@@ -1,0 +1,27 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Local Supabase credentials (copy from config/supabase_env.example)
+config/supabase.env
+
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# Editor/agent configs
+.aider.conf.yml
+.cursor/
+.opencode/
+.pi/
+.k2so/
+.goosehints
+.gutconfig.json
+.vercel
+.env*.local

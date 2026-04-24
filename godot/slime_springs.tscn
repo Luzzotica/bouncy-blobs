@@ -1,0 +1,199 @@
+[gd_scene format=3 uid="uid://cqmxjfpardog7"]
+
+[node name="Springs" type="Node2D" unique_id=1361240570]
+
+[node name="spring_0_1" type="DampedSpringJoint2D" parent="." unique_id=72320000]
+node_a = NodePath("../p0")
+node_b = NodePath("../p1")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_2" type="DampedSpringJoint2D" parent="." unique_id=387006974]
+node_a = NodePath("../p0")
+node_b = NodePath("../p2")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_3" type="DampedSpringJoint2D" parent="." unique_id=2145406346]
+node_a = NodePath("../p0")
+node_b = NodePath("../p3")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_4" type="DampedSpringJoint2D" parent="." unique_id=551528879]
+node_a = NodePath("../p0")
+node_b = NodePath("../p4")
+rest_length = 96.0
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_5" type="DampedSpringJoint2D" parent="." unique_id=697497204]
+node_a = NodePath("../p0")
+node_b = NodePath("../p5")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_6" type="DampedSpringJoint2D" parent="." unique_id=1327666387]
+node_a = NodePath("../p0")
+node_b = NodePath("../p6")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_0_7" type="DampedSpringJoint2D" parent="." unique_id=1337088280]
+node_a = NodePath("../p0")
+node_b = NodePath("../p7")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_2" type="DampedSpringJoint2D" parent="." unique_id=565799811]
+node_a = NodePath("../p1")
+node_b = NodePath("../p2")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_3" type="DampedSpringJoint2D" parent="." unique_id=1743927654]
+node_a = NodePath("../p1")
+node_b = NodePath("../p3")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_4" type="DampedSpringJoint2D" parent="." unique_id=1325825354]
+node_a = NodePath("../p1")
+node_b = NodePath("../p4")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_5" type="DampedSpringJoint2D" parent="." unique_id=324641476]
+node_a = NodePath("../p1")
+node_b = NodePath("../p5")
+rest_length = 96.0
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_6" type="DampedSpringJoint2D" parent="." unique_id=1565463494]
+node_a = NodePath("../p1")
+node_b = NodePath("../p6")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_1_7" type="DampedSpringJoint2D" parent="." unique_id=2052478092]
+node_a = NodePath("../p1")
+node_b = NodePath("../p7")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_2_3" type="DampedSpringJoint2D" parent="." unique_id=280194870]
+node_a = NodePath("../p2")
+node_b = NodePath("../p3")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_2_4" type="DampedSpringJoint2D" parent="." unique_id=414882097]
+node_a = NodePath("../p2")
+node_b = NodePath("../p4")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_2_5" type="DampedSpringJoint2D" parent="." unique_id=453813863]
+node_a = NodePath("../p2")
+node_b = NodePath("../p5")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_2_6" type="DampedSpringJoint2D" parent="." unique_id=698846369]
+node_a = NodePath("../p2")
+node_b = NodePath("../p6")
+rest_length = 96.0
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_2_7" type="DampedSpringJoint2D" parent="." unique_id=1883047945]
+node_a = NodePath("../p2")
+node_b = NodePath("../p7")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_3_4" type="DampedSpringJoint2D" parent="." unique_id=1150344276]
+node_a = NodePath("../p3")
+node_b = NodePath("../p4")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_3_5" type="DampedSpringJoint2D" parent="." unique_id=827396526]
+node_a = NodePath("../p3")
+node_b = NodePath("../p5")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_3_6" type="DampedSpringJoint2D" parent="." unique_id=970459148]
+node_a = NodePath("../p3")
+node_b = NodePath("../p6")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_3_7" type="DampedSpringJoint2D" parent="." unique_id=1624949959]
+node_a = NodePath("../p3")
+node_b = NodePath("../p7")
+rest_length = 96.0
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_4_5" type="DampedSpringJoint2D" parent="." unique_id=1740970005]
+node_a = NodePath("../p4")
+node_b = NodePath("../p5")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_4_6" type="DampedSpringJoint2D" parent="." unique_id=515050507]
+node_a = NodePath("../p4")
+node_b = NodePath("../p6")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_4_7" type="DampedSpringJoint2D" parent="." unique_id=998986925]
+node_a = NodePath("../p4")
+node_b = NodePath("../p7")
+rest_length = 88.69244
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_5_6" type="DampedSpringJoint2D" parent="." unique_id=1802050927]
+node_a = NodePath("../p5")
+node_b = NodePath("../p6")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_5_7" type="DampedSpringJoint2D" parent="." unique_id=179890952]
+node_a = NodePath("../p5")
+node_b = NodePath("../p7")
+rest_length = 67.88225
+stiffness = 72000.0
+damping = 3600.0
+
+[node name="spring_6_7" type="DampedSpringJoint2D" parent="." unique_id=1845473257]
+node_a = NodePath("../p6")
+node_b = NodePath("../p7")
+rest_length = 36.73761
+stiffness = 72000.0
+damping = 3600.0

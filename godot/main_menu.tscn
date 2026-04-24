@@ -1,0 +1,108 @@
+[gd_scene format=3 uid="uid://b8mainmenu"]
+
+[ext_resource type="Script" path="res://main_menu.gd" id="1"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -200.0
+offset_right = 240.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="Title" type="Label" parent="VBox"]
+layout_mode = 2
+text = "Bouncy Blobs"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="VBox"]
+layout_mode = 2
+text = "WebSocket: same LAN. WebRTC: use session id from your site (game_sessions) + Supabase signaling."
+autowrap_mode = 3
+horizontal_alignment = 1
+
+[node name="WebRTCSection" type="Label" parent="VBox"]
+layout_mode = 2
+text = "WebRTC (Supabase signaling)"
+horizontal_alignment = 1
+
+[node name="SessionId" type="LineEdit" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "1"
+placeholder_text = "game_sessions.session_id"
+
+[node name="HostWebRTC" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Host WebRTC"
+
+[node name="JoinWebRTC" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Join WebRTC"
+
+[node name="WsSection" type="Label" parent="VBox"]
+layout_mode = 2
+text = "WebSocket (LAN)"
+horizontal_alignment = 1
+
+[node name="Port" type="SpinBox" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1024.0
+max_value = 65535.0
+value = 9080.0
+rounded = true
+
+[node name="Address" type="LineEdit" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "ws://127.0.0.1:9080"
+placeholder_text = "ws://host:port"
+
+[node name="Host" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Host"
+
+[node name="Join" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Join"
+
+[node name="Start" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+visible = false
+text = "Start Game"
+
+[node name="Disconnect" type="Button" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+visible = false
+text = "Disconnect"
+
+[node name="Status" type="Label" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+text = "Host or join a WebSocket session."
+horizontal_alignment = 1

@@ -1,0 +1,9 @@
+export const SPRING_K = 55.0;
+export const SPRING_DAMP = 3.5;
+export const RADIAL_K = 75.0;
+export const RADIAL_DAMP = 4.2;
+export const PRESSURE_K = 0.12;
+export const SHAPE_MATCH_K = 88.0;
+export const SHAPE_MATCH_DAMP = 3.85;
+export const CENTER_MASS = 0.2;
+export const HULL_MASS = 0.12;

@@ -1,0 +1,10 @@
+{
+  "levels": [
+    { "id": "classic", "name": "Classic Race", "file": "classic.json", "levelTypes": ["solo_racing"] },
+    { "id": "chained", "name": "Chained Climb", "file": "chained.json", "levelTypes": ["team_racing"] },
+    { "id": "party", "name": "Party Arena", "file": "party.json", "levelTypes": ["party"] },
+    { "id": "koth", "name": "King of the Hill Arena", "file": "koth.json", "levelTypes": ["koth"] },
+    { "id": "blob-hill", "name": "Blob Hill", "file": "blob-hill.json", "levelTypes": ["koth"] },
+    { "id": "default", "name": "Default Arena", "file": "default.json", "levelTypes": ["solo_racing"] }
+  ]
+}

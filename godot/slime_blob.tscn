@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://jdi4s3qymjif"]
+
+[ext_resource type="Script" uid="uid://y3y0n3pmiukl" path="res://slime_blob.gd" id="1"]
+
+[node name="SlimeBlob" type="Node2D" unique_id=1712394146]
+script = ExtResource("1")

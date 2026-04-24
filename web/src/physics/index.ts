@@ -1,0 +1,12 @@
+export { SoftBodyWorld } from './softBodyWorld';
+export type { SoftBodyWorldConfig } from './softBodyWorld';
+export { SlimeBlob } from './slimeBlob';
+export type { SlimeBlobConfig, HullPreset } from './slimeBlob';
+export * as Vec2 from './vec2';
+export type { Vec2 as Vec2Type } from './vec2';
+export * as HullPresets from './hullPresets';
+export * as Tuning from './tuning';
+export * as Collision from './collision';
+export * as Constraints from './constraints';
+export * as ShapeMatching from './shapeMatching';
+export type { Spring, BlobRange, Shape, BlobResult, PumpEdge, RayHit, AABB, Transform2D } from './types';
