@@ -26,6 +26,9 @@ import { VotingMode, VotingCandidate as VotingCandidateType } from '../game/game
 
 import { getAvailableLevels, loadBuiltinLevel } from '../levels/levelRegistry';
 
+/** LAN IP for dev QR codes — update to match your machine's local IP */
+const LOCAL_LAN_IP = '10.50.6.221';
+
 // Re-export for use elsewhere
 export type VotingCandidate = VotingCandidateType;
 
@@ -108,37 +111,41 @@ export default function GameMaster() {
     }
   }, []);
 
-  /** Build and broadcast the current taken colors/faces to all controllers. */
+  /** Build taken lists excluding a specific player's own selections. */
+  const getTakenExcluding = useCallback((excludePlayerId?: string) => {
+    const takenColors: string[] = [];
+    const takenFaces: string[] = [];
+    for (const [pid, custom] of playerCustomRef.current) {
+      if (pid === excludePlayerId) continue; // don't mark player's own as taken
+      if (custom.color) takenColors.push(custom.color);
+      if (custom.faceId) takenFaces.push(custom.faceId);
+    }
+    return { takenColors, takenFaces };
+  }, []);
+
+  /** Send personalized taken lists to every connected controller (excluding each player's own). */
   const broadcastCustomizationUpdate = useCallback(() => {
     const manager = managerRef.current;
     if (!manager) return;
-    const takenColors: string[] = [];
-    const takenFaces: string[] = [];
-    for (const [, custom] of playerCustomRef.current) {
-      if (custom.color) takenColors.push(custom.color);
-      if (custom.faceId) takenFaces.push(custom.faceId);
+    for (const player of connectedPlayersRef.current) {
+      const { takenColors, takenFaces } = getTakenExcluding(player.player_id);
+      manager.send(player.player_id, JSON.stringify({
+        type: 'customization_update',
+        value: { takenColors, takenFaces },
+      }));
     }
-    manager.broadcast(JSON.stringify({
-      type: 'customization_update',
-      value: { takenColors, takenFaces },
-    }));
-  }, []);
+  }, [getTakenExcluding]);
 
-  /** Send taken customizations to a specific player. */
+  /** Send taken customizations to a specific player (excluding their own). */
   const sendCustomizationTo = useCallback((playerId: string) => {
     const manager = managerRef.current;
     if (!manager) return;
-    const takenColors: string[] = [];
-    const takenFaces: string[] = [];
-    for (const [, custom] of playerCustomRef.current) {
-      if (custom.color) takenColors.push(custom.color);
-      if (custom.faceId) takenFaces.push(custom.faceId);
-    }
+    const { takenColors, takenFaces } = getTakenExcluding(playerId);
     manager.send(playerId, JSON.stringify({
       type: 'customization_update',
       value: { takenColors, takenFaces },
     }));
-  }, []);
+  }, [getTakenExcluding]);
 
   const handlePlayerJoin = useCallback((player: Player, _webrtcPlayerId: string) => {
     // Save customizations for reuse across game restarts
@@ -369,6 +376,22 @@ export default function GameMaster() {
                 handlePlayerJoin(message.player, playerId);
                 return;
               }
+              // Live customization updates (color/face changes while on customization screen)
+              if (message.type === 'customization_update' && message.value) {
+                const { color, faceId } = message.value;
+                // Update stored customizations
+                const existing = playerCustomRef.current.get(playerId) ?? {};
+                if (color) existing.color = color;
+                if (faceId) existing.faceId = faceId;
+                playerCustomRef.current.set(playerId, existing);
+                // Update the live game blob
+                if (gameRef.current && contextRef.current) {
+                  gameRef.current.onPlayerCustomizationUpdate(contextRef.current, playerId, color, faceId);
+                }
+                // Broadcast updated taken list to all controllers
+                broadcastCustomizationUpdate();
+                return;
+              }
               // Route party mode messages
               if (message.type === 'item_select' || message.type === 'cursor_move' || message.type === 'placement_confirm') {
                 handlePartyMessage(playerId, message);
@@ -402,7 +425,12 @@ export default function GameMaster() {
         setSessionId(sid);
         setJoinCode(result.join_code);
 
-        const origin = window.location.origin;
+        // In dev, use the LAN IP so phones on the same network can connect
+        let origin = window.location.origin;
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+          const port = window.location.port || '5173';
+          origin = `http://${LOCAL_LAN_IP}:${port}`;
+        }
         setJoinUrl(`${origin}/controller/${sid}`);
 
         // Setup input listener to forward to game
@@ -537,7 +565,19 @@ export default function GameMaster() {
         {/* Join info overlay (bottom-right): QR code + join code */}
         {joinUrl && (
           <div
-            onClick={() => navigator.clipboard.writeText(joinUrl)}
+            onClick={() => {
+              if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(joinUrl);
+              } else {
+                // Fallback for non-HTTPS (e.g. LAN dev)
+                const ta = document.createElement('textarea');
+                ta.value = joinUrl;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+              }
+            }}
             style={{
               position: 'absolute',
               bottom: 16,

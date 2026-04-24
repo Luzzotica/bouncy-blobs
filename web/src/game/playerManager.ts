@@ -38,8 +38,13 @@ export class PlayerManager {
       return this.players.get(playerId)!;
     }
 
-    const spawnPos = this.spawnPoints[this.nextSpawnIndex % this.spawnPoints.length];
+    const baseSpawn = this.spawnPoints[this.nextSpawnIndex % this.spawnPoints.length];
     this.nextSpawnIndex++;
+    // Randomize within ±200px horizontally so players don't stack
+    const spawnPos = vec2(
+      baseSpawn.x + (Math.random() - 0.5) * 400,
+      baseSpawn.y,
+    );
 
     const blob = new SlimeBlob(world, spawnPos, {
       playerControlled: true,
@@ -114,6 +119,13 @@ export class PlayerManager {
 
   getCentroids(): Vec2[] {
     return this.getAllPlayers().map(p => p.blob.getCentroid());
+  }
+
+  updateCustomization(playerId: string, color?: string, faceId?: string): void {
+    const player = this.players.get(playerId);
+    if (!player) return;
+    if (color !== undefined) player.color = color;
+    if (faceId !== undefined) player.faceId = faceId;
   }
 
   clear(): void {

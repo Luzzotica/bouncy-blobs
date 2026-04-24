@@ -5,6 +5,7 @@ export class Camera {
   zoom = 1.0;
   private targetPosition: Vec2 = vec2(0, 0);
   private targetZoom = 1.0;
+  private smoothSpeed = 8; // exponential decay speed (higher = snappier)
 
   setTarget(pos: Vec2, zoom?: number): void {
     this.targetPosition = pos;
@@ -20,9 +21,12 @@ export class Camera {
     }
   }
 
-  update(): void {
-    this.position = { ...this.targetPosition };
-    this.zoom = this.targetZoom;
+  /** Lerp position & zoom toward target. Call exactly once per frame. */
+  update(dt: number): void {
+    const alpha = 1 - Math.exp(-this.smoothSpeed * dt);
+    this.position.x += (this.targetPosition.x - this.position.x) * alpha;
+    this.position.y += (this.targetPosition.y - this.position.y) * alpha;
+    this.zoom += (this.targetZoom - this.zoom) * alpha;
   }
 
   followTargets(targets: Vec2[], canvasWidth: number, canvasHeight: number, padding = 200): void {
@@ -44,8 +48,8 @@ export class Camera {
     const spanY = (maxY - minY) + padding * 2;
     const zoomX = canvasWidth / spanX;
     const zoomY = canvasHeight / spanY;
-    this.targetZoom = Math.min(zoomX, zoomY, 0.35);
-    this.targetZoom = Math.max(this.targetZoom, 0.15);
+    this.targetZoom = Math.min(zoomX, zoomY, 0.592);
+    this.targetZoom = Math.max(this.targetZoom, 0.254);
   }
 
   worldToScreen(world: Vec2, canvasWidth: number, canvasHeight: number): Vec2 {

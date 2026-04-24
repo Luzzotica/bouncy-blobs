@@ -21,6 +21,8 @@ import { PowerupManager } from './powerups/powerupManager';
 import { SpringPadManager } from './springPadManager';
 import { SpikeManager } from './spikeManager';
 import { DynamicItemManager } from './dynamicItemManager';
+import { CameraFollower } from '../renderer/cameraFollower';
+import { Vec2 } from '../physics/vec2';
 
 export interface BouncyBlobsGameState {
   world: SoftBodyWorld;
@@ -41,6 +43,7 @@ export interface BouncyBlobsGameState {
   dynamicItemManager: DynamicItemManager | null;
   triggerIndices: Map<string, number>;
   gameTime: number;
+  cameraFollower: CameraFollower;
 }
 
 export class BouncyBlobsGame implements Game {
@@ -94,7 +97,7 @@ export class BouncyBlobsGame implements Game {
     const { playerSpawnPoints, npcBlobs, triggerIndices } = loadLevel(world, level);
     const playerManager = new PlayerManager(playerSpawnPoints);
     const camera = new Camera();
-    camera.snapTo(playerSpawnPoints[0] ?? { x: 0, y: 400 }, 0.35);
+    camera.snapTo(playerSpawnPoints[0] ?? { x: 0, y: 400 }, 0.592);
 
     const renderOptions: RenderOptions = {
       showSprings: false,
@@ -186,14 +189,34 @@ export class BouncyBlobsGame implements Game {
 
       this.state.gameTime += dt;
 
-      // Camera follows alive player centroids only
+      // Camera: follow actual centroids, lerp the camera itself (once per frame)
       const allPlayers = playerManager.getAllPlayers();
-      const aliveCentroids = allPlayers
+
+      // Alive players: use actual physics centroids
+      const cameraTargets: Vec2[] = allPlayers
         .filter(p => !spikeManager?.isDead(p.playerId))
         .map(p => p.blob.getCentroid());
-      if (aliveCentroids.length > 0 && this.state.canvasWidth > 0) {
-        camera.followTargets(aliveCentroids, this.state.canvasWidth, this.state.canvasHeight);
-        camera.update();
+
+      // Dead players: ghost dot lingers at death pos, drifts to spawn
+      if (spikeManager) {
+        const deadMap = spikeManager.getDeadPlayers();
+        if (deadMap.size > 0) {
+          const spawnPoints = playerManager.getSpawnPoints();
+          const defaultSpawn = spawnPoints[0] ?? { x: 0, y: 400 };
+          const { cameraFollower } = this.state;
+          const deadTargets = Array.from(deadMap).map(([pid, dead]) => ({
+            id: pid,
+            deathPosition: dead.deathPosition,
+            driftTo: defaultSpawn,
+          }));
+          cameraFollower.update(dt, [], deadTargets);
+          cameraTargets.push(...cameraFollower.getPositions());
+        }
+      }
+
+      if (cameraTargets.length > 0 && this.state.canvasWidth > 0) {
+        camera.followTargets(cameraTargets, this.state.canvasWidth, this.state.canvasHeight);
+        camera.update(dt);
       }
 
       // Render
@@ -255,6 +278,7 @@ export class BouncyBlobsGame implements Game {
       dynamicItemManager,
       triggerIndices,
       gameTime: 0,
+      cameraFollower: new CameraFollower(),
     };
 
     return {};
@@ -320,6 +344,11 @@ export class BouncyBlobsGame implements Game {
 
   setAllowCountdownInput(allow: boolean): void {
     this.allowCountdownInput = allow;
+  }
+
+  onPlayerCustomizationUpdate(_context: GameContext, playerId: string, color?: string, faceId?: string): void {
+    if (!this.state) return;
+    this.state.playerManager.updateCustomization(playerId, color, faceId);
   }
 
   onPlayerInput(_context: GameContext, playerId: string, inputEvent: InputEvent): void {

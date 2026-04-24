@@ -123,7 +123,7 @@ export default function JoinLobby() {
         <p style={{ color: '#aaa', fontSize: 13, margin: '0 0 12px', textAlign: 'center' }}>
           Enter game code
         </p>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <input
             type="text"
             placeholder="ABC123"
@@ -135,9 +135,9 @@ export default function JoinLobby() {
             onKeyDown={e => e.key === 'Enter' && handleCodeSubmit()}
             maxLength={8}
             style={{
-              flex: 1,
-              padding: '14px 14px',
-              fontSize: 24,
+              width: '100%',
+              padding: '14px',
+              fontSize: 'clamp(18px, 5vw, 24px)',
               fontWeight: 'bold',
               letterSpacing: 5,
               background: '#0f0f1a',
@@ -146,6 +146,7 @@ export default function JoinLobby() {
               color: '#fff',
               textAlign: 'center',
               textTransform: 'uppercase',
+              boxSizing: 'border-box',
             }}
             autoFocus
           />
@@ -153,6 +154,7 @@ export default function JoinLobby() {
             onClick={handleCodeSubmit}
             disabled={lookingUp || !joinCode.trim()}
             style={{
+              width: '100%',
               padding: '14px 22px',
               fontSize: 16,
               fontWeight: 'bold',

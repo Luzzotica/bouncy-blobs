@@ -33,6 +33,17 @@ const FACE_PRESETS = [
   { id: 'cool', label: 'B)' },
   { id: 'angry', label: '>:(' },
   { id: 'uwu', label: 'uwu' },
+  { id: 'sleepy', label: '-_-' },
+  { id: 'star', label: '*_*' },
+  { id: 'cat', label: ':3' },
+  { id: 'shock', label: 'O_O' },
+  { id: 'wink', label: ';)' },
+  { id: 'smug', label: '>.>' },
+  { id: 'cry', label: 'T_T' },
+  { id: 'skull', label: 'x_x' },
+  { id: 'clown', label: '0w0' },
+  { id: 'tired', label: 'u_u' },
+  { id: 'monocle', label: 'o_Q' },
 ];
 
 // ─── Joystick Component ──────────────────────────────────────────────────────
@@ -194,6 +205,161 @@ function JellyButton({
   );
 }
 
+// ─── Normal Mode: Split-Screen Touch Zones ──────────────────────────────────
+
+const JOYSTICK_RADIUS = 80; // virtual radius in px for normalizing drag distance
+
+function NormalModeZones({
+  onMove,
+  expanding,
+  onExpandPress,
+  onExpandRelease,
+}: {
+  onMove: (x: number, y: number) => void;
+  expanding: boolean;
+  onExpandPress: () => void;
+  onExpandRelease: () => void;
+}) {
+  // Left zone — dynamic joystick
+  const [joystickOrigin, setJoystickOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [thumbOffset, setThumbOffset] = useState({ x: 0, y: 0 });
+  const leftRef = useRef<HTMLDivElement>(null);
+
+  const handleLeftDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setJoystickOrigin({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setThumbOffset({ x: 0, y: 0 });
+    onMove(0, 0);
+  }, [onMove]);
+
+  const handleLeftMove = useCallback((e: React.PointerEvent) => {
+    if (!joystickOrigin) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    let dx = (cx - joystickOrigin.x) / JOYSTICK_RADIUS;
+    let dy = (cy - joystickOrigin.y) / JOYSTICK_RADIUS;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 1) { dx /= dist; dy /= dist; }
+    setThumbOffset({ x: dx, y: dy });
+    onMove(dx, dy);
+  }, [joystickOrigin, onMove]);
+
+  const handleLeftUp = useCallback(() => {
+    setJoystickOrigin(null);
+    setThumbOffset({ x: 0, y: 0 });
+    onMove(0, 0);
+  }, [onMove]);
+
+  // Right zone — expand
+  const handleRightDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    onExpandPress();
+  }, [onExpandPress]);
+
+  const handleRightUp = useCallback(() => {
+    onExpandRelease();
+  }, [onExpandRelease]);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
+      {/* Left zone — dynamic joystick */}
+      <div
+        ref={leftRef}
+        onPointerDown={handleLeftDown}
+        onPointerMove={handleLeftMove}
+        onPointerUp={handleLeftUp}
+        onPointerCancel={handleLeftUp}
+        style={{
+          flex: 1,
+          position: 'relative',
+          touchAction: 'none',
+          userSelect: 'none',
+          borderRight: '1px solid rgba(255,255,255,0.06)',
+        }}
+      >
+        {/* Hint label when not touching */}
+        {!joystickOrigin && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}>
+            <span style={{ color: '#334', fontSize: 13, fontWeight: 'bold', letterSpacing: 2 }}>MOVE</span>
+          </div>
+        )}
+        {/* Dynamic joystick visual */}
+        {joystickOrigin && (
+          <>
+            {/* Base ring */}
+            <div style={{
+              position: 'absolute',
+              left: joystickOrigin.x - 50,
+              top: joystickOrigin.y - 50,
+              width: 100,
+              height: 100,
+              borderRadius: '50%',
+              border: '2px solid rgba(167, 139, 250, 0.3)',
+              background: 'rgba(42, 58, 90, 0.25)',
+              pointerEvents: 'none',
+            }} />
+            {/* Thumb */}
+            <div style={{
+              position: 'absolute',
+              left: joystickOrigin.x + thumbOffset.x * 40 - 22,
+              top: joystickOrigin.y + thumbOffset.y * 40 - 22,
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              background: 'radial-gradient(circle at 35% 35%, #a78bfa, #7c5cbf)',
+              boxShadow: '0 2px 8px rgba(124, 92, 191, 0.5)',
+              pointerEvents: 'none',
+            }} />
+          </>
+        )}
+      </div>
+
+      {/* Right zone — expand */}
+      <div
+        onPointerDown={handleRightDown}
+        onPointerUp={handleRightUp}
+        onPointerCancel={handleRightUp}
+        style={{
+          flex: 1,
+          position: 'relative',
+          touchAction: 'none',
+          userSelect: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: expanding
+            ? 'radial-gradient(circle, rgba(224, 96, 112, 0.2) 0%, transparent 70%)'
+            : 'transparent',
+          transition: 'background 0.15s',
+        }}
+      >
+        <span style={{
+          fontSize: expanding ? 18 : 14,
+          fontWeight: 'bold',
+          color: expanding ? '#ffb3c1' : '#445',
+          letterSpacing: 2,
+          pointerEvents: 'none',
+          transition: 'all 0.15s',
+          textShadow: expanding ? '0 0 12px rgba(224, 96, 112, 0.6)' : 'none',
+        }}>
+          {expanding ? 'EXPANDING' : 'EXPAND'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Controller Page ────────────────────────────────────────────────────
 
 export default function Controller() {
@@ -279,7 +445,21 @@ export default function Controller() {
     try {
       const callbacks: ControllerCallbacks = {
         onConnected: () => {
-          // Don't send player_join yet — go to customization screen first
+          // Immediately join the game with default appearance — blob spawns right away
+          managerRef.current?.send(JSON.stringify({
+            type: 'player_join',
+            player: {
+              player_id: playerIdRef.current,
+              name: playerName.trim(),
+              session_id: sessionId,
+              slot: 0,
+              status: 'connected',
+              controller_config: null,
+              joined_at: new Date().toISOString(),
+              color: '',
+              faceId: 'default',
+            },
+          } satisfies WebRTCMessage));
           setPhase('customizing');
         },
         onMessage: (data) => {
@@ -336,29 +516,22 @@ export default function Controller() {
     }
   }, [sessionId, playerName]);
 
-  /** Confirm customization and fully join the game. */
-  const handleConfirmCustomization = useCallback(() => {
-    if (!sessionId) return;
-    setPhase('connected');
+  /** Send a live customization update to the host. */
+  const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
     managerRef.current?.send(JSON.stringify({
-      type: 'player_join',
-      player: {
-        player_id: playerIdRef.current,
-        name: playerName.trim(),
-        session_id: sessionId,
-        slot: 0,
-        status: 'connected',
-        controller_config: null,
-        joined_at: new Date().toISOString(),
-        color: selectedColor,
-        faceId: selectedFace,
-      },
-    } satisfies WebRTCMessage));
-  }, [sessionId, playerName, selectedColor, selectedFace]);
+      type: 'customization_update',
+      value: { color, faceId },
+    }));
+  }, []);
 
-  // Send input at ~30Hz
+  /** Confirm customization and move to controller UI. */
+  const handleConfirmCustomization = useCallback(() => {
+    setPhase('connected');
+  }, []);
+
+  // Send input at ~30Hz (active during both customizing and connected phases)
   useEffect(() => {
-    if (phase !== 'connected') return;
+    if (phase !== 'connected' && phase !== 'customizing') return;
 
     sendIntervalRef.current = setInterval(() => {
       const manager = managerRef.current;
@@ -504,6 +677,21 @@ export default function Controller() {
         >
           Join
         </button>
+
+        <button
+          onClick={() => navigate('/join')}
+          style={{
+            ...btnStyle,
+            marginTop: 12,
+            background: 'transparent',
+            color: '#888',
+            fontSize: 14,
+            padding: '8px 24px',
+            border: '1px solid #444',
+          }}
+        >
+          Back
+        </button>
       </div>
     );
   }
@@ -521,13 +709,19 @@ export default function Controller() {
     const availableFaces = FACE_PRESETS.filter(f => !takenFaces.includes(f.id));
 
     // Auto-select first available if current selection is empty or taken
+    let autoColor = selectedColor;
+    let autoFace = selectedFace;
     if (!selectedColor || takenColors.includes(selectedColor)) {
       const first = availableColors[0];
-      if (first && first !== selectedColor) setSelectedColor(first);
+      if (first && first !== selectedColor) { setSelectedColor(first); autoColor = first; }
     }
     if (!selectedFace || takenFaces.includes(selectedFace)) {
       const first = availableFaces[0];
-      if (first && first.id !== selectedFace) setSelectedFace(first.id);
+      if (first && first.id !== selectedFace) { setSelectedFace(first.id); autoFace = first.id; }
+    }
+    // Send initial auto-selected defaults so the blob gets a color immediately
+    if (autoColor && autoFace && (autoColor !== selectedColor || autoFace !== selectedFace)) {
+      sendCustomizationUpdate(autoColor, autoFace);
     }
 
     const canConfirm = selectedColor && selectedFace
@@ -535,21 +729,28 @@ export default function Controller() {
       && !takenFaces.includes(selectedFace);
 
     return (
-      <div style={fullCenter}>
+      <div style={{
+        ...fullCenter,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        justifyContent: 'flex-start',
+        paddingTop: 24,
+        paddingBottom: 24,
+      }}>
         <h2 style={{ color: '#c77dff', margin: '0 0 4px' }}>Customize</h2>
         <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>{playerName}</p>
 
         {/* Color picker */}
         <div>
           <p style={{ color: '#888', fontSize: 12, margin: '0 0 6px', textAlign: 'center' }}>Color</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: 230 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: 280, margin: '0 auto' }}>
             {COLOR_PALETTE.map(color => {
               const taken = takenColors.includes(color);
               const selected = selectedColor === color;
               return (
                 <div
                   key={color}
-                  onClick={() => { if (!taken) setSelectedColor(color); }}
+                  onClick={() => { if (!taken) { setSelectedColor(color); sendCustomizationUpdate(color, selectedFace); } }}
                   style={{
                     width: 32,
                     height: 32,
@@ -587,17 +788,17 @@ export default function Controller() {
         {/* Face selector */}
         <div style={{ marginTop: 16 }}>
           <p style={{ color: '#888', fontSize: 12, margin: '0 0 6px', textAlign: 'center' }}>Face</p>
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: 280, margin: '0 auto' }}>
             {FACE_PRESETS.map(face => {
               const taken = takenFaces.includes(face.id);
               const selected = selectedFace === face.id;
               return (
                 <div
                   key={face.id}
-                  onClick={() => { if (!taken) setSelectedFace(face.id); }}
+                  onClick={() => { if (!taken) { setSelectedFace(face.id); sendCustomizationUpdate(selectedColor, face.id); } }}
                   style={{
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     borderRadius: 8,
                     background: selected ? '#3a4a6a' : '#1a1a2e',
                     border: selected ? '2px solid #c77dff' : '2px solid #333',
@@ -662,7 +863,7 @@ export default function Controller() {
       overflow: 'hidden',
       background: '#0f0f1a',
     }}>
-      {/* Jelly animation keyframes */}
+      {/* Jelly animation keyframes + prevent all text selection */}
       <style>{`
         @keyframes jelly-release {
           0% { transform: scale(1.25); }
@@ -671,9 +872,10 @@ export default function Controller() {
           70% { transform: scale(0.97); }
           100% { transform: scale(1.0); }
         }
+        * { -webkit-user-select: none; -webkit-touch-callout: none; }
       `}</style>
 
-      <div style={{ padding: '8px 16px', textAlign: 'center', color: '#888', fontSize: 12 }}>
+      <div style={{ padding: '8px 16px', textAlign: 'center', color: '#888', fontSize: 12, touchAction: 'none', userSelect: 'none', pointerEvents: 'none' }}>
         {playerName}
         {controllerMode !== 'normal' && (
           <span style={{ marginLeft: 8, color: '#c77dff', fontWeight: 'bold' }}>
@@ -753,34 +955,14 @@ export default function Controller() {
         </div>
       )}
 
-      {/* Normal Mode */}
+      {/* Normal Mode — Split-screen touch zones */}
       {controllerMode === 'normal' && (
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-around',
-          padding: '0 24px',
-          gap: 16,
-        }}>
-          {/* Left — Joystick */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <Joystick onChange={handleJoystickChange} />
-            <span style={{ color: '#556', fontSize: 11 }}>MOVE</span>
-          </div>
-
-          {/* Right — Expand button */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <JellyButton
-              pressed={expanding}
-              onPress={handleExpandPress}
-              onRelease={handleExpandRelease}
-            />
-            <span style={{ color: '#556', fontSize: 11 }}>
-              {expanding ? 'EXPANDING' : 'EXPAND'}
-            </span>
-          </div>
-        </div>
+        <NormalModeZones
+          onMove={(x, y) => { inputRef.current.moveX = x; inputRef.current.moveY = y; }}
+          expanding={expanding}
+          onExpandPress={handleExpandPress}
+          onExpandRelease={handleExpandRelease}
+        />
       )}
     </div>
   );

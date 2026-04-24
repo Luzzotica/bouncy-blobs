@@ -114,7 +114,7 @@ export default function Sandbox() {
       springPadManager?.update(dt);
       spikeManager?.update(dt);
       camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
-      camera.update();
+      camera.update(dt);
 
       const modeOverlay = (spikeManager || springPadManager) ? {
         renderWorld: (rctx: CanvasRenderingContext2D) => {

@@ -556,12 +556,13 @@ export class SoftBodyWorld {
   }
 
   step(delta: number): void {
-    this.timeAccum += delta;
-    while (this.timeAccum >= this.fixedDt) {
-      this.timeAccum -= this.fixedDt;
-      for (let s = 0; s < this.substeps; s++) {
-        this.substep();
-      }
+    // Always run exactly 1 physics tick per frame using the actual dt.
+    // This avoids 0-step or 2-step frames that cause jitter with camera lerp.
+    // Clamp dt to a safe range to prevent instability.
+    const clampedDt = Math.min(Math.max(delta, 1 / 240), 1 / 20);
+    this.fixedDt = clampedDt;
+    for (let s = 0; s < this.substeps; s++) {
+      this.substep();
     }
   }
 
