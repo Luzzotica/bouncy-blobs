@@ -13,6 +13,14 @@ const PLAYER_K_MULT = 0.92;
 const PLAYER_MASS_MULT = 0.5;
 const EXPAND_SPRING_STIFFNESS_MULT = 1.45;
 
+// Joystick shape deformation
+const LEAN_AMOUNT = 0.4;       // 40% of radius — exaggerated tilt at max speed
+const LEAN_MAX_SPEED = 3500;   // lateral speed (px/s) at which lean maxes out
+const SQUASH_X_AMOUNT = 0.35;  // widen 35% at full crouch
+const SQUASH_Y_AMOUNT = 0.3;   // shorten 30% at full crouch
+const DOWN_FORCE = 1.5;        // downward force multiplier
+const UP_FORCE = 0.8;          // upward force (gentle float)
+
 export interface SlimeBlobConfig {
   playerControlled?: boolean;
   hullPreset?: HullPreset;
@@ -42,8 +50,13 @@ export class SlimeBlob {
 
   private world: SoftBodyWorld;
   private expandPressed = false;
-  private moveInput: Vec2 = ZERO;
+  private stickX = 0;  // raw joystick input (world-space)
+  private stickY = 0;
   private expandShapeScale = 1.0;
+  private baseHullLocal: Vec2[];
+  private deformedHullLocal: Vec2[];
+  /** Per-blob gravity override. null = use world gravity. */
+  private gravityOverride: Vec2 | null = null;
 
   private expandShapeScaleMax: number;
   private expandShapeScaleSpeed: number;
@@ -92,6 +105,8 @@ export class SlimeBlob {
     this.hullIndices = result.hullIndices;
     this.centerIdx = result.centerIdx;
     this.shapeIdx = result.shapeIdx;
+    this.baseHullLocal = hullLocal.map(v => ({ ...v }));
+    this.deformedHullLocal = hullLocal.map(v => ({ ...v }));
   }
 
   setMoveForceMultiplier(m: number): void {
@@ -107,9 +122,34 @@ export class SlimeBlob {
     this.expandSpeedMultiplier = 1.0;
   }
 
-  setInput(moveX: number, expand: boolean): void {
-    this.moveInput = vec2(Math.max(-1, Math.min(1, moveX)), 0);
+  /** Retire this blob from the physics world. Particles/springs/shape stay
+   * allocated (indices into world arrays must remain stable for every other
+   * blob) but are tagged inactive so no physics pass touches them. */
+  destroy(): void {
+    this.world.removeBlob(this.blobId);
+  }
+
+  setInput(moveX: number, moveY: number, expand: boolean): void {
+    this.stickX = Math.max(-1, Math.min(1, moveX));
+    this.stickY = Math.max(-1, Math.min(1, moveY));
     this.expandPressed = expand;
+  }
+
+  /** True if any of this blob's particles are currently in contact with the ground/platform. */
+  isGrounded(): boolean {
+    return this.world.getBlobGroundContacts(this.blobId) > 0;
+  }
+
+  setGravityOverride(g: Vec2 | null): void {
+    this.gravityOverride = g;
+  }
+
+  /** Get the effective gravity direction (normalized). */
+  private getGravityDir(): Vec2 {
+    const g = this.gravityOverride ?? this.world.getBlobEffectiveGravity(this.blobId);
+    const len = Math.sqrt(g.x * g.x + g.y * g.y);
+    if (len < 0.0001) return vec2(0, 1); // fallback to down
+    return vec2(g.x / len, g.y / len);
   }
 
   update(delta: number): void {
@@ -119,10 +159,37 @@ export class SlimeBlob {
     const expandSpringMult = this.expandPressed ? EXPAND_SPRING_STIFFNESS_MULT : 1.0;
     this.world.setBlobSpringStiffnessScale(this.blobId, expandSpringMult);
 
-    // Movement — reduced in air (no ground contacts)
+    // Build gravity-relative frame
+    // "down" = gravity direction, "right" = perpendicular (90° CW from down)
+    const down = this.getGravityDir();
+    const right = vec2(down.y, -down.x); // perpendicular, 90° CCW from down
+    const up = vec2(-down.x, -down.y);
+
+    // Map joystick into gravity-relative world directions
+    // stickX: left/right perpendicular to gravity
+    // stickY: positive = along gravity (down), negative = against gravity (up)
+    const moveDir = vec2(
+      right.x * this.stickX + down.x * this.stickY,
+      right.y * this.stickX + down.y * this.stickY,
+    );
+
+    // Lateral movement — reduced in air
     const grounded = this.world.getBlobGroundContacts(this.blobId) > 0;
     const airMult = grounded ? 1.0 : AIR_MOVE_MULTIPLIER;
-    this.world.applyBlobMoveForce(this.blobId, this.moveInput, MOVE_FORCE * this.moveForceMultiplier * airMult);
+    const lateralDir = vec2(right.x * this.stickX, right.y * this.stickX);
+    this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult);
+
+    // Gravity-axis forces from joystick Y
+    if (this.stickY > 0.1) {
+      // Pulling "down" (along gravity) — fall faster / crouch
+      this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier);
+    } else if (this.stickY < -0.1) {
+      // Pushing "up" (against gravity) — gentle float
+      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * -this.stickY * this.moveForceMultiplier);
+    }
+
+    // Hull shape deformation from velocity + input (gravity-relative)
+    this.updateHullDeformation(down, right);
 
     // Expand shape scale animation
     const targetShapeScale = this.expandPressed ? this.expandShapeScaleMax : 1.0;
@@ -132,6 +199,127 @@ export class SlimeBlob {
     const rampRate = baseRate * this.expandSpeedMultiplier;
     this.expandShapeScale = moveToward(this.expandShapeScale, targetShapeScale, rampRate * delta);
     this.world.setBlobShapeMatchRestScale(this.blobId, this.expandShapeScale);
+  }
+
+  /** Get average blob velocity projected onto a given axis. */
+  private getHullVelocityAlong(axis: Vec2): number {
+    const vel = this.world.getVelocities();
+    let sum = 0;
+    for (const idx of this.hullIndices) {
+      sum += vel[idx].x * axis.x + vel[idx].y * axis.y;
+    }
+    return sum / this.hullIndices.length;
+  }
+
+  private updateHullDeformation(down: Vec2, right: Vec2): void {
+    const n = this.baseHullLocal.length;
+
+    // Lean: based on velocity along the "right" axis (perpendicular to gravity)
+    const vLateral = this.getHullVelocityAlong(right);
+    const leanFactor = Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED));
+
+    // Squash: when pushing joystick "down" (along gravity)
+    const squash = Math.max(0, this.stickY);
+
+    // The base hull is defined in local space where Y points down, X points right.
+    // We need to apply deformations along the gravity-relative axes.
+    // Project each base hull point onto the gravity frame:
+    //   localRight = base dot right_local, localDown = base dot down_local
+    // For default gravity (0,1): down_local=(0,1), right_local=(1,0) — matches base coords.
+    // For rotated gravity we need to rotate the base points into the gravity frame,
+    // apply deformation, then rotate back.
+
+    // Gravity frame axes in local space (local space has no rotation yet —
+    // shape matching handles world rotation). Since base hull is defined with
+    // Y=down, X=right, and gravity may not align with that, we compute the
+    // gravity direction in local space. But rest positions are in local space
+    // which is unrotated — the shape matching frame handles rotation.
+    // So we need the gravity direction relative to the blob's current orientation.
+    //
+    // For now: the gravity frame in local space is just the world gravity direction
+    // projected through the blob's inverse rotation. But since shape matching
+    // computes rotation from rest→current, and rest positions are in a fixed frame,
+    // we should apply deformation in the world-gravity frame projected into local space.
+    //
+    // Simpler approach: since the base hull is axis-aligned (Y=down by default),
+    // and gravity is expressed in world space, we rotate the gravity frame into
+    // the hull's local space. The hull's local space is unrotated, so down_local = down_world
+    // when the blob hasn't rotated. But the blob DOES rotate in world space via shape matching.
+    // The rest positions are always in the same local frame though.
+    //
+    // Actually — rest positions are in a fixed local frame. Shape matching rotates them
+    // to match the blob's world orientation. So deformations to restLocal should be in
+    // that fixed local frame. The "gravity down" in local frame = world gravity rotated
+    // by the NEGATIVE of the blob's current rotation angle.
+
+    // Get blob's current rotation angle (from shape matching)
+    const blobAngle = this.getBlobAngle();
+    // Rotate world gravity into local frame
+    const cosA = Math.cos(-blobAngle);
+    const sinA = Math.sin(-blobAngle);
+    const localDown = vec2(
+      down.x * cosA - down.y * sinA,
+      down.x * sinA + down.y * cosA,
+    );
+    const localRight = vec2(-localDown.y, localDown.x);
+
+    // Squash scales: widen along localRight, shorten along localDown
+    const scaleRight = 1 + squash * SQUASH_X_AMOUNT;
+    const scaleDown = 1 - squash * SQUASH_Y_AMOUNT;
+
+    for (let i = 0; i < n; i++) {
+      const base = this.baseHullLocal[i];
+
+      // Project base point onto gravity-local axes
+      const projRight = base.x * localRight.x + base.y * localRight.y;
+      const projDown = base.x * localDown.x + base.y * localDown.y;
+
+      // Apply squash scaling in gravity frame
+      const scaledRight = projRight * scaleRight;
+      const scaledDown = projDown * scaleDown;
+
+      // Lean: offset along gravity axis based on lateral position
+      // Points further in the "right" direction get pushed "down" when moving right
+      const leanOffset = (projRight / BLOB_RADIUS) * -leanFactor * LEAN_AMOUNT * BLOB_RADIUS;
+
+      // Reconstruct in local space
+      this.deformedHullLocal[i].x = localRight.x * scaledRight + localDown.x * (scaledDown + leanOffset);
+      this.deformedHullLocal[i].y = localRight.y * scaledRight + localDown.y * (scaledDown + leanOffset);
+    }
+
+    this.world.setBlobRestLocal(this.blobId, this.deformedHullLocal);
+  }
+
+  private getBlobAngle(): number {
+    // Compute average rotation angle same way shape matching does
+    const positions = this.world.getPositions();
+    let cx = 0, cy = 0;
+    for (const idx of this.hullIndices) {
+      cx += positions[idx].x;
+      cy += positions[idx].y;
+    }
+    const n = this.hullIndices.length;
+    cx /= n;
+    cy /= n;
+
+    // Average angle between rest positions and current positions relative to centroid
+    let sinSum = 0, cosSum = 0;
+    for (let i = 0; i < n; i++) {
+      const rest = this.baseHullLocal[i];
+      const idx = this.hullIndices[i];
+      const dx = positions[idx].x - cx;
+      const dy = positions[idx].y - cy;
+      // Cross product and dot product give sin/cos of rotation
+      cosSum += rest.x * dx + rest.y * dy;
+      sinSum += rest.x * dy - rest.y * dx;
+    }
+    return Math.atan2(sinSum, cosSum);
+  }
+
+  getCenterPosition(): Vec2 {
+    const positions = this.world.getPositions();
+    const p = positions[this.centerIdx];
+    return vec2(p.x, p.y);
   }
 
   getCentroid(): Vec2 {
@@ -155,6 +343,34 @@ export class SlimeBlob {
 
   getExpandScale(): number {
     return this.expandShapeScale;
+  }
+
+  /**
+   * Reconcile this client's blob centroid toward an authoritative target.
+   * `alpha` is the fraction of the gap to close this call (0..1) — small
+   * values keep motion smooth while still erasing drift over a few snapshots.
+   */
+  nudgeCentroidToward(target: Vec2, alpha: number): void {
+    const c = this.getCentroid();
+    const dx = (target.x - c.x) * alpha;
+    const dy = (target.y - c.y) * alpha;
+    this.world.nudgeBlob(this.blobId, dx, dy);
+  }
+
+  /** Hard reset to a position, zeroing velocity. Used to recover from large drift. */
+  teleportTo(target: Vec2): void {
+    this.world.teleportBlob(this.blobId, target);
+  }
+
+  /**
+   * Override the expand state on a non-authoritative client. Mirrors what
+   * happens when a real input arrives via setExpandPressed, but skips the
+   * input-rate gating so the value sticks until the next correction.
+   */
+  setExpandStateExternal(pressed: boolean, scale: number): void {
+    this.expandPressed = pressed;
+    this.expandShapeScale = Math.max(0.35, Math.min(3.5, scale));
+    this.world.setBlobShapeMatchRestScale(this.blobId, this.expandShapeScale);
   }
 }
 

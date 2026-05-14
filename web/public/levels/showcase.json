@@ -1,0 +1,132 @@
+{
+  "name": "Showcase Arena",
+  "version": 1,
+  "levelTypes": ["solo_racing"],
+  "bounds": { "width": 4000, "height": 2400 },
+  "walls": [
+    { "id": "floor",       "points": [{ "x":   -100, "y": 2380 }, { "x": 4100, "y": 2380 }, { "x": 4100, "y": 2400 }, { "x":  -100, "y": 2400 }] },
+    { "id": "ceiling",     "points": [{ "x":   -100, "y": -100 }, { "x": 4100, "y": -100 }, { "x": 4100, "y":    0 }, { "x":  -100, "y":    0 }] },
+    { "id": "left-wall",   "points": [{ "x":   -100, "y": -100 }, { "x":    0, "y": -100 }, { "x":    0, "y": 2400 }, { "x":  -100, "y": 2400 }] },
+    { "id": "right-wall",  "points": [{ "x":   4000, "y": -100 }, { "x": 4100, "y": -100 }, { "x": 4100, "y": 2400 }, { "x":  4000, "y": 2400 }] }
+  ],
+
+  "platforms": [
+    { "id": "spawn-floor", "x":  400, "y": 1900, "width": 700, "height": 60, "rotation": 0 },
+    { "id": "ramp",        "x":  950, "y": 1820, "width": 200, "height": 30, "rotation": -0.3 },
+    { "id": "spring-base", "x": 1250, "y": 2100, "width": 240, "height": 50, "rotation": 0 },
+    { "id": "bridge-l",    "x": 1700, "y": 1700, "width": 200, "height": 50, "rotation": 0 },
+    { "id": "bridge-r",    "x": 2500, "y": 1700, "width": 200, "height": 50, "rotation": 0 },
+    { "id": "hill-floor",  "x": 3000, "y": 1900, "width": 600, "height": 60, "rotation": 0 },
+    { "id": "goal-floor",  "x": 3700, "y": 2000, "width": 400, "height": 60, "rotation": 0 }
+  ],
+
+  "spawnPoints": [
+    { "id": "sp-p1", "x": 250, "y": 1820, "type": "player" },
+    { "id": "sp-p2", "x": 400, "y": 1820, "type": "player" },
+    { "id": "sp-npc", "x": 550, "y": 1820, "type": "npc" }
+  ],
+
+  "npcBlobs": [
+    { "id": "npc-circle",   "x":  500, "y": 1820, "hullPreset": "circle16", "hue": 0.1 },
+    { "id": "npc-square",   "x":  580, "y": 1820, "hullPreset": "square",   "hue": 0.3 },
+    { "id": "npc-triangle", "x":  660, "y": 1820, "hullPreset": "triangle", "hue": 0.55 },
+    { "id": "npc-star",     "x":  300, "y": 1500, "hullPreset": "star",     "hue": 0.75 },
+    { "id": "npc-diamond",  "x":  380, "y": 1500, "hullPreset": "diamond",  "hue": 0.85 },
+    { "id": "npc-hexagon",  "x":  460, "y": 1500, "hullPreset": "hexagon",  "hue": 0.95 }
+  ],
+
+  "spikes": [
+    { "id": "spike-pit",  "x": 1500, "y": 2360, "width": 320, "height": 40, "rotation": 0 },
+    { "id": "spike-roof", "x": 2100, "y":  140, "width": 240, "height": 40, "rotation": 3.14159 }
+  ],
+
+  "springPads": [
+    { "id": "spring-up", "x": 1250, "y": 2060, "width": 140, "height": 30, "rotation": -1.5708, "force": 700 }
+  ],
+
+  "goalZones": [
+    { "id": "goal", "x": 3700, "y": 1820, "width": 360, "height": 280 }
+  ],
+
+  "hillZones": [
+    { "id": "hill", "x": 3000, "y": 1810, "width": 600, "height": 180 }
+  ],
+
+  "powerupSpawns": [
+    { "id": "pu-mid",   "x": 2100, "y": 1600 },
+    { "id": "pu-goal",  "x": 3700, "y": 1700 }
+  ],
+
+  "pointShapes": [
+    {
+      "id": "rope-bridge",
+      "points": [
+        { "x": 1820, "y": 1680, "anchored": true },
+        { "x": 1950, "y": 1700, "anchored": false },
+        { "x": 2080, "y": 1700, "anchored": false },
+        { "x": 2210, "y": 1700, "anchored": false },
+        { "x": 2340, "y": 1700, "anchored": false },
+        { "x": 2400, "y": 1680, "anchored": true }
+      ],
+      "edges": [
+        { "a": 0, "b": 1 },
+        { "a": 1, "b": 2 },
+        { "a": 2, "b": 3 },
+        { "a": 3, "b": 4 },
+        { "a": 4, "b": 5 }
+      ]
+    },
+    {
+      "id": "kite",
+      "points": [
+        { "x": 2700, "y":  500, "anchored": true },
+        { "x": 2800, "y":  600, "anchored": false },
+        { "x": 2700, "y":  720, "anchored": false },
+        { "x": 2600, "y":  600, "anchored": false }
+      ],
+      "edges": [
+        { "a": 0, "b": 1 },
+        { "a": 1, "b": 2 },
+        { "a": 2, "b": 3 }
+      ],
+      "closed": true
+    }
+  ],
+
+  "pressurePlates": [
+    {
+      "id": "plate-bridge",
+      "x": 1250, "y": 1880, "width": 220, "height": 24, "rotation": 0,
+      "triggerIds": ["raise-bridge"],
+      "oneShot": false
+    },
+    {
+      "id": "plate-kite",
+      "x": 2700, "y": 1880, "width": 180, "height": 24, "rotation": 0,
+      "triggerIds": ["release-kite"],
+      "oneShot": true
+    }
+  ],
+
+  "triggers": [
+    {
+      "id": "raise-bridge",
+      "kind": "movePoints",
+      "duration": 1.2,
+      "easing": "easeInOut",
+      "targets": [
+        { "shapeId": "rope-bridge", "pointIndex": 0, "endX": 1820, "endY": 1300 },
+        { "shapeId": "rope-bridge", "pointIndex": 5, "endX": 2400, "endY": 1300 }
+      ]
+    },
+    {
+      "id": "release-kite",
+      "kind": "movePoints",
+      "duration": 2.0,
+      "easing": "easeOut",
+      "targets": [
+        { "shapeId": "kite", "pointIndex": 0, "endX": 2700, "endY": 200 }
+      ]
+    }
+  ]
+}

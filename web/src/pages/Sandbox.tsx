@@ -9,10 +9,65 @@ import { KeyboardInput } from '../game/keyboardInput';
 import { PlayerManager } from '../game/playerManager';
 import { SpikeManager } from '../game/spikeManager';
 import { SpringPadManager } from '../game/springPadManager';
+import { TriggerManager } from '../game/triggerManager';
+import { PressurePlateManager } from '../game/pressurePlateManager';
 import { loadLevel } from '../levels/levelLoader';
 import { loadBuiltinLevel } from '../levels/levelRegistry';
 import { LevelData } from '../levels/types';
 import GameCanvas from '../components/GameCanvas';
+
+function renderPointShapesLive(
+  ctx: CanvasRenderingContext2D,
+  world: SoftBodyWorld,
+  particles: Map<string, number[]>,
+  level: LevelData,
+): void {
+  if (!level.pointShapes) return;
+  for (const ps of level.pointShapes) {
+    const ids = particles.get(ps.id);
+    if (!ids) continue;
+
+    ctx.save();
+    ctx.strokeStyle = '#88c0ff';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const e of ps.edges) {
+      const pa = world.pos[ids[e.a]];
+      const pb = world.pos[ids[e.b]];
+      if (!pa || !pb) continue;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+    if (ps.closed && ps.points.length > 2) {
+      const pa = world.pos[ids[ids.length - 1]];
+      const pb = world.pos[ids[0]];
+      if (pa && pb) {
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+    }
+
+    for (let i = 0; i < ids.length; i++) {
+      const p = world.pos[ids[i]];
+      if (!p) continue;
+      const anchored = ps.points[i].anchored;
+      ctx.fillStyle = anchored ? '#ffcc55' : '#88c0ff';
+      ctx.strokeStyle = '#0f1629';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, anchored ? 7 : 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
 
 export default function Sandbox() {
   const [searchParams] = useSearchParams();
@@ -30,6 +85,8 @@ export default function Sandbox() {
     renderOptions: RenderOptions;
     spikeManager: SpikeManager | null;
     springPadManager: SpringPadManager | null;
+    triggerManager: TriggerManager | null;
+    pressurePlateManager: PressurePlateManager | null;
   } | null>(null);
 
   // Load level data (test level from editor or default)
@@ -56,7 +113,7 @@ export default function Sandbox() {
       gravityScale: 4.0,
     });
 
-    const { playerSpawnPoints, npcBlobs } = loadLevel(world, levelData);
+    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId } = loadLevel(world, levelData);
 
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
@@ -79,6 +136,16 @@ export default function Sandbox() {
     if (levelData.springPads && levelData.springPads.length > 0) {
       springPadManager = new SpringPadManager();
       springPadManager.initialize(world, levelData.springPads);
+    }
+
+    // Triggers must initialize before plates so plates can fire into them.
+    const triggerManager = new TriggerManager();
+    triggerManager.initialize(world, levelData.triggers ?? [], pointShapeParticles);
+
+    let pressurePlateManager: PressurePlateManager | null = null;
+    if (levelData.pressurePlates && levelData.pressurePlates.length > 0) {
+      pressurePlateManager = new PressurePlateManager();
+      pressurePlateManager.initialize(world, levelData.pressurePlates, plateShapeIdxToId, triggerManager);
     }
 
     const camera = new Camera();
@@ -105,22 +172,29 @@ export default function Sandbox() {
       renderOptions,
       spikeManager,
       springPadManager,
+      triggerManager,
+      pressurePlateManager,
     };
 
     const loop = new GameLoop((dt) => {
-      playerBlob.setInput(input.getMoveX(), input.isExpanding());
+      playerBlob.setInput(input.getMoveX(), input.getMoveY(), input.isExpanding());
       playerBlob.update(dt);
       world.step(dt);
       springPadManager?.update(dt);
       spikeManager?.update(dt);
+      pressurePlateManager?.update(dt);
+      triggerManager.update(dt);
       camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
       camera.update(dt);
 
-      const modeOverlay = (spikeManager || springPadManager) ? {
+      const hasPointShapes = pointShapeParticles.size > 0;
+      const modeOverlay = (spikeManager || springPadManager || pressurePlateManager || hasPointShapes) ? {
         renderWorld: (rctx: CanvasRenderingContext2D) => {
           springPadManager?.render(rctx);
           spikeManager?.render(rctx);
           spikeManager?.renderDeadPlayers(rctx);
+          pressurePlateManager?.render(rctx);
+          renderPointShapesLive(rctx, world, pointShapeParticles, levelData);
         },
         renderHUD: () => {},
       } : undefined;
@@ -147,6 +221,8 @@ export default function Sandbox() {
         stateRef.current.input.detach();
         stateRef.current.spikeManager?.cleanup();
         stateRef.current.springPadManager?.cleanup();
+        stateRef.current.pressurePlateManager?.cleanup();
+        stateRef.current.triggerManager?.cleanup();
         stateRef.current = null;
       }
     };

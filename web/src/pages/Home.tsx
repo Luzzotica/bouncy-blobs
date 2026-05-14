@@ -14,8 +14,13 @@ export default function Home() {
       <p style={{ color: '#888', fontSize: 18 }}>A soft-body physics party game</p>
       <div style={{ display: 'flex', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
         <Link to="/game">
-          <button style={{ fontSize: 20, padding: '14px 32px', background: '#c77dff' }}>
-            Host Game
+          <button data-testid="host-button" style={{ fontSize: 20, padding: '14px 32px', background: '#c77dff' }}>
+            Host
+          </button>
+        </Link>
+        <Link to="/lobbies">
+          <button data-testid="browse-button" style={{ fontSize: 20, padding: '14px 32px', background: '#5a189a' }}>
+            Browse Lobbies
           </button>
         </Link>
         <Link to="/sandbox">

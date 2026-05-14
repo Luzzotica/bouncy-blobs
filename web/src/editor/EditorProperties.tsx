@@ -175,6 +175,134 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     );
   }
 
+  if (sel.type === 'plate') {
+    const plate = (state.level.pressurePlates ?? []).find(p => p.id === sel.id);
+    if (!plate) return null;
+    const allTriggers = state.level.triggers ?? [];
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Pressure Plate</h3>
+        <NumInput label="X" value={plate.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
+        <NumInput label="Y" value={plate.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
+        <NumInput label="Width" value={plate.width} onChange={v => { state.updateProperty('width', Math.max(40, v)); onUpdate(); }} />
+        <NumInput label="Height" value={plate.height} onChange={v => { state.updateProperty('height', Math.max(10, v)); onUpdate(); }} />
+        <NumInput label="Rotation" value={radToDeg(plate.rotation)} step={15} onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
+        <div style={rowStyle}>
+          <label style={labelStyle}>One-shot</label>
+          <input type="checkbox" checked={!!plate.oneShot}
+            onChange={e => { state.updateProperty('oneShot', e.target.checked); onUpdate(); }} />
+        </div>
+        <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Fires triggers</div>
+          {allTriggers.length === 0 ? (
+            <p style={{ color: '#555', fontSize: 11 }}>No triggers in level yet</p>
+          ) : (
+            allTriggers.map(t => (
+              <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: '#bbb', cursor: 'pointer' }}>
+                <input type="checkbox" checked={plate.triggerIds.includes(t.id)}
+                  onChange={() => { state.togglePlateTriggerBinding(plate.id, t.id); onUpdate(); }} />
+                {t.id}
+              </label>
+            ))
+          )}
+        </div>
+        <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
+      </div>
+    );
+  }
+
+  if (sel.type === 'pointShape') {
+    const shape = (state.level.pointShapes ?? []).find(p => p.id === sel.id);
+    if (!shape) return null;
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Point Shape</h3>
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>
+          {shape.points.length} points, {shape.edges.length}{shape.closed ? '+1' : ''} edges
+        </div>
+        <div style={rowStyle}>
+          <label style={labelStyle}>Closed</label>
+          <input type="checkbox" checked={!!shape.closed}
+            onChange={e => { state.updateProperty('closed', e.target.checked); onUpdate(); }} />
+        </div>
+        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
+          {shape.points.map((pt, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, fontSize: 11 }}>
+              <span style={{ color: '#888', width: 22 }}>#{i}</span>
+              <span style={{ color: '#aaa', flex: 1 }}>({Math.round(pt.x)},{Math.round(pt.y)})</span>
+              <label style={{ color: pt.anchored ? '#ffcc55' : '#666', cursor: 'pointer' }}>
+                <input type="checkbox" checked={pt.anchored}
+                  onChange={() => { state.togglePointAnchored(shape.id, i); onUpdate(); }}
+                  style={{ marginRight: 2 }} />
+                anchor
+              </label>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete Shape</button>
+      </div>
+    );
+  }
+
+  if (sel.type === 'pointShapeVertex') {
+    const shape = (state.level.pointShapes ?? []).find(p => p.id === sel.id);
+    const pt = shape?.points[sel.pointIndex];
+    if (!shape || !pt) return null;
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Vertex #{sel.pointIndex}</h3>
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>of shape {shape.id}</div>
+        <NumInput label="X" value={pt.x} onChange={v => { pt.x = v; onUpdate(); }} />
+        <NumInput label="Y" value={pt.y} onChange={v => { pt.y = v; onUpdate(); }} />
+        <NumInput label="Mass" value={pt.mass ?? 1} step={0.1}
+          onChange={v => { pt.mass = Math.max(0.01, v); onUpdate(); }} />
+        <div style={rowStyle}>
+          <label style={labelStyle}>Anchored</label>
+          <input type="checkbox" checked={pt.anchored}
+            onChange={() => { state.togglePointAnchored(shape.id, sel.pointIndex); onUpdate(); }} />
+        </div>
+        <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete Vertex</button>
+      </div>
+    );
+  }
+
+  if (sel.type === 'trigger') {
+    const trig = (state.level.triggers ?? []).find(t => t.id === sel.id);
+    if (!trig) return null;
+    const easings = ['linear', 'easeInOut', 'easeOut'] as const;
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Trigger</h3>
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>{trig.id}</div>
+        <NumInput label="Duration" value={trig.duration} step={0.1}
+          onChange={v => { state.updateProperty('duration', Math.max(0.05, v)); onUpdate(); }} suffix="s" />
+        <div style={rowStyle}>
+          <label style={labelStyle}>Easing</label>
+          <select value={trig.easing ?? 'easeInOut'}
+            onChange={e => { state.updateProperty('easing', e.target.value); onUpdate(); }}
+            style={inputStyle}>
+            {easings.map(k => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>Targets</div>
+        <div style={{ maxHeight: 180, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
+          {trig.targets.map((t, i) => (
+            <div key={i} style={{ marginBottom: 6, fontSize: 11, color: '#bbb' }}>
+              <div style={{ color: '#888' }}>{t.shapeId} · #{t.pointIndex}</div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                <input type="number" value={Math.round(t.endX)} style={{ ...inputStyle, padding: '2px 4px' }}
+                  onChange={e => { state.setTriggerTargetEnd(trig.id, i, parseFloat(e.target.value) || 0, t.endY); onUpdate(); }} />
+                <input type="number" value={Math.round(t.endY)} style={{ ...inputStyle, padding: '2px 4px' }}
+                  onChange={e => { state.setTriggerTargetEnd(trig.id, i, t.endX, parseFloat(e.target.value) || 0); onUpdate(); }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete Trigger</button>
+      </div>
+    );
+  }
+
   return null;
 }
 

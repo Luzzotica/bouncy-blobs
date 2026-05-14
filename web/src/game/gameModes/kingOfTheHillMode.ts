@@ -129,4 +129,14 @@ export class KingOfTheHillMode implements GameMode {
   cleanup(): void {
     this.currentKingColor = null;
   }
+
+  getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.hillZone) return null;
+    return {
+      x: this.hillZone.x,
+      y: this.hillZone.y,
+      width: this.hillZone.width,
+      height: this.hillZone.height,
+    };
+  }
 }

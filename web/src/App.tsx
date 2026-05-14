@@ -5,6 +5,8 @@ import Editor from './pages/Editor'
 import GameMaster from './pages/GameMaster'
 import Controller from './pages/Controller'
 import JoinLobby from './pages/JoinLobby'
+import LobbyBrowser from './pages/LobbyBrowser'
+import OnlineGuest from './pages/OnlineGuest'
 
 export default function App() {
   return (
@@ -15,6 +17,8 @@ export default function App() {
       <Route path="/game" element={<GameMaster />} />
       <Route path="/join" element={<JoinLobby />} />
       <Route path="/controller/:sessionId" element={<Controller />} />
+      <Route path="/lobbies" element={<LobbyBrowser />} />
+      <Route path="/online-guest" element={<OnlineGuest />} />
     </Routes>
   )
 }

@@ -111,4 +111,14 @@ export class ClassicMode implements GameMode {
     this.world = null;
     this.finishedPlayerId = null;
   }
+
+  getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.goalZone) return null;
+    return {
+      x: this.goalZone.x,
+      y: this.goalZone.y,
+      width: this.goalZone.width,
+      height: this.goalZone.height,
+    };
+  }
 }

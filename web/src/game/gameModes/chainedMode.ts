@@ -8,7 +8,9 @@ import { drawGoalZone } from '../../renderer/zoneRenderer';
 import { drawPlayerLabels, drawTimer } from '../../renderer/hudRenderer';
 import { Vec2, vec2, sub, length } from '../../physics/vec2';
 
-const CHAIN_MAX_DIST = 350;
+const CHAIN_REST_LENGTH = 250;   // slack distance before spring kicks in
+const CHAIN_STIFFNESS = 40;      // spring pull strength
+const CHAIN_DAMPING = 8;         // prevents oscillation
 
 export class ChainedMode implements GameMode {
   readonly config: GameModeConfig = {
@@ -95,7 +97,7 @@ export class ChainedMode implements GameMode {
     for (let i = 0; i < players.length - 1; i++) {
       const a = players[i];
       const b = players[i + 1];
-      world.addDistanceMax(a.blob.centerIdx, b.blob.centerIdx, CHAIN_MAX_DIST);
+      world.addTetherSpring(a.blob.centerIdx, b.blob.centerIdx, CHAIN_REST_LENGTH, CHAIN_STIFFNESS, CHAIN_DAMPING);
       this.chainPairs.push({ pidA: a.playerId, pidB: b.playerId });
     }
   }
@@ -150,7 +152,7 @@ export class ChainedMode implements GameMode {
       const posA = a.blob.getCentroid();
       const posB = b.blob.getCentroid();
       const dist = length(sub(posB, posA));
-      const tension = Math.min(dist / CHAIN_MAX_DIST, 1);
+      const tension = Math.min(Math.max(0, (dist - CHAIN_REST_LENGTH) / CHAIN_REST_LENGTH), 1);
 
       // Color: green (slack) -> yellow -> red (taut)
       let r: number, g: number, bv: number;
@@ -198,5 +200,15 @@ export class ChainedMode implements GameMode {
     this.world = null;
     this.chainPairs = [];
     this.chainsCreated = false;
+  }
+
+  getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.goalZone) return null;
+    return {
+      x: this.goalZone.x,
+      y: this.goalZone.y,
+      width: this.goalZone.width,
+      height: this.goalZone.height,
+    };
   }
 }

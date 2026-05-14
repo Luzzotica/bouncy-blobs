@@ -253,6 +253,170 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.fillText(npc.hullPreset.slice(0, 4), npc.x, npc.y);
     }
 
+    // Pressure plates (behind powerups)
+    for (const plate of state.level.pressurePlates ?? []) {
+      const selected = state.selectedElement?.type === 'plate' && state.selectedElement.id === plate.id;
+      ctx.save();
+      ctx.translate(plate.x, plate.y);
+      ctx.rotate(plate.rotation);
+      const hw = plate.width / 2;
+      const hh = plate.height / 2;
+      ctx.fillStyle = selected ? '#3a7e3a' : '#345';
+      ctx.strokeStyle = selected ? '#9fffa0' : '#789';
+      ctx.lineWidth = selected ? 3 : 2;
+      ctx.beginPath();
+      ctx.roundRect(-hw, -hh, plate.width, plate.height, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = selected ? '#5ec85e' : '#7ad27a';
+      ctx.beginPath();
+      ctx.roundRect(-hw + 4, -hh + 1, plate.width - 8, plate.height - 5, 3);
+      ctx.fill();
+      // Trigger indicator
+      if (plate.triggerIds.length > 0) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`→ ${plate.triggerIds.length}`, 0, -hh - 8);
+      }
+      ctx.restore();
+    }
+
+    // PointShapes
+    for (const ps of state.level.pointShapes ?? []) {
+      const selectedShape = state.selectedElement?.type === 'pointShape' && state.selectedElement.id === ps.id;
+      ctx.save();
+      ctx.strokeStyle = selectedShape ? '#aaddff' : '#5588aa';
+      ctx.lineWidth = selectedShape ? 3 : 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const e of ps.edges) {
+        const pa = ps.points[e.a];
+        const pb = ps.points[e.b];
+        if (!pa || !pb) continue;
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+      if (ps.closed && ps.points.length > 2) {
+        const pa = ps.points[ps.points.length - 1];
+        const pb = ps.points[0];
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+      for (let i = 0; i < ps.points.length; i++) {
+        const pt = ps.points[i];
+        const vertexSelected = state.selectedElement?.type === 'pointShapeVertex'
+          && state.selectedElement.id === ps.id
+          && state.selectedElement.pointIndex === i;
+        ctx.fillStyle = pt.anchored ? '#ffcc55' : '#88c0ff';
+        ctx.strokeStyle = vertexSelected ? '#fff' : '#0f1629';
+        ctx.lineWidth = vertexSelected ? 3 / state.zoom : 2 / state.zoom;
+        const r = (pt.anchored ? 8 : 6) + (vertexSelected ? 2 : 0);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Draft PointShape preview
+    if (state.draftPointShape) {
+      const draft = state.draftPointShape;
+      ctx.save();
+      ctx.strokeStyle = '#aaff88';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      for (let i = 0; i < draft.points.length - 1; i++) {
+        const a = draft.points[i];
+        const b = draft.points[i + 1];
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      // Ghost line from last point to cursor
+      if (draft.points.length > 0) {
+        const last = draft.points[draft.points.length - 1];
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(state.cursorX, state.cursorY);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      for (let i = 0; i < draft.points.length; i++) {
+        const pt = draft.points[i];
+        ctx.fillStyle = pt.anchored ? '#ffcc55' : '#aaff88';
+        ctx.strokeStyle = '#0f1629';
+        ctx.lineWidth = 2 / state.zoom;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Triggers — render arrows from each target's authored position to its endXY.
+    for (const trig of state.level.triggers ?? []) {
+      const selected = state.selectedElement?.type === 'trigger' && state.selectedElement.id === trig.id;
+      ctx.save();
+      ctx.strokeStyle = selected ? '#ffaaff' : '#9966cc';
+      ctx.fillStyle = selected ? '#ffaaff' : '#9966cc';
+      ctx.lineWidth = selected ? 2.5 : 1.5;
+      ctx.setLineDash([4, 4]);
+      for (const t of trig.targets) {
+        const shape = (state.level.pointShapes ?? []).find(s => s.id === t.shapeId);
+        const pt = shape?.points[t.pointIndex];
+        if (!pt) continue;
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y);
+        ctx.lineTo(t.endX, t.endY);
+        ctx.stroke();
+        // End ghost
+        ctx.beginPath();
+        ctx.arc(t.endX, t.endY, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Draft Trigger preview
+    if (state.draftTrigger) {
+      const dt = state.draftTrigger;
+      ctx.save();
+      ctx.strokeStyle = '#ffccff';
+      ctx.fillStyle = '#ffccff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      for (const t of dt.targets) {
+        const shape = (state.level.pointShapes ?? []).find(s => s.id === t.shapeId);
+        const pt = shape?.points[t.pointIndex];
+        if (!pt) continue;
+        if (dt.phase === 'placeEnds') {
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(t.endX, t.endY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(t.endX, t.endY, 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Highlight selected source vertex
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 11, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     // Powerup spawns
     for (const pu of state.level.powerupSpawns ?? []) {
       const selected = state.selectedElement?.type === 'powerup' && state.selectedElement.id === pu.id;
@@ -303,13 +467,20 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     ctx.restore();
 
     // HUD: show current tool + hotkey hint
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(8, h - 28, 220, 22);
-    ctx.fillStyle = '#aaa';
     ctx.font = '11px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`Tool: ${state.selectedTool} | R: rotate | 1-9: tools`, 14, h - 17);
+    const draftHint = state.draftPointShape
+      ? ` | shape: ${state.draftPointShape.points.length} pts · Shift=anchor · Enter/C: commit · Esc: cancel`
+      : state.draftTrigger
+        ? state.draftTrigger.phase === 'pickPoints'
+          ? ` | trigger: ${state.draftTrigger.targets.length} pts · Enter: next · Esc: cancel`
+          : ` | trigger: drag ends · Enter: commit · Esc: cancel`
+        : '';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(8, h - 28, Math.min(800, 240 + draftHint.length * 6), 22);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`Tool: ${state.selectedTool} | R: rotate | 1-9,Q,W,E: tools${draftHint}`, 14, h - 17);
   }, [state]);
 
   useEffect(() => {
@@ -338,6 +509,14 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     }
 
     if (state.selectedTool === 'select') {
+      // If editing a trigger in placeEnds phase, allow dragging its end ghosts.
+      const draftEndIdx = state.hitTestDraftTriggerEnd(wx, wy);
+      if (draftEndIdx !== null) {
+        state.draggingTriggerTarget = draftEndIdx;
+        onUpdate();
+        return;
+      }
+
       // Check resize handles first
       const handle = state.hitTestHandle(wx, wy);
       if (handle) {
@@ -352,10 +531,32 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         state.startDrag(wx, wy);
       }
       onUpdate();
+    } else if (state.selectedTool === 'pointShape') {
+      state.appendDraftPoint(wx, wy, e.shiftKey);
+      onUpdate();
+    } else if (state.selectedTool === 'trigger') {
+      // Pick a vertex to add as a target; otherwise advance/commit.
+      const vhit = state.hitTestPointShapeVertex(wx, wy);
+      if (vhit) {
+        if (!state.draftTrigger) state.beginDraftTrigger();
+        state.appendTriggerTargetAtVertex(vhit.shapeId, vhit.pointIndex);
+        onUpdate();
+        return;
+      }
+      // Click empty space while in placeEnds: drag an end ghost if hit; else commit.
+      if (state.draftTrigger?.phase === 'placeEnds') {
+        const idx = state.hitTestDraftTriggerEnd(wx, wy);
+        if (idx !== null) {
+          state.draggingTriggerTarget = idx;
+          onUpdate();
+          return;
+        }
+      }
+      onUpdate();
     } else {
       const tool = state.selectedTool;
       // Rect-based tools use drag-to-place
-      if (tool === 'platform' || tool === 'spring' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone') {
+      if (tool === 'platform' || tool === 'spring' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone' || tool === 'plate') {
         state.startPlacement(tool, wx, wy);
       } else {
         switch (tool) {
@@ -372,6 +573,14 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    const { x: cwx, y: cwy } = screenToWorld(sx, sy);
+    state.cursorX = cwx;
+    state.cursorY = cwy;
+
+    if (state.draggingTriggerTarget !== null) {
+      state.setDraftTriggerTargetEnd(state.draggingTriggerTarget, cwx, cwy);
+      return;
+    }
 
     if (state.isPanning) {
       const dx = (sx - state.panStartX) / state.zoom;
@@ -426,6 +635,9 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     if (state.isResizing) {
       state.stopResize();
     }
+    if (state.draggingTriggerTarget !== null) {
+      state.draggingTriggerTarget = null;
+    }
     state.stopDrag();
     state.isPanning = false;
   }, [state, onUpdate]);
@@ -462,18 +674,58 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       }
     }
 
-    // Escape: deselect
+    // Enter: commit drafts
+    if (e.key === 'Enter') {
+      if (state.draftPointShape) {
+        state.commitDraftPointShape(false);
+        onUpdate();
+        return;
+      }
+      if (state.draftTrigger) {
+        if (state.draftTrigger.phase === 'pickPoints') {
+          state.advanceDraftTriggerPhase();
+        } else {
+          state.commitDraftTrigger();
+        }
+        onUpdate();
+        return;
+      }
+    }
+
+    // 'c' while drafting a PointShape: close it.
+    if ((e.key === 'c' || e.key === 'C') && state.draftPointShape) {
+      state.commitDraftPointShape(true);
+      onUpdate();
+      return;
+    }
+
+    // Escape: cancel any draft, then deselect
     if (e.key === 'Escape') {
+      if (state.draftPointShape) {
+        state.cancelDraftPointShape();
+        onUpdate();
+        return;
+      }
+      if (state.draftTrigger) {
+        state.cancelDraftTrigger();
+        onUpdate();
+        return;
+      }
       state.selectedElement = null;
       state.selectedTool = 'select';
       onUpdate();
       return;
     }
 
-    // Tool hotkeys (1-9)
-    const tool = TOOL_HOTKEYS[e.key];
+    // Tool hotkeys (1-9, q/w/e)
+    const tool = TOOL_HOTKEYS[e.key.toLowerCase()];
     if (tool) {
+      // Bail out of any in-progress draft when switching tools.
+      if (state.draftPointShape && tool !== 'pointShape') state.cancelDraftPointShape();
+      if (state.draftTrigger && tool !== 'trigger') state.cancelDraftTrigger();
       state.selectedTool = tool;
+      if (tool === 'pointShape' && !state.draftPointShape) state.beginDraftPointShape();
+      if (tool === 'trigger' && !state.draftTrigger) state.beginDraftTrigger();
       onUpdate();
     }
   }, [state, onUpdate]);

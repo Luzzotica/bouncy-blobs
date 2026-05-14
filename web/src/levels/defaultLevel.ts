@@ -6,22 +6,22 @@ export const defaultLevel: LevelData = {
   bounds: { width: 4400, height: 2248 },
   platforms: [
     // North tier (Y=-310)
-    { id: 'p1', x: -1200, y: -310, width: 300, height: 24, rotation: 0 },
-    { id: 'p2', x: 0, y: -310, width: 300, height: 24, rotation: 0 },
-    { id: 'p3', x: 1200, y: -310, width: 300, height: 24, rotation: 0 },
+    { id: 'p1', x: -1200, y: -310, width: 300, height: 72, rotation: 0 },
+    { id: 'p2', x: 0, y: -310, width: 300, height: 72, rotation: 0 },
+    { id: 'p3', x: 1200, y: -310, width: 300, height: 72, rotation: 0 },
     // Middle tier (Y=96)
-    { id: 'p4', x: -900, y: 96, width: 280, height: 24, rotation: 0 },
-    { id: 'p5', x: 0, y: 96, width: 280, height: 24, rotation: 0 },
-    { id: 'p6', x: 900, y: 96, width: 280, height: 24, rotation: 0 },
+    { id: 'p4', x: -900, y: 96, width: 280, height: 72, rotation: 0 },
+    { id: 'p5', x: 0, y: 96, width: 280, height: 72, rotation: 0 },
+    { id: 'p6', x: 900, y: 96, width: 280, height: 72, rotation: 0 },
     // Lower tier (Y=502)
-    { id: 'p7', x: -600, y: 502, width: 260, height: 24, rotation: 0 },
-    { id: 'p8', x: 300, y: 502, width: 260, height: 24, rotation: 0 },
-    { id: 'p9', x: 1100, y: 502, width: 260, height: 24, rotation: 0 },
+    { id: 'p7', x: -600, y: 502, width: 260, height: 72, rotation: 0 },
+    { id: 'p8', x: 300, y: 502, width: 260, height: 72, rotation: 0 },
+    { id: 'p9', x: 1100, y: 502, width: 260, height: 72, rotation: 0 },
     // Run section (Y=1000)
-    { id: 'p10', x: -500, y: 1000, width: 400, height: 24, rotation: 0 },
-    { id: 'p11', x: 500, y: 1000, width: 400, height: 24, rotation: 0 },
+    { id: 'p10', x: -500, y: 1000, width: 400, height: 72, rotation: 0 },
+    { id: 'p11', x: 500, y: 1000, width: 400, height: 72, rotation: 0 },
     // Near floor (Y=1470)
-    { id: 'p12', x: 0, y: 1470, width: 800, height: 24, rotation: 0 },
+    { id: 'p12', x: 0, y: 1470, width: 800, height: 72, rotation: 0 },
   ],
   walls: [
     // Floor

@@ -32,6 +32,13 @@ export class KeyboardInput {
     return x;
   }
 
+  getMoveY(): number {
+    let y = 0;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) y -= 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) y += 1;
+    return y;
+  }
+
   isExpanding(): boolean {
     return this.keys.has('Space');
   }

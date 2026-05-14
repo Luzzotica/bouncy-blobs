@@ -52,6 +52,8 @@ export class SoftBodyWorld {
   private welds: [number, number][] = [];
   private anchors: { indicesA: number[]; weightsA: number[]; indicesB: number[]; weightsB: number[] }[] = [];
   private distanceMaxConstraints: [number, number, number][] = [];
+  /** Tether springs: [particleA, particleB, restLength, stiffness, damping]. Only pull when stretched beyond rest. */
+  private tetherSprings: [number, number, number, number, number][] = [];
 
   // Trigger state
   private triggerPrev: Map<string, boolean> = new Map();
@@ -254,6 +256,40 @@ export class SoftBodyWorld {
     return { blobId, centerIdx: start, hullIndices, shapeIdx };
   }
 
+  /**
+   * Retire a blob from the simulation. Compacting the particle/spring/shape
+   * arrays would shift indices and break every other blob's stored ids, so
+   * instead we leave the slots in place and tag them inactive — every physics
+   * pass early-skips inactive ranges. Particles are frozen (invMass=0, vel=0,
+   * radius=0) so they can never participate in collisions or forces, and the
+   * shape's hull is collapsed to a point off-screen to keep AABB tests cheap.
+   */
+  removeBlob(blobId: number): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    const r = this.blobRanges[blobId];
+    if (r.inactive) return;
+    r.inactive = true;
+
+    const GRAVEYARD = vec2(-1e7, -1e7);
+    for (let i = r.start; i < r.end; i++) {
+      this.invMass[i] = 0;
+      this.mass[i] = 0;
+      this.vel[i] = ZERO;
+      this.pos[i] = GRAVEYARD;
+      this.particleRadius[i] = 0;
+    }
+
+    if (r.shapeIdx >= 0 && r.shapeIdx < this.shapes.length) {
+      this.shapes[r.shapeIdx].inactive = true;
+    }
+
+    this.baseMasses.delete(blobId);
+    // Drop any cached trigger membership so stale "exited" events don't fire.
+    for (const key of [...this.triggerPrev.keys()]) {
+      if (key.endsWith(`_${blobId}`)) this.triggerPrev.delete(key);
+    }
+  }
+
   setBlobSpringStiffnessScale(blobId: number, stiffnessScale: number, dampScale = -1): void {
     if (blobId < 0 || blobId >= this.blobRanges.length) return;
     const r = this.blobRanges[blobId];
@@ -270,6 +306,20 @@ export class SoftBodyWorld {
     const sh = this.shapes[si];
     if (sh.isStatic || sh.isTrigger) return;
     sh.shapeMatchRestScale = Math.max(0.35, Math.min(3.5, s));
+  }
+
+  /** Overwrite the shape-matching rest-local positions for a blob's hull. */
+  setBlobRestLocal(blobId: number, restLocal: Vec2[]): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    const si = this.blobRanges[blobId].shapeIdx;
+    if (si < 0 || si >= this.shapes.length) return;
+    const sh = this.shapes[si];
+    if (sh.isStatic || sh.isTrigger) return;
+    const n = Math.min(restLocal.length, sh.restLocal.length);
+    for (let i = 0; i < n; i++) {
+      sh.restLocal[i].x = restLocal[i].x;
+      sh.restLocal[i].y = restLocal[i].y;
+    }
   }
 
   /** Scale all particle masses in a blob by a factor. Stores base masses for restore. */
@@ -293,6 +343,21 @@ export class SoftBodyWorld {
       const base = bases[i - r.start];
       this.mass[i] = base * massScale;
       this.invMass[i] = this.mass[i] > 0 ? 1 / this.mass[i] : 0;
+    }
+  }
+
+  /**
+   * Translate every particle in a blob by (dx, dy) without touching velocities.
+   * Used by clients to gently reconcile their local sim toward the host's
+   * authoritative centroid each snapshot — keeps the blob's momentum and shape
+   * deformation intact while pulling its position back in line.
+   */
+  nudgeBlob(blobId: number, dx: number, dy: number): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    if (dx === 0 && dy === 0) return;
+    const r = this.blobRanges[blobId];
+    for (let i = r.start; i < r.end; i++) {
+      this.pos[i] = vec2(this.pos[i].x + dx, this.pos[i].y + dy);
     }
   }
 
@@ -404,6 +469,25 @@ export class SoftBodyWorld {
   getPositions(): Vec2[] { return this.pos; }
   getVelocities(): Vec2[] { return this.vel.map(v => ({ ...v })); }
   getPointCount(): number { return this.pos.length; }
+  getGravity(): Vec2 { return this.gravity; }
+
+  /** Returns the effective gravity for a blob (accounting for trigger zone overrides). */
+  getBlobEffectiveGravity(blobId: number): Vec2 {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return this.gravity;
+    const r = this.blobRanges[blobId];
+    const cx = centroidFromIndices(this.pos, r.hull);
+    for (let si = 0; si < this.shapes.length; si++) {
+      const sh = this.shapes[si];
+      if (!sh.isTrigger) continue;
+      if (sh.staticPoly.length === 0) continue;
+      if (isPointInPolygon(cx, sh.staticPoly)) {
+        if (lengthSq(sh.triggerGravity) > 0.0001) {
+          return sh.triggerGravity;
+        }
+      }
+    }
+    return this.gravity;
+  }
 
   getHullPolygon(blobId: number): Vec2[] {
     if (blobId < 0 || blobId >= this.blobRanges.length) return [];
@@ -488,6 +572,11 @@ export class SoftBodyWorld {
 
   addDistanceMax(i: number, j: number, maxDist: number): void {
     this.distanceMaxConstraints.push([i, j, maxDist]);
+  }
+
+  /** Add a spring that only pulls when distance exceeds restLength (like a slack rope). */
+  addTetherSpring(i: number, j: number, restLength: number, stiffness: number, damping: number): void {
+    this.tetherSprings.push([i, j, restLength, stiffness, damping]);
   }
 
   addWeightedAnchor(indicesA: number[], weightsA: number[], indicesB: number[], weightsB: number[]): void {
@@ -577,6 +666,7 @@ export class SoftBodyWorld {
 
     for (let bi = 0; bi < this.blobRanges.length; bi++) {
       const r = this.blobRanges[bi];
+      if (r.inactive) continue;
       const cx = centroidFromIndices(this.pos, r.hull);
       for (let si = 0; si < this.shapes.length; si++) {
         const sh = this.shapes[si];
@@ -599,6 +689,7 @@ export class SoftBodyWorld {
 
     // 3-5. Forces
     this.applySprings(dt);
+    this.applyTetherSprings(dt);
     this.applyPressure(dt);
     this.applyShapeMatching(dt);
 
@@ -641,6 +732,7 @@ export class SoftBodyWorld {
   private applySprings(dt: number): void {
     for (let bi = 0; bi < this.blobRanges.length; bi++) {
       const r = this.blobRanges[bi];
+      if (r.inactive) continue;
       const kMult = r.springStiffnessScale;
       const dMult = r.springDampScale;
       if (r.springBegin < 0 || r.springEnd < 0 || r.springBegin >= r.springEnd) continue;
@@ -667,10 +759,28 @@ export class SoftBodyWorld {
     }
   }
 
+  private applyTetherSprings(dt: number): void {
+    for (const [ia, ib, rest, k, damp] of this.tetherSprings) {
+      const diff = sub(this.pos[ib], this.pos[ia]);
+      const dist = length(diff);
+      if (dist <= rest || dist < 0.0001) continue; // slack — no force
+      const dir = scale(diff, 1 / dist);
+      const stretch = dist - rest;
+      const relVel = dot(sub(this.vel[ib], this.vel[ia]), dir);
+      const force = scale(dir, k * stretch + damp * relVel);
+      if (this.invMass[ia] > 0) {
+        this.vel[ia] = add(this.vel[ia], scale(force, this.invMass[ia] * dt));
+      }
+      if (this.invMass[ib] > 0) {
+        this.vel[ib] = sub(this.vel[ib], scale(force, this.invMass[ib] * dt));
+      }
+    }
+  }
+
   private applyPressure(dt: number): void {
     for (let si = 0; si < this.shapes.length; si++) {
       const sh = this.shapes[si];
-      if (sh.isStatic || sh.isTrigger) continue;
+      if (sh.isStatic || sh.isTrigger || sh.inactive) continue;
       if (sh.pressureK <= 0) continue;
       const idx = sh.indices;
       if (idx.length < 3) continue;
@@ -699,7 +809,7 @@ export class SoftBodyWorld {
   private applyShapeMatching(dt: number): void {
     for (let si = 0; si < this.shapes.length; si++) {
       const sh = this.shapes[si];
-      if (sh.isStatic || sh.isTrigger) continue;
+      if (sh.isStatic || sh.isTrigger || sh.inactive) continue;
       if (sh.shapeMatchK <= 0) continue;
       const { indices, restLocal, shapeMatchK: smk, shapeMatchDamp: smd } = sh;
       if (indices.length !== restLocal.length) continue;
@@ -748,6 +858,7 @@ export class SoftBodyWorld {
 
     for (let bi = 0; bi < this.blobRanges.length; bi++) {
       const r = this.blobRanges[bi];
+      if (r.inactive) continue;
       const ci = r.start;
       for (let j = r.start; j < r.end; j++) {
         if (j === ci) {
@@ -765,12 +876,15 @@ export class SoftBodyWorld {
   private solveCollisions(dt: number): void {
     // Blob-blob first, then blob-static
     for (let a = 0; a < this.blobRanges.length; a++) {
+      if (this.blobRanges[a].inactive) continue;
       for (let b = a + 1; b < this.blobRanges.length; b++) {
+        if (this.blobRanges[b].inactive) continue;
         this.collideBlobs(a, b);
       }
     }
     for (const poly of this.staticPolygons) {
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
+        if (this.blobRanges[bi].inactive) continue;
         this.collideBlobWithPoly(bi, poly, true, dt);
       }
     }
@@ -927,6 +1041,7 @@ export class SoftBodyWorld {
   private sweepStaticCCD(prevPos: Vec2[]): void {
     for (let bi = 0; bi < this.blobRanges.length; bi++) {
       const r = this.blobRanges[bi];
+      if (r.inactive) continue;
       // Sweep hull particles and center particle
       const centerIdx = this.shapes[r.shapeIdx]?.centerIdx ?? -1;
       const indicesToCheck = centerIdx >= 0 ? [...r.hull, centerIdx] : r.hull;
@@ -989,7 +1104,7 @@ export class SoftBodyWorld {
         this.resolveParticleVsPoly(i, rad, poly);
       }
       for (const sh of this.shapes) {
-        if (sh.isTrigger) continue;
+        if (sh.isTrigger || sh.inactive) continue;
         if (sh.isStatic) {
           if (sh.staticPoly.length > 0) this.resolveParticleVsPoly(i, rad, sh.staticPoly);
         } else {
@@ -1030,6 +1145,7 @@ export class SoftBodyWorld {
       if (sh.staticPoly.length === 0) continue;
 
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
+        if (this.blobRanges[bi].inactive) continue;
         const cx = centroidFromIndices(this.pos, this.blobRanges[bi].hull);
         const inside = isPointInPolygon(cx, sh.staticPoly);
         const key = `${si}_${bi}`;

@@ -10,6 +10,16 @@ node_modules/
 dist/
 .DS_Store
 
+# Build artifacts
+*.tsbuildinfo
+test-results/
+playwright-report/
+playwright/output/
+
+# Supabase CLI local state
+**/supabase/.branches/
+**/supabase/.temp/
+
 # Environment files (keep .env.example)
 .env
 .env.local

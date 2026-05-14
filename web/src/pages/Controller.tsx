@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { joinAsController, ControllerWebRTCManager, SignalingService } from '../lib/party';
-import type { ControllerCallbacks } from '../lib/party';
-import { partyConfig } from '../lib/partyConfig';
+import { joinAsPeer, PeerManager, RoomService } from '../lib/party';
+import type { PeerCallbacks } from '../lib/party';
+import { roomConfig } from '../lib/partyConfig';
 import { WebRTCMessage } from '../types/webrtc';
+import { COLOR_PALETTE } from '../constants/customization';
 
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 type ControllerMode = 'normal' | 'party_box' | 'placement';
@@ -16,14 +17,6 @@ interface PartyBoxItem {
   width: number;
   height: number;
 }
-
-// ─── Color Palette ──────────────────────────────────────────────────────────
-
-const COLOR_PALETTE = [
-  '#e06070', '#e88a5a', '#e8c54a', '#6ecf6e',
-  '#4ac8c8', '#5a8ae0', '#8a6ae0', '#d06eb0',
-  '#f0f0f0', '#ff4444', '#44aaff', '#aa44ff',
-];
 
 // ─── Face Presets ────────────────────────────────────────────────────────────
 
@@ -383,8 +376,8 @@ export default function Controller() {
   const [itemSelected, setItemSelected] = useState(false);
   const [placementConfirmed, setPlacementConfirmed] = useState(false);
 
-  const managerRef = useRef<ControllerWebRTCManager | null>(null);
-  const signalingRef = useRef<SignalingService | null>(null);
+  const managerRef = useRef<PeerManager | null>(null);
+  const roomRef = useRef<RoomService | null>(null);
   const playerIdRef = useRef<string>('');
   const inputRef = useRef({ moveX: 0, moveY: 0, expanding: false });
   const sendIntervalRef = useRef<ReturnType<typeof setInterval>>();
@@ -414,7 +407,7 @@ export default function Controller() {
     if (controllerMode === 'party_box' && !itemSelected) {
       // Select the highlighted item
       setItemSelected(true);
-      managerRef.current?.send(JSON.stringify({
+      managerRef.current?.sendPrimary("host", JSON.stringify({
         type: 'item_select',
         value: { itemIndex: highlightedItem },
       }));
@@ -423,7 +416,7 @@ export default function Controller() {
     if (controllerMode === 'placement' && !placementConfirmed) {
       // Confirm placement
       setPlacementConfirmed(true);
-      managerRef.current?.send(JSON.stringify({
+      managerRef.current?.sendPrimary("host", JSON.stringify({
         type: 'placement_confirm',
       }));
       return;
@@ -443,10 +436,10 @@ export default function Controller() {
     setNameSubmitted(true);
 
     try {
-      const callbacks: ControllerCallbacks = {
-        onConnected: () => {
+      const callbacks: PeerCallbacks = {
+        onPeerConnected: () => {
           // Immediately join the game with default appearance — blob spawns right away
-          managerRef.current?.send(JSON.stringify({
+          managerRef.current?.sendPrimary('host', JSON.stringify({
             type: 'player_join',
             player: {
               player_id: playerIdRef.current,
@@ -462,7 +455,7 @@ export default function Controller() {
           } satisfies WebRTCMessage));
           setPhase('customizing');
         },
-        onMessage: (data) => {
+        onMessage: (_peerId, _channel, data) => {
           try {
             const message: WebRTCMessage = JSON.parse(data as string);
             if (message.type === 'customization_update' && message.value) {
@@ -488,7 +481,7 @@ export default function Controller() {
             console.error('Failed to parse message:', e);
           }
         },
-        onDisconnected: () => {
+        onPeerDisconnected: () => {
           // Host closed — navigate back to lobby selector
           navigateRef.current('/join');
         },
@@ -498,16 +491,16 @@ export default function Controller() {
         },
       };
 
-      const { result, manager, signaling } = await joinAsController(
-        partyConfig,
+      const { result, manager, room } = await joinAsPeer(
+        roomConfig,
         sessionId,
-        playerName.trim(),
+        { kind: 'phone', display_name: playerName.trim() },
         callbacks,
       );
 
-      playerIdRef.current = result.player_id;
+      playerIdRef.current = result.peer_id;
       managerRef.current = manager;
-      signalingRef.current = signaling;
+      roomRef.current = room;
 
       setPhase('waiting');
     } catch (err: any) {
@@ -518,7 +511,7 @@ export default function Controller() {
 
   /** Send a live customization update to the host. */
   const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
-    managerRef.current?.send(JSON.stringify({
+    managerRef.current?.sendPrimary("host", JSON.stringify({
       type: 'customization_update',
       value: { color, faceId },
     }));
@@ -541,17 +534,17 @@ export default function Controller() {
 
       if (controllerMode === 'placement') {
         // In placement mode, send cursor movement
-        manager.send(JSON.stringify({
+        manager.sendPrimary("host", JSON.stringify({
           type: 'cursor_move',
           value: { x: moveX, y: moveY },
         }));
       } else {
         // Normal mode + party box: send standard input
-        manager.send(JSON.stringify({
+        manager.sendPrimary("host", JSON.stringify({
           type: 'player_input_batch',
           timestamp: Date.now(),
           inputs: {
-            joystick_left: { x: moveX, y: 0 },
+            joystick_left: { x: moveX, y: moveY },
             button_right: { pressed: expanding },
           },
         } satisfies WebRTCMessage));

@@ -25,6 +25,60 @@ export interface LevelData {
   powerupSpawns?: PowerupSpawnDef[];
   springPads?: SpringPadDef[];
   spikes?: SpikeDef[];
+  pointShapes?: PointShapeDef[];
+  pressurePlates?: PressurePlateDef[];
+  triggers?: TriggerDef[];
+}
+
+export interface PointShapePoint {
+  x: number;
+  y: number;
+  anchored: boolean;
+  mass?: number;
+}
+
+export interface PointShapeEdge {
+  a: number;
+  b: number;
+  stiffness?: number;
+  damping?: number;
+}
+
+export interface PointShapeDef {
+  id: string;
+  points: PointShapePoint[];
+  edges: PointShapeEdge[];
+  /** When true, an implicit edge connects the last point to the first at load time. */
+  closed?: boolean;
+}
+
+export interface PressurePlateDef {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  triggerIds: string[];
+  oneShot?: boolean;
+}
+
+export type TriggerEasing = 'linear' | 'easeInOut' | 'easeOut';
+
+export interface TriggerTarget {
+  shapeId: string;
+  pointIndex: number;
+  endX: number;
+  endY: number;
+}
+
+export interface TriggerDef {
+  id: string;
+  kind: 'movePoints';
+  targets: TriggerTarget[];
+  /** Seconds. */
+  duration: number;
+  easing?: TriggerEasing;
 }
 
 export interface SpikeDef {

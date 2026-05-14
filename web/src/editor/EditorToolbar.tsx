@@ -20,6 +20,9 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
   { id: 'goalZone', label: 'Goal', hotkey: '7' },
   { id: 'hillZone', label: 'Hill', hotkey: '8' },
   { id: 'powerup', label: 'Powerup', hotkey: '9' },
+  { id: 'pointShape', label: 'Shape', hotkey: 'Q' },
+  { id: 'plate', label: 'Plate', hotkey: 'W' },
+  { id: 'trigger', label: 'Trigger', hotkey: 'E' },
 ];
 
 export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToolbarProps) {
@@ -158,7 +161,14 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToo
         {tools.map(t => (
           <button
             key={t.id}
-            onClick={() => { state.selectedTool = t.id; onUpdate(); }}
+            onClick={() => {
+              if (state.draftPointShape && t.id !== 'pointShape') state.cancelDraftPointShape();
+              if (state.draftTrigger && t.id !== 'trigger') state.cancelDraftTrigger();
+              state.selectedTool = t.id;
+              if (t.id === 'pointShape' && !state.draftPointShape) state.beginDraftPointShape();
+              if (t.id === 'trigger' && !state.draftTrigger) state.beginDraftTrigger();
+              onUpdate();
+            }}
             title={`${t.label} (${t.hotkey})`}
             style={{
               padding: '5px 10px',

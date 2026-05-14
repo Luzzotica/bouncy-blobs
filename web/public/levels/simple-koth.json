@@ -1,0 +1,63 @@
+{
+  "name": "Simple King of the Hill",
+  "version": 1,
+  "levelType": "koth",
+  "bounds": { "width": 3200, "height": 2400 },
+  "platforms": [
+    { "id": "left-spawn",  "x": 550,  "y": 1700, "width": 900, "height": 80, "rotation": 0 },
+    { "id": "hill",        "x": 1600, "y": 1700, "width": 600, "height": 80, "rotation": 0 },
+    { "id": "right-spawn", "x": 2650, "y": 1700, "width": 900, "height": 80, "rotation": 0 }
+  ],
+  "walls": [
+    {
+      "id": "floor",
+      "points": [
+        { "x": -100, "y": 2380 },
+        { "x": 3300, "y": 2380 },
+        { "x": 3300, "y": 2400 },
+        { "x": -100, "y": 2400 }
+      ]
+    },
+    {
+      "id": "left-wall",
+      "points": [
+        { "x": -100, "y": -100 },
+        { "x": 0,    "y": -100 },
+        { "x": 0,    "y": 2400 },
+        { "x": -100, "y": 2400 }
+      ]
+    },
+    {
+      "id": "right-wall",
+      "points": [
+        { "x": 3200, "y": -100 },
+        { "x": 3300, "y": -100 },
+        { "x": 3300, "y": 2400 },
+        { "x": 3200, "y": 2400 }
+      ]
+    },
+    {
+      "id": "ceiling",
+      "points": [
+        { "x": -100, "y": -100 },
+        { "x": 3300, "y": -100 },
+        { "x": 3300, "y": 0 },
+        { "x": -100, "y": 0 }
+      ]
+    }
+  ],
+  "spawnPoints": [
+    { "id": "sp1", "x": 300,  "y": 1480, "type": "player" },
+    { "id": "sp2", "x": 700,  "y": 1480, "type": "player" },
+    { "id": "sp3", "x": 2500, "y": 1480, "type": "player" },
+    { "id": "sp4", "x": 2900, "y": 1480, "type": "player" }
+  ],
+  "npcBlobs": [],
+  "hillZones": [
+    { "id": "hill-zone", "x": 1600, "y": 1610, "width": 600, "height": 180 }
+  ],
+  "spikes": [
+    { "id": "spike-left",  "x": 1150, "y": 2360, "width": 300, "height": 40, "rotation": 0 },
+    { "id": "spike-right", "x": 2050, "y": 2360, "width": 300, "height": 40, "rotation": 0 }
+  ]
+}

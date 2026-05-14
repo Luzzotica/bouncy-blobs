@@ -1,7 +1,8 @@
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
-import { PlayerManager } from '../playerManager';
+import { PlayerManager, ManagedPlayer } from '../playerManager';
 import { LevelData } from '../../levels/types';
+import { Vec2 } from '../../physics/vec2';
 
 export type GamePhase = 'lobby' | 'countdown' | 'playing' | 'results';
 
@@ -41,4 +42,18 @@ export interface GameMode {
   cleanup(): void;
   /** If implemented, controls whether physics runs during playing phase. Default: true. */
   shouldRunPhysics?(): boolean;
+  /**
+   * Returns the world-space goal this player should currently be moving toward
+   * (the hill in KOTH, the goal zone in racing modes, etc.), or null if the
+   * mode has no single goal (e.g. PartyMode mini-games handle their own logic).
+   *
+   * `width` and `height` describe the AABB of the goal zone — the AI uses the
+   * same containment check the mode uses for scoring, so "I'm in the goal"
+   * means exactly what the game thinks it means. Used by the AI controller
+   * to drive bots.
+   */
+  getGoalForBlob?(
+    self: ManagedPlayer,
+    state: GameModeState,
+  ): { x: number; y: number; width: number; height: number } | null;
 }

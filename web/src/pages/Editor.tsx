@@ -12,7 +12,7 @@ import { getAvailableLevels, loadBuiltinLevel, LevelManifestEntry } from '../lev
 
 const LEVEL_TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
-  team_racing: 'Team Racing',
+  team_racing: 'Chained Together',
   party: 'Party',
   koth: 'King of the Hill',
 };
@@ -28,7 +28,7 @@ type EditorPhase = 'list' | 'new_level_type' | 'editing';
 
 const LEVEL_TYPE_DESCRIPTIONS: Record<LevelType, string> = {
   solo_racing: 'First to the finish wins',
-  team_racing: 'Everyone reaches the end',
+  team_racing: 'Chained together — everyone reaches the end',
   party: 'UCH-style rounds with item placement',
   koth: 'Control the hill to score points',
 };

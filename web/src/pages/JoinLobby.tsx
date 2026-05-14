@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SignalingService } from '../lib/party';
-import { partyConfig } from '../lib/partyConfig';
+import { RoomService } from '../lib/party';
+import { roomConfig } from '../lib/partyConfig';
 
 export default function JoinLobby() {
   const navigate = useNavigate();
@@ -13,7 +13,7 @@ export default function JoinLobby() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
-  const signalingRef = useRef(new SignalingService(partyConfig));
+  const roomRef = useRef(new RoomService(roomConfig));
 
   const handleCodeSubmit = useCallback(async () => {
     if (!joinCode.trim()) return;
@@ -21,8 +21,8 @@ export default function JoinLobby() {
     setLookingUp(true);
 
     try {
-      const session = await signalingRef.current.lookupByCode(joinCode.trim());
-      navigate(`/controller/${session.session_id}`);
+      const room = await roomRef.current.lookupByCode(joinCode.trim());
+      navigate(`/controller/${room.room_id}`);
     } catch (err: any) {
       setCodeError(err.message?.includes('404') || err.message?.includes('No active')
         ? 'No game found with that code'

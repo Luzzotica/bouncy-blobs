@@ -12,6 +12,10 @@ export interface BlobRange {
   springEnd: number;
   springStiffnessScale: number;
   springDampScale: number;
+  /** Set by SoftBodyWorld.removeBlob(). All physics passes skip inactive ranges
+   * so the blob's particles/springs/shape stay in the flat arrays (keeping every
+   * other blob's indices stable) but contribute nothing to forces or collisions. */
+  inactive?: boolean;
 }
 
 export interface Shape {
@@ -29,6 +33,8 @@ export interface Shape {
   frameOverride: Transform2D;
   triggerGravity: Vec2;
   centerIdx: number;
+  /** Mirrors BlobRange.inactive on the shape that backs an inactive blob. */
+  inactive?: boolean;
 }
 
 export interface Transform2D {

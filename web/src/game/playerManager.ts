@@ -2,6 +2,9 @@ import { SoftBodyWorld } from '../physics/softBodyWorld';
 import { SlimeBlob, HullPreset } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { playerColor } from '../renderer/colors';
+import type { AIController } from './aiController';
+
+export type InputSource = 'remote' | 'ai';
 
 export interface ManagedPlayer {
   playerId: string;
@@ -11,7 +14,11 @@ export interface ManagedPlayer {
   color: string;
   faceId: string;
   moveX: number;
+  moveY: number;
   expanding: boolean;
+  inputSource: InputSource;
+  /** Set when inputSource === 'ai'. */
+  aiController: AIController | null;
 }
 
 export class PlayerManager {
@@ -60,14 +67,30 @@ export class PlayerManager {
       color: customColor || playerColor(colorIndex),
       faceId: faceId || 'default',
       moveX: 0,
+      moveY: 0,
       expanding: false,
+      inputSource: 'remote',
+      aiController: null,
     };
 
     this.players.set(playerId, managed);
     return managed;
   }
 
+  /** Promote (or demote) an existing player to AI control. */
+  attachAIController(playerId: string, controller: AIController): void {
+    const p = this.players.get(playerId);
+    if (!p) return;
+    p.inputSource = 'ai';
+    p.aiController = controller;
+  }
+
   removePlayer(playerId: string): void {
+    const p = this.players.get(playerId);
+    if (!p) return;
+    // Free the blob's slot in the SoftBodyWorld so other blobs no longer
+    // collide with an invisible body at the leaver's last position.
+    p.blob.destroy();
     this.players.delete(playerId);
   }
 
@@ -108,7 +131,14 @@ export class PlayerManager {
 
   updateAll(dt: number): void {
     for (const player of this.players.values()) {
-      player.blob.setInput(player.moveX, player.expanding);
+      // Let AI controllers re-decide their input each tick.
+      if (player.inputSource === 'ai' && player.aiController) {
+        const out = player.aiController.tick(player, this, dt);
+        player.moveX = out.moveX;
+        player.moveY = out.moveY;
+        player.expanding = out.expanding;
+      }
+      player.blob.setInput(player.moveX, player.moveY, player.expanding);
       player.blob.update(dt);
     }
   }
