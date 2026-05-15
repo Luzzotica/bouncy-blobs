@@ -14,7 +14,7 @@ const EPS = 1e-6;
  * Each value is treated as a multiplier on the world's defaults so that
  * `default` keeps behavior unchanged. */
 export const MATERIAL_PARAMS: Record<SurfaceMaterial, MaterialParams> = {
-  default: { restitution: 0.0, frictionMu: 0.7 },
+  default: { restitution: 0.0, frictionMu: 1.2 },
   ice:     { restitution: 0.0, frictionMu: 0.05 },
   sticky:  { restitution: 0.0, frictionMu: 4.0 },
   bouncy:  { restitution: 0.8, frictionMu: 0.3 },

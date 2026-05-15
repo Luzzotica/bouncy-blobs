@@ -9,7 +9,7 @@ export type HullPreset = 'circle16' | 'square' | 'triangle' | 'star' | 'diamond'
 const BLOB_RADIUS = 48;
 // Forces are now per-second (multiplied by dt in applyBlobMoveForce).
 // Old per-frame values (2.0 / 1.5 / 0.8) scaled by 60 to preserve 60fps feel.
-const MOVE_FORCE = 120.0;
+const MOVE_FORCE = 240.0;
 const AIR_MOVE_MULTIPLIER = 0.3;
 const PLAYER_K_MULT = 0.92;
 const PLAYER_MASS_MULT = 0.5;
@@ -20,8 +20,8 @@ const LEAN_AMOUNT = 0.4;       // 40% of radius — exaggerated tilt at max spee
 const LEAN_MAX_SPEED = 3500;   // lateral speed (px/s) at which lean maxes out
 const SQUASH_X_AMOUNT = 0.35;  // widen 35% at full crouch
 const SQUASH_Y_AMOUNT = 0.3;   // shorten 30% at full crouch
-const DOWN_FORCE = 90.0;       // downward force (per-second)
-const UP_FORCE = 48.0;         // upward force (per-second, gentle float)
+const DOWN_FORCE = 180.0;      // downward force (per-second)
+const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 
 export interface SlimeBlobConfig {
   playerControlled?: boolean;
