@@ -1,6 +1,21 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { hasSeenIntro, resetIntroSeen } from '../utils/introSeen'
 
 export default function Home() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!hasSeenIntro()) {
+      navigate('/intro', { replace: true })
+    }
+  }, [navigate])
+
+  function replayIntro() {
+    resetIntroSeen()
+    navigate('/intro')
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -32,6 +47,21 @@ export default function Home() {
           </button>
         </Link>
       </div>
+      <button
+        onClick={replayIntro}
+        style={{
+          marginTop: 12,
+          fontSize: 14,
+          padding: '6px 14px',
+          background: 'transparent',
+          color: '#888',
+          border: '1px solid #444',
+          borderRadius: 4,
+          cursor: 'pointer',
+        }}
+      >
+        Replay intro
+      </button>
     </div>
   )
 }

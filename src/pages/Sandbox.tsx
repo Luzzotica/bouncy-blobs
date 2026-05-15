@@ -100,8 +100,8 @@ export default function Sandbox() {
         } catch { /* fall through to default */ }
       }
     }
-    loadBuiltinLevel('default').then(setLevelData).catch(err => {
-      console.error('Failed to load default level:', err);
+    loadBuiltinLevel('playground').then(setLevelData).catch(err => {
+      console.error('Failed to load playground level:', err);
     });
   }, [searchParams]);
 

@@ -57,6 +57,84 @@ export function render(
     drawStaticPolygon(ctx, surface.poly, surface.material);
   }
 
+  // Gravity-zone overlays
+  for (const shape of world.shapes) {
+    if (!shape.isTrigger || shape.gravityField === null || shape.staticPoly.length < 3) continue;
+    const field = shape.gravityField;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(shape.staticPoly[0].x, shape.staticPoly[0].y);
+    for (let i = 1; i < shape.staticPoly.length; i++) {
+      ctx.lineTo(shape.staticPoly[i].x, shape.staticPoly[i].y);
+    }
+    ctx.closePath();
+    if (field.kind === 'point') {
+      // Radial gradient toward the singularity
+      const grad = ctx.createRadialGradient(
+        field.center.x, field.center.y, 5,
+        field.center.x, field.center.y, 350,
+      );
+      grad.addColorStop(0, 'rgba(180, 60, 220, 0.55)');
+      grad.addColorStop(1, 'rgba(180, 60, 220, 0)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(180, 60, 220, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Center marker
+      ctx.beginPath();
+      ctx.arc(field.center.x, field.center.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 230, 255, 0.9)';
+      ctx.fill();
+    } else {
+      // Uniform — color by zero-g vs directional
+      const isZero = Math.abs(field.vector.x) + Math.abs(field.vector.y) < 1e-3;
+      if (isZero) {
+        ctx.fillStyle = 'rgba(80, 220, 220, 0.18)';
+        ctx.strokeStyle = 'rgba(80, 220, 220, 0.7)';
+      } else {
+        ctx.fillStyle = 'rgba(255, 160, 60, 0.16)';
+        ctx.strokeStyle = 'rgba(255, 160, 60, 0.7)';
+      }
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Arrow showing gravity direction inside the zone (non-zero only)
+      if (!isZero) {
+        // Centroid of zone polygon (average)
+        let cxz = 0, cyz = 0;
+        for (const p of shape.staticPoly) { cxz += p.x; cyz += p.y; }
+        cxz /= shape.staticPoly.length;
+        cyz /= shape.staticPoly.length;
+        const mag = Math.sqrt(field.vector.x * field.vector.x + field.vector.y * field.vector.y);
+        const dx = field.vector.x / mag, dy = field.vector.y / mag;
+        const arrowLen = 70;
+        const ex = cxz + dx * arrowLen, ey = cyz + dy * arrowLen;
+        ctx.beginPath();
+        ctx.moveTo(cxz - dx * arrowLen, cyz - dy * arrowLen);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = 'rgba(255, 200, 100, 0.95)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        // Arrowhead
+        const ah = 12;
+        const pX = -dy, pY = dx;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - dx * ah + pX * ah * 0.5, ey - dy * ah + pY * ah * 0.5);
+        ctx.lineTo(ex - dx * ah - pX * ah * 0.5, ey - dy * ah - pY * ah * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 200, 100, 0.95)';
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
   // Debug: springs
   if (options.showSprings) {
     drawSprings(ctx, world);

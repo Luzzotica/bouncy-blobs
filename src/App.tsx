@@ -7,6 +7,7 @@ import Controller from './pages/Controller'
 import JoinLobby from './pages/JoinLobby'
 import LobbyBrowser from './pages/LobbyBrowser'
 import OnlineGuest from './pages/OnlineGuest'
+import Intro from './pages/Intro'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/controller/:sessionId" element={<Controller />} />
       <Route path="/lobbies" element={<LobbyBrowser />} />
       <Route path="/online-guest" element={<OnlineGuest />} />
+      <Route path="/intro" element={<Intro />} />
     </Routes>
   )
 }
