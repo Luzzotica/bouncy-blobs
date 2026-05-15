@@ -7,7 +7,9 @@ import { BlobResult } from './types';
 export type HullPreset = 'circle16' | 'square' | 'triangle' | 'star' | 'diamond' | 'hexagon';
 
 const BLOB_RADIUS = 48;
-const MOVE_FORCE = 2.0;
+// Forces are now per-second (multiplied by dt in applyBlobMoveForce).
+// Old per-frame values (2.0 / 1.5 / 0.8) scaled by 60 to preserve 60fps feel.
+const MOVE_FORCE = 120.0;
 const AIR_MOVE_MULTIPLIER = 0.3;
 const PLAYER_K_MULT = 0.92;
 const PLAYER_MASS_MULT = 0.5;
@@ -18,8 +20,8 @@ const LEAN_AMOUNT = 0.4;       // 40% of radius — exaggerated tilt at max spee
 const LEAN_MAX_SPEED = 3500;   // lateral speed (px/s) at which lean maxes out
 const SQUASH_X_AMOUNT = 0.35;  // widen 35% at full crouch
 const SQUASH_Y_AMOUNT = 0.3;   // shorten 30% at full crouch
-const DOWN_FORCE = 1.5;        // downward force multiplier
-const UP_FORCE = 0.8;          // upward force (gentle float)
+const DOWN_FORCE = 90.0;       // downward force (per-second)
+const UP_FORCE = 48.0;         // upward force (per-second, gentle float)
 
 export interface SlimeBlobConfig {
   playerControlled?: boolean;
@@ -177,15 +179,15 @@ export class SlimeBlob {
     const grounded = this.world.getBlobGroundContacts(this.blobId) > 0;
     const airMult = grounded ? 1.0 : AIR_MOVE_MULTIPLIER;
     const lateralDir = vec2(right.x * this.stickX, right.y * this.stickX);
-    this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult);
+    this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult, delta);
 
     // Gravity-axis forces from joystick Y
     if (this.stickY > 0.1) {
       // Pulling "down" (along gravity) — fall faster / crouch
-      this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier);
+      this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier, delta);
     } else if (this.stickY < -0.1) {
       // Pushing "up" (against gravity) — gentle float
-      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * -this.stickY * this.moveForceMultiplier);
+      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * -this.stickY * this.moveForceMultiplier, delta);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)

@@ -97,8 +97,8 @@ export class SoftBodyWorld {
     this.constraintIters = config.constraintIters ?? 8;
     this.staticRestitution = config.staticRestitution ?? 0.0;
     this.staticContactSlop = config.staticContactSlop ?? 14.0;
-    this.blobBlobFrictionMu = config.blobBlobFrictionMu ?? 1.44;
-    this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 1.0;
+    this.blobBlobFrictionMu = config.blobBlobFrictionMu ?? 0.4;
+    this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 0.6;
     this.staticEdgeFrictionMu = config.staticEdgeFrictionMu ?? 1.64;
     this.staticFrictionMinTangSpeed = config.staticFrictionMinTangSpeed ?? 0.06;
     this.staticFrictionNormalLoadScale = config.staticFrictionNormalLoadScale ?? 2.0;
@@ -401,10 +401,10 @@ export class SoftBodyWorld {
     return this.blobGroundContacts[blobId];
   }
 
-  applyBlobMoveForce(blobId: number, move: Vec2, force: number): void {
+  applyBlobMoveForce(blobId: number, move: Vec2, force: number, dt: number): void {
     if (blobId < 0 || blobId >= this.blobRanges.length) return;
     const r = this.blobRanges[blobId];
-    const f = scale(move, force);
+    const f = scale(move, force * dt);
     for (let i = r.start; i < r.end; i++) {
       this.vel[i] = add(this.vel[i], scale(f, this.invMass[i]));
     }
