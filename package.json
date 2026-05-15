@@ -13,7 +13,10 @@
     "test:e2e:lobby": "playwright test api-reachability navigation host-flow lobby-discovery local-player guest-play guest-sim",
     "test:e2e:capacity": "playwright test api-reachability room-capacity",
     "test:e2e:all": "playwright test",
-    "record:match": "playwright test ai-content"
+    "record:match": "playwright test ai-content",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
@@ -24,6 +27,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
+    "@tauri-apps/cli": "^2.11.1",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
