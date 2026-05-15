@@ -37,7 +37,7 @@ describe('levelLoader — PointShape hydration', () => {
     const loaded = loadLevel(world, level);
 
     expect(world.pos.length).toBe(3);
-    expect(world.springs.length).toBe(2);
+    expect(world.extraSprings.length).toBe(2);
     const ids = loaded.pointShapeParticles.get('bridge')!;
     expect(ids).toEqual([0, 1, 2]);
   });
@@ -80,7 +80,7 @@ describe('levelLoader — PointShape hydration', () => {
 
     loadLevel(world, level);
 
-    const [, , rest] = world.springs[0];
+    const [, , rest] = world.extraSprings[0];
     expect(rest).toBeCloseTo(50, 5);
   });
 
@@ -102,8 +102,8 @@ describe('levelLoader — PointShape hydration', () => {
 
     loadLevel(world, level);
 
-    expect(world.springs.length).toBe(3);
-    const last = world.springs[2];
+    expect(world.extraSprings.length).toBe(3);
+    const last = world.extraSprings[2];
     // Closing edge connects particle 2 → particle 0
     expect(last[0]).toBe(2);
     expect(last[1]).toBe(0);

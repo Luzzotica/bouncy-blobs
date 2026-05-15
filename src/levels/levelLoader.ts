@@ -18,6 +18,11 @@ const POINT_SHAPE_DEFAULT_K = 600;
 const POINT_SHAPE_DEFAULT_DAMP = 12;
 const POINT_SHAPE_DEFAULT_MASS = 1;
 const POINT_SHAPE_PARTICLE_RADIUS = 5;
+// Home-position pull: how hard each unanchored point is yanked back to its
+// rest world coordinates. This is what makes a point-shape feel like it has
+// a "memory" of its shape rather than a loose mesh of springs.
+const POINT_SHAPE_HOME_K = 1800;
+const POINT_SHAPE_HOME_DAMP = 18;
 
 function plateToPolygon(p: PressurePlateDef): Vec2[] {
   const hw = p.width / 2;
@@ -112,7 +117,9 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
   }
 
   // Hydrate point shapes: each point becomes a particle, each edge a spring.
-  // Anchored points use mass=0 → invMass=0 (fixed in space).
+  // Anchored points use mass=0 → invMass=0 (fixed in space). Each unanchored
+  // point also gets a home-position pull so the shape resists deformation
+  // independent of edge tension.
   const pointShapeParticles = new Map<string, number[]>();
   for (const ps of level.pointShapes ?? []) {
     const ids: number[] = [];
@@ -125,6 +132,14 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
         POINT_SHAPE_PARTICLE_RADIUS,
       );
       ids.push(id);
+      if (!p.anchored) {
+        world.homeAnchors.push({
+          idx: id,
+          home: vec2(p.x, p.y),
+          k: POINT_SHAPE_HOME_K,
+          damp: POINT_SHAPE_HOME_DAMP,
+        });
+      }
     }
     const pushEdge = (a: number, b: number, k?: number, damp?: number) => {
       if (a === b) return;
@@ -133,7 +148,7 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
       const dx = pa.x - pb.x;
       const dy = pa.y - pb.y;
       const rest = Math.sqrt(dx * dx + dy * dy);
-      world.springs.push([
+      world.extraSprings.push([
         ids[a],
         ids[b],
         rest,

@@ -67,8 +67,17 @@ export class SoftBodyWorld {
   invMass: number[] = [];
   particleRadius: number[] = [];
 
-  // Springs
+  // Springs — owned by blobs (each blob has a contiguous [springBegin, springEnd) range)
   springs: Spring[] = [];
+
+  // Extra springs not owned by any blob (level-author point shapes, ropes, etc.).
+  // Applied unconditionally each substep.
+  extraSprings: Spring[] = [];
+
+  // Home-position anchors: for each (idx, home) pull the particle back to its
+  // rest world-position with the given stiffness/damping. Used by point shapes
+  // to maintain their shape independent of edge springs.
+  homeAnchors: { idx: number; home: Vec2; k: number; damp: number }[] = [];
 
   // Shapes & blobs
   shapes: Shape[] = [];
@@ -898,6 +907,34 @@ export class SoftBodyWorld {
           this.vel[ib] = sub(this.vel[ib], scale(force, this.invMass[ib] * dt));
         }
       }
+    }
+
+    // Level-author springs (point shapes, ropes) — not owned by any blob.
+    for (const s of this.extraSprings) {
+      const ia = s[0], ib = s[1], rest = s[2], k = s[3], damp = s[4];
+      const diff = sub(this.pos[ib], this.pos[ia]);
+      const dist = length(diff);
+      if (dist < 0.0001) continue;
+      const dir = scale(diff, 1 / dist);
+      const stretch = dist - rest;
+      const relVel = dot(sub(this.vel[ib], this.vel[ia]), dir);
+      const force = scale(dir, k * stretch + damp * relVel);
+      if (this.invMass[ia] > 0) this.vel[ia] = add(this.vel[ia], scale(force, this.invMass[ia] * dt));
+      if (this.invMass[ib] > 0) this.vel[ib] = sub(this.vel[ib], scale(force, this.invMass[ib] * dt));
+    }
+
+    // Home-position pulls — each unanchored particle is yanked back toward its
+    // rest world-position. This is the "shape memory" that keeps a point-shape
+    // platform from drifting when pushed.
+    for (const ha of this.homeAnchors) {
+      if (this.invMass[ha.idx] === 0) continue;
+      const p = this.pos[ha.idx];
+      const v = this.vel[ha.idx];
+      const dx = ha.home.x - p.x;
+      const dy = ha.home.y - p.y;
+      const fx = ha.k * dx - ha.damp * v.x;
+      const fy = ha.k * dy - ha.damp * v.y;
+      this.vel[ha.idx] = { x: v.x + fx * this.invMass[ha.idx] * dt, y: v.y + fy * this.invMass[ha.idx] * dt };
     }
   }
 
