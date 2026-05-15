@@ -14,7 +14,7 @@ const EPS = 1e-6;
  * Each value is treated as a multiplier on the world's defaults so that
  * `default` keeps behavior unchanged. */
 export const MATERIAL_PARAMS: Record<SurfaceMaterial, MaterialParams> = {
-  default: { restitution: 0.0, frictionMu: 1.2 },
+  default: { restitution: 0.0, frictionMu: 1.64 },
   ice:     { restitution: 0.0, frictionMu: 0.05 },
   sticky:  { restitution: 0.0, frictionMu: 4.0 },
   bouncy:  { restitution: 0.8, frictionMu: 0.3 },
@@ -111,7 +111,7 @@ export class SoftBodyWorld {
     this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 0.6;
     this.staticEdgeFrictionMu = config.staticEdgeFrictionMu ?? 1.64;
     this.staticFrictionMinTangSpeed = config.staticFrictionMinTangSpeed ?? 0.06;
-    this.staticFrictionNormalLoadScale = config.staticFrictionNormalLoadScale ?? 1.0;
+    this.staticFrictionNormalLoadScale = config.staticFrictionNormalLoadScale ?? 2.0;
     this.hullVertexDampingPerSec = config.hullVertexDampingPerSec ?? 0.012;
     this.centerHullDampingPerSec = config.centerHullDampingPerSec ?? 0.004;
     this.hullDampSkipAboveSpeed = config.hullDampSkipAboveSpeed ?? 220.0;
