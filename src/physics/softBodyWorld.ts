@@ -150,8 +150,16 @@ export class SoftBodyWorld {
 
   // --- Public API ---
 
-  registerStaticPolygon(poly: Vec2[], material: SurfaceMaterial = 'default', id?: string): void {
-    this.staticSurfaces.push({ poly: [...poly], material, id });
+  registerStaticPolygon(poly: Vec2[], material: SurfaceMaterial = 'default', id?: string): StaticSurface {
+    const surface: StaticSurface = { poly: poly.map(p => ({ ...p })), material, id };
+    this.staticSurfaces.push(surface);
+    return surface;
+  }
+
+  /** Remove a previously registered static surface (linear splice). */
+  removeStaticSurface(surface: StaticSurface): void {
+    const i = this.staticSurfaces.indexOf(surface);
+    if (i >= 0) this.staticSurfaces.splice(i, 1);
   }
 
   clearStaticPolygons(): void {
@@ -1013,7 +1021,24 @@ export class SoftBodyWorld {
     for (const surface of this.staticSurfaces) {
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
         if (this.blobRanges[bi].inactive) continue;
-        this.collideBlobWithPoly(bi, surface.poly, true, dt, surface.material);
+        this.collideBlobWithPoly(bi, surface.poly, true, dt, surface.material, surface.velocity);
+      }
+    }
+
+    // Blob vs free particles (point-shape platforms, etc.) — reciprocal push.
+    // Anchored particles (invMass=0) absorb correction without moving, so a
+    // pointShape with anchored corners behaves like a deformable platform:
+    // the blob lands on it, the middle particles sag, the corners stay put.
+    for (let bi = 0; bi < this.blobRanges.length; bi++) {
+      const r = this.blobRanges[bi];
+      if (r.inactive) continue;
+      const polyB = this.buildPolygonFromIndices(r.hull);
+      const bbox = polygonAABB(polyB);
+      for (let i = 0; i < this.pos.length; i++) {
+        if (this.particleRadius[i] <= 0) continue;
+        const p = this.pos[i];
+        if (p.x < bbox.minX - 8 || p.x > bbox.maxX + 8 || p.y < bbox.minY - 8 || p.y > bbox.maxY + 8) continue;
+        this.resolvePointInShape(i, polyB, r.hull);
       }
     }
   }
@@ -1075,13 +1100,15 @@ export class SoftBodyWorld {
     this.vel[ib1] = vcNew;
   }
 
-  private collideBlobWithPoly(blobId: number, polyWorld: Vec2[], polyIsStatic: boolean, contactDt: number, material: SurfaceMaterial = 'default'): void {
+  private collideBlobWithPoly(blobId: number, polyWorld: Vec2[], polyIsStatic: boolean, contactDt: number, material: SurfaceMaterial = 'default', surfaceVel?: Vec2): void {
     const matParams = MATERIAL_PARAMS[material];
     const restitution = polyIsStatic ? matParams.restitution : this.staticRestitution;
     const frictionMu = polyIsStatic ? matParams.frictionMu : this.staticEdgeFrictionMu;
     const r = this.blobRanges[blobId];
     const hull = r.hull;
     const bbox = polygonAABB(polyWorld);
+    const hasSurfVel = surfaceVel !== undefined && (surfaceVel.x !== 0 || surfaceVel.y !== 0);
+    const sv: Vec2 = hasSurfVel ? surfaceVel! : ZERO;
 
     for (let k = 0; k < hull.length; k++) {
       const pi = hull[k];
@@ -1132,8 +1159,9 @@ export class SoftBodyWorld {
           sum.y += n.y;
         }
 
-        // Remove velocity into wall
-        const vnInWall = dot(this.vel[pi], n);
+        // Remove velocity into wall (work in surface frame for kinematic surfaces)
+        const vRel0 = hasSurfVel ? sub(this.vel[pi], sv) : this.vel[pi];
+        const vnInWall = dot(vRel0, n);
         if (vnInWall < 0) {
           this.vel[pi] = sub(this.vel[pi], scale(n, vnInWall));
         }
@@ -1141,12 +1169,14 @@ export class SoftBodyWorld {
         // Position correction
         this.pos[pi] = add(closest, scale(n, pushDist));
 
-        // Restitution
-        const vnBeforeRest = dot(this.vel[pi], n);
+        // Restitution (surface-frame normal component)
+        const vRel1 = hasSurfVel ? sub(this.vel[pi], sv) : this.vel[pi];
+        const vnBeforeRest = dot(vRel1, n);
         if (vnBeforeRest < 0) {
           this.vel[pi] = sub(this.vel[pi], scale(n, vnBeforeRest * (1 + restitution)));
         }
-        const vnAfterRest = dot(this.vel[pi], n);
+        const vRel2 = hasSurfVel ? sub(this.vel[pi], sv) : this.vel[pi];
+        const vnAfterRest = dot(vRel2, n);
 
         // Static friction
         if (frictionMu > 1e-6) {
@@ -1154,7 +1184,8 @@ export class SoftBodyWorld {
           let t = normalize(edgeDir);
           if (lengthSq(t) < 1e-12) t = normalize({ x: -n.y, y: n.x });
 
-          const vT = dot(this.vel[pi], t);
+          const vRelT = hasSurfVel ? sub(this.vel[pi], sv) : this.vel[pi];
+          const vT = dot(vRelT, t);
           if (Math.abs(vT) >= this.staticFrictionMinTangSpeed) {
             const jnCollision = Math.abs(this.mass[pi] * (vnAfterRest - vnBeforeRest));
             const gL = length(this.gravity);
@@ -1195,6 +1226,7 @@ export class SoftBodyWorld {
         let bestT = Infinity;
         let bestPoint: Vec2 | null = null;
         let bestNormal: Vec2 | null = null;
+        let bestSurfVel: Vec2 | undefined = undefined;
 
         for (const surface of this.staticSurfaces) {
           const poly = surface.poly;
@@ -1218,6 +1250,7 @@ export class SoftBodyWorld {
               const toOld = (oldP.x - a.x) * nx + (oldP.y - a.y) * ny;
               if (toOld < 0) { nx = -nx; ny = -ny; }
               bestNormal = vec2(nx, ny);
+              bestSurfVel = surface.velocity;
             }
           }
         }
@@ -1225,8 +1258,10 @@ export class SoftBodyWorld {
         if (bestPoint && bestNormal) {
           // Place particle at hit point + margin along the outward normal
           this.pos[pi] = add(bestPoint, scale(bestNormal, this.collisionMargin));
-          // Remove velocity component into the wall
-          const vn = dot(this.vel[pi], bestNormal);
+          // Remove velocity component into the wall (surface frame for kinematic surfaces)
+          const hasSv = bestSurfVel !== undefined && (bestSurfVel.x !== 0 || bestSurfVel.y !== 0);
+          const vRel = hasSv ? sub(this.vel[pi], bestSurfVel!) : this.vel[pi];
+          const vn = dot(vRel, bestNormal);
           if (vn < 0) {
             this.vel[pi] = sub(this.vel[pi], scale(bestNormal, vn));
           }
