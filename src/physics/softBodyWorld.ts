@@ -142,11 +142,11 @@ export class SoftBodyWorld {
     this.gravity = config.gravity ?? vec2(0, 980.0 * this.gravityScale);
     this.fixedDt = config.fixedDt ?? 1 / 60;
     this.substeps = config.substeps ?? 2;
-    this.collisionMargin = config.collisionMargin ?? 1.5;
+    this.collisionMargin = config.collisionMargin ?? 0.5;
     this.collisionRestitution = config.collisionRestitution ?? 0.25;
     this.constraintIters = config.constraintIters ?? 8;
     this.staticRestitution = config.staticRestitution ?? 0.0;
-    this.staticContactSlop = config.staticContactSlop ?? 14.0;
+    this.staticContactSlop = config.staticContactSlop ?? 4.0;
     this.blobBlobFrictionMu = config.blobBlobFrictionMu ?? 0.4;
     this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 0.6;
     this.staticEdgeFrictionMu = config.staticEdgeFrictionMu ?? 1.64;

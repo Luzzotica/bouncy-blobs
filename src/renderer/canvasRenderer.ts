@@ -210,6 +210,21 @@ export function render(
   // Debug: hull + center points (on top of blobs so they're visible)
   if (options.showPoints) {
     drawBlobPoints(ctx, world);
+    // Outline every static collision polygon so misalignment with visual
+    // platforms is obvious (rotated platforms in particular).
+    ctx.strokeStyle = 'rgba(255, 100, 100, 0.85)';
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([5, 4]);
+    for (const surface of world.staticSurfaces) {
+      const poly = surface.poly;
+      if (poly.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   // Sticky-wall aim indicator: arrow from blob centroid showing release direction
