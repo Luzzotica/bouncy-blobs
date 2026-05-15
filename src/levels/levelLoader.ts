@@ -222,7 +222,15 @@ function expandSoftPlatform(
 ): SoftPlatformInfo {
   const segW = def.segW ?? 8;
   const segH = def.segH ?? 1;
-  const hullLocal = hullRect(def.width, def.height, segW, segH);
+  let hullLocal = hullRect(def.width, def.height, segW, segH);
+  // Pre-rotate the hull around its center so anchored corners + free vertices
+  // end up at their world-rotated rest positions.
+  const rot = def.rotation ?? 0;
+  if (Math.abs(rot) > 0.0001) {
+    const c = Math.cos(rot);
+    const s = Math.sin(rot);
+    hullLocal = hullLocal.map(p => ({ x: p.x * c - p.y * s, y: p.x * s + p.y * c }));
+  }
 
   // Resolve anchor pattern → set of hull indices.
   let anchorIdxs: number[];

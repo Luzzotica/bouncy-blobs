@@ -44,6 +44,9 @@ export interface SoftPlatformDef {
   y: number;            // center y
   width: number;
   height: number;
+  /** Rotation in radians. Default 0. Rotates the hull (anchored corners and
+   * unanchored mid-edge points alike) around the platform center. */
+  rotation?: number;
   /** Hull subdivisions. Defaults: segW=8 along the long axis, segH=1 along
    * the short axis. Total hull points = 2*segW + 2*segH. */
   segW?: number;

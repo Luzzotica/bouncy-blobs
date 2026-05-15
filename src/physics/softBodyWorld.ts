@@ -147,8 +147,8 @@ export class SoftBodyWorld {
     this.constraintIters = config.constraintIters ?? 8;
     this.staticRestitution = config.staticRestitution ?? 0.0;
     this.staticContactSlop = config.staticContactSlop ?? 4.0;
-    this.blobBlobFrictionMu = config.blobBlobFrictionMu ?? 0.4;
-    this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 0.6;
+    this.blobBlobFrictionMu = config.blobBlobFrictionMu ?? 1.2;
+    this.blobBlobFrictionImpulseScale = config.blobBlobFrictionImpulseScale ?? 1.0;
     this.staticEdgeFrictionMu = config.staticEdgeFrictionMu ?? 1.64;
     this.staticFrictionMinTangSpeed = config.staticFrictionMinTangSpeed ?? 0.06;
     this.staticFrictionNormalLoadScale = config.staticFrictionNormalLoadScale ?? 2.0;
@@ -1094,11 +1094,12 @@ export class SoftBodyWorld {
     // applies friction reciprocally, so running it on both passes doubles the
     // friction relative to blob-vs-static. Halve the friction scale per pass
     // so the total over both passes is 1x.
+    const dt = this.fixedDt / this.substeps;
     for (let k = 0; k < ra.hull.length; k++) {
-      this.resolvePointInShape(ra.hull[k], polyB, rb.hull, 0.5);
+      this.resolvePointInShape(ra.hull[k], polyB, rb.hull, 0.5, dt);
     }
     for (let k = 0; k < rb.hull.length; k++) {
-      this.resolvePointInShape(rb.hull[k], polyA, ra.hull, 0.5);
+      this.resolvePointInShape(rb.hull[k], polyA, ra.hull, 0.5, dt);
     }
   }
 
@@ -1113,8 +1114,12 @@ export class SoftBodyWorld {
    *   contact). When `collideBlobs` runs symmetric A-into-B + B-into-A
    *   passes, pass 0.5 to each so the total friction across both passes is
    *   1x and matches blob-vs-static behavior.
+   * @param dt Substep duration. When > 0 a gravity-proportional resting-load
+   *   floor is added to the Coulomb friction cap so a blob can rest on a
+   *   sloped soft platform without sliding off (mirrors the static path's
+   *   resting-contact friction).
    */
-  private resolvePointInShape(pi: number, polyWorld: Vec2[], polyIndices: number[], frictionScale = 1.0): void {
+  private resolvePointInShape(pi: number, polyWorld: Vec2[], polyIndices: number[], frictionScale = 1.0, dt = 0): void {
     const p = this.pos[pi];
     if (!isPointInPolygon(p, polyWorld)) return;
 
@@ -1141,6 +1146,19 @@ export class SoftBodyWorld {
     this.pos[ib0] = sub(this.pos[ib0], scale(n, corr * invB * wb));
     this.pos[ib1] = sub(this.pos[ib1], scale(n, corr * invC * wc));
 
+    // Resting-load floor — gravity-proportional, only acts on "ground-like"
+    // contact normals (support > 0 means the normal opposes gravity).
+    let restingLoad = 0;
+    if (dt > 0 && this.mass[pi] > EPS) {
+      const gL = length(this.gravity);
+      if (gL > EPS) {
+        const gDir = scale(this.gravity, 1 / gL);
+        const upDir = negate(gDir);
+        const support = Math.max(0, Math.min(1, dot(upDir, n)));
+        restingLoad = this.mass[pi] * gL * support * dt * this.staticFrictionNormalLoadScale;
+      }
+    }
+
     const [vaNew, vbNew, vcNew] = resolveThreeBodyVelocity(
       this.vel[pi], this.mass[pi],
       this.vel[ib0], this.mass[ib0],
@@ -1150,6 +1168,7 @@ export class SoftBodyWorld {
       this.blobBlobFrictionMu * frictionScale,
       info.edgeDir,
       this.blobBlobFrictionImpulseScale * frictionScale,
+      restingLoad,
     );
     this.vel[pi] = vaNew;
     this.vel[ib0] = vbNew;

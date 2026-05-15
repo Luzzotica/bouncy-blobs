@@ -116,6 +116,16 @@ export function signedAreaPolygon(poly: Vec2[]): number {
   return a * 0.5;
 }
 
+/**
+ * Three-body collision response: normal impulse + Coulomb friction between
+ * a query particle (a) and two polygon-edge vertices (b, c) weighted (wb, wc).
+ *
+ * @param restingLoad Optional minimum normal-impulse magnitude representing
+ *   the gravity load on the contact (mass * g * support * dt * scale, mirrors
+ *   the static-surface friction path). Allows friction to act in the resting
+ *   case where there's no inbound normal velocity — necessary to support
+ *   blobs standing on a sloped soft platform without sliding off.
+ */
 export function resolveThreeBodyVelocity(
   va: Vec2, ma: number,
   vb: Vec2, mb: number,
@@ -126,10 +136,10 @@ export function resolveThreeBodyVelocity(
   mu: number = 0,
   tangent: Vec2 = ZERO,
   frictionImpulseScale: number = 1.0,
+  restingLoad: number = 0,
 ): [Vec2, Vec2, Vec2] {
   const n = normalize(normal);
   const vRel = dot(n, va) - (wb * dot(n, vb) + wc * dot(n, vc));
-  if (vRel >= 0) return [va, vb, vc];
 
   let invSum = 0;
   if (ma > EPS) invSum += 1 / ma;
@@ -137,10 +147,18 @@ export function resolveThreeBodyVelocity(
   if (mc > EPS) invSum += (wc * wc) / mc;
   if (invSum < EPS) return [va, vb, vc];
 
-  const j = -(1 + restitution) * vRel / invSum;
-  let vaNew = add(va, scale(n, ma > EPS ? j / ma : 0));
-  let vbNew = sub(vb, scale(n, mb > EPS ? (j * wb) / mb : 0));
-  let vcNew = sub(vc, scale(n, mc > EPS ? (j * wc) / mc : 0));
+  // Normal impulse only if approaching. Resting contact (vRel >= 0) skips
+  // normal response but still applies friction below if restingLoad > 0.
+  let vaNew = va, vbNew = vb, vcNew = vc;
+  let j = 0;
+  if (vRel < 0) {
+    j = -(1 + restitution) * vRel / invSum;
+    vaNew = add(va, scale(n, ma > EPS ? j / ma : 0));
+    vbNew = sub(vb, scale(n, mb > EPS ? (j * wb) / mb : 0));
+    vcNew = sub(vc, scale(n, mc > EPS ? (j * wc) / mc : 0));
+  } else if (restingLoad <= EPS) {
+    return [va, vb, vc];
+  }
 
   if (mu <= EPS || lengthSq(tangent) < EPS * EPS) return [vaNew, vbNew, vcNew];
 
@@ -153,7 +171,7 @@ export function resolveThreeBodyVelocity(
   if (Math.abs(vRelT) < 0.42) return [vaNew, vbNew, vcNew];
 
   const jtUncap = -vRelT / invSum;
-  const jnAbs = Math.abs(j);
+  const jnAbs = Math.max(Math.abs(j), restingLoad);
   const maxT = mu * Math.max(jnAbs, EPS * EPS);
   const jt = Math.max(-maxT, Math.min(maxT, jtUncap)) * Math.max(0, Math.min(1, frictionImpulseScale));
 

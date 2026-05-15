@@ -50,6 +50,7 @@
 
   "softPlatforms": [
     { "id": "soft-platform", "x": 3450, "y": 1950, "width": 560, "height": 60, "anchors": "corners" },
+    { "id": "sloped-soft", "x": 5550, "y": 2400, "width": 600, "height": 50, "rotation": 0.3, "anchors": "corners" },
     { "id": "tilting-platform", "x": 8500, "y": 2050, "width": 400, "height": 50, "anchors": "corners" }
   ],
 
