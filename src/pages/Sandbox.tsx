@@ -114,7 +114,7 @@ export default function Sandbox() {
       gravityScale: 4.0,
     });
 
-    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId, softPlatforms } = loadLevel(world, levelData);
+    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId, softPlatforms, softPlatformStaticParticles } = loadLevel(world, levelData);
 
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
@@ -141,7 +141,7 @@ export default function Sandbox() {
 
     // Triggers must initialize before plates so plates can fire into them.
     const triggerManager = new TriggerManager();
-    triggerManager.initialize(world, levelData.triggers ?? [], pointShapeParticles);
+    triggerManager.initialize(world, levelData.triggers ?? [], pointShapeParticles, softPlatformStaticParticles);
 
     let pressurePlateManager: PressurePlateManager | null = null;
     if (levelData.pressurePlates && levelData.pressurePlates.length > 0) {

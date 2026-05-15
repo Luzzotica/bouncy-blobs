@@ -35,9 +35,18 @@ export class TriggerManager {
     world: SoftBodyWorld,
     triggers: TriggerDef[],
     pointShapeParticles: Map<string, number[]>,
+    softPlatformStaticParticles?: Map<string, number[]>,
   ): void {
     this.world = world;
-    this.shapeParticles = pointShapeParticles;
+    // Merge pointShape and softPlatform addressable particles into a single
+    // id → particle-ids lookup. softPlatforms map their static anchor list
+    // in order: index 0 = first static anchor (TL for 'corners' pattern), etc.
+    this.shapeParticles = new Map(pointShapeParticles);
+    if (softPlatformStaticParticles) {
+      for (const [id, ids] of softPlatformStaticParticles) {
+        this.shapeParticles.set(id, ids);
+      }
+    }
     this.triggers.clear();
     this.active = [];
     this.fired.clear();
