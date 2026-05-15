@@ -1,5 +1,5 @@
 import { Vec2, vec2, add, sub, scale, dot, length, lengthSq, normalize, negate, distanceTo, ZERO, RIGHT } from './vec2';
-import { Spring, BlobRange, Shape, Transform2D, BlobResult, PumpEdge, RayHit, AABB } from './types';
+import { Spring, BlobRange, Shape, Transform2D, BlobResult, PumpEdge, RayHit, AABB, SurfaceMaterial, MaterialParams, StaticSurface } from './types';
 import {
   polygonAABB, aabbOverlap, isPointInPolygon,
   closestPointOnPolygonBoundary, edgeVertexWeights,
@@ -9,6 +9,16 @@ import { solveWeld, solveWeightedAnchor, solveDistanceMax } from './constraints'
 import { centroidFromIndices, averageAngle, frameTransform, applyTransform } from './shapeMatching';
 
 const EPS = 1e-6;
+
+/** Per-material restitution + friction overrides for static surfaces.
+ * Each value is treated as a multiplier on the world's defaults so that
+ * `default` keeps behavior unchanged. */
+export const MATERIAL_PARAMS: Record<SurfaceMaterial, MaterialParams> = {
+  default: { restitution: 0.0, frictionMu: 1.64 },
+  ice:     { restitution: 0.0, frictionMu: 0.05 },
+  sticky:  { restitution: 0.0, frictionMu: 4.0 },
+  bouncy:  { restitution: 0.8, frictionMu: 0.3 },
+};
 
 export interface SoftBodyWorldConfig {
   gravity?: Vec2;
@@ -46,7 +56,7 @@ export class SoftBodyWorld {
   blobRanges: BlobRange[] = [];
 
   // Static collision geometry
-  staticPolygons: Vec2[][] = [];
+  staticSurfaces: StaticSurface[] = [];
 
   // Constraints
   private welds: [number, number][] = [];
@@ -109,12 +119,12 @@ export class SoftBodyWorld {
 
   // --- Public API ---
 
-  registerStaticPolygon(poly: Vec2[]): void {
-    this.staticPolygons.push([...poly]);
+  registerStaticPolygon(poly: Vec2[], material: SurfaceMaterial = 'default', id?: string): void {
+    this.staticSurfaces.push({ poly: [...poly], material, id });
   }
 
   clearStaticPolygons(): void {
-    this.staticPolygons.length = 0;
+    this.staticSurfaces.length = 0;
   }
 
   registerTriggerPolygon(poly: Vec2[], gravityOverride: Vec2 = ZERO): number {
@@ -606,7 +616,8 @@ export class SoftBodyWorld {
     let bestNormal: Vec2 = { x: 0, y: -1 };
     let hit = false;
 
-    for (const poly of this.staticPolygons) {
+    for (const surface of this.staticSurfaces) {
+      const poly = surface.poly;
       const n = poly.length;
       for (let i = 0; i < n; i++) {
         const a = poly[i];
@@ -882,10 +893,10 @@ export class SoftBodyWorld {
         this.collideBlobs(a, b);
       }
     }
-    for (const poly of this.staticPolygons) {
+    for (const surface of this.staticSurfaces) {
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
         if (this.blobRanges[bi].inactive) continue;
-        this.collideBlobWithPoly(bi, poly, true, dt);
+        this.collideBlobWithPoly(bi, surface.poly, true, dt, surface.material);
       }
     }
   }
@@ -947,7 +958,10 @@ export class SoftBodyWorld {
     this.vel[ib1] = vcNew;
   }
 
-  private collideBlobWithPoly(blobId: number, polyWorld: Vec2[], polyIsStatic: boolean, contactDt: number): void {
+  private collideBlobWithPoly(blobId: number, polyWorld: Vec2[], polyIsStatic: boolean, contactDt: number, material: SurfaceMaterial = 'default'): void {
+    const matParams = MATERIAL_PARAMS[material];
+    const restitution = polyIsStatic ? matParams.restitution : this.staticRestitution;
+    const frictionMu = polyIsStatic ? matParams.frictionMu : this.staticEdgeFrictionMu;
     const r = this.blobRanges[blobId];
     const hull = r.hull;
     const bbox = polygonAABB(polyWorld);
@@ -1005,12 +1019,12 @@ export class SoftBodyWorld {
         // Restitution
         const vnBeforeRest = dot(this.vel[pi], n);
         if (vnBeforeRest < 0) {
-          this.vel[pi] = sub(this.vel[pi], scale(n, vnBeforeRest * (1 + this.staticRestitution)));
+          this.vel[pi] = sub(this.vel[pi], scale(n, vnBeforeRest * (1 + restitution)));
         }
         const vnAfterRest = dot(this.vel[pi], n);
 
         // Static friction
-        if (this.staticEdgeFrictionMu > 1e-6) {
+        if (frictionMu > 1e-6) {
           const edgeDir = info.edgeDir;
           let t = normalize(edgeDir);
           if (lengthSq(t) < 1e-12) t = normalize({ x: -n.y, y: n.x });
@@ -1025,7 +1039,7 @@ export class SoftBodyWorld {
             const jnRest = this.mass[pi] * gL * support * contactDt * this.staticFrictionNormalLoadScale;
             const jn = Math.max(jnCollision, jnRest);
             const jtUncap = -this.mass[pi] * vT;
-            const jt = Math.max(-this.staticEdgeFrictionMu * jn, Math.min(this.staticEdgeFrictionMu * jn, jtUncap));
+            const jt = Math.max(-frictionMu * jn, Math.min(frictionMu * jn, jtUncap));
             this.vel[pi] = add(this.vel[pi], scale(t, jt / this.mass[pi]));
           }
         }
@@ -1057,7 +1071,8 @@ export class SoftBodyWorld {
         let bestPoint: Vec2 | null = null;
         let bestNormal: Vec2 | null = null;
 
-        for (const poly of this.staticPolygons) {
+        for (const surface of this.staticSurfaces) {
+          const poly = surface.poly;
           const pn = poly.length;
           for (let e = 0; e < pn; e++) {
             const a = poly[e];
@@ -1100,8 +1115,8 @@ export class SoftBodyWorld {
       const rad = this.particleRadius[i];
       if (rad <= 0) continue;
 
-      for (const poly of this.staticPolygons) {
-        this.resolveParticleVsPoly(i, rad, poly);
+      for (const surface of this.staticSurfaces) {
+        this.resolveParticleVsPoly(i, rad, surface.poly);
       }
       for (const sh of this.shapes) {
         if (sh.isTrigger || sh.inactive) continue;

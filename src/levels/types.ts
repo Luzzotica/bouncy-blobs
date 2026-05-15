@@ -1,4 +1,5 @@
 import type { HullPreset } from '../physics/slimeBlob';
+import type { SurfaceMaterial } from '../physics/types';
 
 export type LevelType = 'solo_racing' | 'team_racing' | 'party' | 'koth';
 
@@ -124,11 +125,15 @@ export interface PlatformDef {
   width: number;
   height: number;
   rotation: number;
+  /** Surface material affecting friction/restitution. Defaults to 'default'. */
+  material?: SurfaceMaterial;
 }
 
 export interface WallDef {
   id: string;
   points: { x: number; y: number }[];
+  /** Surface material affecting friction/restitution. Defaults to 'default'. */
+  material?: SurfaceMaterial;
 }
 
 export interface SpawnPointDef {

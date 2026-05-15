@@ -2,6 +2,19 @@ import { Vec2 } from './vec2';
 
 export type Spring = [i: number, j: number, rest: number, kBase: number, dampBase: number];
 
+export type SurfaceMaterial = 'default' | 'ice' | 'sticky' | 'bouncy';
+
+export interface MaterialParams {
+  restitution: number;
+  frictionMu: number;
+}
+
+export interface StaticSurface {
+  poly: Vec2[];
+  material: SurfaceMaterial;
+  id?: string;
+}
+
 export interface BlobRange {
   id: number;
   start: number;

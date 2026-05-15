@@ -52,8 +52,8 @@ export function render(
   modeOverlay?.renderWorld(ctx);
 
   // Static polygons
-  for (const poly of world.staticPolygons) {
-    drawStaticPolygon(ctx, poly);
+  for (const surface of world.staticSurfaces) {
+    drawStaticPolygon(ctx, surface.poly, surface.material);
   }
 
   // Debug: springs

@@ -60,12 +60,12 @@ function platformToPolygon(p: PlatformDef): Vec2[] {
 export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
   // Register platforms
   for (const platform of level.platforms) {
-    world.registerStaticPolygon(platformToPolygon(platform));
+    world.registerStaticPolygon(platformToPolygon(platform), platform.material ?? 'default', platform.id);
   }
 
   // Register walls
   for (const wall of level.walls) {
-    world.registerStaticPolygon(wall.points.map(p => vec2(p.x, p.y)));
+    world.registerStaticPolygon(wall.points.map(p => vec2(p.x, p.y)), wall.material ?? 'default', wall.id);
   }
 
   // Spawn NPC blobs

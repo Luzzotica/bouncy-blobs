@@ -71,13 +71,22 @@ function drawCapsule(
   ctx.stroke();
 }
 
+const MATERIAL_COLORS: Record<string, { fill: string; stroke: string }> = {
+  default: { fill: PLATFORM_COLOR, stroke: PLATFORM_BORDER },
+  ice:     { fill: '#bfe6ff',      stroke: '#7ec0e8' },
+  sticky:  { fill: '#d8b4f8',      stroke: '#9a6ed1' },
+  bouncy:  { fill: '#ffd166',      stroke: '#cf9a26' },
+};
+
 export function drawStaticPolygon(
   ctx: CanvasRenderingContext2D,
   poly: Vec2[],
-  fillColor = PLATFORM_COLOR,
-  strokeColor = PLATFORM_BORDER,
+  material: string = 'default',
   lineWidth = 2,
 ): void {
+  const colors = MATERIAL_COLORS[material] ?? MATERIAL_COLORS.default;
+  const fillColor = colors.fill;
+  const strokeColor = colors.stroke;
   if (poly.length < 2) return;
 
   // Check if this is a rectangular platform — draw as capsule
