@@ -2,56 +2,58 @@
   "name": "Physics Playground",
   "version": 1,
   "levelTypes": ["solo_racing"],
-  "bounds": { "width": 7200, "height": 2800 },
+  "bounds": { "width": 11000, "height": 3000 },
 
   "walls": [
-    { "id": "floor",      "points": [{ "x":  -200, "y": 2600 }, { "x": 7400, "y": 2600 }, { "x": 7400, "y": 2800 }, { "x":  -200, "y": 2800 }] },
-    { "id": "ceiling",    "points": [{ "x":  -200, "y":  -400 }, { "x": 7400, "y":  -400 }, { "x": 7400, "y": -200 }, { "x":  -200, "y": -200 }] },
-    { "id": "left-wall",  "points": [{ "x":  -400, "y":  -400 }, { "x":  -200, "y":  -400 }, { "x":  -200, "y": 2800 }, { "x":  -400, "y": 2800 }] },
-    { "id": "right-wall", "points": [{ "x":  7200, "y":  -400 }, { "x":  7400, "y":  -400 }, { "x":  7400, "y": 2800 }, { "x":  7200, "y": 2800 }] }
+    { "id": "floor",      "points": [{ "x":  -200, "y": 2700 }, { "x": 11200, "y": 2700 }, { "x": 11200, "y": 3000 }, { "x":  -200, "y": 3000 }] },
+    { "id": "ceiling",    "points": [{ "x":  -200, "y":  -400 }, { "x": 11200, "y":  -400 }, { "x": 11200, "y": -200 }, { "x":  -200, "y": -200 }] },
+    { "id": "left-wall",  "points": [{ "x":  -400, "y":  -400 }, { "x":  -200, "y":  -400 }, { "x":  -200, "y": 3000 }, { "x":  -400, "y": 3000 }] },
+    { "id": "right-wall", "points": [{ "x":  11000, "y":  -400 }, { "x": 11200, "y":  -400 }, { "x": 11200, "y": 3000 }, { "x":  11000, "y": 3000 }] }
   ],
 
   "platforms": [
-    { "id": "spawn-floor",    "x":  500, "y": 2200, "width": 800, "height": 40, "rotation": 0 },
+    { "id": "spawn-floor",    "x":   500, "y": 2300, "width": 800, "height": 40, "rotation": 0 },
 
-    { "id": "ice-strip",      "x": 1900, "y": 2200, "width": 700, "height": 40, "rotation": 0, "material": "ice" },
+    { "id": "ice-strip",      "x":  2300, "y": 2300, "width": 700, "height": 40, "rotation": 0, "material": "ice" },
 
-    { "id": "sticky-wall-l",  "x": 3300, "y": 1800, "width":  60, "height": 800, "rotation": 0, "material": "sticky" },
-    { "id": "sticky-wall-r",  "x": 3900, "y": 1800, "width":  60, "height": 800, "rotation": 0, "material": "sticky" },
-    { "id": "sticky-ceiling", "x": 3600, "y": 1380, "width": 600, "height":  60, "rotation": 0, "material": "sticky" },
+    { "id": "sticky-wall-l",  "x":  4400, "y": 1900, "width":  60, "height": 800, "rotation": 0, "material": "sticky" },
+    { "id": "sticky-wall-r",  "x":  5000, "y": 1900, "width":  60, "height": 800, "rotation": 0, "material": "sticky" },
+    { "id": "sticky-ceiling", "x":  4700, "y": 1480, "width": 600, "height":  60, "rotation": 0, "material": "sticky" },
 
-    { "id": "bounce-floor",   "x": 4750, "y": 2200, "width": 400, "height": 40, "rotation": 0, "material": "bouncy" },
+    { "id": "bounce-floor",   "x":  6300, "y": 2300, "width": 400, "height": 40, "rotation": 0, "material": "bouncy" },
 
-    { "id": "spring-base",    "x": 5500, "y": 2300, "width": 280, "height": 50, "rotation": 0 },
+    { "id": "spring-base",    "x":  7300, "y": 2400, "width": 280, "height": 50, "rotation": 0 },
 
-    { "id": "zerog-floor",    "x": 6200, "y": 2200, "width": 500, "height": 40, "rotation": 0 },
+    { "id": "tilt-ground",    "x":  8500, "y": 2300, "width": 700, "height": 40, "rotation": 0 },
 
-    { "id": "sideways-floor", "x": 6900, "y": 2200, "width": 400, "height": 40, "rotation": 0 },
-    { "id": "sideways-wall",  "x": 7180, "y": 1800, "width":  40, "height": 800, "rotation": 0 }
+    { "id": "zerog-floor",    "x":  9700, "y": 2300, "width": 500, "height": 40, "rotation": 0 },
+
+    { "id": "sideways-floor", "x": 10650, "y": 2300, "width": 400, "height": 40, "rotation": 0 },
+    { "id": "sideways-wall",  "x": 10980, "y": 1900, "width":  40, "height": 800, "rotation": 0 }
   ],
 
   "spawnPoints": [
-    { "id": "sp-p1", "x": 300, "y": 2120, "type": "player" }
+    { "id": "sp-p1", "x": 300, "y": 2220, "type": "player" }
   ],
 
   "npcBlobs": [
-    { "id": "npc-circle", "x":  650, "y": 2120, "hullPreset": "circle16", "hue": 0.10 },
-    { "id": "npc-star",   "x":  800, "y": 2120, "hullPreset": "star",     "hue": 0.75 }
+    { "id": "npc-circle", "x":  650, "y": 2220, "hullPreset": "circle16", "hue": 0.10 },
+    { "id": "npc-star",   "x":  800, "y": 2220, "hullPreset": "star",     "hue": 0.75 }
   ],
 
   "springPads": [
-    { "id": "spring-up", "x": 5500, "y": 2260, "width": 160, "height": 30, "rotation": -1.5708, "force": 1100 }
+    { "id": "spring-up", "x": 7300, "y": 2360, "width": 160, "height": 30, "rotation": -1.5708, "force": 1500 }
   ],
 
   "softPlatforms": [
-    { "id": "soft-platform", "x": 2760, "y": 1850, "width": 560, "height": 60, "anchors": "corners" },
-    { "id": "tilting-platform", "x": 5800, "y": 1500, "width": 400, "height": 50, "anchors": "corners" }
+    { "id": "soft-platform", "x": 3450, "y": 1950, "width": 560, "height": 60, "anchors": "corners" },
+    { "id": "tilting-platform", "x": 8500, "y": 2050, "width": 400, "height": 50, "anchors": "corners" }
   ],
 
   "pressurePlates": [
     {
       "id": "plate-tilt",
-      "x": 5800, "y": 2180, "width": 140, "height": 24, "rotation": 0,
+      "x": 8500, "y": 2268, "width": 160, "height": 24, "rotation": 0,
       "triggerIds": ["tilt-left"],
       "oneShot": false
     }
@@ -64,8 +66,8 @@
       "duration": 1.2,
       "easing": "easeInOut",
       "targets": [
-        { "shapeId": "tilting-platform", "pointIndex": 0, "endX": 5600, "endY": 1225 },
-        { "shapeId": "tilting-platform", "pointIndex": 3, "endX": 5600, "endY": 1275 }
+        { "shapeId": "tilting-platform", "pointIndex": 0, "endX": 8300, "endY": 1775 },
+        { "shapeId": "tilting-platform", "pointIndex": 3, "endX": 8300, "endY": 1825 }
       ]
     }
   ],
@@ -73,19 +75,19 @@
   "gravityZones": [
     {
       "id": "blackhole",
-      "x": 2400, "y": 1100,
+      "x": 3450, "y": 1200,
       "width": 700, "height": 700,
-      "field": { "kind": "point", "center": { "x": 2400, "y": 1100 }, "strength": 80000, "falloff": "inverseSquare" }
+      "field": { "kind": "point", "center": { "x": 3450, "y": 1200 }, "strength": 80000, "falloff": "inverseSquare" }
     },
     {
       "id": "zerog",
-      "x": 6200, "y": 1500,
+      "x": 9700, "y": 1600,
       "width": 500, "height": 1200,
       "field": { "kind": "uniform", "vector": { "x": 0, "y": 0 } }
     },
     {
       "id": "sideways",
-      "x": 6900, "y": 1500,
+      "x": 10650, "y": 1600,
       "width": 400, "height": 1200,
       "field": { "kind": "uniform", "vector": { "x": 3920, "y": 0 } }
     }
