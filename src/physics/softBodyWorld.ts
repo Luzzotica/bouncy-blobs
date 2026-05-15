@@ -220,13 +220,21 @@ export class SoftBodyWorld {
     shapeMatchK: number;
     shapeMatchDamp: number;
     worldOrigin: Vec2;
+    /** Indices into hullRestLocal whose particles are locked in space
+     * (mass=0, invMass=0). For soft platforms with fixed anchor points.
+     * The center particle is never static. */
+    staticHullIndices?: number[];
+    /** When true, the center particle is also locked. Default false. */
+    staticCenter?: boolean;
   }): BlobResult {
     const {
       hullRestLocal, centerLocal = ZERO,
       centerMass, hullMass, springK, springDamp,
       radialK, radialDamp, pressureK, shapeMatchK, shapeMatchDamp,
-      worldOrigin,
+      worldOrigin, staticHullIndices, staticCenter = false,
     } = params;
+
+    const staticSet = new Set(staticHullIndices ?? []);
 
     const numHull = hullRestLocal.length;
     if (numHull < 3) throw new Error('Need at least 3 hull points');
@@ -236,8 +244,9 @@ export class SoftBodyWorld {
     // Center particle
     this.pos.push(add(centerLocal, worldOrigin));
     this.vel.push(ZERO);
-    this.mass.push(centerMass);
-    this.invMass.push(centerMass > 0.001 ? 1 / centerMass : 0);
+    const cMass = staticCenter ? 0 : centerMass;
+    this.mass.push(cMass);
+    this.invMass.push(cMass > 0.001 ? 1 / cMass : 0);
     this.particleRadius.push(0);
 
     // Hull particles
@@ -245,8 +254,10 @@ export class SoftBodyWorld {
     for (let i = 0; i < numHull; i++) {
       this.pos.push(add(hullRestLocal[i], worldOrigin));
       this.vel.push(ZERO);
-      this.mass.push(hullMass);
-      this.invMass.push(hullMass > 0.001 ? 1 / hullMass : 0);
+      const isStatic = staticSet.has(i);
+      const m = isStatic ? 0 : hullMass;
+      this.mass.push(m);
+      this.invMass.push(m > 0.001 ? 1 / m : 0);
       this.particleRadius.push(0);
       hullIndices.push(start + 1 + i);
     }
@@ -1068,22 +1079,6 @@ export class SoftBodyWorld {
       }
     }
 
-    // Blob vs free particles (point-shape platforms, etc.) — reciprocal push.
-    // Anchored particles (invMass=0) absorb correction without moving, so a
-    // pointShape with anchored corners behaves like a deformable platform:
-    // the blob lands on it, the middle particles sag, the corners stay put.
-    for (let bi = 0; bi < this.blobRanges.length; bi++) {
-      const r = this.blobRanges[bi];
-      if (r.inactive) continue;
-      const polyB = this.buildPolygonFromIndices(r.hull);
-      const bbox = polygonAABB(polyB);
-      for (let i = 0; i < this.pos.length; i++) {
-        if (this.particleRadius[i] <= 0) continue;
-        const p = this.pos[i];
-        if (p.x < bbox.minX - 8 || p.x > bbox.maxX + 8 || p.y < bbox.minY - 8 || p.y > bbox.maxY + 8) continue;
-        this.resolvePointInShape(i, polyB, r.hull);
-      }
-    }
   }
 
   private collideBlobs(aId: number, bId: number): void {
@@ -1209,8 +1204,10 @@ export class SoftBodyWorld {
           this.vel[pi] = sub(this.vel[pi], scale(n, vnInWall));
         }
 
-        // Position correction
-        this.pos[pi] = add(closest, scale(n, pushDist));
+        // Position correction (skip anchored particles — they don't move)
+        if (this.invMass[pi] > 0) {
+          this.pos[pi] = add(closest, scale(n, pushDist));
+        }
 
         // Restitution (surface-frame normal component)
         const vRel1 = hasSurfVel ? sub(this.vel[pi], sv) : this.vel[pi];
@@ -1298,7 +1295,7 @@ export class SoftBodyWorld {
           }
         }
 
-        if (bestPoint && bestNormal) {
+        if (bestPoint && bestNormal && this.invMass[pi] > 0) {
           // Place particle at hit point + margin along the outward normal
           this.pos[pi] = add(bestPoint, scale(bestNormal, this.collisionMargin));
           // Remove velocity component into the wall (surface frame for kinematic surfaces)
@@ -1336,6 +1333,8 @@ export class SoftBodyWorld {
   }
 
   private resolveParticleVsPoly(i: number, rad: number, polyWorld: Vec2[]): void {
+    // Anchored particles (invMass=0) are immovable — never push them.
+    if (this.invMass[i] === 0) return;
     const p = this.pos[i];
     const info = closestPointOnPolygonBoundary(p, polyWorld);
     const closest = info.closest;

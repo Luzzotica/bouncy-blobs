@@ -96,7 +96,7 @@ export class BouncyBlobsGame implements Game {
       gravityScale: 4.0,
     });
 
-    const { playerSpawnPoints, npcBlobs, triggerIndices } = loadLevel(world, level);
+    const { playerSpawnPoints, npcBlobs, triggerIndices, softPlatforms } = loadLevel(world, level);
     const playerManager = new PlayerManager(playerSpawnPoints);
     const camera = new Camera();
     camera.snapTo(playerSpawnPoints[0] ?? { x: 0, y: 400 }, 0.592);
@@ -258,6 +258,7 @@ export class BouncyBlobsGame implements Game {
               }
             : undefined,
           playerRenderData,
+          softPlatforms,
         );
       }
     });

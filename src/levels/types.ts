@@ -28,8 +28,30 @@ export interface LevelData {
   springPads?: SpringPadDef[];
   spikes?: SpikeDef[];
   pointShapes?: PointShapeDef[];
+  softPlatforms?: SoftPlatformDef[];
   pressurePlates?: PressurePlateDef[];
   triggers?: TriggerDef[];
+}
+
+export type SoftAnchorPattern = 'corners' | 'ends' | 'left' | 'right' | 'top' | 'bottom';
+
+/** Rectangular soft-body platform with anchored points. Loader expands into
+ * a blob whose hull is a subdivided rectangle, with the indicated hull
+ * indices locked in space (mass=0, invMass=0). */
+export interface SoftPlatformDef {
+  id: string;
+  x: number;            // center x
+  y: number;            // center y
+  width: number;
+  height: number;
+  /** Hull subdivisions. Defaults: segW=8 along the long axis, segH=1 along
+   * the short axis. Total hull points = 2*segW + 2*segH. */
+  segW?: number;
+  segH?: number;
+  /** Which hull points are locked in space. Default 'corners'. */
+  anchors?: SoftAnchorPattern | number[];
+  /** Multiplier on spring stiffness (defaults to 1.0). Higher = more rigid. */
+  stiffness?: number;
 }
 
 export interface PointShapePoint {
@@ -126,8 +148,10 @@ export interface SpringPadDef {
   height: number;
   /** Launch direction in radians. 0 = right, -PI/2 = up, PI/2 = down, PI = left. */
   rotation: number;
-  /** Launch impulse strength. */
-  force: number;
+  /** Speed (world units/sec) the plate extends at while firing — also the launch
+   * speed imparted to a contacted blob along `rotation`. Typical range: 500–2500.
+   * Omitted ≡ default (medium). */
+  fireSpeed?: number;
 }
 
 export interface PlatformDef {

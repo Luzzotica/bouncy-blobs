@@ -1,7 +1,16 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
-import { LevelData, PlatformDef, PressurePlateDef, ZoneDef } from './types';
+import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+import * as Tuning from '../physics/tuning';
+import { LevelData, PlatformDef, PressurePlateDef, SoftPlatformDef, ZoneDef } from './types';
+
+export interface SoftPlatformInfo {
+  id: string;
+  blobId: number;
+  hullIndices: number[];
+  staticHullIndices: number[];
+}
 
 export interface LoadedLevel {
   playerSpawnPoints: Vec2[];
@@ -10,6 +19,11 @@ export interface LoadedLevel {
   triggerIndices: Map<string, number>;
   /** Map from PointShape id → ordered list of particle indices in the world. */
   pointShapeParticles: Map<string, number[]>;
+  /** Map from soft-platform id → ordered list of its STATIC hull particle
+   * indices in the world. Used by triggers that animate platform anchors. */
+  softPlatformStaticParticles: Map<string, number[]>;
+  /** All soft platforms in load order. For rendering. */
+  softPlatforms: SoftPlatformInfo[];
   /** Map from physics-world trigger shape index → pressure plate id. */
   plateShapeIdxToId: Map<number, string>;
 }
@@ -170,6 +184,15 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     plateShapeIdxToId.set(shapeIdx, plate.id);
   }
 
+  // Hydrate soft platforms: each is a regular blob with a subdivided
+  // rectangular hull and certain hull points locked as static.
+  const softPlatformStaticParticles = new Map<string, number[]>();
+  const softPlatforms: SoftPlatformInfo[] = [];
+  for (const sp of level.softPlatforms ?? []) {
+    const info = expandSoftPlatform(world, sp, softPlatformStaticParticles);
+    softPlatforms.push(info);
+  }
+
   // Collect player spawn points
   const playerSpawnPoints = level.spawnPoints
     .filter(sp => sp.type === 'player')
@@ -180,6 +203,55 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     npcBlobs,
     triggerIndices,
     pointShapeParticles,
+    softPlatformStaticParticles,
+    softPlatforms,
     plateShapeIdxToId,
+  };
+}
+
+function expandSoftPlatform(
+  world: SoftBodyWorld,
+  def: SoftPlatformDef,
+  staticParticleMap: Map<string, number[]>,
+): SoftPlatformInfo {
+  const segW = def.segW ?? 8;
+  const segH = def.segH ?? 1;
+  const hullLocal = hullRect(def.width, def.height, segW, segH);
+
+  // Resolve anchor pattern → set of hull indices.
+  let anchorIdxs: number[];
+  if (Array.isArray(def.anchors)) {
+    anchorIdxs = def.anchors;
+  } else {
+    anchorIdxs = rectAnchorIndices(segW, segH, def.anchors ?? 'corners');
+  }
+
+  const stiffness = def.stiffness ?? 1.0;
+
+  const result = world.addBlobFromHull({
+    hullRestLocal: hullLocal,
+    centerLocal: { x: 0, y: 0 },
+    centerMass: Tuning.CENTER_MASS * 4,    // heavier than a blob for stability
+    hullMass: Tuning.HULL_MASS * 4,
+    springK: Tuning.SPRING_K * 4 * stiffness,
+    springDamp: Tuning.SPRING_DAMP * 2,
+    radialK: Tuning.RADIAL_K * 4 * stiffness,
+    radialDamp: Tuning.RADIAL_DAMP * 2,
+    pressureK: 0.0,                        // platforms don't puff
+    shapeMatchK: Tuning.SHAPE_MATCH_K * 3 * stiffness,
+    shapeMatchDamp: Tuning.SHAPE_MATCH_DAMP * 2,
+    worldOrigin: vec2(def.x, def.y),
+    staticHullIndices: anchorIdxs,
+  });
+
+  // Track static hull particle world-indices for trigger animation.
+  const staticParticles = anchorIdxs.map(i => result.hullIndices[i]);
+  staticParticleMap.set(def.id, staticParticles);
+
+  return {
+    id: def.id,
+    blobId: result.blobId,
+    hullIndices: result.hullIndices,
+    staticHullIndices: staticParticles,
   };
 }

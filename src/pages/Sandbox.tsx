@@ -113,7 +113,7 @@ export default function Sandbox() {
       gravityScale: 4.0,
     });
 
-    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId } = loadLevel(world, levelData);
+    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId, softPlatforms } = loadLevel(world, levelData);
 
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
@@ -200,7 +200,7 @@ export default function Sandbox() {
         renderHUD: () => {},
       } : undefined;
 
-      render(ctx, world, camera, [playerBlob], npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay);
+      render(ctx, world, camera, [playerBlob], npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay, undefined, softPlatforms);
     });
 
     state.loop = loop;

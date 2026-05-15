@@ -7,6 +7,11 @@ import { drawSprings, drawShapeMatchTargets, drawBlobPoints } from './debugRende
 import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
 import { drawBlobFace } from './faceRenderer';
 
+export interface SoftPlatformRenderInfo {
+  hullIndices: number[];
+  staticHullIndices: number[];
+}
+
 export interface RenderOptions {
   showSprings?: boolean;
   showShapeTargets?: boolean;
@@ -36,6 +41,7 @@ export function render(
   options: RenderOptions = {},
   modeOverlay?: ModeOverlay,
   playerData?: PlayerRenderData[],
+  softPlatforms: SoftPlatformRenderInfo[] = [],
 ): void {
   // Clear
   ctx.fillStyle = BACKGROUND_COLOR;
@@ -55,6 +61,38 @@ export function render(
   // Static polygons
   for (const surface of world.staticSurfaces) {
     drawStaticPolygon(ctx, surface.poly, surface.material);
+  }
+
+  // Soft platforms — filled polygon following the current hull positions
+  for (const sp of softPlatforms) {
+    if (sp.hullIndices.length < 3) continue;
+    const positions = world.getPositions();
+    ctx.beginPath();
+    const first = positions[sp.hullIndices[0]];
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < sp.hullIndices.length; i++) {
+      const p = positions[sp.hullIndices[i]];
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#9aa6c0';      // muted slate fill
+    ctx.fill();
+    ctx.strokeStyle = '#4f5874';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // Static-point highlights (small yellow dots)
+    const staticSet = new Set(sp.staticHullIndices);
+    ctx.fillStyle = '#ffcc55';
+    ctx.strokeStyle = '#0f1629';
+    ctx.lineWidth = 1.5;
+    for (const idx of sp.hullIndices) {
+      if (!staticSet.has(idx)) continue;
+      const p = positions[idx];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   // Gravity-zone overlays

@@ -43,43 +43,8 @@
     { "id": "spring-up", "x": 5500, "y": 2260, "width": 160, "height": 30, "rotation": -1.5708, "force": 1100 }
   ],
 
-  "pointShapes": [
-    {
-      "id": "soft-platform",
-      "points": [
-        { "x": 2480, "y": 1820, "anchored": true },
-        { "x": 2550, "y": 1820, "anchored": false },
-        { "x": 2620, "y": 1820, "anchored": false },
-        { "x": 2690, "y": 1820, "anchored": false },
-        { "x": 2760, "y": 1820, "anchored": false },
-        { "x": 2830, "y": 1820, "anchored": false },
-        { "x": 2900, "y": 1820, "anchored": false },
-        { "x": 2970, "y": 1820, "anchored": false },
-        { "x": 3040, "y": 1820, "anchored": true },
-        { "x": 2480, "y": 1880, "anchored": true },
-        { "x": 2550, "y": 1880, "anchored": false },
-        { "x": 2620, "y": 1880, "anchored": false },
-        { "x": 2690, "y": 1880, "anchored": false },
-        { "x": 2760, "y": 1880, "anchored": false },
-        { "x": 2830, "y": 1880, "anchored": false },
-        { "x": 2900, "y": 1880, "anchored": false },
-        { "x": 2970, "y": 1880, "anchored": false },
-        { "x": 3040, "y": 1880, "anchored": true }
-      ],
-      "edges": [
-        { "a": 0, "b": 1 }, { "a": 1, "b": 2 }, { "a": 2, "b": 3 }, { "a": 3, "b": 4 },
-        { "a": 4, "b": 5 }, { "a": 5, "b": 6 }, { "a": 6, "b": 7 }, { "a": 7, "b": 8 },
-        { "a":  9, "b": 10 }, { "a": 10, "b": 11 }, { "a": 11, "b": 12 }, { "a": 12, "b": 13 },
-        { "a": 13, "b": 14 }, { "a": 14, "b": 15 }, { "a": 15, "b": 16 }, { "a": 16, "b": 17 },
-        { "a": 0, "b":  9 }, { "a": 1, "b": 10 }, { "a": 2, "b": 11 }, { "a": 3, "b": 12 },
-        { "a": 4, "b": 13 }, { "a": 5, "b": 14 }, { "a": 6, "b": 15 }, { "a": 7, "b": 16 },
-        { "a": 8, "b": 17 },
-        { "a": 0, "b": 10 }, { "a": 1, "b": 11 }, { "a": 2, "b": 12 }, { "a": 3, "b": 13 },
-        { "a": 4, "b": 14 }, { "a": 5, "b": 15 }, { "a": 6, "b": 16 }, { "a": 7, "b": 17 },
-        { "a": 1, "b":  9 }, { "a": 2, "b": 10 }, { "a": 3, "b": 11 }, { "a": 4, "b": 12 },
-        { "a": 5, "b": 13 }, { "a": 6, "b": 14 }, { "a": 7, "b": 15 }, { "a": 8, "b": 16 }
-      ]
-    }
+  "softPlatforms": [
+    { "id": "soft-platform", "x": 2760, "y": 1850, "width": 560, "height": 60, "anchors": "corners" }
   ],
 
   "gravityZones": [
