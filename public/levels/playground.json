@@ -54,6 +54,7 @@
     {
       "id": "plate-tilt",
       "x": 8500, "y": 2268, "width": 160, "height": 24, "rotation": 0,
+      "triggerHeight": 120,
       "triggerIds": ["tilt-left"],
       "oneShot": false
     }

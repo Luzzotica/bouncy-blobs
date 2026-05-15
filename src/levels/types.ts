@@ -85,6 +85,14 @@ export interface PressurePlateDef {
   rotation: number;
   triggerIds: string[];
   oneShot?: boolean;
+  /** Optional override for the trigger detection zone's width. Defaults to
+   * `width`. Use when the visible plate should be small but the sensor area
+   * should be larger. */
+  triggerWidth?: number;
+  /** Optional override for the trigger detection zone's height. Defaults to
+   * `height`. The trigger zone is anchored so its bottom aligns with the
+   * plate's bottom — extra height extends upward, where blobs approach from. */
+  triggerHeight?: number;
 }
 
 export type TriggerEasing = 'linear' | 'easeInOut' | 'easeOut';

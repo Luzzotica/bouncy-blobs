@@ -39,13 +39,19 @@ const POINT_SHAPE_HOME_K = 1800;
 const POINT_SHAPE_HOME_DAMP = 18;
 
 function plateToPolygon(p: PressurePlateDef): Vec2[] {
-  const hw = p.width / 2;
-  const hh = p.height / 2;
+  const tw = p.triggerWidth ?? p.width;
+  const th = p.triggerHeight ?? p.height;
+  const hw = tw / 2;
+  const hh = th / 2;
+  // Bottom of the trigger zone stays aligned with the bottom of the visual
+  // plate (so an extra-tall trigger extends upward where blobs come from).
+  const visualBottomY = p.height / 2;
+  const triggerCenterYOffset = visualBottomY - hh;
   const corners: Vec2[] = [
-    vec2(-hw, -hh),
-    vec2(hw, -hh),
-    vec2(hw, hh),
-    vec2(-hw, hh),
+    vec2(-hw, -hh + triggerCenterYOffset),
+    vec2(hw, -hh + triggerCenterYOffset),
+    vec2(hw, hh + triggerCenterYOffset),
+    vec2(-hw, hh + triggerCenterYOffset),
   ];
   if (Math.abs(p.rotation) > 0.001) {
     const c = Math.cos(p.rotation);

@@ -1360,11 +1360,25 @@ export class SoftBodyWorld {
       const sh = this.shapes[si];
       if (!sh.isTrigger) continue;
       if (sh.staticPoly.length === 0) continue;
+      const bbox = polygonAABB(sh.staticPoly);
 
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
-        if (this.blobRanges[bi].inactive) continue;
-        const cx = centroidFromIndices(this.pos, this.blobRanges[bi].hull);
-        const inside = isPointInPolygon(cx, sh.staticPoly);
+        const range = this.blobRanges[bi];
+        if (range.inactive) continue;
+        // Trigger fires if ANY hull point (or the center) is inside the
+        // trigger polygon. AABB prefilter keeps the inner loop cheap.
+        let inside = false;
+        for (const idx of range.hull) {
+          const p = this.pos[idx];
+          if (p.x < bbox.minX || p.x > bbox.maxX || p.y < bbox.minY || p.y > bbox.maxY) continue;
+          if (isPointInPolygon(p, sh.staticPoly)) { inside = true; break; }
+        }
+        if (!inside) {
+          const c = this.pos[range.start];
+          if (c.x >= bbox.minX && c.x <= bbox.maxX && c.y >= bbox.minY && c.y <= bbox.maxY) {
+            if (isPointInPolygon(c, sh.staticPoly)) inside = true;
+          }
+        }
         const key = `${si}_${bi}`;
         const prev = this.triggerPrev.get(key) ?? false;
 
