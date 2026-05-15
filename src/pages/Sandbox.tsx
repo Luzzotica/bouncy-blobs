@@ -72,6 +72,7 @@ function renderPointShapesLive(
 export default function Sandbox() {
   const [searchParams] = useSearchParams();
   const [levelData, setLevelData] = useState<LevelData | null>(null);
+  const [showPoints, setShowPoints] = useState(true);
   const stateRef = useRef<{
     world: SoftBodyWorld;
     camera: Camera;
@@ -157,7 +158,7 @@ export default function Sandbox() {
     const renderOptions: RenderOptions = {
       showSprings: false,
       showShapeTargets: false,
-      showPoints: true,
+      showPoints,
     };
 
     const state = {
@@ -229,6 +230,13 @@ export default function Sandbox() {
     };
   }, []);
 
+  // Live-sync renderOptions when the user toggles debug points
+  useEffect(() => {
+    if (stateRef.current) {
+      stateRef.current.renderOptions.showPoints = showPoints;
+    }
+  }, [showPoints]);
+
   if (!levelData) {
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f1629' }}>
@@ -251,6 +259,19 @@ export default function Sandbox() {
         <Link to="/">
           <button style={{ padding: '6px 12px', fontSize: 14 }}>Home</button>
         </Link>
+        <button
+          style={{
+            padding: '6px 12px',
+            fontSize: 14,
+            background: showPoints ? '#3b6ab8' : '#1f2a3f',
+            color: '#fff',
+            border: '1px solid #4f5874',
+            cursor: 'pointer',
+          }}
+          onClick={() => setShowPoints(p => !p)}
+        >
+          Points: {showPoints ? 'ON' : 'OFF'}
+        </button>
         <span style={{ color: '#888', fontSize: 13 }}>
           A/D: Move | Space: Expand
         </span>
