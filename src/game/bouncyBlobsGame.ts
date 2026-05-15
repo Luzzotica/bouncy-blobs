@@ -104,6 +104,7 @@ export class BouncyBlobsGame implements Game {
     const renderOptions: RenderOptions = {
       showSprings: false,
       showShapeTargets: false,
+      showPoints: true,
     };
 
     // Create mode manager if a game mode is set

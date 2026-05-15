@@ -157,6 +157,7 @@ export default function Sandbox() {
     const renderOptions: RenderOptions = {
       showSprings: false,
       showShapeTargets: false,
+      showPoints: true,
     };
 
     const state = {

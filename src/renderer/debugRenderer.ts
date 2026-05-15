@@ -78,3 +78,32 @@ export function drawMassPoints(
     ctx.fill();
   }
 }
+
+/** Render every particle of every blob, with hull and center distinguished. */
+export function drawBlobPoints(
+  ctx: CanvasRenderingContext2D,
+  world: SoftBodyWorld,
+  hullColor = 'rgba(255, 80, 80, 0.95)',
+  centerColor = 'rgba(255, 230, 80, 0.95)',
+  hullRadius = 3.5,
+  centerRadius = 5,
+): void {
+  const pos = world.getPositions();
+  for (let bi = 0; bi < world.getBlobCount(); bi++) {
+    const r = world.blobRanges[bi];
+    if (r.inactive) continue;
+    const centerIdx = world.shapes[r.shapeIdx]?.centerIdx ?? -1;
+    for (let i = r.start; i < r.end; i++) {
+      const p = pos[i];
+      if (!p) continue;
+      const isCenter = i === centerIdx;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, isCenter ? centerRadius : hullRadius, 0, Math.PI * 2);
+      ctx.fillStyle = isCenter ? centerColor : hullColor;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}

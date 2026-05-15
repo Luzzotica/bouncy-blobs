@@ -3,13 +3,14 @@ import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from './camera';
 import { drawBlob } from './blobRenderer';
 import { drawStaticPolygon } from './levelRenderer';
-import { drawSprings, drawShapeMatchTargets } from './debugRenderer';
+import { drawSprings, drawShapeMatchTargets, drawBlobPoints } from './debugRenderer';
 import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
 import { drawBlobFace } from './faceRenderer';
 
 export interface RenderOptions {
   showSprings?: boolean;
   showShapeTargets?: boolean;
+  showPoints?: boolean;
 }
 
 export interface ModeOverlay {
@@ -97,6 +98,11 @@ export function render(
       const centroid = playerBlobs[i].getCentroid();
       drawBlobFace(ctx, centroid, pd.faceId, pd.expanding, pd.expandScale);
     }
+  }
+
+  // Debug: hull + center points (on top of blobs so they're visible)
+  if (options.showPoints) {
+    drawBlobPoints(ctx, world);
   }
 
   ctx.restore();
