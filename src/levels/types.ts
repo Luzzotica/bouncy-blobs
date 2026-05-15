@@ -1,5 +1,5 @@
 import type { HullPreset } from '../physics/slimeBlob';
-import type { SurfaceMaterial } from '../physics/types';
+import type { SurfaceMaterial, GravityField } from '../physics/types';
 
 export type LevelType = 'solo_racing' | 'team_racing' | 'party' | 'koth';
 
@@ -23,6 +23,7 @@ export interface LevelData {
   npcBlobs: NpcBlobDef[];
   goalZones?: ZoneDef[];
   hillZones?: ZoneDef[];
+  gravityZones?: GravityZoneDef[];
   powerupSpawns?: PowerupSpawnDef[];
   springPads?: SpringPadDef[];
   spikes?: SpikeDef[];
@@ -98,6 +99,17 @@ export interface ZoneDef {
   y: number;
   width: number;
   height: number;
+}
+
+/** A rectangular trigger zone that applies a non-default gravity field
+ * to blobs whose centroid is inside it. */
+export interface GravityZoneDef {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  field: GravityField;
 }
 
 export interface PowerupSpawnDef {

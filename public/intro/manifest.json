@@ -1,0 +1,41 @@
+{
+  "music": "theme.mp3",
+  "panels": [
+    {
+      "image": "panel-1.png",
+      "sfx": "panel-1.mp3",
+      "caption": "Behold!",
+      "durationMs": 3500
+    },
+    {
+      "image": "panel-2.png",
+      "sfx": "panel-2.mp3",
+      "caption": "I have created\u2026 subjects!",
+      "durationMs": 4000
+    },
+    {
+      "image": "panel-3.png",
+      "sfx": "panel-3.mp3",
+      "caption": "They shall be tested!",
+      "durationMs": 4000
+    },
+    {
+      "image": "panel-4.png",
+      "sfx": "panel-4.mp3",
+      "caption": "(They think it's recess.)",
+      "durationMs": 4000
+    },
+    {
+      "image": "panel-5.png",
+      "sfx": "panel-5.mp3",
+      "caption": "King of the Hill!",
+      "durationMs": 4000
+    },
+    {
+      "image": "panel-6.png",
+      "sfx": "panel-6.mp3",
+      "caption": "He wanted subjects. He made friends.",
+      "durationMs": 5000
+    }
+  ]
+}

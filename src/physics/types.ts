@@ -15,6 +15,11 @@ export interface StaticSurface {
   id?: string;
 }
 
+/** Gravity vector field applied inside a trigger zone. */
+export type GravityField =
+  | { kind: 'uniform'; vector: Vec2 }
+  | { kind: 'point'; center: Vec2; strength: number; falloff: 'linear' | 'inverseSquare' };
+
 export interface BlobRange {
   id: number;
   start: number;
@@ -44,7 +49,7 @@ export interface Shape {
   shapeMatchRestScale: number;
   useFrameOverride: boolean;
   frameOverride: Transform2D;
-  triggerGravity: Vec2;
+  gravityField: GravityField | null;
   centerIdx: number;
   /** Mirrors BlobRange.inactive on the shape that backs an inactive blob. */
   inactive?: boolean;

@@ -56,6 +56,15 @@
     { "id": "hill", "x": 3000, "y": 1810, "width": 600, "height": 180 }
   ],
 
+  "gravityZones": [
+    {
+      "id": "blackhole",
+      "x": 2200, "y": 600,
+      "width": 700, "height": 700,
+      "field": { "kind": "point", "center": { "x": 2200, "y": 600 }, "strength": 80000, "falloff": "inverseSquare" }
+    }
+  ],
+
   "powerupSpawns": [
     { "id": "pu-mid",   "x": 2100, "y": 1600 },
     { "id": "pu-goal",  "x": 3700, "y": 1700 }

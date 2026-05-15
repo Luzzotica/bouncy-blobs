@@ -1,5 +1,5 @@
 import { Vec2, vec2, add, sub, scale, dot, length, lengthSq, normalize, negate, distanceTo, ZERO, RIGHT } from './vec2';
-import { Spring, BlobRange, Shape, Transform2D, BlobResult, PumpEdge, RayHit, AABB, SurfaceMaterial, MaterialParams, StaticSurface } from './types';
+import { Spring, BlobRange, Shape, Transform2D, BlobResult, PumpEdge, RayHit, AABB, SurfaceMaterial, MaterialParams, StaticSurface, GravityField } from './types';
 import {
   polygonAABB, aabbOverlap, isPointInPolygon,
   closestPointOnPolygonBoundary, edgeVertexWeights,
@@ -9,6 +9,25 @@ import { solveWeld, solveWeightedAnchor, solveDistanceMax } from './constraints'
 import { centroidFromIndices, averageAngle, frameTransform, applyTransform } from './shapeMatching';
 
 const EPS = 1e-6;
+
+/** Evaluate a GravityField at a world position. Returns the gravity vector
+ * to apply to a particle at that point. */
+export function evalGravityField(field: GravityField, pt: Vec2): Vec2 {
+  if (field.kind === 'uniform') return field.vector;
+  // 'point' — attractor (positive strength) or repulsor (negative strength)
+  const dx = field.center.x - pt.x;
+  const dy = field.center.y - pt.y;
+  const dSq = dx * dx + dy * dy;
+  if (dSq < EPS) return { x: 0, y: 0 };
+  const d = Math.sqrt(dSq);
+  let mag: number;
+  if (field.falloff === 'inverseSquare') {
+    mag = field.strength / Math.max(dSq, 100); // softening to avoid singularity
+  } else {
+    mag = field.strength / Math.max(d, 10);
+  }
+  return { x: (dx / d) * mag, y: (dy / d) * mag };
+}
 
 /** Per-material restitution + friction overrides for static surfaces.
  * Each value is treated as a multiplier on the world's defaults so that
@@ -135,7 +154,18 @@ export class SoftBodyWorld {
     this.staticSurfaces.length = 0;
   }
 
-  registerTriggerPolygon(poly: Vec2[], gravityOverride: Vec2 = ZERO): number {
+  /**
+   * @param gravityOverride Pass a Vec2 for a uniform override (back-compat),
+   *   or a tagged GravityField for point attractors / custom fields. ZERO
+   *   means "no override" — the blob keeps world gravity inside the trigger.
+   */
+  registerTriggerPolygon(poly: Vec2[], gravityOverride: Vec2 | GravityField = ZERO): number {
+    let field: GravityField | null = null;
+    if ('kind' in gravityOverride) {
+      field = gravityOverride;
+    } else if (lengthSq(gravityOverride) > 0.0001) {
+      field = { kind: 'uniform', vector: gravityOverride };
+    }
     const shape: Shape = {
       indices: [],
       staticPoly: [...poly],
@@ -149,7 +179,7 @@ export class SoftBodyWorld {
       shapeMatchRestScale: 1,
       useFrameOverride: false,
       frameOverride: { cos: 1, sin: 0, tx: 0, ty: 0 },
-      triggerGravity: gravityOverride,
+      gravityField: field,
       centerIdx: -1,
     };
     this.shapes.push(shape);
@@ -252,7 +282,7 @@ export class SoftBodyWorld {
       shapeMatchRestScale: 1,
       useFrameOverride: false,
       frameOverride: { cos: 1, sin: 0, tx: 0, ty: 0 },
-      triggerGravity: ZERO,
+      gravityField: null,
       centerIdx: start,
     };
     this.shapes.push(shape);
@@ -527,8 +557,8 @@ export class SoftBodyWorld {
       if (!sh.isTrigger) continue;
       if (sh.staticPoly.length === 0) continue;
       if (isPointInPolygon(cx, sh.staticPoly)) {
-        if (lengthSq(sh.triggerGravity) > 0.0001) {
-          return sh.triggerGravity;
+        if (sh.gravityField !== null) {
+          return evalGravityField(sh.gravityField, cx);
         }
       }
     }
@@ -719,12 +749,14 @@ export class SoftBodyWorld {
         const sh = this.shapes[si];
         if (!sh.isTrigger) continue;
         if (sh.staticPoly.length === 0) continue;
-        if (isPointInPolygon(cx, sh.staticPoly)) {
-          if (lengthSq(sh.triggerGravity) > 0.0001) {
-            for (let j = r.start; j < r.end; j++) {
-              grav[j] = sh.triggerGravity;
-            }
-          }
+        if (sh.gravityField === null) continue;
+        if (!isPointInPolygon(cx, sh.staticPoly)) continue;
+        // Uniform fields apply the same vector to all particles; point fields
+        // re-evaluate per particle so the radial direction changes across the blob.
+        if (sh.gravityField.kind === 'uniform') {
+          for (let j = r.start; j < r.end; j++) grav[j] = sh.gravityField.vector;
+        } else {
+          for (let j = r.start; j < r.end; j++) grav[j] = evalGravityField(sh.gravityField, this.pos[j]);
         }
       }
     }

@@ -97,6 +97,20 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     triggerIndices.set(zone.id, shapeIdx);
   }
 
+  // Gravity-field trigger zones (black holes, directional shifts, etc.)
+  for (const gz of level.gravityZones ?? []) {
+    const hw = gz.width / 2;
+    const hh = gz.height / 2;
+    const poly: Vec2[] = [
+      vec2(gz.x - hw, gz.y - hh),
+      vec2(gz.x + hw, gz.y - hh),
+      vec2(gz.x + hw, gz.y + hh),
+      vec2(gz.x - hw, gz.y + hh),
+    ];
+    const shapeIdx = world.registerTriggerPolygon(poly, gz.field);
+    triggerIndices.set(gz.id, shapeIdx);
+  }
+
   // Hydrate point shapes: each point becomes a particle, each edge a spring.
   // Anchored points use mass=0 → invMass=0 (fixed in space).
   const pointShapeParticles = new Map<string, number[]>();
