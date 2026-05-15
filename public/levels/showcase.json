@@ -17,7 +17,11 @@
     { "id": "bridge-l",    "x": 1700, "y": 1700, "width": 200, "height": 50, "rotation": 0 },
     { "id": "bridge-r",    "x": 2500, "y": 1700, "width": 200, "height": 50, "rotation": 0 },
     { "id": "hill-floor",  "x": 3000, "y": 1900, "width": 600, "height": 60, "rotation": 0 },
-    { "id": "goal-floor",  "x": 3700, "y": 2000, "width": 400, "height": 60, "rotation": 0 }
+    { "id": "goal-floor",  "x": 3700, "y": 2000, "width": 400, "height": 60, "rotation": 0 },
+
+    { "id": "mat-ice",     "x":  650, "y": 1280, "width": 360, "height": 30, "rotation": 0, "material": "ice" },
+    { "id": "mat-sticky",  "x":  900, "y":  900, "width":  40, "height": 400, "rotation": 0, "material": "sticky" },
+    { "id": "mat-bouncy",  "x": 1400, "y": 1280, "width": 200, "height": 30, "rotation": 0, "material": "bouncy" }
   ],
 
   "spawnPoints": [

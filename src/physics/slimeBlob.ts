@@ -23,6 +23,11 @@ const SQUASH_Y_AMOUNT = 0.3;   // shorten 30% at full crouch
 const DOWN_FORCE = 180.0;      // downward force (per-second)
 const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 
+// Sticky wall stick
+const STICK_MIN_CONTACTS = 2;    // hull points touching sticky surface to engage
+const STICK_RELEASE_GRACE = 0.25;// seconds — can't re-stick to same wall immediately after release
+const STICK_JUMP_IMPULSE = 1400; // instant velocity impulse on release
+
 export interface SlimeBlobConfig {
   playerControlled?: boolean;
   hullPreset?: HullPreset;
@@ -52,6 +57,7 @@ export class SlimeBlob {
 
   private world: SoftBodyWorld;
   private expandPressed = false;
+  private expandWasPressed = false;
   private stickX = 0;  // raw joystick input (world-space)
   private stickY = 0;
   private expandShapeScale = 1.0;
@@ -59,6 +65,11 @@ export class SlimeBlob {
   private deformedHullLocal: Vec2[];
   /** Per-blob gravity override. null = use world gravity. */
   private gravityOverride: Vec2 | null = null;
+
+  // Sticky wall state
+  private stuckTo: { normal: Vec2 } | null = null;
+  /** Seconds remaining where re-sticking is suppressed. */
+  private stickReleaseGrace = 0;
 
   private expandShapeScaleMax: number;
   private expandShapeScaleSpeed: number;
@@ -157,6 +168,74 @@ export class SlimeBlob {
   update(delta: number): void {
     if (!this.playerControlled) return;
 
+    // Rising-edge detection for the jump/release button.
+    const jumpPressed = this.expandPressed && !this.expandWasPressed;
+
+    // Decrement release grace timer
+    if (this.stickReleaseGrace > 0) {
+      this.stickReleaseGrace = Math.max(0, this.stickReleaseGrace - delta);
+    }
+
+    // ── Sticky wall state machine ────────────────────────────────────
+    const sticky = this.world.getBlobStickyContact(this.blobId);
+
+    // Attempt to enter stuck state
+    if (
+      this.stuckTo === null &&
+      this.stickReleaseGrace === 0 &&
+      sticky.count >= STICK_MIN_CONTACTS
+    ) {
+      this.stuckTo = { normal: sticky.normal };
+      this.world.setBlobGravityOverride(this.blobId, vec2(0, 0));
+      this.world.zeroBlobVelocity(this.blobId);
+    }
+
+    // While stuck: handle release; otherwise skip the normal movement code path.
+    if (this.stuckTo !== null) {
+      // Refresh the wall normal if we still have contact (handles a moving wall)
+      if (sticky.count > 0) this.stuckTo.normal = sticky.normal;
+
+      // Compute aim from input: joystick X/Y in world space.
+      // If the joystick is pushing into the wall, project onto the wall's tangent plane.
+      let aim = vec2(this.stickX, this.stickY);
+      const aLen = Math.sqrt(aim.x * aim.x + aim.y * aim.y);
+      const n = this.stuckTo.normal;
+      if (aLen < 0.1) {
+        // No input → default to jumping straight off the wall.
+        aim = { x: n.x, y: n.y };
+      } else {
+        aim = { x: aim.x / aLen, y: aim.y / aLen };
+        // Clamp to half-plane facing away from the wall.
+        const into = aim.x * n.x + aim.y * n.y;
+        if (into < 0) {
+          aim = { x: aim.x - n.x * into, y: aim.y - n.y * into };
+          const tLen = Math.sqrt(aim.x * aim.x + aim.y * aim.y);
+          if (tLen < 0.05) aim = { x: n.x, y: n.y };
+          else aim = { x: aim.x / tLen, y: aim.y / tLen };
+        }
+      }
+
+      if (jumpPressed) {
+        // Release: launch along aim, clear stuck state, set grace timer.
+        this.world.applyBlobLinearVelocityDelta(
+          this.blobId,
+          vec2(aim.x * STICK_JUMP_IMPULSE, aim.y * STICK_JUMP_IMPULSE),
+        );
+        this.stuckTo = null;
+        this.stickReleaseGrace = STICK_RELEASE_GRACE;
+        this.world.setBlobGravityOverride(this.blobId, null);
+      } else {
+        // Keep velocity damped while stuck so the high-friction surface can pin us.
+        // (Gravity is already overridden to zero.) Cache aim so the renderer can show it.
+        (this.stuckTo as { normal: Vec2; aim?: Vec2 }).aim = aim;
+        this.world.setBlobShapeMatchRestScale(this.blobId, this.expandShapeScale);
+        this.expandWasPressed = this.expandPressed;
+        return;
+      }
+    }
+
+    // ── Normal movement path ─────────────────────────────────────────
+
     // Spring stiffness while expanding
     const expandSpringMult = this.expandPressed ? EXPAND_SPRING_STIFFNESS_MULT : 1.0;
     this.world.setBlobSpringStiffnessScale(this.blobId, expandSpringMult);
@@ -201,6 +280,16 @@ export class SlimeBlob {
     const rampRate = baseRate * this.expandSpeedMultiplier;
     this.expandShapeScale = moveToward(this.expandShapeScale, targetShapeScale, rampRate * delta);
     this.world.setBlobShapeMatchRestScale(this.blobId, this.expandShapeScale);
+
+    this.expandWasPressed = this.expandPressed;
+  }
+
+  /** While stuck to a sticky surface, returns the current aim direction + wall normal
+   * for rendering an aim indicator. Returns null when not stuck. */
+  getStickAim(): { aim: Vec2; normal: Vec2 } | null {
+    if (this.stuckTo === null) return null;
+    const aim = (this.stuckTo as { normal: Vec2; aim?: Vec2 }).aim ?? this.stuckTo.normal;
+    return { aim, normal: this.stuckTo.normal };
   }
 
   /** Get average blob velocity projected onto a given axis. */

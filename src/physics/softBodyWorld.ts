@@ -71,6 +71,14 @@ export class SoftBodyWorld {
   // Ground contact tracking — reset each step, counts hull particles touching static geometry
   private blobGroundContacts: number[] = [];
 
+  // Sticky contact tracking — reset each step. count = hull particles touching a 'sticky' surface;
+  // normalSum is the unnormalized sum of those contact normals (averaged on read).
+  private blobStickyContactCount: number[] = [];
+  private blobStickyContactNormalSum: Vec2[] = [];
+
+  // Per-blob gravity override. null = use world gravity (or trigger override if inside one).
+  private blobGravityOverride: (Vec2 | null)[] = [];
+
   // Timing
   private timeAccum = 0;
 
@@ -411,6 +419,34 @@ export class SoftBodyWorld {
     return this.blobGroundContacts[blobId];
   }
 
+  /** Returns the number of hull points touching a 'sticky' material surface this step,
+   * along with the averaged outward normal. Normal is ZERO if count is 0. */
+  getBlobStickyContact(blobId: number): { count: number; normal: Vec2 } {
+    if (blobId < 0 || blobId >= this.blobStickyContactCount.length) {
+      return { count: 0, normal: ZERO };
+    }
+    const count = this.blobStickyContactCount[blobId];
+    const sum = this.blobStickyContactNormalSum[blobId] ?? ZERO;
+    if (count === 0 || lengthSq(sum) < EPS * EPS) return { count, normal: ZERO };
+    return { count, normal: normalize(sum) };
+  }
+
+  /** Per-blob gravity override. Pass null to clear. Takes precedence over trigger gravity. */
+  setBlobGravityOverride(blobId: number, gravity: Vec2 | null): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    while (this.blobGravityOverride.length <= blobId) this.blobGravityOverride.push(null);
+    this.blobGravityOverride[blobId] = gravity;
+  }
+
+  /** Zero out every particle velocity in this blob. Useful for state transitions. */
+  zeroBlobVelocity(blobId: number): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    const r = this.blobRanges[blobId];
+    for (let i = r.start; i < r.end; i++) {
+      this.vel[i] = { x: 0, y: 0 };
+    }
+  }
+
   applyBlobMoveForce(blobId: number, move: Vec2, force: number, dt: number): void {
     if (blobId < 0 || blobId >= this.blobRanges.length) return;
     const r = this.blobRanges[blobId];
@@ -693,6 +729,15 @@ export class SoftBodyWorld {
       }
     }
 
+    // Per-blob gravity override (sticky-wall stick, etc.) — takes precedence over trigger overrides.
+    for (let bi = 0; bi < this.blobRanges.length; bi++) {
+      const r = this.blobRanges[bi];
+      if (r.inactive) continue;
+      const ov = this.blobGravityOverride[bi];
+      if (!ov) continue;
+      for (let j = r.start; j < r.end; j++) grav[j] = ov;
+    }
+
     // 2. Apply gravity
     for (let i = 0; i < n; i++) {
       this.vel[i] = add(this.vel[i], scale(grav[i], dt));
@@ -725,8 +770,14 @@ export class SoftBodyWorld {
       }
     }
 
-    // 8-9. Collisions — reset ground contact counts
+    // 8-9. Collisions — reset ground + sticky contact counts
     this.blobGroundContacts.length = this.blobRanges.length;
+    this.blobStickyContactCount.length = this.blobRanges.length;
+    this.blobStickyContactNormalSum.length = this.blobRanges.length;
+    for (let i = 0; i < this.blobRanges.length; i++) {
+      this.blobStickyContactCount[i] = 0;
+      this.blobStickyContactNormalSum[i] = { x: 0, y: 0 };
+    }
     this.blobGroundContacts.fill(0);
     this.solveCollisions(dt);
     this.solveParticleCollisions(dt);
@@ -1005,6 +1056,14 @@ export class SoftBodyWorld {
         // Track ground contacts (contact with upward-facing normal)
         if (n.y < -0.3) {
           this.blobGroundContacts[blobId]++;
+        }
+
+        // Track sticky contacts (accumulate count + normal for averaging on read)
+        if (material === 'sticky') {
+          this.blobStickyContactCount[blobId]++;
+          const sum = this.blobStickyContactNormalSum[blobId];
+          sum.x += n.x;
+          sum.y += n.y;
         }
 
         // Remove velocity into wall

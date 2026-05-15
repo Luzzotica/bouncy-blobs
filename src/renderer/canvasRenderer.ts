@@ -105,6 +105,34 @@ export function render(
     drawBlobPoints(ctx, world);
   }
 
+  // Sticky-wall aim indicator: arrow from blob centroid showing release direction
+  for (let i = 0; i < playerBlobs.length; i++) {
+    const stick = playerBlobs[i].getStickAim();
+    if (!stick) continue;
+    const c = playerBlobs[i].getCentroid();
+    const len = 90;
+    const ex = c.x + stick.aim.x * len;
+    const ey = c.y + stick.aim.y * len;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 80, 0.95)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // Arrowhead
+    const ah = 10;
+    const pX = -stick.aim.y, pY = stick.aim.x;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - stick.aim.x * ah + pX * ah * 0.5, ey - stick.aim.y * ah + pY * ah * 0.5);
+    ctx.lineTo(ex - stick.aim.x * ah - pX * ah * 0.5, ey - stick.aim.y * ah - pY * ah * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 255, 80, 0.95)';
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.restore();
 
   // Mode HUD overlay (screen-space)
