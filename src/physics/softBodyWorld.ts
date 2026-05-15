@@ -1088,15 +1088,33 @@ export class SoftBodyWorld {
     const polyB = this.buildPolygonFromIndices(rb.hull);
     if (!aabbOverlap(polygonAABB(polyA), polygonAABB(polyB))) return;
 
+    // Two symmetric passes: A's hull pushed out of B, then B's hull pushed out
+    // of A. Both passes are needed for stable resolution under interpenetration
+    // — but resolveThreeBodyVelocity inside resolvePointInShape already
+    // applies friction reciprocally, so running it on both passes doubles the
+    // friction relative to blob-vs-static. Halve the friction scale per pass
+    // so the total over both passes is 1x.
     for (let k = 0; k < ra.hull.length; k++) {
-      this.resolvePointInShape(ra.hull[k], polyB, rb.hull);
+      this.resolvePointInShape(ra.hull[k], polyB, rb.hull, 0.5);
     }
     for (let k = 0; k < rb.hull.length; k++) {
-      this.resolvePointInShape(rb.hull[k], polyA, ra.hull);
+      this.resolvePointInShape(rb.hull[k], polyA, ra.hull, 0.5);
     }
   }
 
-  private resolvePointInShape(pi: number, polyWorld: Vec2[], polyIndices: number[]): void {
+  /**
+   * Push a query particle outside the given polygon (defined by world coords
+   * and matching index array). Position correction is mass-weighted between
+   * the query particle and the two polygon-edge vertices nearest to it, so
+   * anchored vertices (invMass=0) absorb correction without moving.
+   *
+   * @param frictionScale Scales the friction impulse for this call. Use 1.0
+   *   when only one pass runs (the typical case for a single hull-vs-polygon
+   *   contact). When `collideBlobs` runs symmetric A-into-B + B-into-A
+   *   passes, pass 0.5 to each so the total friction across both passes is
+   *   1x and matches blob-vs-static behavior.
+   */
+  private resolvePointInShape(pi: number, polyWorld: Vec2[], polyIndices: number[], frictionScale = 1.0): void {
     const p = this.pos[pi];
     if (!isPointInPolygon(p, polyWorld)) return;
 
@@ -1129,9 +1147,9 @@ export class SoftBodyWorld {
       this.vel[ib1], this.mass[ib1],
       n, wb, wc,
       this.collisionRestitution,
-      this.blobBlobFrictionMu,
+      this.blobBlobFrictionMu * frictionScale,
       info.edgeDir,
-      this.blobBlobFrictionImpulseScale,
+      this.blobBlobFrictionImpulseScale * frictionScale,
     );
     this.vel[pi] = vaNew;
     this.vel[ib0] = vbNew;
