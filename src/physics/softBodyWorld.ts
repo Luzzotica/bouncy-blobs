@@ -98,6 +98,10 @@ export class SoftBodyWorld {
   // Per-blob gravity override. null = use world gravity (or trigger override if inside one).
   private blobGravityOverride: (Vec2 | null)[] = [];
 
+  // Snapshot-pinned blobs: every particle position is restored each substep
+  // and velocity zeroed. Used by the sticky-wall stick state.
+  private blobPinSnapshots: Map<number, Vec2[]> = new Map();
+
   // Timing
   private timeAccum = 0;
 
@@ -468,6 +472,22 @@ export class SoftBodyWorld {
     this.blobGravityOverride[blobId] = gravity;
   }
 
+  /** Freeze every particle of this blob in place. Snapshot taken now; each
+   * substep restores positions and zeroes velocities until unpinBlob() is called. */
+  pinBlobToCurrentPose(blobId: number): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    const r = this.blobRanges[blobId];
+    const snap: Vec2[] = [];
+    for (let i = r.start; i < r.end; i++) {
+      snap.push({ x: this.pos[i].x, y: this.pos[i].y });
+    }
+    this.blobPinSnapshots.set(blobId, snap);
+  }
+
+  unpinBlob(blobId: number): void {
+    this.blobPinSnapshots.delete(blobId);
+  }
+
   /** Zero out every particle velocity in this blob. Useful for state transitions. */
   zeroBlobVelocity(blobId: number): void {
     if (blobId < 0 || blobId >= this.blobRanges.length) return;
@@ -819,6 +839,20 @@ export class SoftBodyWorld {
 
     // 11. Damping
     this.applyHullVelocityDamping(dt);
+
+    // 12. Snapshot pins — for blobs frozen by the sticky-wall stick state,
+    // restore every particle to its snapshot position and zero velocity.
+    if (this.blobPinSnapshots.size > 0) {
+      this.blobPinSnapshots.forEach((snap, blobId) => {
+        if (blobId < 0 || blobId >= this.blobRanges.length) return;
+        const r = this.blobRanges[blobId];
+        if (r.inactive) return;
+        for (let i = r.start, k = 0; i < r.end && k < snap.length; i++, k++) {
+          this.pos[i] = { x: snap[k].x, y: snap[k].y };
+          this.vel[i] = { x: 0, y: 0 };
+        }
+      });
+    }
   }
 
   // --- Internal physics ---

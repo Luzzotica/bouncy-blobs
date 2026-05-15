@@ -188,6 +188,9 @@ export class SlimeBlob {
       this.stuckTo = { normal: sticky.normal };
       this.world.setBlobGravityOverride(this.blobId, vec2(0, 0));
       this.world.zeroBlobVelocity(this.blobId);
+      // Pin every particle to its current world position — substeps will keep
+      // restoring this snapshot until release, eliminating shape-match drift.
+      this.world.pinBlobToCurrentPose(this.blobId);
     }
 
     // While stuck: handle release; otherwise skip the normal movement code path.
@@ -216,7 +219,8 @@ export class SlimeBlob {
       }
 
       if (jumpPressed) {
-        // Release: launch along aim, clear stuck state, set grace timer.
+        // Release: unpin first so the impulse is preserved, then launch.
+        this.world.unpinBlob(this.blobId);
         this.world.applyBlobLinearVelocityDelta(
           this.blobId,
           vec2(aim.x * STICK_JUMP_IMPULSE, aim.y * STICK_JUMP_IMPULSE),
