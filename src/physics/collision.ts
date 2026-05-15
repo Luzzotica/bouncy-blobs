@@ -74,13 +74,25 @@ export function closestPointOnPolygonBoundary(point: Vec2, polygon: Vec2[]): Clo
   const b = polygon[(bestI + 1) % n];
   const edge = sub(b, a);
   const lenE = length(edge);
-  const edgeDir = lenE > EPS ? scale(edge, 1 / lenE) : RIGHT;
+  let edgeDir = lenE > EPS ? scale(edge, 1 / lenE) : RIGHT;
   // Normal perpendicular to edge: (tangent.y, -tangent.x)
   let normal = normalize({ x: edgeDir.y, y: -edgeDir.x });
   // Flip normal if it points away from query point
   const fromClosestToPoint = sub(point, bestClosest);
   if (dot(fromClosestToPoint, normal) < 0) {
     normal = negate(normal);
+  }
+  // Corner case: if the closest point coincides with a polygon vertex,
+  // the picked edge's tangent is arbitrary (two edges share the corner).
+  // Use the radial direction from the corner to the query point as the
+  // normal instead — this prevents the point from being pinned by
+  // tangential friction along an arbitrarily-picked adjacent edge.
+  const atVertex =
+    distanceToSq(bestClosest, a) < EPS * EPS ||
+    distanceToSq(bestClosest, b) < EPS * EPS;
+  if (atVertex && lengthSq(fromClosestToPoint) > EPS * EPS) {
+    normal = normalize(fromClosestToPoint);
+    edgeDir = { x: -normal.y, y: normal.x };
   }
   return { closest: bestClosest, edgeI: bestI, normal, a, b, edgeDir, edgeLen: lenE };
 }
