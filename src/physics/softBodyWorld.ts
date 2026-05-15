@@ -798,8 +798,9 @@ export class SoftBodyWorld {
       for (let j = r.start; j < r.end; j++) grav[j] = ov;
     }
 
-    // 2. Apply gravity
+    // 2. Apply gravity (skip anchored particles — invMass=0 means fixed in space)
     for (let i = 0; i < n; i++) {
+      if (this.invMass[i] === 0) continue;
       this.vel[i] = add(this.vel[i], scale(grav[i], dt));
     }
 
@@ -810,9 +811,14 @@ export class SoftBodyWorld {
     this.applyShapeMatching(dt);
 
     // 6. Semi-implicit Euler — save prev positions for CCD sweep
+    // (skip integration for anchored particles so they never drift)
     const prevPos: Vec2[] = new Array(n);
     for (let i = 0; i < n; i++) {
       prevPos[i] = this.pos[i];
+      if (this.invMass[i] === 0) {
+        this.vel[i] = { x: 0, y: 0 };
+        continue;
+      }
       this.pos[i] = add(this.pos[i], scale(this.vel[i], dt));
     }
 
