@@ -69,18 +69,20 @@ export function render(
     const positions = world.getPositions();
     const hull = sp.hullIndices.map(i => positions[i]);
     drawBlob(ctx, hull, '#9aa6c0', '#4f5874', 2.5, 0.18);
-    // Static-point highlights (small yellow dots)
-    const staticSet = new Set(sp.staticHullIndices);
-    ctx.fillStyle = '#ffcc55';
-    ctx.strokeStyle = '#0f1629';
-    ctx.lineWidth = 1.5;
-    for (const idx of sp.hullIndices) {
-      if (!staticSet.has(idx)) continue;
-      const p = positions[idx];
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+    // Static-point highlights (yellow dots) — debug-only
+    if (options.showPoints) {
+      const staticSet = new Set(sp.staticHullIndices);
+      ctx.fillStyle = '#ffcc55';
+      ctx.strokeStyle = '#0f1629';
+      ctx.lineWidth = 1.5;
+      for (const idx of sp.hullIndices) {
+        if (!staticSet.has(idx)) continue;
+        const p = positions[idx];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
     }
   }
 
