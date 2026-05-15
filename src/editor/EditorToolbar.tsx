@@ -23,6 +23,7 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
   { id: 'pointShape', label: 'Shape', hotkey: 'Q' },
   { id: 'plate', label: 'Plate', hotkey: 'W' },
   { id: 'trigger', label: 'Trigger', hotkey: 'E' },
+  { id: 'softPlatform', label: 'Soft Platform', hotkey: 'R' },
 ];
 
 export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToolbarProps) {

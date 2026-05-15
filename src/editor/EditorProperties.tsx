@@ -34,6 +34,43 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     );
   }
 
+  if (sel.type === 'softPlatform') {
+    const sp = (state.level.softPlatforms ?? []).find(s => s.id === sel.id);
+    if (!sp) return null;
+    const anchorsValue = Array.isArray(sp.anchors) ? 'custom' : (sp.anchors ?? 'corners');
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Soft Platform</h3>
+        <NumInput label="X" value={sp.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
+        <NumInput label="Y" value={sp.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
+        <NumInput label="Width" value={sp.width} onChange={v => { state.updateProperty('width', Math.max(40, v)); onUpdate(); }} />
+        <NumInput label="Height" value={sp.height} onChange={v => { state.updateProperty('height', Math.max(20, v)); onUpdate(); }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Anchors</label>
+          <select
+            value={anchorsValue}
+            disabled={anchorsValue === 'custom'}
+            onChange={e => { state.updateProperty('anchors', e.target.value); onUpdate(); }}
+            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+          >
+            <option value="corners">Corners</option>
+            <option value="ends">Ends</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+            {anchorsValue === 'custom' && <option value="custom">Custom (JSON)</option>}
+          </select>
+        </div>
+        <NumInput label="Stiffness" value={sp.stiffness ?? 1.0} step={0.1} onChange={v => { state.updateProperty('stiffness', Math.max(0.1, v)); onUpdate(); }} />
+        <NumInput label="Segments W" value={sp.segW ?? 8} step={1} onChange={v => { state.updateProperty('segW', Math.max(2, Math.floor(v))); onUpdate(); }} />
+        <NumInput label="Segments H" value={sp.segH ?? 1} step={1} onChange={v => { state.updateProperty('segH', Math.max(1, Math.floor(v))); onUpdate(); }} />
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Higher stiffness = more rigid. Higher segments = smoother sag.</p>
+        <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
+      </div>
+    );
+  }
+
   if (sel.type === 'platform') {
     const p = state.level.platforms.find(p => p.id === sel.id);
     if (!p) return null;
@@ -61,8 +98,8 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Width" value={s.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
         <NumInput label="Height" value={s.height} onChange={v => { state.updateProperty('height', Math.max(20, v)); onUpdate(); }} />
         <NumInput label="Rotation" value={radToDeg(s.rotation)} step={15} onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
-        <NumInput label="Force" value={s.force} step={50} onChange={v => { state.updateProperty('force', Math.max(100, v)); onUpdate(); }} />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>0°=right, -90°=up, 90°=down</p>
+        <NumInput label="Fire speed" value={s.fireSpeed ?? 1100} step={100} onChange={v => { state.updateProperty('fireSpeed', Math.max(500, Math.min(2500, v))); onUpdate(); }} />
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>0°=right, -90°=up, 90°=down · fire speed 500–2500</p>
         <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
       </div>
     );

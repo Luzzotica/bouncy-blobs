@@ -1,11 +1,11 @@
-import { LevelData, LevelType, PlatformDef, SpawnPointDef, NpcBlobDef, SpringPadDef, SpikeDef, ZoneDef, PowerupSpawnDef, PointShapeDef, PointShapePoint, PressurePlateDef, TriggerDef, TriggerTarget } from '../levels/types';
+import { LevelData, LevelType, PlatformDef, SpawnPointDef, NpcBlobDef, SpringPadDef, SpikeDef, ZoneDef, PowerupSpawnDef, PointShapeDef, PointShapePoint, PressurePlateDef, TriggerDef, TriggerTarget, SoftPlatformDef, SoftAnchorPattern } from '../levels/types';
 import { defaultLevel } from '../levels/defaultLevel';
 import type { HullPreset } from '../physics/slimeBlob';
 
 export type EditorTool =
   | 'select' | 'platform' | 'spawn' | 'npc' | 'spring' | 'spike'
   | 'goalZone' | 'hillZone' | 'powerup'
-  | 'pointShape' | 'plate' | 'trigger';
+  | 'pointShape' | 'plate' | 'trigger' | 'softPlatform';
 
 export type EditorElement =
   | { type: 'platform'; id: string }
@@ -20,7 +20,8 @@ export type EditorElement =
   | { type: 'pointShape'; id: string }
   | { type: 'pointShapeVertex'; id: string; pointIndex: number }
   | { type: 'plate'; id: string }
-  | { type: 'trigger'; id: string };
+  | { type: 'trigger'; id: string }
+  | { type: 'softPlatform'; id: string };
 
 export type ResizeHandle = 'left' | 'right' | 'top' | 'bottom';
 
@@ -37,11 +38,12 @@ export const TOOL_HOTKEYS: Record<string, EditorTool> = {
   'q': 'pointShape',
   'w': 'plate',
   'e': 'trigger',
+  'r': 'softPlatform',
 };
 
 const POINT_HIT_RADIUS_SQ = 200;
 
-const RECT_TYPES = new Set<string>(['platform', 'spring', 'spike', 'goalZone', 'hillZone', 'plate']);
+const RECT_TYPES = new Set<string>(['platform', 'spring', 'spike', 'goalZone', 'hillZone', 'plate', 'softPlatform']);
 const ROTATABLE_TYPES = new Set<string>(['platform', 'spring', 'spike', 'plate']);
 
 export interface UndoEntry {
@@ -174,6 +176,7 @@ export class EditorState {
         return shape?.points[sel.pointIndex];
       }
       case 'trigger': return (this.level.triggers ?? []).find(t => t.id === sel.id);
+      case 'softPlatform': return (this.level.softPlatforms ?? []).find(s => s.id === sel.id);
       default: return null;
     }
   }
@@ -196,6 +199,19 @@ export class EditorState {
     };
     this.level.platforms.push(platform);
     this.selectedElement = { type: 'platform', id: platform.id };
+    this.selectedTool = 'select';
+    this.onChange?.();
+  }
+
+  addSoftPlatform(x: number, y: number): void {
+    this.pushUndo();
+    if (!this.level.softPlatforms) this.level.softPlatforms = [];
+    const sp: SoftPlatformDef = {
+      id: genId('soft'), x: this.snap(x), y: this.snap(y),
+      width: 400, height: 60, anchors: 'corners',
+    };
+    this.level.softPlatforms.push(sp);
+    this.selectedElement = { type: 'softPlatform', id: sp.id };
     this.selectedTool = 'select';
     this.onChange?.();
   }
@@ -228,7 +244,7 @@ export class EditorState {
     if (!this.level.springPads) this.level.springPads = [];
     const spring: SpringPadDef = {
       id: genId('spring'), x: this.snap(x), y: this.snap(y),
-      width: 100, height: 40, rotation: -Math.PI / 2, force: 500,
+      width: 100, height: 40, rotation: -Math.PI / 2, fireSpeed: 1100,
     };
     this.level.springPads.push(spring);
     this.selectedElement = { type: 'spring', id: spring.id };
@@ -497,6 +513,7 @@ export class EditorState {
       case 'goalZone': this.addGoalZone(x, y); break;
       case 'hillZone': this.addHillZone(x, y); break;
       case 'plate': this.addPressurePlate(x, y); break;
+      case 'softPlatform': this.addSoftPlatform(x, y); break;
       default: this.isPlacing = false; return;
     }
 
@@ -546,6 +563,7 @@ export class EditorState {
           case 'goalZone': data.width = 400; data.height = 400; break;
           case 'hillZone': data.width = 500; data.height = 250; break;
           case 'plate': data.width = 120; data.height = 24; break;
+          case 'softPlatform': data.width = 400; data.height = 60; break;
         }
       }
     }
@@ -571,6 +589,7 @@ export class EditorState {
       case 'goalZone': this.level.goalZones = (this.level.goalZones ?? []).filter(z => z.id !== sel.id); break;
       case 'hillZone': this.level.hillZones = (this.level.hillZones ?? []).filter(z => z.id !== sel.id); break;
       case 'powerup': this.level.powerupSpawns = (this.level.powerupSpawns ?? []).filter(p => p.id !== sel.id); break;
+      case 'softPlatform': this.level.softPlatforms = (this.level.softPlatforms ?? []).filter(s => s.id !== sel.id); break;
       case 'plate': {
         const removedId = sel.id;
         this.level.pressurePlates = (this.level.pressurePlates ?? []).filter(p => p.id !== removedId);
@@ -821,6 +840,9 @@ export class EditorState {
     }
 
     // Rectangular elements (with rotation-aware test)
+    for (const s of this.level.softPlatforms ?? []) {
+      if (this.hitTestRect(worldX, worldY, s)) return { type: 'softPlatform', id: s.id };
+    }
     for (const p of this.level.platforms) {
       if (this.hitTestRect(worldX, worldY, p, p.rotation)) return { type: 'platform', id: p.id };
     }

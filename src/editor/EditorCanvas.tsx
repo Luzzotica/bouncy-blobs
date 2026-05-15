@@ -100,6 +100,44 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.restore();
     }
 
+    // Soft platforms (drawn first so platforms render on top)
+    for (const sp of state.level.softPlatforms ?? []) {
+      const selected = state.selectedElement?.type === 'softPlatform' && state.selectedElement.id === sp.id;
+      const hw = sp.width / 2;
+      const hh = sp.height / 2;
+      ctx.save();
+      ctx.fillStyle = selected ? '#5a6a90' : '#9aa6c0';
+      ctx.strokeStyle = selected ? '#8ab4f8' : '#4f5874';
+      ctx.lineWidth = selected ? 3 : 2;
+      const r = Math.min(8, hh, hw);
+      // Rounded rectangle
+      ctx.beginPath();
+      ctx.moveTo(sp.x - hw + r, sp.y - hh);
+      ctx.lineTo(sp.x + hw - r, sp.y - hh);
+      ctx.quadraticCurveTo(sp.x + hw, sp.y - hh, sp.x + hw, sp.y - hh + r);
+      ctx.lineTo(sp.x + hw, sp.y + hh - r);
+      ctx.quadraticCurveTo(sp.x + hw, sp.y + hh, sp.x + hw - r, sp.y + hh);
+      ctx.lineTo(sp.x - hw + r, sp.y + hh);
+      ctx.quadraticCurveTo(sp.x - hw, sp.y + hh, sp.x - hw, sp.y + hh - r);
+      ctx.lineTo(sp.x - hw, sp.y - hh + r);
+      ctx.quadraticCurveTo(sp.x - hw, sp.y - hh, sp.x - hw + r, sp.y - hh);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Anchor dots — show 'corners' as a sensible visual default; this is a
+      // schematic preview, the actual anchors at runtime depend on def.anchors.
+      ctx.fillStyle = '#ffcc55';
+      ctx.strokeStyle = '#0f1629';
+      ctx.lineWidth = 1.5;
+      for (const [cx, cy] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
+        ctx.beginPath();
+        ctx.arc(sp.x + cx, sp.y + cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Platforms
     for (const p of state.level.platforms) {
       const selected = state.selectedElement?.type === 'platform' && state.selectedElement.id === p.id;
@@ -556,7 +594,7 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     } else {
       const tool = state.selectedTool;
       // Rect-based tools use drag-to-place
-      if (tool === 'platform' || tool === 'spring' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone' || tool === 'plate') {
+      if (tool === 'platform' || tool === 'spring' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone' || tool === 'plate' || tool === 'softPlatform') {
         state.startPlacement(tool, wx, wy);
       } else {
         switch (tool) {
