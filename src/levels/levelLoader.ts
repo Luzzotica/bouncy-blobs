@@ -231,15 +231,15 @@ function expandSoftPlatform(
   const result = world.addBlobFromHull({
     hullRestLocal: hullLocal,
     centerLocal: { x: 0, y: 0 },
-    centerMass: Tuning.CENTER_MASS * 4,    // heavier than a blob for stability
-    hullMass: Tuning.HULL_MASS * 4,
-    springK: Tuning.SPRING_K * 4 * stiffness,
-    springDamp: Tuning.SPRING_DAMP * 2,
-    radialK: Tuning.RADIAL_K * 4 * stiffness,
-    radialDamp: Tuning.RADIAL_DAMP * 2,
+    centerMass: Tuning.CENTER_MASS * 12,   // platforms are heavy
+    hullMass: Tuning.HULL_MASS * 12,
+    springK: Tuning.SPRING_K * 10 * stiffness,
+    springDamp: Tuning.SPRING_DAMP * 4,
+    radialK: Tuning.RADIAL_K * 10 * stiffness,
+    radialDamp: Tuning.RADIAL_DAMP * 4,
     pressureK: 0.0,                        // platforms don't puff
-    shapeMatchK: Tuning.SHAPE_MATCH_K * 3 * stiffness,
-    shapeMatchDamp: Tuning.SHAPE_MATCH_DAMP * 2,
+    shapeMatchK: Tuning.SHAPE_MATCH_K * 8 * stiffness,
+    shapeMatchDamp: Tuning.SHAPE_MATCH_DAMP * 4,
     worldOrigin: vec2(def.x, def.y),
     staticHullIndices: anchorIdxs,
   });

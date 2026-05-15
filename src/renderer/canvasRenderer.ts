@@ -63,23 +63,12 @@ export function render(
     drawStaticPolygon(ctx, surface.poly, surface.material);
   }
 
-  // Soft platforms — filled polygon following the current hull positions
+  // Soft platforms — lightly-rounded polygon following current hull positions
   for (const sp of softPlatforms) {
     if (sp.hullIndices.length < 3) continue;
     const positions = world.getPositions();
-    ctx.beginPath();
-    const first = positions[sp.hullIndices[0]];
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < sp.hullIndices.length; i++) {
-      const p = positions[sp.hullIndices[i]];
-      ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
-    ctx.fillStyle = '#9aa6c0';      // muted slate fill
-    ctx.fill();
-    ctx.strokeStyle = '#4f5874';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
+    const hull = sp.hullIndices.map(i => positions[i]);
+    drawBlob(ctx, hull, '#9aa6c0', '#4f5874', 2.5, 0.18);
     // Static-point highlights (small yellow dots)
     const staticSet = new Set(sp.staticHullIndices);
     ctx.fillStyle = '#ffcc55';
