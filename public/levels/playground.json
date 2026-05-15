@@ -20,6 +20,9 @@
     { "id": "sticky-wall-r",  "x":  5000, "y": 1900, "width":  60, "height": 800, "rotation": 0, "material": "sticky" },
     { "id": "sticky-ceiling", "x":  4700, "y": 1480, "width": 600, "height":  60, "rotation": 0, "material": "sticky" },
 
+    { "id": "ramp-down",      "x":  5550, "y": 2150, "width": 600, "height": 40, "rotation": 0.3, "material": "default" },
+    { "id": "ramp-up",        "x":  5550, "y": 1700, "width": 500, "height": 40, "rotation": -0.4, "material": "ice" },
+
     { "id": "bounce-floor",   "x":  6300, "y": 2300, "width": 400, "height": 40, "rotation": 0, "material": "bouncy" },
 
     { "id": "spring-base",    "x":  7300, "y": 2400, "width": 280, "height": 50, "rotation": 0 },
