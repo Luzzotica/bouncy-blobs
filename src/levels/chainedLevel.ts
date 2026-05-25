@@ -66,12 +66,12 @@ export const chainedLevel: LevelData = {
   ],
   springPads: [
     // Launch up from starting area
-    { id: 'sp1', x: 1100, y: 5580, width: 120, height: 40, rotation: -Math.PI / 2, force: 650 },
+    { id: 'sp1', x: 1100, y: 5580, width: 120, height: 40, rotation: -Math.PI / 2 },
     // Boost on mid-level platforms
-    { id: 'sp2', x: 400, y: 3780, width: 100, height: 40, rotation: -Math.PI / 2, force: 600 },
-    { id: 'sp3', x: 1800, y: 3480, width: 100, height: 40, rotation: -Math.PI / 2, force: 600 },
+    { id: 'sp2', x: 400, y: 3780, width: 100, height: 40, rotation: -Math.PI / 2 },
+    { id: 'sp3', x: 1800, y: 3480, width: 100, height: 40, rotation: -Math.PI / 2 },
     // High-level boost toward summit
-    { id: 'sp4', x: 500, y: 1280, width: 100, height: 40, rotation: -Math.PI / 3, force: 550 },
+    { id: 'sp4', x: 500, y: 1280, width: 100, height: 40, rotation: -Math.PI / 3 },
   ],
   spikes: [
     // Wall spikes on alternating sides to punish swinging into walls

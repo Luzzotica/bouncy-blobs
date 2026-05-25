@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>softbody-wasm — rope / chain test</title>
+  <style>
+    body { margin: 0; background: #1a1626; color: #f0e8d8; font-family: ui-sans-serif, system-ui, sans-serif; }
+    #wrap { max-width: 1100px; margin: 16px auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 6px; letter-spacing: 0.04em; }
+    h2 { font-size: 13px; margin: 16px 0 6px; color: #8e7fa8; letter-spacing: 0.06em; text-transform: uppercase; }
+    p { font-size: 13px; line-height: 1.55; color: #c8bfae; margin: 4px 0 10px; }
+    canvas { background: #0e0a1a; border: 1px solid #3a304f; display: block; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .cell { background: #0e0a1a; border: 1px solid #3a304f; padding: 8px; }
+    .cell h3 { margin: 0 0 6px; font-size: 12px; color: #d35400; letter-spacing: 0.05em; text-transform: uppercase; }
+    .legend { font-family: ui-monospace, monospace; font-size: 11px; color: #6a5f80; margin-top: 6px; }
+    button { background: #3a304f; color: #f0e8d8; border: 1px solid #5a4f7f; padding: 6px 12px; font-size: 12px; cursor: pointer; margin-right: 8px; }
+    button:hover { background: #5a4f7f; }
+    code { background: #2a223a; padding: 1px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <h1>rope / chain test — wasm engine</h1>
+    <p>
+      Three scenarios validate that the rope solver behaves correctly:
+      sag (gravity catenary), pendulum (swing + period), and rope-over-peg
+      (collision routing). Each runs in its own world. Reload to reseed.
+      Hold mouse to drag the orange blob in scene 2 if you want to perturb
+      the pendulum.
+    </p>
+
+    <div class="row">
+      <div class="cell">
+        <h3>1. Sag — two anchors, rope drapes under gravity</h3>
+        <canvas id="c1" width="350" height="280"></canvas>
+        <div class="legend" id="l1">—</div>
+      </div>
+      <div class="cell">
+        <h3>2. Pendulum — anchor + free blob, swings</h3>
+        <canvas id="c2" width="350" height="280"></canvas>
+        <div class="legend" id="l2">—</div>
+      </div>
+      <div class="cell">
+        <h3>3. Over peg — rope wraps a static obstacle</h3>
+        <canvas id="c3" width="350" height="280"></canvas>
+        <div class="legend" id="l3">—</div>
+      </div>
+      <div class="cell">
+        <h3>4. Two blobs over peg — rope between two free soft bodies</h3>
+        <canvas id="c4" width="350" height="280"></canvas>
+        <div class="legend" id="l4">—</div>
+      </div>
+    </div>
+
+    <h2>What you should see if the rope works</h2>
+    <p>
+      <strong>1. Sag:</strong> rope hangs as a smooth catenary curve
+      between the two anchors. Settles in &lt;2 seconds, doesn't oscillate
+      forever. Stretches no more than the budget allows.
+      <br/>
+      <strong>2. Pendulum:</strong> blob swings under gravity, rope stays
+      mostly taut (anchored end at top, free blob at bottom). Period should
+      look reasonable; no infinite acceleration; doesn't snap apart on
+      hard swings.
+      <br/>
+      <strong>3. Over peg:</strong> rope routes around the peg cleanly,
+      blob hangs on one side, weight transfers through the peg without
+      the rope clipping through it.
+      <br/>
+      <strong>4. Two blobs over peg:</strong> two free soft bodies
+      connected by a rope, draped over a peg. Neither is anchored — the
+      rope alone holds them. They should reach a hanging equilibrium
+      where the heavier (or lower-starting) one pulls the other up
+      over the peg. Bumping the system (tweak `seed` or restart) should
+      change which one settles lower.
+    </p>
+  </div>
+
+  <script type="module">
+    import init, { SoftBodyWorldHandle } from './wasm/softbody_wasm.js';
+
+    const LAYER_CHAIN = 0b00000100;
+    const LAYER_WORLD = 0b00001000;
+    const LAYER_ALL   = 0xFFFF;
+
+    // Each scenario is { setup(world), render(ctx, world, state), update?(world, dt) }.
+    // Setup runs once and returns persistent state. Per frame, render() draws.
+
+    function setupSag(w) {
+      // Two anchors at the top (mass=0). Rope between them, 240 units long.
+      const left = w.addParticle(90,  60, 0, 0, 0, 0);
+      const right = w.addParticle(260, 60, 0, 0, 0, 0);
+      const inner = w.addRopeChain(left, right, 240, 10, 0.5, 6, LAYER_CHAIN, LAYER_WORLD, 16);
+      return { kind: 'sag', left, right, inner: Array.from(inner) };
+    }
+
+    function setupPendulum(w) {
+      // Anchor at top. A small blob hanging by a rope from a low-mass free particle.
+      const anchor = w.addParticle(175, 50, 0, 0, 0, 0);
+      // Free heavy "weight" particle representing the blob end (start at rest).
+      const weight = w.addParticle(175, 180, 0, 0, 5.0, 12);
+      const inner = w.addRopeChain(anchor, weight, 140, 12, 0.5, 6, LAYER_CHAIN, LAYER_WORLD, 16);
+      // Give it a tangential push for a clean swing.
+      w.setParticleVel(weight, 220, 0);
+      return { kind: 'pendulum', anchor, weight, inner: Array.from(inner) };
+    }
+
+    function makeOctagonHull(r) {
+      const hull = [];
+      const N = 8;
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        hull.push(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      return new Float64Array(hull);
+    }
+
+    function spawnBlob(w, originX, originY, sortKey) {
+      // No anchors — fully dynamic soft body.
+      // `static_hull_indices` is empty (no anchored hull vertices), and
+      // `static_center` is false. These are required positional args on
+      // the wasm `addBlobFromHull` since the soft-platform-anchor fix.
+      return w.addBlobFromHull(
+        makeOctagonHull(16),
+        0, 0,             // center local
+        0.2, 0.12,        // center mass, hull mass
+        55, 3.5,          // spring k/damp
+        75, 4.2,          // radial k/damp
+        0.12,             // pressure k
+        132, 4.6,         // shape-match k/damp
+        originX, originY,
+        sortKey,
+        new Uint32Array(),
+        false,
+      );
+    }
+
+    function setupTwoBlobsOverPeg(w) {
+      // Two free blobs hung at the top corners. Rope from each blob's
+      // CENTER particle, over a peg in the middle. Neither blob is
+      // anchored — the rope alone connects them. As one tries to fall,
+      // it pulls the other up over the peg.
+      const blobA = spawnBlob(w, 70,  60, 'a');
+      const blobB = spawnBlob(w, 280, 60, 'b');
+
+      // Peg.
+      w.registerStaticPolygon(new Float64Array([
+        160, 140, 200, 140, 200, 160, 160, 160,
+      ]), 0);
+      // Floor.
+      w.registerStaticPolygon(new Float64Array([
+        0, 260, 350, 260, 350, 280, 0, 280,
+      ]), 0);
+
+      // Rope connects the two blob CENTERS. Total length budget = 200
+      // (shorter than the ~260 unit path along the peg, so the blobs
+      // hang taut on either side instead of slacking to the floor).
+      const inner = w.addRopeChain(
+        blobA.center_idx, blobB.center_idx,
+        200, 12, 0.5, 6,
+        LAYER_CHAIN, LAYER_WORLD, 16,
+      );
+
+      return {
+        kind: 'twoBlobsOverPeg',
+        blobA, blobB,
+        // For draw() polyline.
+        top: blobA.center_idx,
+        weight: blobB.center_idx,
+        inner: Array.from(inner),
+      };
+    }
+
+    function setupOverPeg(w) {
+      // Left anchor up high. Free weight starts up high too on the right.
+      // Static peg sits between them at mid-height. As gravity pulls the
+      // weight down, the rope drapes OVER the peg and the weight swings
+      // down the right side, with the peg routing the rope.
+      const anchor = w.addParticle(40, 40, 0, 0, 0, 0);
+      const weight = w.addParticle(310, 60, 0, 0, 8.0, 12);
+
+      // Peg in the middle.
+      w.registerStaticPolygon(new Float64Array([
+        160, 130, 200, 130, 200, 150, 160, 150,
+      ]), 0);
+      // Floor so the weight has somewhere to land if it falls past the peg.
+      w.registerStaticPolygon(new Float64Array([
+        0, 260, 350, 260, 350, 280, 0, 280,
+      ]), 0);
+
+      const inner = w.addRopeChain(anchor, weight, 320, 12, 0.5, 6, LAYER_CHAIN, LAYER_WORLD, 16);
+      return { kind: 'overPeg', top: anchor, weight, inner: Array.from(inner) };
+    }
+
+    function draw(ctx, w, state, label) {
+      const W = ctx.canvas.width, H = ctx.canvas.height;
+      ctx.fillStyle = '#0e0a1a';
+      ctx.fillRect(0, 0, W, H);
+
+      // Static surfaces (draw whatever exists).
+      const surfBuf = w.staticSurfacesSnapshot();
+      ctx.fillStyle = '#3a304f';
+      let i = 0;
+      while (i < surfBuf.length) {
+        const _matId = surfBuf[i++] | 0;
+        const count = surfBuf[i++] | 0;
+        ctx.beginPath();
+        for (let k = 0; k < count; k++) {
+          const x = surfBuf[i++], y = surfBuf[i++];
+          if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Rope: draw poly-line through chain particles.
+      const positions = w.getPositions();
+      const chain = [state.left ?? state.anchor ?? state.top, ...state.inner, state.right ?? state.weight];
+      ctx.strokeStyle = '#d35400';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let k = 0; k < chain.length; k++) {
+        const x = positions[chain[k] * 2];
+        const y = positions[chain[k] * 2 + 1];
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Chain segment particles as small dots.
+      ctx.fillStyle = '#e8b08a';
+      for (const idx of state.inner) {
+        const x = positions[idx * 2];
+        const y = positions[idx * 2 + 1];
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Endpoints: anchor (yellow), weight (purple).
+      function drawEnd(idx, color, r) {
+        const x = positions[idx * 2];
+        const y = positions[idx * 2 + 1];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (state.kind === 'sag') {
+        drawEnd(state.left, '#fff5d8', 5);
+        drawEnd(state.right, '#fff5d8', 5);
+      } else if (state.kind === 'pendulum') {
+        drawEnd(state.anchor, '#fff5d8', 5);
+        drawEnd(state.weight, '#a87ee8', 8);
+      } else if (state.kind === 'overPeg') {
+        drawEnd(state.top, '#fff5d8', 5);
+        drawEnd(state.weight, '#a87ee8', 8);
+      } else if (state.kind === 'twoBlobsOverPeg') {
+        // Draw both blob hulls.
+        for (const [blob, color] of [
+          [state.blobA, '#a87ee8'],
+          [state.blobB, '#e8b08a'],
+        ]) {
+          const hull = w.getHullPolygon(blob.blob_id);
+          ctx.fillStyle = color;
+          ctx.strokeStyle = '#fff5d8';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let k = 0; k < hull.length; k += 2) {
+            if (k === 0) ctx.moveTo(hull[k], hull[k + 1]);
+            else ctx.lineTo(hull[k], hull[k + 1]);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      label.textContent = `tick ${w.tick} · particles ${w.particleCount()}`;
+    }
+
+    init().then(() => {
+      // Each scene is built in isolation — if one throws (bad signature,
+      // bad arg), only that canvas goes blank and the others keep ticking.
+      const worlds = [
+        { canvas: document.getElementById('c1'), label: document.getElementById('l1'), setup: setupSag },
+        { canvas: document.getElementById('c2'), label: document.getElementById('l2'), setup: setupPendulum },
+        { canvas: document.getElementById('c3'), label: document.getElementById('l3'), setup: setupOverPeg },
+        { canvas: document.getElementById('c4'), label: document.getElementById('l4'), setup: setupTwoBlobsOverPeg },
+      ].flatMap(({ canvas, label, setup }) => {
+        try {
+          const w = new SoftBodyWorldHandle(1, 0, 980, 4);
+          const state = setup(w);
+          const ctx = canvas.getContext('2d');
+          return [{ w, state, ctx, label }];
+        } catch (err) {
+          label.textContent = 'setup failed: ' + (err.message ?? err);
+          console.error('scene setup failed:', err);
+          return [];
+        }
+      });
+
+      let last = performance.now();
+      function tick(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        for (const wd of worlds) {
+          wd.w.step(dt);
+          draw(wd.ctx, wd.w, wd.state, wd.label);
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }).catch(err => {
+      console.error('wasm load failed:', err);
+    });
+  </script>
+</body>
+</html>

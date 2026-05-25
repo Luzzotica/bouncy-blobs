@@ -1,11 +1,12 @@
 import { GameMode, GameModeConfig, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
 import { LevelData, ZoneDef } from '../../levels/types';
 import { kothLevel } from '../../levels/kothLevel';
 import { drawHillZone } from '../../renderer/zoneRenderer';
-import { drawPlayerLabels, drawScoreBoard, drawTimer } from '../../renderer/hudRenderer';
+import { drawScoreBoard, drawTimer } from '../../renderer/hudRenderer';
 import { isPointInPolygon } from '../../physics/collision';
 import { vec2 } from '../../physics/vec2';
 
@@ -39,7 +40,7 @@ export class KingOfTheHillMode implements GameMode {
     return this.levelData;
   }
 
-  initialize(_world: SoftBodyWorld, _playerManager: PlayerManager): void {
+  initialize(_world: SoftBodyEngine, _playerManager: PlayerManager): void {
     this.hillZone = this.levelData.hillZones?.[0] ?? null;
   }
 
@@ -50,7 +51,7 @@ export class KingOfTheHillMode implements GameMode {
     }
   }
 
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyWorld): void {
+  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyEngine): void {
     this.gameTime += dt;
     if (!this.hillZone) return;
 
@@ -112,11 +113,10 @@ export class KingOfTheHillMode implements GameMode {
     return null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, state: GameModeState, playerManager: PlayerManager): void {
+  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, _playerManager: PlayerManager): void {
     if (this.hillZone) {
       drawHillZone(ctx, this.hillZone, this.gameTime, this.currentKingColor);
     }
-    drawPlayerLabels(ctx, playerManager.getAllPlayers());
   }
 
   renderHUD(ctx: CanvasRenderingContext2D, width: number, height: number, state: GameModeState, playerManager: PlayerManager): void {

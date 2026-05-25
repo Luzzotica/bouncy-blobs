@@ -35,6 +35,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "resources/steamworks/redistributable_bin/osx/libsteam_api.dylib": "libsteam_api.dylib",
+      "resources/steamworks/redistributable_bin/win64/steam_api64.dll": "steam_api64.dll",
+      "resources/steamworks/redistributable_bin/linux64/libsteam_api.so": "libsteam_api.so"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

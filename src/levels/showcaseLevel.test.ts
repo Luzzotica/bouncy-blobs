@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SoftBodyWorld } from '../physics/softBodyWorld';
 import { TriggerManager } from '../game/triggerManager';
-import { PressurePlateManager } from '../game/pressurePlateManager';
+import { ActionManager } from '../game/actionManager';
+import { PlatformMover } from '../game/platformMover';
 import { loadLevel } from './levelLoader';
 import { LevelData } from './types';
 
@@ -26,8 +27,8 @@ describe('showcase level — covers every element type', () => {
     expect(level.hillZones?.length ?? 0).toBeGreaterThan(0);
     expect(level.powerupSpawns?.length ?? 0).toBeGreaterThan(0);
     expect(level.pointShapes?.length ?? 0).toBeGreaterThan(0);
-    expect(level.pressurePlates?.length ?? 0).toBeGreaterThan(0);
     expect(level.triggers?.length ?? 0).toBeGreaterThan(0);
+    expect(level.actions?.length ?? 0).toBeGreaterThan(0);
   });
 
   it('exercises every NPC hull preset at least once', () => {
@@ -53,34 +54,39 @@ describe('showcase level — covers every element type', () => {
     expect(hasMixed).toBe(true);
   });
 
-  it('includes a one-shot pressure plate and a re-fireable one', () => {
-    const plates = level.pressurePlates!;
-    expect(plates.some(p => p.oneShot)).toBe(true);
-    expect(plates.some(p => !p.oneShot)).toBe(true);
+  it('includes actions covering multiple modes', () => {
+    const modes = new Set(level.actions!.map(a => a.mode));
+    expect(modes.has('continuous')).toBe(true);
+    expect(modes.has('oneShot')).toBe(true);
   });
 
-  it('every plate trigger reference resolves to a defined trigger', () => {
+  it('every action sourceTriggerId resolves to a defined trigger', () => {
     const triggerIds = new Set(level.triggers!.map(t => t.id));
-    for (const plate of level.pressurePlates!) {
-      for (const tid of plate.triggerIds) {
+    for (const action of level.actions!) {
+      for (const tid of action.sourceTriggerIds) {
         expect(triggerIds.has(tid)).toBe(true);
       }
     }
   });
 
-  it('every trigger target refers to a real point on a real shape', () => {
-    const byId = new Map(level.pointShapes!.map(s => [s.id, s]));
-    for (const trig of level.triggers!) {
-      for (const t of trig.targets) {
-        const shape = byId.get(t.shapeId);
-        expect(shape, `shape ${t.shapeId} missing`).toBeDefined();
-        expect(t.pointIndex).toBeGreaterThanOrEqual(0);
-        expect(t.pointIndex).toBeLessThan(shape!.points.length);
+  it('every action target refers to a real point on a real shape or platform', () => {
+    const shapeById = new Map(level.pointShapes!.map(s => [s.id, s]));
+    const platformIds = new Set(level.platforms.map(p => p.id));
+    for (const action of level.actions!) {
+      for (const t of action.targets) {
+        if (t.kind === 'shapePoint') {
+          const shape = shapeById.get(t.shapeId);
+          expect(shape, `shape ${t.shapeId} missing`).toBeDefined();
+          expect(t.pointIndex).toBeGreaterThanOrEqual(0);
+          expect(t.pointIndex).toBeLessThan(shape!.points.length);
+        } else {
+          expect(platformIds.has(t.platformId)).toBe(true);
+        }
       }
     }
   });
 
-  it('loads cleanly into the runtime and a plate can fire a trigger that moves the right particle', () => {
+  it('loads cleanly into the runtime and a continuous action raises bridge points while the trigger is occupied', () => {
     const world = new SoftBodyWorld();
     const loaded = loadLevel(world, level);
 
@@ -89,29 +95,35 @@ describe('showcase level — covers every element type', () => {
       expect(loaded.pointShapeParticles.get(ps.id)?.length).toBe(ps.points.length);
     }
 
+    const platformMover = new PlatformMover();
+    platformMover.initialize(level.platforms, loaded.platformSurfaces);
+
     const triggerMgr = new TriggerManager();
-    triggerMgr.initialize(world, level.triggers ?? [], loaded.pointShapeParticles);
-    const plateMgr = new PressurePlateManager();
-    plateMgr.initialize(world, level.pressurePlates ?? [], loaded.plateShapeIdxToId, triggerMgr);
+    triggerMgr.initialize(world, level.triggers ?? [], loaded.triggerShapeIdxToId);
 
-    // Find the plate-bridge plate and its associated trigger shape index.
-    const bridgePlateId = 'plate-bridge';
-    let shapeIdx = -1;
-    for (const [idx, id] of loaded.plateShapeIdxToId) {
-      if (id === bridgePlateId) { shapeIdx = idx; break; }
+    const actionMgr = new ActionManager();
+    actionMgr.initialize(world, level.actions ?? [], loaded.pointShapeParticles, undefined, platformMover, triggerMgr);
+
+    // Find the bridge trigger area's shape index.
+    let bridgeShapeIdx = -1;
+    for (const [idx, id] of loaded.triggerShapeIdxToId) {
+      if (id === 'plate-bridge') { bridgeShapeIdx = idx; break; }
     }
-    expect(shapeIdx).toBeGreaterThanOrEqual(0);
+    expect(bridgeShapeIdx).toBeGreaterThanOrEqual(0);
 
-    // Capture the start position of the bridge anchor that the trigger moves (pointIndex 0).
     const bridgeIds = loaded.pointShapeParticles.get('rope-bridge')!;
     const anchorPid = bridgeIds[0];
     const startY = world.pos[anchorPid].y;
 
-    // Simulate a blob stepping on the plate, then run a long update.
-    world.onTriggerEntered!(shapeIdx, 0);
-    triggerMgr.update(10);
+    // Simulate a blob stepping on the trigger, then run a long update.
+    world.onTriggerEntered!(bridgeShapeIdx, 0);
+    // Drive several frames: triggerManager flips pressed; actionManager runs the tween.
+    for (let i = 0; i < 200; i++) {
+      triggerMgr.update(0.016);
+      actionMgr.update(0.016);
+    }
 
-    // After the tween, anchor should have lifted to endY=1300 (well above startY=1680).
+    // After a continuous action's open tween, anchor should have risen toward endY=1300.
     expect(world.pos[anchorPid].y).toBeCloseTo(1300, 1);
     expect(world.pos[anchorPid].y).toBeLessThan(startY);
   });

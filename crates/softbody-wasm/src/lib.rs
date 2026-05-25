@@ -1,0 +1,628 @@
+// wasm-bindgen surface for the softbody crate.
+//
+// Design: keep the boundary narrow. The renderer wants Float64Array of
+// positions per frame; the input layer wants to push forces and impulses
+// in by particle/blob id. Everything crosses as either:
+//   - flat f64 typed arrays (point lists, position dumps)
+//   - primitive numbers (ids, scalar forces)
+// All numeric conversion to/from Fx happens at the boundary using
+// `Fx::from_f64` (round-half-to-even). Sim state lives entirely in Fx.
+
+#![cfg(target_arch = "wasm32")]
+
+use wasm_bindgen::prelude::*;
+use js_sys::Float64Array;
+
+use softbody::fx::{Fx, FxVec2};
+use softbody::world::{AddBlobParams, SoftBodyWorld};
+use softbody::types::{SurfaceMaterial, GravityField, PointGravityFalloff, WorldConfig};
+
+fn fv(x: f64, y: f64) -> FxVec2 { FxVec2::new(Fx::from_f64(x), Fx::from_f64(y)) }
+
+fn poly_from_f64_pairs(pts: &[f64]) -> Vec<FxVec2> {
+    assert!(pts.len() % 2 == 0, "polygon points must be flat (x,y) pairs");
+    let mut out = Vec::with_capacity(pts.len() / 2);
+    let mut i = 0;
+    while i < pts.len() {
+        out.push(fv(pts[i], pts[i + 1]));
+        i += 2;
+    }
+    out
+}
+
+fn material_from_id(m: u32) -> SurfaceMaterial {
+    match m {
+        1 => SurfaceMaterial::Ice,
+        2 => SurfaceMaterial::Sticky,
+        3 => SurfaceMaterial::Bouncy,
+        _ => SurfaceMaterial::Default,
+    }
+}
+
+#[wasm_bindgen]
+pub struct SoftBodyWorldHandle {
+    inner: SoftBodyWorld,
+}
+
+#[wasm_bindgen]
+pub struct BlobHandle {
+    #[wasm_bindgen(readonly)] pub blob_id: u32,
+    #[wasm_bindgen(readonly)] pub center_idx: u32,
+    #[wasm_bindgen(readonly)] pub shape_idx: u32,
+    hull_indices: Vec<u32>,
+}
+
+#[wasm_bindgen]
+impl BlobHandle {
+    /// Hull particle indices as a typed array.
+    #[wasm_bindgen(getter, js_name = hullIndices)]
+    pub fn hull_indices_js(&self) -> js_sys::Uint32Array {
+        js_sys::Uint32Array::from(&self.hull_indices[..])
+    }
+}
+
+#[wasm_bindgen]
+impl SoftBodyWorldHandle {
+    /// Construct a new world.
+    ///
+    /// `gravity_y` is positive-down (matches the rest of the engine).
+    /// All scalars are passed as `f64` and rounded into Fx at the boundary.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        rng_seed: u32,
+        gravity_x: f64, gravity_y: f64,
+        substeps: u32,
+    ) -> SoftBodyWorldHandle {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = fv(gravity_x, gravity_y);
+        cfg.substeps = substeps.max(1);
+        SoftBodyWorldHandle { inner: SoftBodyWorld::new(cfg, rng_seed) }
+    }
+
+    /// Override the world's RNG seed mid-flight. Should only be called
+    /// before any step() — changing the seed mid-sim diverges immediately.
+    #[wasm_bindgen(js_name = setRngSeed)]
+    pub fn set_rng_seed(&mut self, seed: u32) {
+        self.inner.rng = softbody::rng::Mulberry32::new(seed);
+    }
+
+    /// Logical tick counter — increments once per `step()`.
+    #[wasm_bindgen(getter)]
+    pub fn tick(&self) -> u32 { self.inner.tick as u32 }
+
+    /// Override the logical tick — used by the guest's keyframe restore
+    /// path to align local sim time with the host's authoritative tick.
+    #[wasm_bindgen(js_name = setTick)]
+    pub fn set_tick(&mut self, t: u32) { self.inner.set_tick(t as u64); }
+
+    /// Total particle count (across all blobs + extras).
+    #[wasm_bindgen(js_name = particleCount)]
+    pub fn particle_count(&self) -> u32 { self.inner.pos.len() as u32 }
+
+    /// Number of registered blobs.
+    #[wasm_bindgen(js_name = blobCount)]
+    pub fn blob_count(&self) -> u32 { self.inner.blob_count() as u32 }
+
+    /// Register a static (immovable) collision polygon. `points` is a
+    /// flat (x0,y0,x1,y1,...) buffer in world units. `material_id`:
+    /// 0 default, 1 ice, 2 sticky, 3 bouncy.
+    #[wasm_bindgen(js_name = registerStaticPolygon)]
+    pub fn register_static_polygon(&mut self, points: &[f64], material_id: u32) -> u32 {
+        let poly = poly_from_f64_pairs(points);
+        self.inner.register_static_polygon(poly, material_from_id(material_id), None, None, None) as u32
+    }
+
+    /// Register a trigger zone. `gravity_x`/`gravity_y` of NaN means no
+    /// gravity override (just an enter/exit sensor).
+    #[wasm_bindgen(js_name = registerTriggerPolygon)]
+    pub fn register_trigger_polygon(
+        &mut self,
+        points: &[f64],
+        gravity_x: f64,
+        gravity_y: f64,
+    ) -> u32 {
+        let poly = poly_from_f64_pairs(points);
+        let field = if gravity_x.is_nan() || gravity_y.is_nan() {
+            None
+        } else {
+            Some(GravityField::Uniform { vector: fv(gravity_x, gravity_y) })
+        };
+        self.inner.register_trigger_polygon(poly, field) as u32
+    }
+
+    /// Register a point-attractor trigger.
+    #[wasm_bindgen(js_name = registerTriggerPointGravity)]
+    pub fn register_trigger_point_gravity(
+        &mut self,
+        points: &[f64],
+        center_x: f64, center_y: f64,
+        strength: f64,
+        inverse_square: bool,
+    ) -> u32 {
+        let poly = poly_from_f64_pairs(points);
+        let falloff = if inverse_square { PointGravityFalloff::InverseSquare } else { PointGravityFalloff::Linear };
+        let field = Some(GravityField::Point {
+            center: fv(center_x, center_y),
+            strength: Fx::from_f64(strength),
+            falloff,
+        });
+        self.inner.register_trigger_polygon(poly, field) as u32
+    }
+
+    /// Add a blob from a hull (flat x,y,x,y,... rest-local coords).
+    /// `static_hull_indices` lists hull-local indices that should be
+    /// anchored (mass=0, immovable) — used by soft platforms to fix
+    /// corners/edges in place while the body deforms. Pass an empty
+    /// array for a fully-dynamic blob.
+    /// Returns a BlobHandle with the blob id + key particle indices.
+    #[wasm_bindgen(js_name = addBlobFromHull)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_blob_from_hull(
+        &mut self,
+        hull_rest_local: &[f64],
+        center_local_x: f64, center_local_y: f64,
+        center_mass: f64, hull_mass: f64,
+        spring_k: f64, spring_damp: f64,
+        radial_k: f64, radial_damp: f64,
+        pressure_k: f64,
+        shape_match_k: f64, shape_match_damp: f64,
+        world_origin_x: f64, world_origin_y: f64,
+        sort_key: &str,
+        static_hull_indices: &[u32],
+        static_center: bool,
+    ) -> BlobHandle {
+        let hull = poly_from_f64_pairs(hull_rest_local);
+        let res = self.inner.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: hull,
+            center_local: fv(center_local_x, center_local_y),
+            center_mass: Fx::from_f64(center_mass),
+            hull_mass: Fx::from_f64(hull_mass),
+            spring_k: Fx::from_f64(spring_k),
+            spring_damp: Fx::from_f64(spring_damp),
+            radial_k: Fx::from_f64(radial_k),
+            radial_damp: Fx::from_f64(radial_damp),
+            pressure_k: Fx::from_f64(pressure_k),
+            shape_match_k: Fx::from_f64(shape_match_k),
+            shape_match_damp: Fx::from_f64(shape_match_damp),
+            world_origin: fv(world_origin_x, world_origin_y),
+            sort_key: if sort_key.is_empty() { None } else { Some(sort_key.to_string()) },
+            static_hull_indices: static_hull_indices.iter().map(|&i| i as usize).collect(),
+            static_center,
+        });
+        BlobHandle {
+            blob_id: res.blob_id,
+            center_idx: res.center_idx,
+            shape_idx: res.shape_idx,
+            hull_indices: res.hull_indices,
+        }
+    }
+
+    /// Advance the simulation by `delta_seconds`. Internally clamped to
+    /// [1/240, 1/20] and run for `substeps` substeps.
+    #[wasm_bindgen]
+    pub fn step(&mut self, delta_seconds: f64) {
+        self.inner.step(Fx::from_f64(delta_seconds));
+    }
+
+    // ---- input forces ----
+
+    #[wasm_bindgen(js_name = applyBlobMoveForce)]
+    pub fn apply_blob_move_force(
+        &mut self, blob_id: u32,
+        move_x: f64, move_y: f64,
+        force: f64, dt: f64,
+    ) {
+        self.inner.apply_blob_move_force(
+            blob_id,
+            fv(move_x, move_y),
+            Fx::from_f64(force),
+            Fx::from_f64(dt),
+        );
+    }
+
+    #[wasm_bindgen(js_name = applyBlobLinearVelocityDelta)]
+    pub fn apply_blob_linear_velocity_delta(
+        &mut self, blob_id: u32, dvx: f64, dvy: f64,
+    ) {
+        self.inner.apply_blob_linear_velocity_delta(blob_id, fv(dvx, dvy));
+    }
+
+    // ---- state readout (Float64Array — converted on demand from Fx) ----
+
+    /// Flat (x0,y0,x1,y1,...) buffer of all particle positions.
+    #[wasm_bindgen(js_name = getPositions)]
+    pub fn get_positions(&self) -> Float64Array {
+        let n = self.inner.pos.len();
+        let mut buf = vec![0.0f64; n * 2];
+        for (i, p) in self.inner.pos.iter().enumerate() {
+            buf[i * 2] = p.x.to_f64();
+            buf[i * 2 + 1] = p.y.to_f64();
+        }
+        Float64Array::from(&buf[..])
+    }
+
+    #[wasm_bindgen(js_name = getVelocities)]
+    pub fn get_velocities(&self) -> Float64Array {
+        let n = self.inner.vel.len();
+        let mut buf = vec![0.0f64; n * 2];
+        for (i, v) in self.inner.vel.iter().enumerate() {
+            buf[i * 2] = v.x.to_f64();
+            buf[i * 2 + 1] = v.y.to_f64();
+        }
+        Float64Array::from(&buf[..])
+    }
+
+    /// Flat (x,y,x,y,...) buffer of the blob's hull polygon in CCW order.
+    #[wasm_bindgen(js_name = getHullPolygon)]
+    pub fn get_hull_polygon(&self, blob_id: u32) -> Float64Array {
+        let poly = self.inner.hull_polygon(blob_id);
+        let mut buf = vec![0.0f64; poly.len() * 2];
+        for (i, p) in poly.iter().enumerate() {
+            buf[i * 2] = p.x.to_f64();
+            buf[i * 2 + 1] = p.y.to_f64();
+        }
+        Float64Array::from(&buf[..])
+    }
+
+    // ---- determinism aid: a stable hash of the full sim state ----
+
+    /// FNV-1a 64-bit hash of every (pos.raw, vel.raw) i64 in the sim.
+    /// Two clients with the same state arrays produce the same hash.
+    /// Useful for cheap divergence checks in netplay.
+    #[wasm_bindgen(js_name = stateHash)]
+    pub fn state_hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        let prime: u64 = 0x100000001b3;
+        for p in &self.inner.pos {
+            for b in p.x.raw().to_le_bytes() { h ^= b as u64; h = h.wrapping_mul(prime); }
+            for b in p.y.raw().to_le_bytes() { h ^= b as u64; h = h.wrapping_mul(prime); }
+        }
+        for v in &self.inner.vel {
+            for b in v.x.raw().to_le_bytes() { h ^= b as u64; h = h.wrapping_mul(prime); }
+            for b in v.y.raw().to_le_bytes() { h ^= b as u64; h = h.wrapping_mul(prime); }
+        }
+        h
+    }
+
+    /// Drain pending trigger-entered events. Returns flat (shape_idx, blob_id) pairs.
+    #[wasm_bindgen(js_name = takeTriggerEntered)]
+    pub fn take_trigger_entered(&mut self) -> js_sys::Uint32Array {
+        let events = self.inner.take_trigger_entered();
+        let mut buf = Vec::with_capacity(events.len() * 2);
+        for (s, b) in events { buf.push(s); buf.push(b); }
+        js_sys::Uint32Array::from(&buf[..])
+    }
+
+    #[wasm_bindgen(js_name = takeTriggerExited)]
+    pub fn take_trigger_exited(&mut self) -> js_sys::Uint32Array {
+        let events = self.inner.take_trigger_exited();
+        let mut buf = Vec::with_capacity(events.len() * 2);
+        for (s, b) in events { buf.push(s); buf.push(b); }
+        js_sys::Uint32Array::from(&buf[..])
+    }
+
+    // =================================================================
+    // Phase 6A — surface extensions used by the game wrapper
+    // =================================================================
+
+    // ---- particle accessors / mutators ----
+
+    /// Read a single particle position as (x, y) into a 2-element f64 array.
+    #[wasm_bindgen(js_name = getParticlePos)]
+    pub fn get_particle_pos(&self, i: u32) -> Float64Array {
+        let p = self.inner.get_particle_pos(i as usize).unwrap_or(FxVec2::ZERO);
+        Float64Array::from(&[p.x.to_f64(), p.y.to_f64()][..])
+    }
+    #[wasm_bindgen(js_name = getParticleVel)]
+    pub fn get_particle_vel(&self, i: u32) -> Float64Array {
+        let v = self.inner.get_particle_vel(i as usize).unwrap_or(FxVec2::ZERO);
+        Float64Array::from(&[v.x.to_f64(), v.y.to_f64()][..])
+    }
+    #[wasm_bindgen(js_name = setParticlePos)]
+    pub fn set_particle_pos(&mut self, i: u32, x: f64, y: f64) {
+        self.inner.set_particle_pos(i as usize, fv(x, y));
+    }
+    #[wasm_bindgen(js_name = setParticleVel)]
+    pub fn set_particle_vel(&mut self, i: u32, x: f64, y: f64) {
+        self.inner.set_particle_vel(i as usize, fv(x, y));
+    }
+
+    /// Bulk-replace positions from a flat (x0,y0,...) f64 buffer. Used by
+    /// the action-manager rewind path — one wasm call per rewind instead
+    /// of one per particle.
+    #[wasm_bindgen(js_name = setPositionsBulk)]
+    pub fn set_positions_bulk(&mut self, buf: &[f64]) {
+        let pts = poly_from_f64_pairs(buf);
+        self.inner.set_positions_bulk(&pts);
+    }
+    #[wasm_bindgen(js_name = setVelocitiesBulk)]
+    pub fn set_velocities_bulk(&mut self, buf: &[f64]) {
+        let pts = poly_from_f64_pairs(buf);
+        self.inner.set_velocities_bulk(&pts);
+    }
+
+    #[wasm_bindgen(js_name = applyExternalForcePoint)]
+    pub fn apply_external_force_point(&mut self, i: u32, fx: f64, fy: f64) {
+        self.inner.apply_external_force_point(i as usize, fv(fx, fy));
+    }
+
+    /// Add a free particle (level loader uses this for ropes / point shapes).
+    /// Returns the new particle's index.
+    #[wasm_bindgen(js_name = addParticle)]
+    pub fn add_particle(&mut self, px: f64, py: f64, vx: f64, vy: f64, mass: f64, radius: f64) -> u32 {
+        self.inner.add_particle(fv(px, py), fv(vx, vy), Fx::from_f64(mass), Fx::from_f64(radius))
+    }
+
+    // ---- blob lifecycle / mutation ----
+
+    #[wasm_bindgen(js_name = removeBlob)]
+    pub fn remove_blob(&mut self, blob_id: u32) { self.inner.remove_blob(blob_id); }
+
+    #[wasm_bindgen(js_name = removeStaticSurface)]
+    pub fn remove_static_surface(&mut self, idx: u32) { self.inner.remove_static_surface(idx as usize); }
+
+    /// Replace a static surface's polygon. `velocity_x` / `velocity_y` are
+    /// the kinematic carry velocity (used by PlatformMover so blobs sitting
+    /// on the platform get pushed along); pass `has_velocity = false` to
+    /// clear the velocity slot.
+    #[wasm_bindgen(js_name = updateStaticSurface)]
+    pub fn update_static_surface(
+        &mut self,
+        idx: u32,
+        new_poly: &[f64],
+        velocity_x: f64, velocity_y: f64, has_velocity: bool,
+    ) {
+        let poly = poly_from_f64_pairs(new_poly);
+        let vel = if has_velocity { Some(fv(velocity_x, velocity_y)) } else { None };
+        self.inner.update_static_surface(idx as usize, poly, vel);
+    }
+
+    #[wasm_bindgen(js_name = clearStaticPolygons)]
+    pub fn clear_static_polygons(&mut self) { self.inner.clear_static_polygons(); }
+
+    #[wasm_bindgen(js_name = setBlobSpringStiffnessScale)]
+    pub fn set_blob_spring_stiffness_scale(&mut self, blob_id: u32, stiffness: f64, damp: f64) {
+        // damp < 0 means "auto-derive from sqrt(stiffness)"
+        let d = if damp < 0.0 { None } else { Some(Fx::from_f64(damp)) };
+        self.inner.set_blob_spring_stiffness_scale(blob_id, Fx::from_f64(stiffness), d);
+    }
+
+    #[wasm_bindgen(js_name = setBlobShapeMatchRestScale)]
+    pub fn set_blob_shape_match_rest_scale(&mut self, blob_id: u32, s: f64) {
+        self.inner.set_blob_shape_match_rest_scale(blob_id, Fx::from_f64(s));
+    }
+
+    #[wasm_bindgen(js_name = setBlobRestLocal)]
+    pub fn set_blob_rest_local(&mut self, blob_id: u32, rest_local: &[f64]) {
+        let pts = poly_from_f64_pairs(rest_local);
+        self.inner.set_blob_rest_local(blob_id, &pts);
+    }
+
+    #[wasm_bindgen(js_name = setBlobMassScale)]
+    pub fn set_blob_mass_scale(&mut self, blob_id: u32, scale: f64) {
+        self.inner.set_blob_mass_scale(blob_id, Fx::from_f64(scale));
+    }
+
+    #[wasm_bindgen(js_name = resetBlobMassScale)]
+    pub fn reset_blob_mass_scale(&mut self, blob_id: u32) {
+        self.inner.reset_blob_mass_scale(blob_id);
+    }
+
+    #[wasm_bindgen(js_name = nudgeBlob)]
+    pub fn nudge_blob(&mut self, blob_id: u32, dx: f64, dy: f64) {
+        self.inner.nudge_blob(blob_id, Fx::from_f64(dx), Fx::from_f64(dy));
+    }
+
+    #[wasm_bindgen(js_name = teleportBlob)]
+    pub fn teleport_blob(&mut self, blob_id: u32, x: f64, y: f64) {
+        self.inner.teleport_blob(blob_id, fv(x, y));
+    }
+
+    #[wasm_bindgen(js_name = pinBlobToCurrentPose)]
+    pub fn pin_blob_to_current_pose(&mut self, blob_id: u32) {
+        self.inner.pin_blob_to_current_pose(blob_id);
+    }
+
+    #[wasm_bindgen(js_name = unpinBlob)]
+    pub fn unpin_blob(&mut self, blob_id: u32) {
+        self.inner.unpin_blob(blob_id);
+    }
+
+    #[wasm_bindgen(js_name = zeroBlobVelocity)]
+    pub fn zero_blob_velocity(&mut self, blob_id: u32) {
+        self.inner.zero_blob_velocity(blob_id);
+    }
+
+    #[wasm_bindgen(js_name = setBlobGravityOverride)]
+    pub fn set_blob_gravity_override(&mut self, blob_id: u32, gx: f64, gy: f64, clear: bool) {
+        if clear {
+            self.inner.set_blob_gravity_override(blob_id, None);
+        } else {
+            self.inner.set_blob_gravity_override(blob_id, Some(fv(gx, gy)));
+        }
+    }
+
+    // ---- network sync ----
+
+    #[wasm_bindgen(js_name = setBlobGroundContacts)]
+    pub fn set_blob_ground_contacts(&mut self, blob_id: u32, count: i32) {
+        self.inner.set_blob_ground_contacts(blob_id, count);
+    }
+
+    #[wasm_bindgen(js_name = getBlobGroundContacts)]
+    pub fn get_blob_ground_contacts(&self, blob_id: u32) -> i32 {
+        self.inner.get_blob_ground_contacts(blob_id)
+    }
+
+    /// Returns null if no contact this step, else a Float64Array [px,py,nx,ny].
+    #[wasm_bindgen(js_name = getBlobGroundContact)]
+    pub fn get_blob_ground_contact(&self, blob_id: u32) -> Option<Float64Array> {
+        self.inner.get_blob_ground_contact(blob_id).map(|(p, n)| {
+            Float64Array::from(&[p.x.to_f64(), p.y.to_f64(), n.x.to_f64(), n.y.to_f64()][..])
+        })
+    }
+
+    #[wasm_bindgen(js_name = getBlobImpactContact)]
+    pub fn get_blob_impact_contact(&self, blob_id: u32) -> Option<Float64Array> {
+        self.inner.get_blob_impact_contact(blob_id).map(|(p, n)| {
+            Float64Array::from(&[p.x.to_f64(), p.y.to_f64(), n.x.to_f64(), n.y.to_f64()][..])
+        })
+    }
+
+    /// Returns [count, normalX, normalY].
+    #[wasm_bindgen(js_name = getBlobStickyContact)]
+    pub fn get_blob_sticky_contact(&self, blob_id: u32) -> Float64Array {
+        let (c, n) = self.inner.get_blob_sticky_contact(blob_id);
+        Float64Array::from(&[c as f64, n.x.to_f64(), n.y.to_f64()][..])
+    }
+
+    #[wasm_bindgen(js_name = getBlobEffectiveGravity)]
+    pub fn get_blob_effective_gravity(&self, blob_id: u32) -> Float64Array {
+        let g = self.inner.get_blob_effective_gravity(blob_id);
+        Float64Array::from(&[g.x.to_f64(), g.y.to_f64()][..])
+    }
+
+    /// Flat (x,y,x,y,...) buffer of the shape-match target positions for
+    /// the blob's hull. Empty array if no shape matching active.
+    #[wasm_bindgen(js_name = getBlobShapeMatchTargetHull)]
+    pub fn get_blob_shape_match_target_hull(&self, blob_id: u32) -> Float64Array {
+        let pts = self.inner.get_blob_shape_match_target_hull(blob_id);
+        let mut buf = Vec::with_capacity(pts.len() * 2);
+        for p in pts { buf.push(p.x.to_f64()); buf.push(p.y.to_f64()); }
+        Float64Array::from(&buf[..])
+    }
+
+    // ---- blob-range introspection ----
+
+    /// Returns [start, end, hullLen, hull0, hull1, ...] as a Uint32Array.
+    /// Empty array if blob_id is out of bounds.
+    #[wasm_bindgen(js_name = getBlobRange)]
+    pub fn get_blob_range(&self, blob_id: u32) -> js_sys::Uint32Array {
+        let Some((start, end, hull)) = self.inner.blob_range(blob_id) else {
+            return js_sys::Uint32Array::from(&[][..]);
+        };
+        let mut buf = vec![start, end, hull.len() as u32];
+        buf.extend(hull);
+        js_sys::Uint32Array::from(&buf[..])
+    }
+
+    #[wasm_bindgen(js_name = blobCenterIdx)]
+    pub fn blob_center_idx(&self, blob_id: u32) -> i32 {
+        self.inner.blob_center_idx(blob_id).map(|i| i as i32).unwrap_or(-1)
+    }
+
+    #[wasm_bindgen(js_name = blobIdForParticle)]
+    pub fn blob_id_for_particle(&self, idx: u32) -> i32 {
+        self.inner.blob_id_for_particle(idx).map(|i| i as i32).unwrap_or(-1)
+    }
+
+    /// Flat (i,j,i,j,...) buffer of spring index pairs (debug viz).
+    #[wasm_bindgen(js_name = getSpringIndexPairs)]
+    pub fn get_spring_index_pairs(&self) -> js_sys::Uint32Array {
+        let pairs = self.inner.spring_index_pairs();
+        let mut buf = Vec::with_capacity(pairs.len() * 2);
+        for (i, j) in pairs { buf.push(i); buf.push(j); }
+        js_sys::Uint32Array::from(&buf[..])
+    }
+
+    // ---- RNG state + draw (netcode recovery + powerups/spike) ----
+
+    #[wasm_bindgen(js_name = rngState)]
+    pub fn rng_state(&self) -> u32 { self.inner.rng_state() }
+
+    #[wasm_bindgen(js_name = setRngState)]
+    pub fn set_rng_state(&mut self, s: u32) { self.inner.set_rng_state(s); }
+
+    /// Mirrors the TS `rng.next()` — uniform in [0, 1). Consumes one RNG draw.
+    #[wasm_bindgen(js_name = rngNextUnit)]
+    pub fn rng_next_unit(&mut self) -> f64 {
+        self.inner.rng_next_unit().to_f64()
+    }
+
+    // ---- level-author additions ----
+
+    #[wasm_bindgen(js_name = addExtraSpring)]
+    pub fn add_extra_spring(&mut self, i: u32, j: u32, rest: f64, k: f64, damp: f64) {
+        self.inner.add_extra_spring(i, j, Fx::from_f64(rest), Fx::from_f64(k), Fx::from_f64(damp));
+    }
+
+    /// Build a rope between two existing particles. Returns the indices
+    /// of the newly-created interior segment particles (Uint32Array). See
+    /// the core `add_rope_chain` for parameter semantics.
+    #[wasm_bindgen(js_name = addRopeChain)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_rope_chain(
+        &mut self,
+        idx_a: u32,
+        idx_b: u32,
+        total_length: f64,
+        max_segment_length: f64,
+        segment_mass: f64,
+        segment_radius: f64,
+        layer: u32,
+        mask: u32,
+        iterations: u32,
+    ) -> js_sys::Uint32Array {
+        let inner = self.inner.add_rope_chain(
+            idx_a, idx_b,
+            Fx::from_f64(total_length),
+            Fx::from_f64(max_segment_length),
+            Fx::from_f64(segment_mass),
+            Fx::from_f64(segment_radius),
+            layer, mask, iterations,
+        );
+        js_sys::Uint32Array::from(&inner[..])
+    }
+
+    #[wasm_bindgen(js_name = addHomeAnchor)]
+    pub fn add_home_anchor(&mut self, idx: u32, home_x: f64, home_y: f64, k: f64, damp: f64) {
+        self.inner.add_home_anchor(idx, fv(home_x, home_y), Fx::from_f64(k), Fx::from_f64(damp));
+    }
+
+    // ---- snapshots for renderer ----
+
+    /// Returns a packed buffer of static surfaces. Format:
+    ///   for each surface: [material_id, point_count, x0, y0, x1, y1, ...]
+    /// Caller walks the buffer using `point_count` to find surface boundaries.
+    #[wasm_bindgen(js_name = staticSurfacesSnapshot)]
+    pub fn static_surfaces_snapshot(&self) -> Float64Array {
+        let mut buf: Vec<f64> = Vec::new();
+        for s in self.inner.static_surfaces_snapshot() {
+            buf.push(s.material_id as f64);
+            buf.push(s.poly.len() as f64);
+            for p in &s.poly { buf.push(p.x.to_f64()); buf.push(p.y.to_f64()); }
+        }
+        Float64Array::from(&buf[..])
+    }
+
+    /// Returns a packed buffer of shapes. Format per shape:
+    ///   [shape_idx, flags, gravKind, gx_or_cx, gy_or_cy, strength, point_count, x0, y0, ...]
+    /// flags: bit0=is_trigger, bit1=is_static, bit2=inactive
+    /// gravKind: 0=none, 1=uniform, 2=point-linear, 3=point-inverse-square
+    /// For uniform: gx_or_cx/gy_or_cy = vector; strength ignored.
+    /// For point: gx_or_cx/gy_or_cy = center; strength = strength.
+    #[wasm_bindgen(js_name = shapesSnapshot)]
+    pub fn shapes_snapshot(&self, include_triggers: bool) -> Float64Array {
+        use softbody::world::GravitySnapshot;
+        let mut buf: Vec<f64> = Vec::new();
+        for s in self.inner.shapes_snapshot(include_triggers) {
+            let flags = (s.is_trigger as u32) | ((s.is_static as u32) << 1) | ((s.inactive as u32) << 2);
+            buf.push(s.shape_idx as f64);
+            buf.push(flags as f64);
+            match s.gravity {
+                None => { buf.push(0.0); buf.push(0.0); buf.push(0.0); buf.push(0.0); }
+                Some(GravitySnapshot::Uniform { vector_x, vector_y }) => {
+                    buf.push(1.0); buf.push(vector_x); buf.push(vector_y); buf.push(0.0);
+                }
+                Some(GravitySnapshot::Point { center_x, center_y, strength, inverse_square }) => {
+                    buf.push(if inverse_square { 3.0 } else { 2.0 });
+                    buf.push(center_x); buf.push(center_y); buf.push(strength);
+                }
+            }
+            buf.push(s.poly.len() as f64);
+            for p in &s.poly { buf.push(p.x.to_f64()); buf.push(p.y.to_f64()); }
+        }
+        Float64Array::from(&buf[..])
+    }
+}
+

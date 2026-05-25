@@ -1,8 +1,10 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { SlimeBlob, HullPreset } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { playerColor } from '../renderer/colors';
 import type { AIController } from './aiController';
+import { hashStringSeed } from '../lib/rng';
 
 export type InputSource = 'remote' | 'ai';
 
@@ -16,6 +18,11 @@ export interface ManagedPlayer {
   moveX: number;
   moveY: number;
   expanding: boolean;
+  /** Smoothed gaze direction (unit-ish vector). Eases toward normalized input
+   * each frame and drifts back to (0,0) when input is zero. Consumed by the
+   * face renderer to offset pupils. */
+  gazeX: number;
+  gazeY: number;
   inputSource: InputSource;
   /** Set when inputSource === 'ai'. */
   aiController: AIController | null;
@@ -36,7 +43,7 @@ export class PlayerManager {
   addPlayer(
     playerId: string,
     name: string,
-    world: SoftBodyWorld,
+    world: SoftBodyEngine,
     hullPreset: HullPreset = 'circle16',
     customColor?: string,
     faceId?: string,
@@ -45,17 +52,35 @@ export class PlayerManager {
       return this.players.get(playerId)!;
     }
 
-    const baseSpawn = this.spawnPoints[this.nextSpawnIndex % this.spawnPoints.length];
+    // Spawn point + jitter must be deterministic per-playerId — host and
+    // guests each call addPlayer at different times, so a counter-based
+    // index (nextSpawnIndex) would assign DIFFERENT spawn points to the
+    // same player on each side. Derive both the spawn slot and the
+    // horizontal jitter from a hash of the playerId so every client
+    // independently agrees on where the blob spawns. `nextSpawnIndex` is
+    // still incremented for legacy single-player / sandbox callers that
+    // rely on round-robin spawn order.
+    const idHash = hashStringSeed(playerId);
+    const spawnIdx = idHash % this.spawnPoints.length;
+    const baseSpawn = this.spawnPoints[spawnIdx];
     this.nextSpawnIndex++;
-    // Randomize within ±200px horizontally so players don't stack
+    // Top 16 bits of the hash drive jitter; using a different bit window
+    // than the spawn-index bits so jitter is uncorrelated with spawn slot.
+    const jitter = (((idHash >>> 16) & 0xffff) / 0xffff) - 0.5; // in [-0.5, 0.5)
     const spawnPos = vec2(
-      baseSpawn.x + (Math.random() - 0.5) * 400,
+      baseSpawn.x + jitter * 400,
       baseSpawn.y,
     );
 
     const blob = new SlimeBlob(world, spawnPos, {
       playerControlled: true,
       hullPreset,
+      // Cross-client sort key — used by SoftBodyWorld's collision-pair
+      // iteration so host and guest process the same blob-blob contact in
+      // the same order even when their local insertion order differs
+      // (host adds itself first then receives guest's player_join; guest
+      // adds itself first then synthesizes host's blob from the keyframe).
+      sortKey: `player:${playerId}`,
     });
 
     const colorIndex = this.nextColorIndex++;
@@ -69,6 +94,8 @@ export class PlayerManager {
       moveX: 0,
       moveY: 0,
       expanding: false,
+      gazeX: 0,
+      gazeY: 0,
       inputSource: 'remote',
       aiController: null,
     };
@@ -129,17 +156,28 @@ export class PlayerManager {
     }
   }
 
-  updateAll(dt: number): void {
+  updateAll(dt: number, world?: SoftBodyEngine): void {
     for (const player of this.players.values()) {
-      // Let AI controllers re-decide their input each tick.
+      // Let AI controllers re-decide their input each tick. AI needs the
+      // world to read tick/RNG — `world` is optional here only because some
+      // older callers (tests / scripted scenes) drove the loop without one.
       if (player.inputSource === 'ai' && player.aiController) {
-        const out = player.aiController.tick(player, this, dt);
+        const out = player.aiController.tick(player, this, dt, world);
         player.moveX = out.moveX;
         player.moveY = out.moveY;
         player.expanding = out.expanding;
       }
       player.blob.setInput(player.moveX, player.moveY, player.expanding);
       player.blob.update(dt);
+
+      // Smoothly ease the gaze vector toward normalized input. When input is
+      // zero, the target is (0,0) and pupils naturally drift back to center.
+      const mag = Math.hypot(player.moveX, player.moveY);
+      const tx = mag > 0.01 ? player.moveX / mag : 0;
+      const ty = mag > 0.01 ? player.moveY / mag : 0;
+      const a = 1 - Math.exp(-12 * dt);
+      player.gazeX += (tx - player.gazeX) * a;
+      player.gazeY += (ty - player.gazeY) * a;
     }
   }
 

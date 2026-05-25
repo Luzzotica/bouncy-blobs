@@ -1,42 +1,73 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { markIntroSeen } from '../utils/introSeen'
+import { startMusic, pauseMusic, resumeMusic } from '../utils/music'
+import { getSfxVolume } from '../utils/audioSettings'
 
 interface Panel {
   image: string
+  gridArea: string
+}
+
+// Per-image crop bias for object-fit: cover. Generation is the Python
+// script's job; how an image happens to be framed in its grid cell is a
+// presentation concern and lives here. Default is "center".
+const PANEL_OBJECT_POSITION: Record<string, string> = {
+  'p1a.png': 'center 30%',
+  'p1b.png': 'center 30%',
+  'p1c.png': 'center top',
+  'ponder_a.png': 'center 10%',
+  'p4a.png': 'center 60%',
+  'p4b.png': 'center top',
+  'p4c.png': 'center top',
+}
+
+interface Page {
+  index: number
+  title: string
   sfx: string
-  caption: string
-  durationMs: number
+  gridTemplate: string
+  panels: Panel[]
 }
 
 interface Manifest {
   music: string
-  panels: Panel[]
+  pages: Page[]
 }
 
 const BASE = '/intro/'
+const PAGE_DURATION_MS = 8000
+const PANEL_STAGGER_MS = 250
+const CONTROLS_HIDE_MS = 4000
+// Toggle filename overlays in each panel for debugging / iteration.
+const SHOW_PANEL_LABELS = true
 
 export default function Intro() {
   const navigate = useNavigate()
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [started, setStarted] = useState(false)
-  const [index, setIndex] = useState(0)
-  const [captionVisible, setCaptionVisible] = useState(false)
-  const musicRef = useRef<HTMLAudioElement | null>(null)
+  const [pageIdx, setPageIdx] = useState(0)
+  const [controlsVisible, setControlsVisible] = useState(false)
+  const [paused, setPaused] = useState(false)
   const sfxRef = useRef<HTMLAudioElement | null>(null)
-  const advanceTimerRef = useRef<number | null>(null)
+  const advanceRef = useRef<number | null>(null)
+  const hideControlsRef = useRef<number | null>(null)
+  // Track how much of the current page's auto-advance has elapsed so we
+  // can pause and resume without losing time.
+  const pageStartRef = useRef<number>(0)
+  const remainingMsRef = useRef<number>(PAGE_DURATION_MS)
 
   useEffect(() => {
     fetch(`${BASE}manifest.json`)
       .then(r => r.json())
-      .then((m: Manifest) => setManifest(m))
+      .then(setManifest)
       .catch(err => {
         console.error('Failed to load intro manifest', err)
         finish()
       })
     return () => {
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current)
-      musicRef.current?.pause()
+      if (advanceRef.current) window.clearTimeout(advanceRef.current)
+      if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
       sfxRef.current?.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,181 +75,292 @@ export default function Intro() {
 
   useEffect(() => {
     if (!manifest || !started) return
-    const panel = manifest.panels[index]
-    if (!panel) {
+    const page = manifest.pages[pageIdx]
+    if (!page) {
       finish()
       return
     }
 
-    setCaptionVisible(false)
-    const captionTimer = window.setTimeout(() => setCaptionVisible(true), 200)
-
     sfxRef.current?.pause()
-    const sfx = new Audio(`${BASE}${panel.sfx}`)
-    sfx.volume = 0.8
+    const sfx = new Audio(`${BASE}${page.sfx}`)
+    sfx.volume = getSfxVolume()
     sfxRef.current = sfx
     sfx.play().catch(() => {})
 
-    if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current)
-    advanceTimerRef.current = window.setTimeout(() => {
-      if (index < manifest.panels.length - 1) {
-        setIndex(i => i + 1)
+    pageStartRef.current = Date.now()
+    remainingMsRef.current = PAGE_DURATION_MS
+    scheduleAdvance(PAGE_DURATION_MS)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manifest, started, pageIdx])
+
+  function scheduleAdvance(ms: number) {
+    if (advanceRef.current) window.clearTimeout(advanceRef.current)
+    advanceRef.current = window.setTimeout(() => {
+      if (!manifest) return
+      if (pageIdx < manifest.pages.length - 1) {
+        setPageIdx(i => i + 1)
       } else {
         finish()
       }
-    }, panel.durationMs)
-
-    return () => {
-      window.clearTimeout(captionTimer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manifest, started, index])
+    }, ms)
+  }
 
   function start() {
     if (!manifest) return
-    const music = new Audio(`${BASE}${manifest.music}`)
-    music.loop = true
-    music.volume = 0.5
-    musicRef.current = music
-    music.play().catch(() => {})
+    startMusic()
     setStarted(true)
   }
 
-  function next() {
-    if (!manifest) return
-    if (index < manifest.panels.length - 1) {
-      setIndex(i => i + 1)
-    } else {
-      finish()
+  function showControls() {
+    setControlsVisible(true)
+    if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
+    if (!paused) {
+      hideControlsRef.current = window.setTimeout(() => {
+        setControlsVisible(false)
+      }, CONTROLS_HIDE_MS)
     }
   }
 
+  function handleStageClick() {
+    if (!started) return
+    showControls()
+  }
+
+  function handlePauseToggle(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (paused) {
+      // resume
+      setPaused(false)
+      resumeMusic()
+      sfxRef.current?.play().catch(() => {})
+      pageStartRef.current = Date.now()
+      scheduleAdvance(remainingMsRef.current)
+      if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
+      hideControlsRef.current = window.setTimeout(() => {
+        setControlsVisible(false)
+      }, CONTROLS_HIDE_MS)
+    } else {
+      // pause
+      setPaused(true)
+      pauseMusic()
+      sfxRef.current?.pause()
+      if (advanceRef.current) window.clearTimeout(advanceRef.current)
+      const elapsed = Date.now() - pageStartRef.current
+      remainingMsRef.current = Math.max(0, remainingMsRef.current - elapsed)
+      if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
+    }
+  }
+
+  function handleSkip(e: React.MouseEvent) {
+    e.stopPropagation()
+    finish()
+  }
+
   function finish() {
-    if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current)
-    musicRef.current?.pause()
+    if (advanceRef.current) window.clearTimeout(advanceRef.current)
+    if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
     sfxRef.current?.pause()
     markIntroSeen()
     navigate('/')
   }
 
   if (!manifest) {
-    return (
-      <div style={fullscreen}>
-        <p style={{ color: '#888' }}>Loading…</p>
-      </div>
-    )
+    return <div style={shell}><p style={{ color: '#888' }}>Loading…</p></div>
   }
 
   if (!started) {
     return (
-      <div style={fullscreen}>
-        <h1 style={{ fontSize: 56, fontWeight: 800, marginBottom: 16 }}>Bouncy Blobs</h1>
-        <p style={{ color: '#aaa', fontSize: 18, marginBottom: 32 }}>A story in six panels.</p>
-        <button
-          onClick={start}
-          style={{
-            fontSize: 22,
-            padding: '16px 40px',
-            background: '#c77dff',
-            border: 'none',
-            color: 'white',
-            borderRadius: 8,
-            cursor: 'pointer',
-          }}
-        >
-          ▶ Start
-        </button>
+      <div style={shell}>
+        <h1 style={{ fontSize: 64, fontWeight: 900, margin: 0, color: '#fffae6', textShadow: '4px 4px 0 #c77dff' }}>
+          Bouncy Blobs
+        </h1>
+        <p style={{ color: '#aaa', fontSize: 18, marginTop: 8, marginBottom: 32 }}>
+          A short comic, in five pages.
+        </p>
+        <button onClick={start} style={primaryBtn}>▶ Start</button>
       </div>
     )
   }
 
-  const panel = manifest.panels[index]
+  const page = manifest.pages[pageIdx]
 
   return (
-    <div style={fullscreen}>
-      <button
-        onClick={finish}
+    <div style={shell} onClick={handleStageClick}>
+      <ComicPage page={page} key={page.index} />
+
+      <div
         style={{
-          position: 'absolute',
-          top: 16,
-          right: 16,
-          background: 'transparent',
-          color: '#aaa',
-          border: '1px solid #555',
-          borderRadius: 6,
-          padding: '8px 14px',
-          cursor: 'pointer',
+          ...controlsBar,
+          opacity: controlsVisible ? 1 : 0,
+          pointerEvents: controlsVisible ? 'auto' : 'none',
         }}
       >
-        Skip ▶▶
-      </button>
-
-      <img
-        key={panel.image}
-        src={`${BASE}${panel.image}`}
-        alt={panel.caption}
-        style={{
-          maxWidth: 'min(90vw, 720px)',
-          maxHeight: '70vh',
-          borderRadius: 12,
-          boxShadow: '0 8px 40px rgba(199,125,255,0.25)',
-          animation: 'introPanelIn 0.4s ease-out',
-        }}
-      />
-
-      <p
-        style={{
-          marginTop: 24,
-          fontSize: 28,
-          fontWeight: 600,
-          color: 'white',
-          textAlign: 'center',
-          maxWidth: '90vw',
-          opacity: captionVisible ? 1 : 0,
-          transition: 'opacity 0.5s ease-in',
-          minHeight: 40,
-        }}
-      >
-        {panel.caption}
-      </p>
-
-      <div style={{ marginTop: 24, display: 'flex', gap: 12, alignItems: 'center' }}>
-        <span style={{ color: '#666', fontSize: 14 }}>
-          {index + 1} / {manifest.panels.length}
-        </span>
-        <button
-          onClick={next}
-          style={{
-            fontSize: 18,
-            padding: '10px 24px',
-            background: '#5a189a',
-            border: 'none',
-            color: 'white',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
-          {index < manifest.panels.length - 1 ? 'Next ▶' : 'Begin ▶'}
+        <button onClick={handlePauseToggle} style={ctrlBtn}>
+          {paused ? '▶  Resume' : '❚❚  Pause'}
+        </button>
+        <button onClick={handleSkip} style={{ ...ctrlBtn, ...skipStyle }}>
+          Skip  ▶▶
         </button>
       </div>
 
-      <style>{`
-        @keyframes introPanelIn {
-          from { opacity: 0; transform: scale(0.96); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
+      <style>{globalCss}</style>
     </div>
   )
 }
 
-const fullscreen: React.CSSProperties = {
+function ComicPage({ page }: { page: Page }) {
+  const { gridTemplateAreas, gridTemplateRows, gridTemplateColumns } = useMemo(
+    () => parseGridTemplate(page.gridTemplate),
+    [page.gridTemplate],
+  )
+
+  return (
+    <div
+      className="comic-page"
+      style={{
+        display: 'grid',
+        gridTemplateAreas,
+        gridTemplateRows,
+        gridTemplateColumns,
+        gap: 12,
+        width: 'min(98vw, 1800px, calc((100vh - 32px) * 16 / 9))',
+        height: 'min(55.125vw, 1012px, calc(100vh - 32px))',
+        padding: 12,
+        boxSizing: 'border-box',
+        background: '#1a0f2e',
+        border: '4px solid #0a0612',
+        borderRadius: 4,
+        boxShadow: '0 12px 60px rgba(199,125,255,0.25)',
+      }}
+    >
+      {page.panels.map((panel, i) => (
+        <div
+          key={panel.image}
+          className="comic-panel"
+          style={{
+            gridArea: panel.gridArea,
+            background: '#000',
+            border: '3px solid #0a0612',
+            borderRadius: 2,
+            overflow: 'hidden',
+            animation: `panelIn 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both`,
+            animationDelay: `${i * PANEL_STAGGER_MS}ms`,
+            boxShadow: 'inset 0 0 0 1px #2a1a4a',
+          }}
+        >
+          <img
+            src={`${BASE}${panel.image}`}
+            alt=""
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              objectPosition: PANEL_OBJECT_POSITION[panel.image] ?? 'center',
+              display: 'block',
+            }}
+          />
+          {SHOW_PANEL_LABELS && (
+            <div style={{
+              position: 'absolute',
+              bottom: 6,
+              left: 6,
+              background: 'rgba(0, 0, 0, 0.75)',
+              color: '#0f0',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 12,
+              fontWeight: 600,
+              padding: '2px 6px',
+              borderRadius: 3,
+              pointerEvents: 'none',
+              letterSpacing: 0.3,
+            }}>{panel.image}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function parseGridTemplate(template: string): {
+  gridTemplateAreas: string
+  gridTemplateRows: string
+  gridTemplateColumns: string
+} {
+  const [rowsPart, colsPart] = template.split('/').map(s => s.trim())
+  const tokens = rowsPart.match(/"[^"]+"|\S+/g) ?? []
+  const areas: string[] = []
+  const rows: string[] = []
+  for (const t of tokens) {
+    if (t.startsWith('"')) areas.push(t)
+    else rows.push(t)
+  }
+  return {
+    gridTemplateAreas: areas.join(' '),
+    gridTemplateRows: rows.join(' '),
+    gridTemplateColumns: colsPart,
+  }
+}
+
+const shell: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: '#0a0612',
+  background: 'radial-gradient(ellipse at center, #1a0f2e 0%, #0a0612 70%)',
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   justifyContent: 'center',
   zIndex: 100,
+  gap: 12,
+  overflow: 'hidden',
+  padding: 0,
+  boxSizing: 'border-box',
+  cursor: 'pointer',
 }
+
+const primaryBtn: React.CSSProperties = {
+  fontSize: 22,
+  padding: '16px 40px',
+  background: '#c77dff',
+  border: 'none',
+  color: 'white',
+  borderRadius: 8,
+  cursor: 'pointer',
+  fontWeight: 700,
+}
+
+const controlsBar: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 28,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  gap: 12,
+  transition: 'opacity 0.25s ease-out',
+}
+
+const ctrlBtn: React.CSSProperties = {
+  background: 'rgba(10, 6, 18, 0.9)',
+  color: '#fffae6',
+  border: '2px solid #c77dff',
+  borderRadius: 999,
+  padding: '12px 28px',
+  fontSize: 16,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  cursor: 'pointer',
+  boxShadow: '0 4px 24px rgba(199,125,255,0.4)',
+}
+
+const skipStyle: React.CSSProperties = {
+  borderColor: '#5a189a',
+  color: '#cdb4f0',
+}
+
+const globalCss = `
+  @keyframes panelIn {
+    from { opacity: 0; transform: scale(0.94) translateY(8px); filter: blur(4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+  }
+  .comic-page { animation: pageIn 0.5s ease-out both; }
+  @keyframes pageIn { from { opacity: 0; } to { opacity: 1; } }
+`

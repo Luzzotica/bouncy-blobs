@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Link, useSearchParams } from 'react-router-dom';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
+import { createSoftBodyEngine } from '../physics/engineSelector';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from '../renderer/camera';
 import { render, RenderOptions } from '../renderer/canvasRenderer';
@@ -10,15 +11,22 @@ import { PlayerManager } from '../game/playerManager';
 import { SpikeManager } from '../game/spikeManager';
 import { SpringPadManager } from '../game/springPadManager';
 import { TriggerManager } from '../game/triggerManager';
-import { PressurePlateManager } from '../game/pressurePlateManager';
+import { ActionManager } from '../game/actionManager';
+import { PlatformMover } from '../game/platformMover';
 import { loadLevel } from '../levels/levelLoader';
 import { loadBuiltinLevel } from '../levels/levelRegistry';
 import { LevelData } from '../levels/types';
 import GameCanvas from '../components/GameCanvas';
+import SettingsModal from '../components/SettingsModal';
+import { EffectsBindings } from '../game/effectsBindings';
+import { updateParticles, clearParticles } from '../renderer/particles';
+import { clearDecals } from '../renderer/decals';
+import { preloadAll, SFX_NAMES, resumeAudio } from '../utils/audio';
+import { getPlayerColor, onAudioSettingsChange } from '../utils/audioSettings';
 
 function renderPointShapesLive(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   particles: Map<string, number[]>,
   level: LevelData,
 ): void {
@@ -71,11 +79,14 @@ function renderPointShapesLive(
 
 export default function Sandbox() {
   const [searchParams] = useSearchParams();
+  const fromEditor = searchParams.get('from') === 'editor';
   const [levelData, setLevelData] = useState<LevelData | null>(null);
   const [showPoints, setShowPoints] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const stateRef = useRef<{
-    world: SoftBodyWorld;
+    world: SoftBodyEngine;
     camera: Camera;
+    playerManager: PlayerManager;
     playerBlob: SlimeBlob;
     npcBlobs: SlimeBlob[];
     input: KeyboardInput;
@@ -86,8 +97,11 @@ export default function Sandbox() {
     renderOptions: RenderOptions;
     spikeManager: SpikeManager | null;
     springPadManager: SpringPadManager | null;
-    triggerManager: TriggerManager | null;
-    pressurePlateManager: PressurePlateManager | null;
+    triggerManager: TriggerManager;
+    actionManager: ActionManager;
+    platformMover: PlatformMover;
+    effects: EffectsBindings;
+    unsubColor: () => void;
   } | null>(null);
 
   // Load level data (test level from editor or default)
@@ -109,28 +123,47 @@ export default function Sandbox() {
   const onInit = useCallback((ctx: CanvasRenderingContext2D, width: number, height: number) => {
     if (!levelData) return;
 
-    const world = new SoftBodyWorld({
+    preloadAll(SFX_NAMES);
+    resumeAudio();
+
+    const world = createSoftBodyEngine({
       substeps: 4,
       gravityScale: 4.0,
     });
 
-    const { playerSpawnPoints, npcBlobs, pointShapeParticles, plateShapeIdxToId, softPlatforms, softPlatformStaticParticles } = loadLevel(world, levelData);
+    const {
+      playerSpawnPoints,
+      npcBlobs,
+      pointShapeParticles,
+      triggerShapeIdxToId,
+      softPlatforms,
+      softPlatformStaticParticles,
+      platformSurfaces,
+    } = loadLevel(world, levelData);
 
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
     // Use PlayerManager so SpikeManager can handle kills/respawns
     const playerManager = new PlayerManager(playerSpawnPoints);
-    const managed = playerManager.addPlayer('sandbox-player', 'Player', world, 'circle16');
+    const managed = playerManager.addPlayer('sandbox-player', 'Player', world, 'circle16', getPlayerColor());
     const playerBlob = managed.blob;
+    // Live-update the blob's colour when the user changes it in Settings.
+    const unsubColor = onAudioSettingsChange(() => {
+      managed.color = getPlayerColor();
+    });
     // Teleport to first spawn since PlayerManager picks its own spawn order
     world.teleportBlob(playerBlob.blobId, spawnPos);
 
     // Initialize spike and spring pad managers if the level has them
     let spikeManager: SpikeManager | null = null;
-    if (levelData.spikes && levelData.spikes.length > 0) {
+    const hasSpikes = (levelData.spikes?.length ?? 0) > 0;
+    const hasDeathZones = (levelData.deathZones?.length ?? 0) > 0;
+    if (hasSpikes || hasDeathZones || levelData.bounds) {
       spikeManager = new SpikeManager();
-      spikeManager.initialize(world, playerManager, levelData.spikes);
+      spikeManager.initialize(world, playerManager, levelData.spikes ?? []);
       spikeManager.deathMode = 'instant';
+      if (hasDeathZones) spikeManager.setDeathZones(levelData.deathZones ?? []);
+      if (levelData.bounds) spikeManager.setKillBelowY(levelData.bounds.height + 500);
     }
 
     let springPadManager: SpringPadManager | null = null;
@@ -139,15 +172,35 @@ export default function Sandbox() {
       springPadManager.initialize(world, levelData.springPads);
     }
 
-    // Triggers must initialize before plates so plates can fire into them.
-    const triggerManager = new TriggerManager();
-    triggerManager.initialize(world, levelData.triggers ?? [], pointShapeParticles, softPlatformStaticParticles);
-
-    let pressurePlateManager: PressurePlateManager | null = null;
-    if (levelData.pressurePlates && levelData.pressurePlates.length > 0) {
-      pressurePlateManager = new PressurePlateManager();
-      pressurePlateManager.initialize(world, levelData.pressurePlates, plateShapeIdxToId, triggerManager);
+    const effects = new EffectsBindings();
+    if (spikeManager) {
+      spikeManager.onKill = (killedPlayerId, deathPos) => {
+        const p = playerManager.getPlayer(killedPlayerId);
+        if (p) effects.onSpikeKill(p, deathPos);
+      };
     }
+    if (springPadManager) {
+      springPadManager.onFire = (pos, dir) => effects.onSpringFire(pos, dir);
+    }
+
+    // PlatformMover owns the platform static surfaces; ActionManager talks to it.
+    const platformMover = new PlatformMover();
+    platformMover.initialize(levelData.platforms, platformSurfaces, world);
+
+    // Trigger areas detect blobs and expose isPressed() to actions.
+    const triggerManager = new TriggerManager();
+    triggerManager.initialize(world, levelData.triggers ?? [], triggerShapeIdxToId);
+
+    // Actions poll the triggers and animate their targets each frame.
+    const actionManager = new ActionManager();
+    actionManager.initialize(
+      world,
+      levelData.actions ?? [],
+      pointShapeParticles,
+      softPlatformStaticParticles,
+      platformMover,
+      triggerManager,
+    );
 
     const camera = new Camera();
     camera.snapTo(spawnPos, 0.7);
@@ -164,6 +217,7 @@ export default function Sandbox() {
     const state = {
       world,
       camera,
+      playerManager,
       playerBlob,
       npcBlobs,
       input,
@@ -175,7 +229,10 @@ export default function Sandbox() {
       spikeManager,
       springPadManager,
       triggerManager,
-      pressurePlateManager,
+      actionManager,
+      platformMover,
+      effects,
+      unsubColor,
     };
 
     const loop = new GameLoop((dt) => {
@@ -184,24 +241,36 @@ export default function Sandbox() {
       world.step(dt);
       springPadManager?.update(dt);
       spikeManager?.update(dt);
-      pressurePlateManager?.update(dt);
+      // Trigger areas first: they flip `pressed` flags based on occupancy.
       triggerManager.update(dt);
+      // Then actions poll the trigger states and tween their targets.
+      actionManager.update(dt);
+      effects.update(dt, playerManager);
+      updateParticles(dt);
       camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
       camera.update(dt);
 
       const hasPointShapes = pointShapeParticles.size > 0;
-      const modeOverlay = (spikeManager || springPadManager || pressurePlateManager || hasPointShapes) ? {
+      const hasTriggers = (levelData.triggers?.length ?? 0) > 0;
+      const modeOverlay = (spikeManager || springPadManager || hasTriggers || hasPointShapes) ? {
         renderWorld: (rctx: CanvasRenderingContext2D) => {
           springPadManager?.render(rctx);
           spikeManager?.render(rctx);
           spikeManager?.renderDeadPlayers(rctx);
-          pressurePlateManager?.render(rctx);
+          triggerManager.render(rctx);
           renderPointShapesLive(rctx, world, pointShapeParticles, levelData);
         },
         renderHUD: () => {},
       } : undefined;
 
-      render(ctx, world, camera, [playerBlob], npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay, undefined, softPlatforms);
+      const playerData = [{
+        color: managed.color,
+        faceId: managed.faceId,
+        expanding: playerBlob.isExpanding(),
+        expandScale: playerBlob.getExpandScale(),
+        gaze: { x: managed.gazeX, y: managed.gazeY },
+      }];
+      render(ctx, world, camera, [playerBlob], npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay, playerData, softPlatforms);
     });
 
     state.loop = loop;
@@ -223,8 +292,13 @@ export default function Sandbox() {
         stateRef.current.input.detach();
         stateRef.current.spikeManager?.cleanup();
         stateRef.current.springPadManager?.cleanup();
-        stateRef.current.pressurePlateManager?.cleanup();
-        stateRef.current.triggerManager?.cleanup();
+        stateRef.current.actionManager.cleanup();
+        stateRef.current.triggerManager.cleanup();
+        stateRef.current.platformMover.cleanup();
+        stateRef.current.unsubColor();
+        stateRef.current.effects.reset();
+        clearParticles();
+        clearDecals();
         stateRef.current = null;
       }
     };
@@ -256,9 +330,15 @@ export default function Sandbox() {
         gap: 8,
         alignItems: 'center',
       }}>
-        <Link to="/">
-          <button style={{ padding: '6px 12px', fontSize: 14 }}>Home</button>
-        </Link>
+        {fromEditor ? (
+          <Link to="/editor?restore=1">
+            <button style={{ padding: '6px 12px', fontSize: 14 }}>← Back to Editor</button>
+          </Link>
+        ) : (
+          <Link to="/">
+            <button style={{ padding: '6px 12px', fontSize: 14 }}>Home</button>
+          </Link>
+        )}
         <button
           style={{
             padding: '6px 12px',
@@ -272,10 +352,24 @@ export default function Sandbox() {
         >
           Points: {showPoints ? 'ON' : 'OFF'}
         </button>
+        <button
+          style={{
+            padding: '6px 12px',
+            fontSize: 14,
+            background: '#1f2a3f',
+            color: '#fff',
+            border: '1px solid #4f5874',
+            cursor: 'pointer',
+          }}
+          onClick={() => setSettingsOpen(true)}
+        >
+          ⚙ Settings
+        </button>
         <span style={{ color: '#888', fontSize: 13 }}>
           A/D: Move | Space: Expand
         </span>
       </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

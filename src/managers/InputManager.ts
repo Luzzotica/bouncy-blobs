@@ -10,7 +10,14 @@ import type { WebRTCMessage } from "../types/webrtc";
 export class InputManager {
   private playerInputStates: Map<string, Map<InputType, InputEvent>> = new Map();
   private listeners: Set<InputEventListener> = new Set();
-  private processedDiscreteEvents: Set<string> = new Set();
+  /** Most recent timestamp seen per `(playerId, inputType)` for any event,
+   * continuous or discrete. The old discrete-dedupe scheme stored a
+   * separate `Set<string>` keyed by `${playerId}_${inputType}_${timestamp}`
+   * which grew without bound — every 30 Hz guest-input batch carried a
+   * fresh timestamp, so no two keys ever matched and the Set leaked one
+   * string per inbound discrete event for the lifetime of the session.
+   * Per-(player,type) "last timestamp" gives the same monotonic-ordering
+   * dedupe with O(player × button-type) memory instead of O(events). */
   private lastProcessedTimestamps: Map<string, number> = new Map();
 
   processInput(
@@ -40,27 +47,22 @@ export class InputManager {
       }
     } else if (isDiscrete) {
       if (typeof value.pressed === "boolean") {
-        const inputKey = `${playerId}_${inputType}_${timestamp}`;
-        if (value.pressed && !this.processedDiscreteEvents.has(inputKey)) {
-          this.processedDiscreteEvents.add(inputKey);
-          const event: DiscreteInputEvent = {
-            type: "discrete",
-            inputType,
-            value: { pressed: true },
-            timestamp: BigInt(timestamp),
-          };
-          this.updateInputState(playerId, inputType, event);
-          this.emitEvent(event, playerId);
-        } else if (!value.pressed) {
-          const event: DiscreteInputEvent = {
-            type: "discrete",
-            inputType,
-            value: { pressed: false },
-            timestamp: BigInt(timestamp),
-          };
-          this.updateInputState(playerId, inputType, event);
-          this.emitEvent(event, playerId);
-        }
+        // Dedupe by per-key monotonic timestamp (same scheme as continuous
+        // events). Stale/duplicate retransmits get dropped; live ordering
+        // is preserved. Bounded by (player × button-type) memory.
+        const timestampKey = `${playerId}_${inputType}`;
+        const lastTimestamp = this.lastProcessedTimestamps.get(timestampKey);
+        if (lastTimestamp !== undefined && timestamp <= lastTimestamp) return;
+        this.lastProcessedTimestamps.set(timestampKey, timestamp);
+
+        const event: DiscreteInputEvent = {
+          type: "discrete",
+          inputType,
+          value: { pressed: value.pressed },
+          timestamp: BigInt(timestamp),
+        };
+        this.updateInputState(playerId, inputType, event);
+        this.emitEvent(event, playerId);
       }
     }
   }
@@ -105,15 +107,8 @@ export class InputManager {
     }
   }
 
-  cleanup(maxSize: number = 1000): void {
-    if (this.processedDiscreteEvents.size > maxSize) {
-      this.processedDiscreteEvents.clear();
-    }
-  }
-
   clear(): void {
     this.playerInputStates.clear();
-    this.processedDiscreteEvents.clear();
     this.lastProcessedTimestamps.clear();
     this.listeners.clear();
   }

@@ -62,13 +62,13 @@ export const classicLevel: LevelData = {
   ],
   springPads: [
     // Launch up from the floor to skip the first section
-    { id: 'sp1', x: 900, y: 1780, width: 100, height: 40, rotation: -Math.PI / 2, force: 600 },
+    { id: 'sp1', x: 900, y: 1780, width: 100, height: 40, rotation: -Math.PI / 2 },
     // Launch diagonally up-right across a big gap
-    { id: 'sp2', x: 2400, y: 1430, width: 100, height: 40, rotation: -Math.PI / 4, force: 500 },
+    { id: 'sp2', x: 2400, y: 1430, width: 100, height: 40, rotation: -Math.PI / 4 },
     // Launch straight up to reach a high platform
-    { id: 'sp3', x: 4600, y: 1380, width: 100, height: 40, rotation: -Math.PI / 2, force: 550 },
+    { id: 'sp3', x: 4600, y: 1380, width: 100, height: 40, rotation: -Math.PI / 2 },
     // Final boost toward the finish
-    { id: 'sp4', x: 6400, y: 1430, width: 100, height: 40, rotation: -Math.PI / 3, force: 500 },
+    { id: 'sp4', x: 6400, y: 1430, width: 100, height: 40, rotation: -Math.PI / 3 },
   ],
   spikes: [
     // Spikes below a gap between section 1 and 2 — punishes falling

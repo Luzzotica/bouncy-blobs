@@ -6,6 +6,16 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "fs:default",
+    "dialog:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$DESKTOP/**" }, { "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$DESKTOP/**" }, { "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }]
+    }
   ]
 }

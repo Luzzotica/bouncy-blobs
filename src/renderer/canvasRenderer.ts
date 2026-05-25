@@ -1,11 +1,15 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from './camera';
-import { drawBlob } from './blobRenderer';
+import { drawBlob, drawBlobShine } from './blobRenderer';
 import { drawStaticPolygon } from './levelRenderer';
 import { drawSprings, drawShapeMatchTargets, drawBlobPoints } from './debugRenderer';
 import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
 import { drawBlobFace } from './faceRenderer';
+import { renderDecals } from './decals';
+import { renderParticles } from './particles';
+import { impactsNear } from './blobImpacts';
 
 export interface SoftPlatformRenderInfo {
   hullIndices: number[];
@@ -28,11 +32,13 @@ export interface PlayerRenderData {
   faceId: string;
   expanding: boolean;
   expandScale: number;
+  /** Smoothed gaze direction (unit-ish). Drives pupil offset in face renderer. */
+  gaze: { x: number; y: number };
 }
 
 export function render(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   camera: Camera,
   playerBlobs: SlimeBlob[],
   npcBlobs: SlimeBlob[],
@@ -174,12 +180,23 @@ export function render(
     drawShapeMatchTargets(ctx, world);
   }
 
+  // Persistent slime decals — drawn ON the world geometry, UNDER the blobs.
+  renderDecals(ctx);
+
+  // Shared monotonic seconds for ambient ripple phase + any future time-
+  // driven effects in the blob shine. Lives in the renderer so blobs in
+  // unrelated game modes share one clock.
+  const shineTime = performance.now() / 1000;
+
   // NPC blobs
   for (let i = 0; i < npcBlobs.length; i++) {
-    const hull = npcBlobs[i].getHullPolygon();
+    const npc = npcBlobs[i];
+    const hull = npc.getHullPolygon();
     const hue = NPC_HUES[i % NPC_HUES.length];
     const fill = npcColor(hue);
     drawBlob(ctx, hull, fill, fill, 2.25);
+    const c = npc.getCentroid();
+    drawBlobShine(ctx, hull, shineTime, impactsNear(c, 240));
   }
 
   // Player blobs
@@ -199,11 +216,13 @@ export function render(
     }
 
     drawBlob(ctx, hull, fill, stroke, 2.5);
+    const centroidForShine = playerBlobs[i].getCentroid();
+    drawBlobShine(ctx, hull, shineTime, impactsNear(centroidForShine, 240));
 
     // Draw face on blob
     if (pd) {
       const centroid = playerBlobs[i].getCentroid();
-      drawBlobFace(ctx, centroid, pd.faceId, pd.expanding, pd.expandScale);
+      drawBlobFace(ctx, centroid, pd.faceId, pd.expanding, pd.expandScale, pd.gaze);
     }
   }
 
@@ -254,6 +273,9 @@ export function render(
     ctx.fill();
     ctx.restore();
   }
+
+  // Particles (transient impact/puff/sparkle bursts) — on top of blobs.
+  renderParticles(ctx);
 
   ctx.restore();
 

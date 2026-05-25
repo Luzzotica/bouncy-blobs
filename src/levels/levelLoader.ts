@@ -1,9 +1,11 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
 import * as Tuning from '../physics/tuning';
-import { LevelData, PlatformDef, PressurePlateDef, SoftPlatformDef, ZoneDef } from './types';
+import { LevelData, PlatformDef, TriggerDef, SoftPlatformDef, ZoneDef } from './types';
+import type { StaticSurface } from '../physics/types';
 
 export interface SoftPlatformInfo {
   id: string;
@@ -24,8 +26,11 @@ export interface LoadedLevel {
   softPlatformStaticParticles: Map<string, number[]>;
   /** All soft platforms in load order. For rendering. */
   softPlatforms: SoftPlatformInfo[];
-  /** Map from physics-world trigger shape index → pressure plate id. */
-  plateShapeIdxToId: Map<number, string>;
+  /** Map from physics-world trigger shape index → trigger (area) id. */
+  triggerShapeIdxToId: Map<number, string>;
+  /** Map from platform id → its registered static surface. Used by `PlatformMover`
+   *  to drive position/velocity at runtime. */
+  platformSurfaces: Map<string, StaticSurface>;
 }
 
 const POINT_SHAPE_DEFAULT_K = 600;
@@ -38,9 +43,9 @@ const POINT_SHAPE_PARTICLE_RADIUS = 5;
 const POINT_SHAPE_HOME_K = 1800;
 const POINT_SHAPE_HOME_DAMP = 18;
 
-function plateToPolygon(p: PressurePlateDef): Vec2[] {
-  const tw = p.triggerWidth ?? p.width;
-  const th = p.triggerHeight ?? p.height;
+function triggerAreaToPolygon(p: TriggerDef): Vec2[] {
+  const tw = p.sensorWidth ?? p.width;
+  const th = p.sensorHeight ?? p.height;
   const hw = tw / 2;
   const hh = th / 2;
   // Bottom of the trigger zone stays aligned with the bottom of the visual
@@ -82,10 +87,16 @@ function platformToPolygon(p: PlatformDef): Vec2[] {
   return corners.map(v => vec2(v.x + p.x, v.y + p.y));
 }
 
-export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
-  // Register platforms
+export function loadLevel(world: SoftBodyEngine, level: LevelData): LoadedLevel {
+  // Register platforms (capture surface handles so they can be moved at runtime).
+  const platformSurfaces = new Map<string, StaticSurface>();
   for (const platform of level.platforms) {
-    world.registerStaticPolygon(platformToPolygon(platform), platform.material ?? 'default', platform.id);
+    const surface = world.registerStaticPolygon(
+      platformToPolygon(platform),
+      platform.material ?? 'default',
+      platform.id,
+    );
+    platformSurfaces.set(platform.id, surface);
   }
 
   // Register walls
@@ -93,12 +104,16 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     world.registerStaticPolygon(wall.points.map(p => vec2(p.x, p.y)), wall.material ?? 'default', wall.id);
   }
 
-  // Spawn NPC blobs
+  // Spawn NPC blobs. NPC `sortKey` uses the level-defined `npc.id` (which
+  // is identical on every client because the level data is identical), so
+  // blob-blob collisions involving NPCs iterate in the same order on host
+  // and guest regardless of local blob index.
   const npcBlobs: SlimeBlob[] = [];
   for (const npc of level.npcBlobs) {
     const blob = new SlimeBlob(world, vec2(npc.x, npc.y), {
       playerControlled: false,
       hullPreset: npc.hullPreset,
+      sortKey: `npc:${npc.id}`,
     });
     npcBlobs.push(blob);
   }
@@ -153,12 +168,7 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
       );
       ids.push(id);
       if (!p.anchored) {
-        world.homeAnchors.push({
-          idx: id,
-          home: vec2(p.x, p.y),
-          k: POINT_SHAPE_HOME_K,
-          damp: POINT_SHAPE_HOME_DAMP,
-        });
+        world.addHomeAnchor(id, vec2(p.x, p.y), POINT_SHAPE_HOME_K, POINT_SHAPE_HOME_DAMP);
       }
     }
     const pushEdge = (a: number, b: number, k?: number, damp?: number) => {
@@ -168,13 +178,7 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
       const dx = pa.x - pb.x;
       const dy = pa.y - pb.y;
       const rest = Math.sqrt(dx * dx + dy * dy);
-      world.extraSprings.push([
-        ids[a],
-        ids[b],
-        rest,
-        k ?? POINT_SHAPE_DEFAULT_K,
-        damp ?? POINT_SHAPE_DEFAULT_DAMP,
-      ]);
+      world.addExtraSpring(ids[a], ids[b], rest, k ?? POINT_SHAPE_DEFAULT_K, damp ?? POINT_SHAPE_DEFAULT_DAMP);
     };
     for (const e of ps.edges) pushEdge(e.a, e.b, e.stiffness, e.damping);
     if (ps.closed && ps.points.length > 2) {
@@ -183,11 +187,11 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     pointShapeParticles.set(ps.id, ids);
   }
 
-  // Register pressure plates as trigger polygons so blob entry fires callbacks.
-  const plateShapeIdxToId = new Map<number, string>();
-  for (const plate of level.pressurePlates ?? []) {
-    const shapeIdx = world.registerTriggerPolygon(plateToPolygon(plate));
-    plateShapeIdxToId.set(shapeIdx, plate.id);
+  // Register trigger areas (formerly pressure plates) as trigger polygons.
+  const triggerShapeIdxToId = new Map<number, string>();
+  for (const trig of level.triggers ?? []) {
+    const shapeIdx = world.registerTriggerPolygon(triggerAreaToPolygon(trig));
+    triggerShapeIdxToId.set(shapeIdx, trig.id);
   }
 
   // Hydrate soft platforms: each is a regular blob with a subdivided
@@ -211,12 +215,13 @@ export function loadLevel(world: SoftBodyWorld, level: LevelData): LoadedLevel {
     pointShapeParticles,
     softPlatformStaticParticles,
     softPlatforms,
-    plateShapeIdxToId,
+    triggerShapeIdxToId,
+    platformSurfaces,
   };
 }
 
 function expandSoftPlatform(
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   def: SoftPlatformDef,
   staticParticleMap: Map<string, number[]>,
 ): SoftPlatformInfo {
@@ -255,6 +260,7 @@ function expandSoftPlatform(
     shapeMatchK: Tuning.SHAPE_MATCH_K * 8 * stiffness,
     shapeMatchDamp: Tuning.SHAPE_MATCH_DAMP * 4,
     worldOrigin: vec2(def.x, def.y),
+    sortKey: `softplat:${def.id}`,
     staticHullIndices: anchorIdxs,
   });
 

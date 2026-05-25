@@ -1,0 +1,32 @@
+{
+  "name": "steam-assets",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "render:steam": "tsx render.ts",
+    "render:steam:watch": "tsx render.ts --watch",
+    "trailer:studio": "remotion studio remotion/index.ts",
+    "trailer:render": "remotion render remotion/index.ts Trailer output/trailer.mp4",
+    "copy:build": "tsx build-copy.ts",
+    "icon:build": "tsx scripts/build-icon.ts",
+    "gen:art": "../../scripts/.venv/bin/python ../../scripts/generate_steam_assets.py"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@remotion/cli": "^4.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/node": "^20.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "playwright": "^1.47.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

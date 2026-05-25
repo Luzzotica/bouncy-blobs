@@ -1,9 +1,10 @@
 import { Vec2 } from '../physics/vec2';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../physics/softBodyWorld';
 
 export function drawSprings(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   color = 'rgba(100, 200, 255, 0.3)',
   lineWidth = 1,
 ): void {
@@ -22,7 +23,7 @@ export function drawSprings(
 
 export function drawShapeMatchTargets(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   color = 'rgba(0, 255, 200, 0.4)',
 ): void {
   for (let bi = 0; bi < world.getBlobCount(); bi++) {
@@ -44,7 +45,7 @@ export function drawShapeMatchTargets(
 
 export function drawVelocities(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   velocityScale = 0.05,
   color = 'rgba(255, 200, 0, 0.5)',
 ): void {
@@ -66,7 +67,7 @@ export function drawVelocities(
 
 export function drawMassPoints(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   color = 'rgba(255, 255, 255, 0.5)',
   radius = 2,
 ): void {
@@ -82,7 +83,7 @@ export function drawMassPoints(
 /** Render every particle of every blob, with hull and center distinguished. */
 export function drawBlobPoints(
   ctx: CanvasRenderingContext2D,
-  world: SoftBodyWorld,
+  world: SoftBodyEngine,
   hullColor = 'rgba(255, 80, 80, 0.95)',
   centerColor = 'rgba(255, 230, 80, 0.95)',
   hullRadius = 3.5,

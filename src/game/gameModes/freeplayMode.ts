@@ -1,9 +1,9 @@
 import { GameMode, GameModeConfig, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
 import { LevelData } from '../../levels/types';
-import { drawPlayerLabels } from '../../renderer/hudRenderer';
 
 /**
  * Lobby playground mode. No goal, no scoring, no timer — players can spawn
@@ -33,21 +33,19 @@ export class FreeplayMode implements GameMode {
     return this.levelData;
   }
 
-  initialize(_world: SoftBodyWorld, _playerManager: PlayerManager): void {
+  initialize(_world: SoftBodyEngine, _playerManager: PlayerManager): void {
     // No triggers, no win-state to hook.
   }
 
   onPhaseStart(_phase: GamePhase, _state: GameModeState): void {}
 
-  update(_dt: number, _state: GameModeState, _playerManager: PlayerManager, _world: SoftBodyWorld): void {}
+  update(_dt: number, _state: GameModeState, _playerManager: PlayerManager, _world: SoftBodyEngine): void {}
 
   checkWinCondition(_state: GameModeState, _playerManager: PlayerManager): string | null {
     return null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, playerManager: PlayerManager): void {
-    drawPlayerLabels(ctx, playerManager.getAllPlayers());
-  }
+  renderWorld(_ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, _playerManager: PlayerManager): void {}
 
   renderHUD(_ctx: CanvasRenderingContext2D, _width: number, _height: number, _state: GameModeState, _playerManager: PlayerManager): void {}
 

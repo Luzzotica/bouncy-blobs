@@ -1,4 +1,6 @@
 import { ZoneDef } from '../levels/types';
+import { getSprite } from '../assets/spriteRegistry';
+import { drawSprite } from './spriteRenderer';
 
 /** Draw a goal zone (green glow with FINISH label). */
 export function drawGoalZone(
@@ -27,12 +29,20 @@ export function drawGoalZone(
   ctx.strokeRect(x, y, zone.width, zone.height);
   ctx.setLineDash([]);
 
-  // Label
-  ctx.font = 'bold 28px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = `rgba(0, 255, 100, ${pulse + 0.4})`;
-  ctx.fillText('FINISH', zone.x, zone.y);
+  // Goal flag sprite — plants on top of the pulsing zone as a clear visual
+  // anchor for the win condition. Falls back to the FINISH text label
+  // when the sprite hasn't loaded yet.
+  const flag = getSprite('goal_flag');
+  if (flag) {
+    const bob = Math.sin(time * 1.8) * 3;
+    drawSprite(ctx, flag, zone.x, zone.y + bob, 0, 1, 1);
+  } else {
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(0, 255, 100, ${pulse + 0.4})`;
+    ctx.fillText('FINISH', zone.x, zone.y);
+  }
 
   ctx.restore();
 }

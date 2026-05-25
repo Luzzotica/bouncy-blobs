@@ -1,7 +1,7 @@
 {
   "name": "Showcase Arena",
   "version": 1,
-  "levelTypes": ["solo_racing"],
+  "levelTypes": [],
   "bounds": { "width": 4000, "height": 2400 },
   "walls": [
     { "id": "floor",       "points": [{ "x":   -100, "y": 2380 }, { "x": 4100, "y": 2380 }, { "x": 4100, "y": 2400 }, { "x":  -100, "y": 2400 }] },
@@ -21,7 +21,10 @@
 
     { "id": "mat-ice",     "x":  650, "y": 1280, "width": 360, "height": 30, "rotation": 0, "material": "ice" },
     { "id": "mat-sticky",  "x":  900, "y":  900, "width":  40, "height": 400, "rotation": 0, "material": "sticky" },
-    { "id": "mat-bouncy",  "x": 1400, "y": 1280, "width": 200, "height": 30, "rotation": 0, "material": "bouncy" }
+    { "id": "mat-bouncy",  "x": 1400, "y": 1280, "width": 200, "height": 30, "rotation": 0, "material": "bouncy" },
+
+    { "id": "switch-lift", "x": 3200, "y": 1500, "width": 220, "height": 30, "rotation": 0 },
+    { "id": "and-gate",    "x": 3500, "y":  900, "width":  40, "height": 200, "rotation": 0 }
   ],
 
   "spawnPoints": [
@@ -106,30 +109,42 @@
     }
   ],
 
-  "pressurePlates": [
+  "triggers": [
     {
       "id": "plate-bridge",
-      "x": 1250, "y": 1880, "width": 220, "height": 24, "rotation": 0,
-      "triggerIds": ["raise-bridge"],
-      "oneShot": false
+      "x": 1250, "y": 1880, "width": 220, "height": 24, "rotation": 0
     },
     {
       "id": "plate-kite",
       "x": 2700, "y": 1880, "width": 180, "height": 24, "rotation": 0,
-      "triggerIds": ["release-kite"],
-      "oneShot": true
+      "chargeSeconds": 0.5
+    },
+    {
+      "id": "plate-switch",
+      "x": 3200, "y": 1880, "width": 180, "height": 24, "rotation": 0
+    },
+    {
+      "id": "plate-and-a",
+      "x": 3500, "y": 1880, "width": 80, "height": 24, "rotation": 0
+    },
+    {
+      "id": "plate-and-b",
+      "x": 3700, "y": 1880, "width": 80, "height": 24, "rotation": 0
     }
   ],
 
-  "triggers": [
+  "actions": [
     {
       "id": "raise-bridge",
       "kind": "movePoints",
       "duration": 1.2,
       "easing": "easeInOut",
+      "sourceTriggerIds": ["plate-bridge"],
+      "requireMode": "any",
+      "mode": "continuous",
       "targets": [
-        { "shapeId": "rope-bridge", "pointIndex": 0, "endX": 1820, "endY": 1300 },
-        { "shapeId": "rope-bridge", "pointIndex": 5, "endX": 2400, "endY": 1300 }
+        { "kind": "shapePoint", "shapeId": "rope-bridge", "pointIndex": 0, "endX": 1820, "endY": 1300 },
+        { "kind": "shapePoint", "shapeId": "rope-bridge", "pointIndex": 5, "endX": 2400, "endY": 1300 }
       ]
     },
     {
@@ -137,8 +152,36 @@
       "kind": "movePoints",
       "duration": 2.0,
       "easing": "easeOut",
+      "sourceTriggerIds": ["plate-kite"],
+      "requireMode": "any",
+      "mode": "oneShot",
       "targets": [
-        { "shapeId": "kite", "pointIndex": 0, "endX": 2700, "endY": 200 }
+        { "kind": "shapePoint", "shapeId": "kite", "pointIndex": 0, "endX": 2700, "endY": 200 }
+      ]
+    },
+    {
+      "id": "toggle-lift",
+      "kind": "movePoints",
+      "duration": 0.8,
+      "easing": "easeInOut",
+      "sourceTriggerIds": ["plate-switch"],
+      "requireMode": "any",
+      "mode": "switch",
+      "targets": [
+        { "kind": "platform", "platformId": "switch-lift", "endX": 3200, "endY": 800 }
+      ]
+    },
+    {
+      "id": "and-open-gate",
+      "kind": "movePoints",
+      "duration": 0.6,
+      "easing": "easeInOut",
+      "sourceTriggerIds": ["plate-and-a", "plate-and-b"],
+      "requireMode": "all",
+      "mode": "continuous",
+      "delaySeconds": 0.3,
+      "targets": [
+        { "kind": "platform", "platformId": "and-gate", "endX": 3500, "endY": 500 }
       ]
     }
   ]

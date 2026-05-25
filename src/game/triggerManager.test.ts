@@ -4,99 +4,69 @@ import { vec2 } from '../physics/vec2';
 import { TriggerManager } from './triggerManager';
 import { TriggerDef } from '../levels/types';
 
-function setupWorldWithAnchor() {
+function setup(opts: { chargeSeconds?: number } = {}) {
   const world = new SoftBodyWorld();
-  // One anchored particle at the origin (mass 0 → invMass 0).
-  const pid = world.addParticle(vec2(0, 0), vec2(0, 0), 0, 0);
-  const particles = new Map<string, number[]>([['s', [pid]]]);
-  return { world, particles, pid };
+  const def: TriggerDef = {
+    id: 't1', x: 0, y: 100, width: 50, height: 10, rotation: 0,
+    chargeSeconds: opts.chargeSeconds,
+  };
+  const shapeIdx = world.registerTriggerPolygon([
+    vec2(-25, 95), vec2(25, 95), vec2(25, 105), vec2(-25, 105),
+  ]);
+  const shapeIdxToId = new Map<number, string>([[shapeIdx, def.id]]);
+
+  const mgr = new TriggerManager();
+  mgr.initialize(world, [def], shapeIdxToId);
+  return { world, mgr, shapeIdx };
 }
 
-describe('TriggerManager', () => {
-  it('does not move points until fire() is called', () => {
-    const { world, particles } = setupWorldWithAnchor();
-    const triggers: TriggerDef[] = [{
-      id: 't1',
-      kind: 'movePoints',
-      targets: [{ shapeId: 's', pointIndex: 0, endX: 100, endY: 0 }],
-      duration: 1.0,
-      easing: 'linear',
-    }];
-    const mgr = new TriggerManager();
-    mgr.initialize(world, triggers, particles);
-
-    mgr.update(0.5);
-
-    expect(world.pos[0].x).toBe(0);
-    expect(world.pos[0].y).toBe(0);
+describe('TriggerManager (area)', () => {
+  it('hooks world.onTriggerEntered/onTriggerExited', () => {
+    const { world } = setup();
+    expect(world.onTriggerEntered).toBeTypeOf('function');
+    expect(world.onTriggerExited).toBeTypeOf('function');
   });
 
-  it('interpolates a point from start to end over the configured duration', () => {
-    const { world, particles, pid } = setupWorldWithAnchor();
-    const triggers: TriggerDef[] = [{
-      id: 't1',
-      kind: 'movePoints',
-      targets: [{ shapeId: 's', pointIndex: 0, endX: 100, endY: 0 }],
-      duration: 1.0,
-      easing: 'linear',
-    }];
-    const mgr = new TriggerManager();
-    mgr.initialize(world, triggers, particles);
-
-    mgr.fire('t1');
-    mgr.update(0.5);
-    expect(world.pos[pid].x).toBeCloseTo(50, 5);
-
-    mgr.update(0.5);
-    expect(world.pos[pid].x).toBeCloseTo(100, 5);
+  it('chargeSeconds=0 → pressed flips immediately on first enter', () => {
+    const { world, mgr, shapeIdx } = setup();
+    expect(mgr.isPressed('t1')).toBe(false);
+    world.onTriggerEntered!(shapeIdx, 42);
+    expect(mgr.isPressed('t1')).toBe(true);
   });
 
-  it('clamps motion at the end position once duration elapses', () => {
-    const { world, particles, pid } = setupWorldWithAnchor();
-    const triggers: TriggerDef[] = [{
-      id: 't1',
-      kind: 'movePoints',
-      targets: [{ shapeId: 's', pointIndex: 0, endX: 200, endY: -50 }],
-      duration: 0.5,
-      easing: 'linear',
-    }];
-    const mgr = new TriggerManager();
-    mgr.initialize(world, triggers, particles);
-
-    mgr.fire('t1');
-    mgr.update(10); // way past duration
-
-    expect(world.pos[pid].x).toBe(200);
-    expect(world.pos[pid].y).toBe(-50);
+  it('pressed flips back to false when the last occupant leaves', () => {
+    const { world, mgr, shapeIdx } = setup();
+    world.onTriggerEntered!(shapeIdx, 1);
+    world.onTriggerEntered!(shapeIdx, 2);
+    world.onTriggerExited!(shapeIdx, 1);
+    expect(mgr.isPressed('t1')).toBe(true);   // one blob still on
+    world.onTriggerExited!(shapeIdx, 2);
+    expect(mgr.isPressed('t1')).toBe(false);  // empty → released
   });
 
-  it('fire() on unknown trigger id is a no-op', () => {
-    const { world, particles } = setupWorldWithAnchor();
-    const mgr = new TriggerManager();
-    mgr.initialize(world, [], particles);
-
-    expect(() => mgr.fire('nope')).not.toThrow();
-    mgr.update(1);
-    expect(world.pos[0].x).toBe(0);
+  it('chargeSeconds > 0: pressed flips only after the hold duration elapses', () => {
+    const { world, mgr, shapeIdx } = setup({ chargeSeconds: 0.5 });
+    world.onTriggerEntered!(shapeIdx, 1);
+    mgr.update(0.2);
+    expect(mgr.isPressed('t1')).toBe(false);
+    expect(mgr.chargeProgress('t1')).toBeCloseTo(0.4, 5);
+    mgr.update(0.4);   // total 0.6 ≥ 0.5
+    expect(mgr.isPressed('t1')).toBe(true);
   });
 
-  it('zeros velocity on anchored points so the solver does not drift them', () => {
-    const { world, particles, pid } = setupWorldWithAnchor();
-    world.vel[pid] = vec2(999, 999);
-    const triggers: TriggerDef[] = [{
-      id: 't1',
-      kind: 'movePoints',
-      targets: [{ shapeId: 's', pointIndex: 0, endX: 100, endY: 0 }],
-      duration: 1.0,
-      easing: 'linear',
-    }];
-    const mgr = new TriggerManager();
-    mgr.initialize(world, triggers, particles);
+  it('exiting mid-charge resets chargeElapsed to zero', () => {
+    const { world, mgr, shapeIdx } = setup({ chargeSeconds: 0.5 });
+    world.onTriggerEntered!(shapeIdx, 1);
+    mgr.update(0.3);
+    expect(mgr.chargeProgress('t1')).toBeGreaterThan(0);
+    world.onTriggerExited!(shapeIdx, 1);
+    expect(mgr.chargeProgress('t1')).toBe(0);
 
-    mgr.fire('t1');
-    mgr.update(0.1);
-
-    expect(world.vel[pid].x).toBe(0);
-    expect(world.vel[pid].y).toBe(0);
+    // Re-entering starts charging from zero again.
+    world.onTriggerEntered!(shapeIdx, 2);
+    mgr.update(0.4);
+    expect(mgr.isPressed('t1')).toBe(false);  // would have fired if progress carried over
+    mgr.update(0.2);
+    expect(mgr.isPressed('t1')).toBe(true);
   });
 });

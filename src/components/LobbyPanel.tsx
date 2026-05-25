@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { COLOR_PALETTE } from '../constants/customization';
-import { getAllFacePresets, getFacePreset } from '../renderer/faceRenderer';
+import { getAllFacePresets } from '../renderer/faceRenderer';
 import { PERSONALITY_LABELS, type PersonalityName } from '../game/aiPersonalities';
 import type { LevelData, LevelType } from '../levels/types';
 import MapPickerModal from './MapPickerModal';
+import FaceSwatch from './FaceSwatch';
 
 export interface PlayerSummary {
   playerId: string;
@@ -16,18 +17,19 @@ export interface PlayerSummary {
 }
 
 export interface MapOption {
-  id: string;          // 'builtin:default' | 'cloud:<uuid>'
+  id: string;          // 'builtin:default' | 'local:<uuid>' | 'workshop:<id>'
   name: string;
-  source: 'builtin' | 'cloud';
-  /** Modes this map is designed for. Cloud maps default to all modes since we
-   * can't introspect a stored level without loading it. */
+  source: 'builtin' | 'local' | 'workshop';
+  /** Modes this map is designed for. Local/Workshop maps default to all modes
+   * since we can't introspect a stored level without loading it. */
   levelTypes: LevelType[];
 }
 
 export const MODE_OPTIONS: { id: LevelType; label: string }[] = [
   { id: 'solo_racing', label: 'Racing' },
   { id: 'team_racing', label: 'Chained Together' },
-  { id: 'party',       label: 'Party' },
+  // Party mode hidden from UI until balance pass — code, level JSON, and
+  // partyMode.ts remain so re-enabling is a one-line change.
   { id: 'koth',        label: 'King of the Hill' },
 ];
 
@@ -133,31 +135,6 @@ const startButtonStyle: React.CSSProperties = {
 };
 
 // ── Face swatch (canvas preview) ───────────────────────────────────────────
-function FaceSwatch({ faceId, color, size = 28 }: { faceId: string; color: string; size?: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const c = ref.current;
-    if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = size * dpr;
-    c.height = size * dpr;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size, size);
-    // Color background circle
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    // Face on top
-    const preset = getFacePreset(faceId);
-    const scale = size / 80; // face renderer designed for ~80px blobs
-    preset.drawNormal(ctx, size / 2, size / 2, scale);
-  }, [faceId, color, size]);
-  return <canvas ref={ref} style={{ width: size, height: size, borderRadius: '50%' }} />;
-}
-
 // ── Component ──────────────────────────────────────────────────────────────
 export default function LobbyPanel(props: LobbyPanelProps) {
   const {
@@ -318,7 +295,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                 {currentEntry?.name ?? 'Pick a map…'}
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {currentEntry?.source === 'cloud' && (
+                {(currentEntry?.source === 'local' || currentEntry?.source === 'workshop') && (
                   <span style={{
                     fontSize: 9,
                     padding: '1px 5px',

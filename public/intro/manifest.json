@@ -1,41 +1,109 @@
 {
   "music": "theme.mp3",
-  "panels": [
+  "pages": [
     {
-      "image": "panel-1.png",
-      "sfx": "panel-1.mp3",
-      "caption": "Behold!",
-      "durationMs": 3500
+      "index": 1,
+      "title": "I HEREBY DECLARE MYSELF KING!",
+      "sfx": "page-1.mp3",
+      "gridTemplate": "\"a a a\" 3fr \"b c c\" 2fr / 1fr 1fr 1fr",
+      "panels": [
+        {
+          "image": "p1a.png",
+          "gridArea": "a"
+        },
+        {
+          "image": "p1b.png",
+          "gridArea": "b"
+        },
+        {
+          "image": "p1c.png",
+          "gridArea": "c"
+        }
+      ]
     },
     {
-      "image": "panel-2.png",
-      "sfx": "panel-2.mp3",
-      "caption": "I have created\u2026 subjects!",
-      "durationMs": 4000
+      "index": 2,
+      "title": "But what is a king without subjects?",
+      "sfx": "page-2.mp3",
+      "gridTemplate": "\"a a a\" 2fr \"b c c\" 3fr / 1fr 1fr 1fr",
+      "panels": [
+        {
+          "image": "ponder_a.png",
+          "gridArea": "a"
+        },
+        {
+          "image": "ponder_b.png",
+          "gridArea": "b"
+        },
+        {
+          "image": "ponder_c.png",
+          "gridArea": "c"
+        }
+      ]
     },
     {
-      "image": "panel-3.png",
-      "sfx": "panel-3.mp3",
-      "caption": "They shall be tested!",
-      "durationMs": 4000
+      "index": 3,
+      "title": "A king needs subjects.",
+      "sfx": "page-3.mp3",
+      "gridTemplate": "\"a c\" 1fr \"b c\" 1fr / 1fr 1fr",
+      "panels": [
+        {
+          "image": "p2a.png",
+          "gridArea": "a"
+        },
+        {
+          "image": "p2b.png",
+          "gridArea": "b"
+        },
+        {
+          "image": "p2c.png",
+          "gridArea": "c"
+        }
+      ]
     },
     {
-      "image": "panel-4.png",
-      "sfx": "panel-4.mp3",
-      "caption": "(They think it's recess.)",
-      "durationMs": 4000
+      "index": 4,
+      "title": "Oh. Oh no. Oh YES.",
+      "sfx": "page-4.mp3",
+      "gridTemplate": "\"a a b\" 1fr \"a a c\" 1fr \"a a d\" 1fr / 1fr 1fr 1fr",
+      "panels": [
+        {
+          "image": "p3a.png",
+          "gridArea": "a"
+        },
+        {
+          "image": "p3b.png",
+          "gridArea": "b"
+        },
+        {
+          "image": "p3c.png",
+          "gridArea": "c"
+        },
+        {
+          "image": "p3d.png",
+          "gridArea": "d"
+        }
+      ]
     },
     {
-      "image": "panel-5.png",
-      "sfx": "panel-5.mp3",
-      "caption": "King of the Hill!",
-      "durationMs": 4000
-    },
-    {
-      "image": "panel-6.png",
-      "sfx": "panel-6.mp3",
-      "caption": "He wanted subjects. He made friends.",
-      "durationMs": 5000
+      "index": 5,
+      "title": "LET THE ROYAL TRIALS BEGIN!",
+      "sfx": "page-5.mp3",
+      "gridTemplate": "\"a a\" 1fr \"b c\" 1fr \"b c\" 1fr / 1fr 2fr",
+      "panels": [
+        {
+          "image": "p4a.png",
+          "gridArea": "a"
+        },
+        {
+          "image": "p4b.png",
+          "gridArea": "b"
+        },
+        {
+          "image": "p4c.png",
+          "gridArea": "c"
+        }
+      ]
     }
   ]
 }

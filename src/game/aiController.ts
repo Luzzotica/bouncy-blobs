@@ -1,4 +1,5 @@
 import type { ManagedPlayer, PlayerManager } from './playerManager';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import {
   PERSONALITIES,
   type AIWorldView,
@@ -7,6 +8,7 @@ import {
   type PersonalityState,
 } from './aiPersonalities';
 import { Vec2, vec2 } from '../physics/vec2';
+import type { SoftBodyWorld } from '../physics/softBodyWorld';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AIController
@@ -24,7 +26,6 @@ import { Vec2, vec2 } from '../physics/vec2';
 export class AIController {
   public readonly personality: PersonalityName;
   private state: PersonalityState = { scratch: {} };
-  private startedAt: number;
   private goalProvider:
     | ((self: ManagedPlayer) => { x: number; y: number; width: number; height: number } | null)
     | null = null;
@@ -32,7 +33,6 @@ export class AIController {
 
   constructor(personality: PersonalityName) {
     this.personality = personality;
-    this.startedAt = performance.now() / 1000;
   }
 
   /** The current target this bot should pursue (set by BouncyBlobsGame). */
@@ -49,7 +49,7 @@ export class AIController {
     this.hillCenterProvider = fn;
   }
 
-  tick(self: ManagedPlayer, manager: PlayerManager, dt: number): AIInput {
+  tick(self: ManagedPlayer, manager: PlayerManager, dt: number, physicsWorld?: SoftBodyEngine): AIInput {
     const allPlayers = manager.getAllPlayers();
     const opponents = allPlayers
       .filter((p) => p.playerId !== self.playerId)
@@ -62,6 +62,18 @@ export class AIController {
     const goalInfo = this.goalProvider?.(self) ?? null;
     const goal: Vec2 | null = goalInfo ? { x: goalInfo.x, y: goalInfo.y } : null;
 
+    // Deterministic elapsed: absolute world tick × fixedDt. NOT relative to
+    // this controller's spawn tick — that was a stable-per-controller value
+    // on the host but the GUEST creates its AI controller at a different
+    // tick (when the keyframe synthesizes the bot), so a per-controller
+    // start tick gave host and guest different `elapsed` values for the
+    // same physical world tick. Absolute world time is the same on every
+    // client in lockstep, so personalities making time-based decisions
+    // (lastExpand cooldowns, bouncer sin oscillator) match.
+    const elapsed = physicsWorld
+      ? physicsWorld.tick * physicsWorld.fixedDt
+      : 0;
+
     const world: AIWorldView = {
       opponents,
       goal,
@@ -69,7 +81,8 @@ export class AIController {
       goalHeight: goalInfo?.height ?? null,
       hillCenter: this.hillCenterProvider?.() ?? null,
       dt,
-      elapsed: performance.now() / 1000 - this.startedAt,
+      elapsed,
+      rng: physicsWorld?.rng,
     };
 
     return PERSONALITIES[this.personality](
@@ -84,17 +97,31 @@ export class AIController {
   }
 }
 
-/** Generate a stable bot id and human-friendly name. */
+/** Minimal RNG shape we need — kept narrow so any seeded RNG implementation
+ *  (EngineRng from the SoftBodyEngine, the legacy SeededRng) can be passed. */
+interface IdRng { next(): number; }
+
+/** Generate a stable bot id and human-friendly name.
+ *
+ *  The id includes a 4-digit numeric suffix for collision-avoidance when
+ *  multiple bots of the same personality spawn back-to-back. The suffix is
+ *  derived from the supplied RNG (always pass `world.rng` so two clients
+ *  with the same session seed generate the same bot ids) — never from
+ *  `Math.random()`, which would diverge across browsers and break netplay
+ *  determinism. */
 let botCounter = 0;
-export function nextBotIdentity(personality: PersonalityName): { id: string; name: string } {
+export function nextBotIdentity(personality: PersonalityName, rng: IdRng): { id: string; name: string } {
   botCounter += 1;
+  const suffix = Math.floor(rng.next() * 9999);
   return {
-    id: `bot-${personality}-${botCounter}-${Math.floor(Math.random() * 9999)}`,
+    id: `bot-${personality}-${botCounter}-${suffix}`,
     name: `Bot ${botCounter} (${personality})`,
   };
 }
 
-/** Convenience: pick a default spawn near the centre when no spawn points are configured. */
-export function defaultBotSpawn(): Vec2 {
-  return vec2((Math.random() - 0.5) * 600, 200);
+/** Default spawn near the centre when no spawn points are configured.
+ *  Uses the supplied RNG (typically `world.rng`) so spawn jitter is
+ *  deterministic across clients given the same session seed. */
+export function defaultBotSpawn(rng: IdRng): Vec2 {
+  return vec2((rng.next() - 0.5) * 600, 200);
 }

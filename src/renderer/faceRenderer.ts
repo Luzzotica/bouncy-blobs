@@ -1,13 +1,28 @@
 import { Vec2 } from '../physics/vec2';
 
+export interface Gaze { x: number; y: number }
+const NO_GAZE: Gaze = { x: 0, y: 0 };
+
 export interface FacePreset {
   id: string;
   label: string;
-  drawNormal: (ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number) => void;
-  drawPuffed: (ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number) => void;
+  drawNormal: (ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, gaze: Gaze) => void;
+  drawPuffed: (ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, gaze: Gaze) => void;
 }
 
-function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, eyeW: number, eyeH: number, pupilR: number) {
+/** Pupil offset in screen-space pixels, given the white-eye radii and pupil
+ * radius (in unscaled units), the face scale, and the gaze unit vector. The
+ * canvas ellipse API takes radii directly, so the max travel for a pupil center
+ * to stay inside the white is (eyeRadius - pupilRadius) along each axis. */
+function pupilOffset(eyeW: number, eyeH: number, pupilR: number, s: number, gaze: Gaze): { x: number; y: number } {
+  const maxX = Math.max(0, (eyeW - pupilR) * s);
+  const maxY = Math.max(0, (eyeH - pupilR) * s);
+  return { x: gaze.x * maxX, y: gaze.y * maxY };
+}
+
+function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, eyeW: number, eyeH: number, pupilR: number, gaze: Gaze = NO_GAZE) {
+  const off = pupilOffset(eyeW, eyeH, pupilR, s, gaze);
+
   // Left eye
   ctx.fillStyle = '#fff';
   ctx.beginPath();
@@ -15,7 +30,7 @@ function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   ctx.fill();
   ctx.fillStyle = '#222';
   ctx.beginPath();
-  ctx.arc(cx - 8 * s, cy - 3 * s, pupilR * s, 0, Math.PI * 2);
+  ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, pupilR * s, 0, Math.PI * 2);
   ctx.fill();
 
   // Right eye
@@ -25,7 +40,7 @@ function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   ctx.fill();
   ctx.fillStyle = '#222';
   ctx.beginPath();
-  ctx.arc(cx + 8 * s, cy - 3 * s, pupilR * s, 0, Math.PI * 2);
+  ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, pupilR * s, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -33,8 +48,8 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'default',
     label: ':)',
-    drawNormal(ctx, cx, cy, s) {
-      drawEyes(ctx, cx, cy, s, 5, 6, 2.5);
+    drawNormal(ctx, cx, cy, s, gaze) {
+      drawEyes(ctx, cx, cy, s, 5, 6, 2.5, gaze);
       // Smile
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 1.5 * s;
@@ -42,9 +57,9 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 4 * s, 7 * s, 0.1 * Math.PI, 0.9 * Math.PI);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Wide eyes
-      drawEyes(ctx, cx, cy, s, 6, 7, 3);
+      drawEyes(ctx, cx, cy, s, 6, 7, 3, gaze);
       // Puffed cheeks (small circle mouth)
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -63,15 +78,17 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'derp',
     label: 'xD',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Derpy eyes (different sizes)
+      const offL = pupilOffset(6, 7, 3, s, gaze);
+      const offR = pupilOffset(4, 5, 2, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.ellipse(cx - 8 * s, cy - 4 * s, 6 * s, 7 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 9 * s, cy - 2 * s, 3 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 9 * s + offL.x, cy - 2 * s + offL.y, 3 * s, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#fff';
@@ -80,7 +97,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx + 7 * s, cy - 4 * s, 2 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 7 * s + offR.x, cy - 4 * s + offR.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
 
       // Tongue out
@@ -94,7 +111,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.ellipse(cx + 3 * s, cy + 10 * s, 4 * s, 3 * s, 0.2, 0, Math.PI * 2);
       ctx.fill();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // X eyes
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -120,7 +137,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'cool',
     label: 'B)',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Sunglasses
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -149,7 +166,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.quadraticCurveTo(cx + 2 * s, cy + 9 * s, cx + 8 * s, cy + 4 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Sunglasses (slightly tilted)
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -174,7 +191,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'angry',
     label: '>:(',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Angry eyebrows
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2.5 * s;
@@ -187,7 +204,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.lineTo(cx + 4 * s, cy - 7 * s);
       ctx.stroke();
       // Eyes
-      drawEyes(ctx, cx, cy, s, 4, 5, 2.5);
+      drawEyes(ctx, cx, cy, s, 4, 5, 2.5, gaze);
       // Frown
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 1.5 * s;
@@ -195,7 +212,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 12 * s, 7 * s, 1.1 * Math.PI, 1.9 * Math.PI);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Very angry
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 3 * s;
@@ -234,7 +251,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'uwu',
     label: 'uwu',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Closed happy eyes (^_^)
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -253,7 +270,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.quadraticCurveTo(cx + 2 * s, cy + 8 * s, cx + 6 * s, cy + 5 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // > < eyes
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -287,7 +304,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'sleepy',
     label: '-_-',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Half-closed eyes
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -314,9 +331,9 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.font = `bold ${7 * s}px sans-serif`;
       ctx.fillText('z', cx + 18 * s, cy - 14 * s);
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Startled awake — wide eyes
-      drawEyes(ctx, cx, cy, s, 7, 8, 3.5);
+      drawEyes(ctx, cx, cy, s, 7, 8, 3.5, gaze);
       // Yawning mouth
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -327,7 +344,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'star',
     label: '*_*',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Star eyes
       ctx.fillStyle = '#ffd700';
       for (const ox of [-8, 8]) {
@@ -356,7 +373,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 5 * s, 5 * s, 0, Math.PI);
       ctx.fill();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Spinning star eyes
       ctx.fillStyle = '#ffd700';
       for (const ox of [-8, 8]) {
@@ -376,7 +393,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'cat',
     label: ':3',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Cat ears (triangles on top)
       ctx.fillStyle = 'rgba(255,150,200,0.5)';
       ctx.beginPath();
@@ -390,7 +407,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.lineTo(cx + 15 * s, cy - 12 * s);
       ctx.fill();
       // Eyes
-      drawEyes(ctx, cx, cy, s, 4, 5, 2);
+      drawEyes(ctx, cx, cy, s, 4, 5, 2, gaze);
       // :3 mouth
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 1.5 * s;
@@ -411,7 +428,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.moveTo(cx + 17 * s, cy + 6 * s); ctx.lineTo(cx + 8 * s, cy + 5 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Cat ears
       ctx.fillStyle = 'rgba(255,150,200,0.5)';
       ctx.beginPath();
@@ -425,7 +442,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.lineTo(cx + 15 * s, cy - 12 * s);
       ctx.fill();
       // Wide eyes
-      drawEyes(ctx, cx, cy, s, 6, 7, 3);
+      drawEyes(ctx, cx, cy, s, 6, 7, 3, gaze);
       // Hissing mouth
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -438,15 +455,16 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'shock',
     label: 'O_O',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Big round eyes
+      const off = pupilOffset(7, 7, 3.5, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(cx - 8 * s, cy - 4 * s, 7 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 8 * s, cy - 3 * s, 3.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 3.5 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
@@ -454,7 +472,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx + 8 * s, cy - 3 * s, 3.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, 3.5 * s, 0, Math.PI * 2);
       ctx.fill();
       // Small O mouth
       ctx.strokeStyle = '#222';
@@ -463,15 +481,16 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 7 * s, 4 * s, 0, Math.PI * 2);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Even bigger eyes
+      const off = pupilOffset(9, 9, 2, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(cx - 9 * s, cy - 4 * s, 9 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 9 * s, cy - 3 * s, 2 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 9 * s + off.x, cy - 3 * s + off.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
@@ -479,7 +498,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx + 9 * s, cy - 3 * s, 2 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 9 * s + off.x, cy - 3 * s + off.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
       // Big O mouth
       ctx.fillStyle = '#222';
@@ -491,15 +510,16 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'wink',
     label: ';)',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Left eye (open)
+      const off = pupilOffset(5, 6, 2.5, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.ellipse(cx - 8 * s, cy - 4 * s, 5 * s, 6 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 8 * s, cy - 3 * s, 2.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
       // Right eye (winking)
       ctx.strokeStyle = '#222';
@@ -514,9 +534,9 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 4 * s, 7 * s, 0.1 * Math.PI, 0.9 * Math.PI);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Both eyes open wide
-      drawEyes(ctx, cx, cy, s, 6, 7, 3);
+      drawEyes(ctx, cx, cy, s, 6, 7, 3, gaze);
       // Cheeky grin
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -532,15 +552,16 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'smug',
     label: '>.>',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Half-lidded eyes looking to side
+      const off = pupilOffset(5, 4, 2.5, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.ellipse(cx - 8 * s, cy - 3 * s, 5 * s, 4 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 5 * s, cy - 2 * s, 2.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 5 * s + off.x, cy - 2 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
@@ -548,7 +569,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx + 11 * s, cy - 2 * s, 2.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 11 * s + off.x, cy - 2 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
       // Eyelids (top half)
       ctx.fillStyle = 'rgba(30,30,30,0.15)';
@@ -566,8 +587,8 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.quadraticCurveTo(cx + 4 * s, cy + 6 * s, cx + 8 * s, cy + 3 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
-      drawEyes(ctx, cx, cy, s, 5, 6, 2.5);
+    drawPuffed(ctx, cx, cy, s, gaze) {
+      drawEyes(ctx, cx, cy, s, 5, 6, 2.5, gaze);
       // Forced grin
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -579,9 +600,9 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'cry',
     label: 'T_T',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Crying eyes
-      drawEyes(ctx, cx, cy, s, 5, 6, 2.5);
+      drawEyes(ctx, cx, cy, s, 5, 6, 2.5, gaze);
       // Eyebrows (worried)
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -610,8 +631,8 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.quadraticCurveTo(cx + 3 * s, cy + 10 * s, cx + 6 * s, cy + 8 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
-      drawEyes(ctx, cx, cy, s, 6, 7, 3);
+    drawPuffed(ctx, cx, cy, s, gaze) {
+      drawEyes(ctx, cx, cy, s, 6, 7, 3, gaze);
       // Big tears
       ctx.fillStyle = 'rgba(100,180,255,0.7)';
       ctx.beginPath();
@@ -630,7 +651,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'skull',
     label: 'x_x',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Hollow circle eyes
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -661,7 +682,7 @@ const FACE_PRESETS: FacePreset[] = [
         ctx.stroke();
       }
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // X eyes
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2.5 * s;
@@ -684,9 +705,9 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'clown',
     label: '0w0',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Eyes with lashes
-      drawEyes(ctx, cx, cy, s, 5, 6, 2.5);
+      drawEyes(ctx, cx, cy, s, 5, 6, 2.5, gaze);
       // Red nose
       ctx.fillStyle = '#ff3333';
       ctx.beginPath();
@@ -707,8 +728,8 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx + 14 * s, cy + 3 * s, 4 * s, 0, Math.PI * 2);
       ctx.fill();
     },
-    drawPuffed(ctx, cx, cy, s) {
-      drawEyes(ctx, cx, cy, s, 7, 8, 3.5);
+    drawPuffed(ctx, cx, cy, s, gaze) {
+      drawEyes(ctx, cx, cy, s, 7, 8, 3.5, gaze);
       // Big red nose
       ctx.fillStyle = '#ff3333';
       ctx.beginPath();
@@ -724,7 +745,7 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'tired',
     label: 'u_u',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Bags under eyes
       ctx.fillStyle = 'rgba(100,80,120,0.3)';
       ctx.beginPath();
@@ -734,7 +755,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.ellipse(cx + 8 * s, cy, 6 * s, 3 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       // Droopy eyes
-      drawEyes(ctx, cx, cy, s, 4, 3, 2);
+      drawEyes(ctx, cx, cy, s, 4, 3, 2, gaze);
       // Flat mouth
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 1.5 * s;
@@ -743,9 +764,9 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.quadraticCurveTo(cx, cy + 8 * s, cx + 5 * s, cy + 7 * s);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Startled awake
-      drawEyes(ctx, cx, cy, s, 6, 8, 3);
+      drawEyes(ctx, cx, cy, s, 6, 8, 3, gaze);
       // Bags still there
       ctx.fillStyle = 'rgba(100,80,120,0.3)';
       ctx.beginPath();
@@ -764,15 +785,16 @@ const FACE_PRESETS: FacePreset[] = [
   {
     id: 'monocle',
     label: 'o_Q',
-    drawNormal(ctx, cx, cy, s) {
+    drawNormal(ctx, cx, cy, s, gaze) {
       // Normal left eye
+      const off = pupilOffset(5, 6, 2.5, s, gaze);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.ellipse(cx - 8 * s, cy - 4 * s, 5 * s, 6 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx - 8 * s, cy - 3 * s, 2.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
       // Monocle on right eye
       ctx.strokeStyle = '#c8a84e';
@@ -794,7 +816,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.fill();
       ctx.fillStyle = '#222';
       ctx.beginPath();
-      ctx.arc(cx + 8 * s, cy - 3 * s, 2.5 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
       // Redraw monocle rim on top
       ctx.strokeStyle = '#c8a84e';
@@ -815,9 +837,9 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.arc(cx, cy + 5 * s, 6 * s, 0.15 * Math.PI, 0.85 * Math.PI);
       ctx.stroke();
     },
-    drawPuffed(ctx, cx, cy, s) {
+    drawPuffed(ctx, cx, cy, s, gaze) {
       // Monocle pops off
-      drawEyes(ctx, cx, cy, s, 6, 7, 3);
+      drawEyes(ctx, cx, cy, s, 6, 7, 3, gaze);
       // Monocle flying away
       ctx.strokeStyle = '#c8a84e';
       ctx.lineWidth = 2 * s;
@@ -843,23 +865,34 @@ export function getAllFacePresets(): FacePreset[] {
   return FACE_PRESETS;
 }
 
-/** Draw a face at the blob's centroid. */
+/** Draw a face at the blob's centroid. `gaze` is a unit-ish vector that
+ * offsets pupils toward the player's input direction. The whole face also
+ * leans a little in that direction (a fraction of the pupil travel) so the
+ * blob feels like it's looking *and* turning toward the input. */
 export function drawBlobFace(
   ctx: CanvasRenderingContext2D,
   centroid: Vec2,
   faceId: string,
   isExpanding: boolean,
   expandScale: number,
+  gaze: Gaze = NO_GAZE,
 ): void {
   const face = getFacePreset(faceId);
   // Scale face with blob expansion (but not too much)
-  const s = 0.8 + Math.min(expandScale - 1, 1.5) * 0.15;
+  const s = 2.0 + Math.min(expandScale - 1, 1.5) * 0.15;
+
+  // Subtle whole-face lean toward the gaze direction. Tuned to ~60% of the
+  // default eye's max pupil travel so the face shift reads as connected to,
+  // but smaller than, the pupil shift.
+  const FACE_LEAN_PX = 3 * s;
+  const cx = centroid.x + gaze.x * FACE_LEAN_PX;
+  const cy = centroid.y + gaze.y * FACE_LEAN_PX;
 
   ctx.save();
   if (isExpanding) {
-    face.drawPuffed(ctx, centroid.x, centroid.y, s);
+    face.drawPuffed(ctx, cx, cy, s, gaze);
   } else {
-    face.drawNormal(ctx, centroid.x, centroid.y, s);
+    face.drawNormal(ctx, cx, cy, s, gaze);
   }
   ctx.restore();
 }

@@ -1,4 +1,5 @@
 import { SoftBodyWorld } from './softBodyWorld';
+import type { SoftBodyEngine } from "./SoftBodyEngine";
 import { Vec2, vec2, ZERO } from './vec2';
 import * as Tuning from './tuning';
 import * as HullPresets from './hullPresets';
@@ -6,7 +7,10 @@ import { BlobResult } from './types';
 
 export type HullPreset = 'circle16' | 'square' | 'triangle' | 'star' | 'diamond' | 'hexagon';
 
-const BLOB_RADIUS = 48;
+export const BLOB_RADIUS = 48;
+export const BLOB_EXPAND_MAX_SCALE = 3.0;
+export const BLOB_SQUASH_X_AMOUNT = 0.35;
+export const BLOB_SQUASH_Y_AMOUNT = 0.3;
 // Forces are now per-second (multiplied by dt in applyBlobMoveForce).
 // Old per-frame values (2.0 / 1.5 / 0.8) scaled by 60 to preserve 60fps feel.
 const MOVE_FORCE = 240.0;
@@ -34,6 +38,12 @@ export interface SlimeBlobConfig {
   expandShapeScaleMax?: number;
   expandShapeScaleSpeed?: number;
   expandShapeScaleSpeedPress?: number;
+  /** Stable cross-client identifier — see `BlobRange.sortKey` and
+   * `SoftBodyWorld.addBlobFromHull`'s `sortKey` parameter. Pass the
+   * playerId for player blobs, the NPC id for NPCs. Omit for single-
+   * player / editor / test contexts where cross-client order doesn't
+   * matter. */
+  sortKey?: string;
 }
 
 function getHullLocal(preset: HullPreset): Vec2[] {
@@ -55,7 +65,7 @@ export class SlimeBlob {
   readonly shapeIdx: number;
   readonly playerControlled: boolean;
 
-  private world: SoftBodyWorld;
+  private world: SoftBodyEngine;
   private expandPressed = false;
   private expandWasPressed = false;
   private stickX = 0;  // raw joystick input (world-space)
@@ -79,7 +89,7 @@ export class SlimeBlob {
   private moveForceMultiplier = 1.0;
   private expandSpeedMultiplier = 1.0;
 
-  constructor(world: SoftBodyWorld, worldOrigin: Vec2, config: SlimeBlobConfig = {}) {
+  constructor(world: SoftBodyEngine, worldOrigin: Vec2, config: SlimeBlobConfig = {}) {
     this.world = world;
     this.playerControlled = config.playerControlled ?? true;
     this.expandShapeScaleMax = config.expandShapeScaleMax ?? 3.0;
@@ -112,6 +122,7 @@ export class SlimeBlob {
       shapeMatchK: smk,
       shapeMatchDamp: smd,
       worldOrigin,
+      sortKey: config.sortKey,
     });
 
     this.blobId = result.blobId;
@@ -151,6 +162,20 @@ export class SlimeBlob {
   /** True if any of this blob's particles are currently in contact with the ground/platform. */
   isGrounded(): boolean {
     return this.world.getBlobGroundContacts(this.blobId) > 0;
+  }
+
+  /** Representative ground-contact point + outward surface normal from the
+   * most recent physics step, or null when not grounded. Used by VFX to
+   * place splats on the actual surface rather than at the blob's centroid. */
+  getGroundContact(): { point: Vec2; normal: Vec2; poly: Vec2[] | null } | null {
+    return this.world.getBlobGroundContact(this.blobId);
+  }
+
+  /** Representative impact contact on any static surface (floor, wall, or
+   * ceiling) from the most recent physics step, or null if not touching
+   * anything. Used by VFX to spawn splats on walls/ceilings on hard impact. */
+  getImpactContact(): { point: Vec2; normal: Vec2; poly: Vec2[] | null } | null {
+    return this.world.getBlobImpactContact(this.blobId);
   }
 
   setGravityOverride(g: Vec2 | null): void {
@@ -434,6 +459,19 @@ export class SlimeBlob {
 
   isExpanding(): boolean {
     return this.expandPressed;
+  }
+
+  /** The X/Y stick values the blob USED for this tick's physics, captured
+   * by `setInput` at the start of the tick. The host's network broadcast
+   * must use THESE values (not the latest `ManagedPlayer.moveX/Y` which
+   * may have been overwritten by an async input event arriving AFTER
+   * physics ran) — otherwise host's physics and guest's physics diverge
+   * by one tick whenever the input changes mid-tick on the host. */
+  getStickX(): number {
+    return this.stickX;
+  }
+  getStickY(): number {
+    return this.stickY;
   }
 
   getExpandScale(): number {

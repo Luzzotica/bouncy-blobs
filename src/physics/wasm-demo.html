@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>softbody-wasm demo</title>
+  <style>
+    body { margin: 0; background: #1a1626; color: #f0e8d8; font-family: ui-sans-serif, system-ui, sans-serif; }
+    #wrap { max-width: 720px; margin: 24px auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 8px; letter-spacing: 0.04em; }
+    p { font-size: 13px; line-height: 1.5; color: #c8bfae; margin: 4px 0; }
+    canvas { background: #0e0a1a; border: 1px solid #3a304f; display: block; margin-top: 12px; }
+    .stats { font-family: ui-monospace, monospace; font-size: 12px; color: #8e7fa8; margin-top: 8px; }
+    code { background: #2a223a; padding: 1px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <h1>softbody-wasm — deterministic fixed-point physics demo</h1>
+    <p>
+      A single soft body falling onto a floor under gravity, simulated entirely
+      in integer (Q32.32) arithmetic compiled to WASM. The sim is bit-deterministic:
+      every refresh produces the exact same particle trajectories from the seed.
+    </p>
+    <p>
+      Press <code>R</code> to reset, <code>SPACE</code> to launch the blob upward.
+    </p>
+    <canvas id="canvas" width="600" height="400"></canvas>
+    <div class="stats" id="stats">loading wasm…</div>
+  </div>
+
+  <script type="module">
+    import init, { SoftBodyWorldHandle } from './wasm/softbody_wasm.js';
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const stats = document.getElementById('stats');
+
+    // World coords: y is positive-down.
+    const W = canvas.width, H = canvas.height;
+
+    let world = null;
+    let blob = null;
+    const FLOOR_Y = 320;
+    const SEED = 1;
+    let lastFrame = performance.now();
+    let frameCount = 0;
+
+    function setupScene() {
+      world = new SoftBodyWorldHandle(SEED, 0, 1000, 4);
+      // Floor (full-width rect).
+      world.registerStaticPolygon(new Float64Array([
+        20,  FLOOR_Y,
+        W - 20, FLOOR_Y,
+        W - 20, FLOOR_Y + 40,
+        20,  FLOOR_Y + 40,
+      ]), 0 /* default material */);
+
+      // Octagonal blob, 30px radius, dropped from (W/2, 80).
+      const hull = [];
+      const R = 30;
+      const N = 8;
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        hull.push(Math.cos(a) * R, Math.sin(a) * R);
+      }
+      blob = world.addBlobFromHull(
+        new Float64Array(hull),
+        0, 0,           // center local
+        0.2, 0.12,      // center_mass, hull_mass
+        55, 3.5,        // spring k, damp
+        75, 4.2,        // radial k, damp
+        0.12,           // pressure k
+        132, 4.6,       // shape-match k, damp
+        W / 2, 80,      // world origin
+        'demo',
+      );
+    }
+
+    function draw() {
+      ctx.fillStyle = '#0e0a1a';
+      ctx.fillRect(0, 0, W, H);
+
+      // Floor.
+      ctx.fillStyle = '#3a304f';
+      ctx.fillRect(20, FLOOR_Y, W - 40, 40);
+
+      // Hull polygon.
+      const hull = world.getHullPolygon(blob.blob_id);
+      ctx.fillStyle = '#a87ee8';
+      ctx.strokeStyle = '#e8d8ff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < hull.length; i += 2) {
+        if (i === 0) ctx.moveTo(hull[i], hull[i + 1]);
+        else ctx.lineTo(hull[i], hull[i + 1]);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Center dot.
+      const positions = world.getPositions();
+      const cx = positions[blob.center_idx * 2];
+      const cy = positions[blob.center_idx * 2 + 1];
+      ctx.fillStyle = '#fff5d8';
+      ctx.fillRect(cx - 2, cy - 2, 4, 4);
+    }
+
+    function tick(now) {
+      const dt = Math.min(0.05, (now - lastFrame) / 1000);
+      lastFrame = now;
+      world.step(dt);
+      draw();
+      frameCount++;
+      if (frameCount % 30 === 0) {
+        const hash = world.stateHash();
+        stats.textContent =
+          `tick ${world.tick}  ·  particles ${world.particleCount()}  ·  ` +
+          `state hash 0x${hash.toString(16)}`;
+      }
+      requestAnimationFrame(tick);
+    }
+
+    addEventListener('keydown', (e) => {
+      if (!world) return;
+      if (e.key === 'r' || e.key === 'R') {
+        setupScene();
+      } else if (e.key === ' ') {
+        world.applyBlobLinearVelocityDelta(blob.blob_id, 0, -800);
+      }
+    });
+
+    init().then(() => {
+      setupScene();
+      lastFrame = performance.now();
+      requestAnimationFrame(tick);
+    }).catch(err => {
+      stats.textContent = 'wasm load failed: ' + err.message;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

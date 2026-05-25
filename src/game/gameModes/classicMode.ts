@@ -1,11 +1,12 @@
 import { GameMode, GameModeConfig, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
 import { LevelData, ZoneDef } from '../../levels/types';
 import { classicLevel } from '../../levels/classicLevel';
 import { drawGoalZone } from '../../renderer/zoneRenderer';
-import { drawPlayerLabels, drawTimer } from '../../renderer/hudRenderer';
+import { drawTimer } from '../../renderer/hudRenderer';
 
 export class ClassicMode implements GameMode {
   readonly config: GameModeConfig = {
@@ -22,7 +23,7 @@ export class ClassicMode implements GameMode {
   private levelData: LevelData;
   private goalZone: ZoneDef | null = null;
   private goalTriggerIdx: number = -1;
-  private world: SoftBodyWorld | null = null;
+  private world: SoftBodyEngine | null = null;
   private finishedPlayerId: string | null = null;
   private gameTime = 0;
 
@@ -34,7 +35,7 @@ export class ClassicMode implements GameMode {
     return this.levelData;
   }
 
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
     this.world = world;
     this.goalZone = this.levelData.goalZones?.[0] ?? null;
 
@@ -67,7 +68,7 @@ export class ClassicMode implements GameMode {
     }
   }
 
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyWorld): void {
+  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyEngine): void {
     this.gameTime += dt;
   }
 
@@ -91,14 +92,10 @@ export class ClassicMode implements GameMode {
     return null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, state: GameModeState, playerManager: PlayerManager): void {
-    // Draw goal zone
+  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, _playerManager: PlayerManager): void {
     if (this.goalZone) {
       drawGoalZone(ctx, this.goalZone, this.gameTime);
     }
-
-    // Draw player labels
-    drawPlayerLabels(ctx, playerManager.getAllPlayers());
   }
 
   renderHUD(ctx: CanvasRenderingContext2D, width: number, height: number, state: GameModeState, _playerManager: PlayerManager): void {

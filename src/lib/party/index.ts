@@ -13,6 +13,8 @@
 export { RoomService } from "./RoomService";
 export type { CreateRoomOpts, JoinRoomOpts, PatchRoomOpts } from "./RoomService";
 export { PeerManager } from "./PeerManager";
+export { SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from "./steamTransport";
+export type { Transport, ChannelName } from "./transport";
 export type {
   Room,
   RoomPeer,

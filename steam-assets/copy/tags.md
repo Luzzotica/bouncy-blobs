@@ -1,0 +1,16 @@
+<!-- Up to 20 tags. Most-relevant first — Steam weights position. -->
+- Party Game
+- Local Multiplayer
+- Online Co-Op
+- Physics
+- Funny
+- Cute
+- Casual
+- Cartoon
+- Level Editor
+- Workshop
+- Couch Co-Op
+- Multiplayer
+- 2D
+- Indie
+- Family Friendly

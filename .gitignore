@@ -16,6 +16,19 @@ test-results/
 playwright-report/
 playwright/output/
 
+# Steam (dev-only App ID file; production binaries get the ID injected by Steam)
+src-tauri/steam_appid.txt
+# Steam SDK (vendored locally; not redistributable in source form)
+src-tauri/resources/steamworks/
+
+# Rust build artifacts
+src-tauri/target/
+crates/target/
+**/target/
+
+# wasm-pack / wasm-bindgen outputs
+crates/softbody-wasm/pkg/
+
 # Supabase CLI local state
 **/supabase/.branches/
 **/supabase/.temp/

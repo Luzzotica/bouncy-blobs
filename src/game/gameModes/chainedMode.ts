@@ -1,16 +1,39 @@
 import { GameMode, GameModeConfig, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager, ManagedPlayer } from '../playerManager';
 import { LevelData, ZoneDef } from '../../levels/types';
 import { chainedLevel } from '../../levels/chainedLevel';
 import { drawGoalZone } from '../../renderer/zoneRenderer';
-import { drawPlayerLabels, drawTimer } from '../../renderer/hudRenderer';
-import { Vec2, vec2, sub, length } from '../../physics/vec2';
+import { drawTimer } from '../../renderer/hudRenderer';
+import { Vec2, sub, length } from '../../physics/vec2';
 
-const CHAIN_REST_LENGTH = 250;   // slack distance before spring kicks in
-const CHAIN_STIFFNESS = 40;      // spring pull strength
-const CHAIN_DAMPING = 8;         // prevents oscillation
+// Total length of the rope between any two chained players. The rope is
+// only this long — when the bots are this far apart in rope-path terms
+// (not straight-line), they can't go further. No spring, no leash:
+// physics does it through the constraint chain alone.
+const CHAIN_TOTAL_LENGTH = 750;
+// Max distance between any two adjacent chain particles. Smaller = denser
+// rope, smoother visual, less clip-through, more compute. 25 against a
+// 750-unit rope gives ~30 segments.
+const CHAIN_MAX_SEGMENT_LEN = 25;
+// Mass close enough to a blob's that the PBD constraint solver actually
+// transmits force through the chain instead of dumping every correction
+// into the segment particles. Blob mass ≈ 5; 0.5 is a 10× ratio.
+const CHAIN_SEGMENT_MASS = 0.5;
+// Roughly 40% of MAX_SEGMENT_LEN so adjacent particles overlap visually —
+// thin walls can't fit between them, no rope-through-wall artefacts.
+const CHAIN_SEGMENT_RADIUS = 10;
+// Bi-directional sweeps per substep inside the chain-specific solver.
+const CHAIN_SOLVER_ITERS = 12;
+
+interface ChainPair {
+  pidA: string;
+  pidB: string;
+  /** Particle indices of the intermediate rope segments, in order from A to B. */
+  segmentIndices: number[];
+}
 
 export class ChainedMode implements GameMode {
   readonly config: GameModeConfig = {
@@ -26,8 +49,8 @@ export class ChainedMode implements GameMode {
 
   private levelData: LevelData;
   private goalZone: ZoneDef | null = null;
-  private world: SoftBodyWorld | null = null;
-  private chainPairs: { pidA: string; pidB: string }[] = [];
+  private world: SoftBodyEngine | null = null;
+  private chainPairs: ChainPair[] = [];
   private allReachedGoal = false;
   private gameTime = 0;
 
@@ -39,11 +62,10 @@ export class ChainedMode implements GameMode {
     return this.levelData;
   }
 
-  initialize(world: SoftBodyWorld, _playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, _playerManager: PlayerManager): void {
     this.world = world;
     this.goalZone = this.levelData.goalZones?.[0] ?? null;
 
-    // Hook trigger for goal detection
     if (this.goalZone) {
       const prevEntered = world.onTriggerEntered;
       world.onTriggerEntered = (triggerShapeIdx, blobId) => {
@@ -52,27 +74,25 @@ export class ChainedMode implements GameMode {
     }
   }
 
-  onPhaseStart(phase: GamePhase, state: GameModeState): void {
+  onPhaseStart(phase: GamePhase, _state: GameModeState): void {
     if (phase === 'playing') {
       this.allReachedGoal = false;
       this.gameTime = 0;
-      // Chains are created when we first know about players — handled in update
       this.chainPairs = [];
+      this.chainsCreated = false;
     }
   }
 
   private chainsCreated = false;
 
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, world: SoftBodyWorld): void {
+  update(dt: number, _state: GameModeState, playerManager: PlayerManager, world: SoftBodyEngine): void {
     this.gameTime += dt;
 
-    // Create chains on first update (players are already added by now)
     if (!this.chainsCreated && playerManager.getPlayerCount() > 1) {
       this.createChains(playerManager, world);
       this.chainsCreated = true;
     }
 
-    // Check if all players reached goal
     if (this.goalZone && playerManager.getPlayerCount() > 0) {
       const gz = this.goalZone;
       const hw = gz.width / 2;
@@ -89,27 +109,33 @@ export class ChainedMode implements GameMode {
     }
   }
 
-  private createChains(playerManager: PlayerManager, world: SoftBodyWorld): void {
+  private createChains(playerManager: PlayerManager, world: SoftBodyEngine): void {
     const players = playerManager.getAllPlayers();
     if (players.length < 2) return;
 
-    // Chain each player to the next in a line
     for (let i = 0; i < players.length - 1; i++) {
       const a = players[i];
       const b = players[i + 1];
-      world.addTetherSpring(a.blob.centerIdx, b.blob.centerIdx, CHAIN_REST_LENGTH, CHAIN_STIFFNESS, CHAIN_DAMPING);
-      this.chainPairs.push({ pidA: a.playerId, pidB: b.playerId });
+      const rope = world.addRopeChain(a.blob.centerIdx, b.blob.centerIdx, {
+        totalLength: CHAIN_TOTAL_LENGTH,
+        maxSegmentLength: CHAIN_MAX_SEGMENT_LEN,
+        segmentMass: CHAIN_SEGMENT_MASS,
+        segmentRadius: CHAIN_SEGMENT_RADIUS,
+        iterations: CHAIN_SOLVER_ITERS,
+      });
+      this.chainPairs.push({
+        pidA: a.playerId,
+        pidB: b.playerId,
+        segmentIndices: rope.particleIndices,
+      });
     }
   }
 
   checkWinCondition(state: GameModeState, playerManager: PlayerManager): string | null {
-    // All players reached goal — everyone wins (return first player as "winner")
     if (this.allReachedGoal) {
       const players = playerManager.getAllPlayers();
       return players[0]?.playerId ?? null;
     }
-
-    // Time's up — highest player (lowest Y in world coords) wins
     if (state.timeRemaining !== null && state.timeRemaining <= 0) {
       let bestId: string | null = null;
       let bestY = Infinity;
@@ -122,27 +148,24 @@ export class ChainedMode implements GameMode {
       }
       return bestId;
     }
-
     return null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, state: GameModeState, playerManager: PlayerManager): void {
-    // Draw goal zone
+  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, playerManager: PlayerManager): void {
     if (this.goalZone) {
       drawGoalZone(ctx, this.goalZone, this.gameTime);
     }
 
-    // Draw chains between connected players
     this.renderChains(ctx, playerManager);
-
-    // Draw player labels
-    drawPlayerLabels(ctx, playerManager.getAllPlayers());
   }
 
   private renderChains(ctx: CanvasRenderingContext2D, playerManager: PlayerManager): void {
+    const world = this.world;
+    if (!world) return;
+
     ctx.save();
-    ctx.lineWidth = 4;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     for (const pair of this.chainPairs) {
       const a = playerManager.getPlayer(pair.pidA);
@@ -151,33 +174,48 @@ export class ChainedMode implements GameMode {
 
       const posA = a.blob.getCentroid();
       const posB = b.blob.getCentroid();
-      const dist = length(sub(posB, posA));
-      const tension = Math.min(Math.max(0, (dist - CHAIN_REST_LENGTH) / CHAIN_REST_LENGTH), 1);
 
-      // Color: green (slack) -> yellow -> red (taut)
+      // Walk the physical rope: endpoint A -> each segment particle -> endpoint B.
+      const pts: Vec2[] = [posA];
+      for (const segIdx of pair.segmentIndices) {
+        const p = world.pos[segIdx];
+        if (p) pts.push(p);
+      }
+      pts.push(posB);
+
+      // Tension color: distance between endpoints vs the rope's full slack length.
+      const straightLine = length(sub(posB, posA));
+      const tension = Math.min(Math.max(0, (straightLine - CHAIN_TOTAL_LENGTH * 0.85) / (CHAIN_TOTAL_LENGTH * 0.15)), 1);
       let r: number, g: number, bv: number;
       if (tension < 0.5) {
         const t = tension * 2;
-        r = Math.floor(100 * t + 50 * (1 - t));
-        g = 200;
-        bv = Math.floor(50 * (1 - t));
+        r = Math.floor(110 * t + 60 * (1 - t));
+        g = Math.floor(180 * (1 - t) + 200 * t);
+        bv = Math.floor(60 * (1 - t) + 40 * t);
       } else {
         const t = (tension - 0.5) * 2;
         r = Math.floor(255 * t + 200 * (1 - t));
-        g = Math.floor(200 * (1 - t) + 80 * t);
-        bv = 50;
+        g = Math.floor(180 * (1 - t) + 80 * t);
+        bv = 40;
       }
-      ctx.strokeStyle = `rgb(${r}, ${g}, ${bv})`;
 
-      // Draw chain as dashed line
-      ctx.setLineDash([12, 8]);
+      // Dark outline + colored fill — two passes give the rope a comic-book chain
+      // look without needing per-link art.
+      ctx.lineWidth = 9;
+      ctx.strokeStyle = '#0a0612';
       ctx.beginPath();
-      ctx.moveTo(posA.x, posA.y);
-      ctx.lineTo(posB.x, posB.y);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = `rgb(${r}, ${g}, ${bv})`;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.stroke();
     }
 
-    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -186,7 +224,6 @@ export class ChainedMode implements GameMode {
       drawTimer(ctx, width, state.timeRemaining);
     }
 
-    // Show "All players must reach the goal!" hint
     ctx.save();
     ctx.font = '14px sans-serif';
     ctx.textAlign = 'center';

@@ -1,4 +1,8 @@
-import { Routes, Route } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, useNavigate } from 'react-router-dom'
+import { installUiSounds } from './utils/uiSounds'
+import { preloadAll, SFX_NAMES } from './utils/audio'
+import { onJoinRequested, onLaunchJoin } from './lib/steamLobbyApi'
 import Home from './pages/Home'
 import Sandbox from './pages/Sandbox'
 import Editor from './pages/Editor'
@@ -10,6 +14,32 @@ import OnlineGuest from './pages/OnlineGuest'
 import Intro from './pages/Intro'
 
 export default function App() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    installUiSounds()
+    preloadAll(SFX_NAMES)
+  }, [])
+
+  // Steam invite handlers — fire when a friend launches us via "Join Game"
+  // (onLaunchJoin via +connect_lobby) or invokes "Join Game" while we're
+  // already running (onJoinRequested). Both navigate to the Steam guest
+  // route; OnlineGuest reads `?steam_lobby` and dials over Steam Networking.
+  useEffect(() => {
+    let unlistenLaunch: (() => void) | null = null
+    let unlistenJoin: (() => void) | null = null
+    onLaunchJoin((lobbyId) => navigate(`/online-guest?steam_lobby=${lobbyId}`))
+      .then((u) => { unlistenLaunch = u })
+      .catch(() => {})
+    onJoinRequested((lobbyId) => navigate(`/online-guest?steam_lobby=${lobbyId}`))
+      .then((u) => { unlistenJoin = u })
+      .catch(() => {})
+    return () => {
+      unlistenLaunch?.()
+      unlistenJoin?.()
+    }
+  }, [navigate])
+
   return (
     <Routes>
       <Route path="/" element={<Home />} />

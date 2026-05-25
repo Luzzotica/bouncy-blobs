@@ -110,24 +110,24 @@ describe('levelLoader — PointShape hydration', () => {
   });
 });
 
-describe('levelLoader — PressurePlate registration', () => {
-  it('registers each plate as a trigger polygon and indexes shape→plateId', () => {
+describe('levelLoader — Trigger area registration', () => {
+  it('registers each trigger as a sensor polygon and indexes shape→triggerId', () => {
     const world = new SoftBodyWorld();
     const level: LevelData = {
       ...emptyLevel(),
-      pressurePlates: [
-        { id: 'plate1', x: 0, y: 0, width: 100, height: 20, rotation: 0, triggerIds: [] },
-        { id: 'plate2', x: 200, y: 0, width: 100, height: 20, rotation: 0, triggerIds: ['t1'] },
+      triggers: [
+        { id: 'trig1', x: 0, y: 0, width: 100, height: 20, rotation: 0 },
+        { id: 'trig2', x: 200, y: 0, width: 100, height: 20, rotation: 0 },
       ],
     };
 
     const loaded = loadLevel(world, level);
 
-    expect(loaded.plateShapeIdxToId.size).toBe(2);
-    const ids = [...loaded.plateShapeIdxToId.values()];
-    expect(ids).toContain('plate1');
-    expect(ids).toContain('plate2');
-    // Each plate should have created exactly one trigger shape in the world.
+    expect(loaded.triggerShapeIdxToId.size).toBe(2);
+    const ids = [...loaded.triggerShapeIdxToId.values()];
+    expect(ids).toContain('trig1');
+    expect(ids).toContain('trig2');
+    // Each trigger should have created exactly one trigger shape in the world.
     const triggerShapes = world.shapes.filter(s => s.isTrigger);
     expect(triggerShapes.length).toBe(2);
   });

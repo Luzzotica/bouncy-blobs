@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>softbody-wasm — netplay determinism validator</title>
+  <style>
+    body { margin: 0; background: #1a1626; color: #f0e8d8; font-family: ui-sans-serif, system-ui, sans-serif; }
+    #wrap { max-width: 760px; margin: 24px auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 6px; letter-spacing: 0.04em; }
+    p { font-size: 13px; line-height: 1.55; color: #c8bfae; margin: 4px 0 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+    .pane { background: #0e0a1a; border: 1px solid #3a304f; padding: 12px; }
+    .pane h2 { font-size: 13px; margin: 0 0 8px; color: #8e7fa8; letter-spacing: 0.05em; text-transform: uppercase; }
+    .hash { font-family: ui-monospace, monospace; font-size: 13px; color: #f0e8d8; word-break: break-all; }
+    .verdict { margin-top: 16px; padding: 12px; font-size: 14px; font-family: ui-monospace, monospace; border: 1px solid #3a304f; }
+    .verdict.match { background: #173a1f; border-color: #4a8a5b; color: #d2e8d8; }
+    .verdict.diverge { background: #3a1f17; border-color: #8a4a4a; color: #e8d2d2; }
+    button { background: #3a304f; color: #f0e8d8; border: 1px solid #5a4f7f; padding: 8px 14px; font-size: 13px; cursor: pointer; margin-right: 8px; }
+    button:hover { background: #5a4f7f; }
+    .stats { font-family: ui-monospace, monospace; font-size: 11px; color: #8e7fa8; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <h1>netplay determinism validator</h1>
+    <p>
+      Two completely independent <code>SoftBodyWorldHandle</code> instances are
+      constructed with the <strong>same seed</strong> and the <strong>same scripted
+      input sequence</strong>. After every step we hash both worlds' state and
+      compare. If the engine is deterministic across instances (which is the
+      whole reason we ported it to integer math), the hashes must match
+      exactly at every tick — that is the netplay guarantee in miniature.
+    </p>
+    <button id="run">Run 600 ticks</button>
+    <button id="resetA">Re-init world A only</button>
+
+    <div class="grid">
+      <div class="pane">
+        <h2>World A</h2>
+        <div class="hash" id="hashA">—</div>
+        <div class="stats" id="statsA"></div>
+      </div>
+      <div class="pane">
+        <h2>World B</h2>
+        <div class="hash" id="hashB">—</div>
+        <div class="stats" id="statsB"></div>
+      </div>
+    </div>
+
+    <div class="verdict" id="verdict">click "Run" to begin</div>
+  </div>
+
+  <script type="module">
+    import init, { SoftBodyWorldHandle } from './wasm/softbody_wasm.js';
+
+    const SEED = 1337;
+    const TICKS = 600;
+    const DT = 1 / 60;
+
+    function makeWorld() {
+      const w = new SoftBodyWorldHandle(SEED, 0, 1000, 4);
+      // Floor.
+      w.registerStaticPolygon(new Float64Array([
+        -500, 200, 500, 200, 500, 260, -500, 260,
+      ]), 0);
+      // Two blobs (same hull preset, different sort keys & origins).
+      const hull = [];
+      const R = 22, N = 6;
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        hull.push(Math.cos(a) * R, Math.sin(a) * R);
+      }
+      const h = new Float64Array(hull);
+      const a = w.addBlobFromHull(h,  0,0, 0.2,0.12, 55,3.5, 75,4.2, 0.12, 132,4.6,  -80, 0, 'a');
+      const b = w.addBlobFromHull(h,  0,0, 0.2,0.12, 55,3.5, 75,4.2, 0.12, 132,4.6,   80, 0, 'b');
+      // Give 'a' some horizontal velocity so they actually collide.
+      w.applyBlobLinearVelocityDelta(a.blob_id, 1200, -200);
+      return w;
+    }
+
+    let A, B;
+
+    function reset() {
+      A = makeWorld();
+      B = makeWorld();
+      document.getElementById('verdict').textContent = 'fresh worlds — click Run';
+      document.getElementById('verdict').className = 'verdict';
+      updateHashes(0);
+    }
+
+    function updateHashes(tick) {
+      const hA = A.stateHash();
+      const hB = B.stateHash();
+      document.getElementById('hashA').textContent = '0x' + hA.toString(16).padStart(16, '0');
+      document.getElementById('hashB').textContent = '0x' + hB.toString(16).padStart(16, '0');
+      document.getElementById('statsA').textContent = `tick ${A.tick} · particles ${A.particleCount()}`;
+      document.getElementById('statsB').textContent = `tick ${B.tick} · particles ${B.particleCount()}`;
+      return hA === hB;
+    }
+
+    function run() {
+      let firstDivergeTick = -1;
+      for (let t = 1; t <= TICKS; t++) {
+        A.step(DT);
+        B.step(DT);
+        if (firstDivergeTick < 0 && A.stateHash() !== B.stateHash()) {
+          firstDivergeTick = t;
+        }
+      }
+      const matched = updateHashes(TICKS);
+      const verdict = document.getElementById('verdict');
+      if (matched && firstDivergeTick < 0) {
+        verdict.className = 'verdict match';
+        verdict.textContent =
+          `✓ DETERMINISTIC — ${TICKS} ticks executed, state hashes matched at every tick.`;
+      } else {
+        verdict.className = 'verdict diverge';
+        verdict.textContent =
+          `✗ DIVERGED — first hash mismatch at tick ${firstDivergeTick}. ` +
+          `Investigate: this would break netplay.`;
+      }
+    }
+
+    document.getElementById('run').addEventListener('click', run);
+    document.getElementById('resetA').addEventListener('click', () => {
+      // Demonstrates that A's hash will diverge from B if you re-seed only one.
+      A = makeWorld();
+      // No tick run — just show A back at initial state, B unchanged.
+      updateHashes(0);
+    });
+
+    init().then(() => {
+      reset();
+    });
+  </script>
+</body>
+</html>

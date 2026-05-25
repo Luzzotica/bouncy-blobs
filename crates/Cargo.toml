@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["softbody", "softbody-wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "Proprietary"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

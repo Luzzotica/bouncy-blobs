@@ -77,6 +77,6 @@ export const partyLevel: LevelData = {
   ],
   springPads: [
     // Launch pad at the bottom to help recover
-    { id: 'spring1', x: 200, y: 2580, width: 100, height: 40, rotation: -Math.PI / 2, force: 600 },
+    { id: 'spring1', x: 200, y: 2580, width: 100, height: 40, rotation: -Math.PI / 2 },
   ],
 };

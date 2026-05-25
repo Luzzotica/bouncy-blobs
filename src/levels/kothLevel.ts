@@ -54,8 +54,8 @@ export const kothLevel: LevelData = {
   ],
   springPads: [
     // Launch from spawn areas up toward the hill
-    { id: 'sp1', x: 500, y: 1680, width: 100, height: 40, rotation: -Math.PI / 3, force: 500 },
-    { id: 'sp2', x: 2700, y: 1680, width: 100, height: 40, rotation: -Math.PI * 2 / 3, force: 500 },
+    { id: 'sp1', x: 500, y: 1680, width: 100, height: 40, rotation: -Math.PI / 3 },
+    { id: 'sp2', x: 2700, y: 1680, width: 100, height: 40, rotation: -Math.PI * 2 / 3 },
   ],
   spikes: [
     // Spikes on the sides of the hill — fall off and get punished

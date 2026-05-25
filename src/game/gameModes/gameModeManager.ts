@@ -1,4 +1,5 @@
 import { GameMode, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
@@ -41,7 +42,7 @@ export class GameModeManager {
     return this.mode;
   }
 
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
     this.mode.initialize(world, playerManager);
   }
 
@@ -55,7 +56,7 @@ export class GameModeManager {
   }
 
   /** Returns true if physics/input should run this frame. */
-  update(dt: number, playerManager: PlayerManager, world: SoftBodyWorld): boolean {
+  update(dt: number, playerManager: PlayerManager, world: SoftBodyEngine): boolean {
     const { phase } = this.state;
 
     if (phase === 'countdown') {

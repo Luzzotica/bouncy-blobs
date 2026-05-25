@@ -2,10 +2,29 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useUser } from '../contexts/UserContext';
-import { createHostRoom, RoomService, PeerManager } from '../lib/party';
+import { createHostRoom, RoomService, PeerManager, SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from '../lib/party';
+import { isSteamAvailable } from '../lib/workshopApi';
+import {
+  createLobby,
+  leaveLobby,
+  openInviteOverlay,
+  onMemberChanged,
+} from '../lib/steamLobbyApi';
 import type { RoomPeer, PeerCallbacks } from '../lib/party';
 import { roomConfig, GAME_ID } from '../lib/partyConfig';
-import { serializeSnapshot, type WorldSnapshot } from '../lib/multiplayerSnapshot';
+import { serializeSnapshot, type WorldSnapshot, type SnapshotEntity, type LobbyStateEvent, type ReliableEvent } from '../lib/multiplayerSnapshot';
+import {
+  encodeSnapshot,
+  ENTITY_KIND_NPC,
+  ENTITY_KIND_PLATFORM,
+  ENTITY_KIND_POINT_SHAPE,
+  MAX_OFFSET,
+  type PlayerRecord,
+  type WorldRecord,
+  type EntityOffset,
+} from '../lib/wireProtocol';
+import { encodeAggregatedInputs } from '../lib/inputProtocol';
+import { installDebugBridge } from '../lib/debugBridge';
 import {
   DEFAULT_PERSONALITY,
   GOAL_SEEKER_PALETTE,
@@ -19,6 +38,7 @@ import LobbyPanel, { type MapOption, type PlayerSummary } from '../components/Lo
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import { InputManager } from '../managers/InputManager';
 import { BouncyBlobsGame } from '../game/bouncyBlobsGame';
+import { createGamepadInput } from '../game/gamepadInput';
 import { GameContext, GameState } from '../game/GameInterface';
 import { LevelData, LevelType, getLevelTypes } from '../levels/types';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,8 +47,6 @@ import { WebRTCMessage } from '../types/webrtc';
 import GameCanvas from '../components/GameCanvas';
 import type { Player } from '../types/database';
 import { GameMode, GamePhase } from '../game/gameModes/types';
-import * as contentApi from '../lib/contentApi';
-
 // Game mode registry
 import { ClassicMode } from '../game/gameModes/classicMode';
 import { ChainedMode } from '../game/gameModes/chainedMode';
@@ -36,7 +54,7 @@ import { PartyMode } from '../game/gameModes/partyMode';
 import { KingOfTheHillMode } from '../game/gameModes/kingOfTheHillMode';
 import { FreeplayMode } from '../game/gameModes/freeplayMode';
 
-import { getAvailableLevels, loadBuiltinLevel } from '../levels/levelRegistry';
+import { getAvailableLevels, loadBuiltinLevel, listAllLevels, loadLevelById } from '../levels/levelRegistry';
 
 /** LAN IP for dev QR codes — set VITE_LOCAL_LAN_IP in .env to your machine's IP */
 const LOCAL_LAN_IP = import.meta.env.VITE_LOCAL_LAN_IP ?? '127.0.0.1';
@@ -97,9 +115,84 @@ export default function GameMaster() {
   const navigate = useNavigate();
 
   const [phase, setPhase] = useState<SessionPhase>('creating');
+  // Mirror of `phase` for closures that captured it stale (e.g. the
+  // onPeerConnected callback inside init() can fire any time after mount).
+  const phaseRef = useRef<SessionPhase>('creating');
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [joinUrl, setJoinUrl] = useState('');
+  const [steamLobbyReady, setSteamLobbyReady] = useState(false);
+  const steamLobbyIdRef = useRef<string | null>(null);
+  const steamMemberUnlistenRef = useRef<(() => void) | null>(null);
+
+  // Latest lobby_state snapshot. Updated in a useEffect below whenever any
+  // tracked piece of host state changes; broadcast to connected screen peers
+  // both from that effect and from the onPeerConnected handler (for late
+  // joiners getting their first lobby_state right after level_loaded).
+  const lobbyStateRef = useRef<LobbyStateEvent | null>(null);
+
+  // Session RNG seed. Generated once at mount and reused across both the
+  // lobby playground and any actual match. Every `level_loaded` event
+  // broadcast to guests carries this seed; the guest's BouncyBlobsGame is
+  // constructed with the matching seed so the host's and guest's worlds
+  // produce identical AI decisions, powerup rolls, etc.
+  // Seed defaults to a random u32 per session. Overridable via `?seed=N`
+  // for deterministic playwright/replay scenarios.
+  const sessionSeedRef = useRef<number>(((): number => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const s = sp.get('seed');
+      if (s) {
+        const n = Number(s);
+        if (Number.isFinite(n)) return (n >>> 0) || 1;
+      }
+    }
+    return (Math.random() * 0xffffffff) >>> 0;
+  })());
+
+  // Delta-compression scratch for the binary snapshot loop. Maps entity id
+  // (player id, npc-N, plat-X, point-shape id) to the last root + offsets we
+  // sent on the wire, plus a counter of how many consecutive ticks the
+  // entity has been at rest (used to compute the settled flag — once it's
+  // been still for SETTLED_FRAMES ticks we emit `settled: true` so the
+  // receiver can skip per-tick reconciliation for it). Every Nth tick we
+  // force a full keyframe so peers that missed updates can recover. Set
+  // `forceKeyframeRef.current = true` to request a keyframe on the next
+  // snapshot (used when a new screen peer connects mid-stream).
+  const lastSentRef = useRef<Map<string, {
+    rootX: number; rootY: number;
+    offsets: Float32Array;
+    /** Consecutive ticks with no significant change. */
+    stillTicks: number;
+  }>>(new Map());
+  // Separate history for world objects — those use absolute positions on the
+  // wire (not root+offsets) because their spans and node counts blow past the
+  // player record's u16-mask / ±MAX_OFFSET budget. We track every particle's
+  // last sent absolute position to compute the settled flag.
+  const lastSentWorldRef = useRef<Map<string, {
+    cx: number; cy: number;
+    positions: Float32Array;
+    stillTicks: number;
+  }>>(new Map());
+  const ticksSinceKeyframeRef = useRef<number>(0);
+  const forceKeyframeRef = useRef<boolean>(true);
+
+  // Late-joiner replay support. The host caches the most recent keyframe
+  // payload + a ring buffer of recent aggregated-input ticks. When a new
+  // screen peer connects, it gets the cached keyframe followed by every
+  // buffered input frame, lets it snap to the keyframe state and replay
+  // forward to ~the host's current tick.
+  const latestKeyframeRef = useRef<{ tick: number; buf: ArrayBuffer } | null>(null);
+  /** Most recent `manager_state` JSON event we've broadcast. Replayed to
+   * late joiners alongside the latest keyframe so their stateful managers
+   * (spring pads etc.) start in the host's state rather than the level's
+   * fresh-from-init state. */
+  const latestManagerStateRef = useRef<{ tick: number; json: string } | null>(null);
+  /** Aggregated input ticks since the most recent keyframe. Ring-buffered
+   * to ~10 s @ 30 Hz worth of frames. */
+  const inputHistoryRef = useRef<Array<{ tick: number; inputs: { playerId: string; moveX: number; moveY: number; expanding: boolean }[] }>>([]);
+  const INPUT_HISTORY_MAX = 300;
   const [connectedPlayers, setConnectedPlayers] = useState<Player[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [gamePhase, setGamePhase] = useState<GamePhase | null>(null);
@@ -122,7 +215,7 @@ export default function GameMaster() {
   const currentLevelRef = useRef<{ levelId: string; levelData: LevelData; levelType: LevelType } | null>(null);
   const [isPublic, setIsPublic] = useState(false);
   const [visibilityBusy, setVisibilityBusy] = useState(false);
-  const [maxPlayers, setMaxPlayers] = useState(4);
+  const [maxPlayers, setMaxPlayers] = useState(8);
   // Host's local-player customization. Picker UI lives in the LobbyPanel.
   // Defaults are reconciled against the live taken-color set in an effect
   // below so a host opening the page after others have joined doesn't collide.
@@ -264,6 +357,70 @@ export default function GameMaster() {
       window.removeEventListener('keyup', onUp);
     };
   }, [localPlayerJoined]);
+
+  // Gamepad → InputManager bridge. Up to 4 controllers (Xbox, PlayStation,
+  // Steam Deck built-in, generic XInput) auto-join as separate local
+  // players the FIRST time each one produces real input (stick past
+  // deadzone OR A/right-trigger pressed). Standard browser-gamepad
+  // mapping: left stick → move, A button or right trigger → expand.
+  useEffect(() => {
+    const im = inputManagerRef.current;
+    const joinedGamepads = new Set<string>();
+
+    const onJoinRequest = (playerId: string, gamepadIndex: number) => {
+      if (joinedGamepads.has(playerId)) return;
+      const game = gameRef.current;
+      const ctx = contextRef.current;
+      if (!game || !ctx) return;
+      const pm = game.getPlayerManager();
+      if (!pm) return;
+      if (pm.getPlayerCount() >= maxPlayers) return;
+      const taken = new Set(pm.getAllPlayers().map((p) => p.color));
+      const color = COLOR_PALETTE.find((c) => !taken.has(c))
+        ?? COLOR_PALETTE[gamepadIndex % COLOR_PALETTE.length];
+      const takenFaces = new Set(pm.getAllPlayers().map((p) => p.faceId).filter(Boolean));
+      const face = getAllFacePresets().find((f) => !takenFaces.has(f.id))?.id ?? 'default';
+      const player: Player = {
+        player_id: playerId,
+        session_id: sessionId ?? '',
+        name: `Gamepad ${gamepadIndex + 1}`,
+        slot: 100 + gamepadIndex,
+        status: 'connected',
+        controller_config: null,
+        joined_at: new Date().toISOString(),
+        color,
+        faceId: face,
+      } as Player;
+      game.onPlayerJoin(ctx, player);
+      playerCustomRef.current.set(playerId, { color, faceId: face });
+      joinedGamepads.add(playerId);
+    };
+
+    const onDisconnect = (playerId: string) => {
+      if (!joinedGamepads.has(playerId)) return;
+      const game = gameRef.current;
+      const ctx = contextRef.current;
+      if (game && ctx) game.onPlayerDisconnect(ctx, playerId);
+      playerCustomRef.current.delete(playerId);
+      joinedGamepads.delete(playerId);
+    };
+
+    const pad = createGamepadInput({
+      inputManager: im,
+      onJoinRequest,
+      onDisconnect,
+    });
+    pad.start();
+    return () => {
+      pad.stop();
+      const game = gameRef.current;
+      const ctx = contextRef.current;
+      if (game && ctx) {
+        for (const id of joinedGamepads) game.onPlayerDisconnect(ctx, id);
+      }
+      joinedGamepads.clear();
+    };
+  }, [maxPlayers, sessionId]);
 
   // Per-game player cap. Limits AI bots locally AND pushes max_peers to the
   // server so phone-join attempts past the new limit get a clean 409. Without
@@ -451,58 +608,26 @@ export default function GameMaster() {
     manager.broadcast('data', json, 'phone');
   }, []);
 
-  /** Resolve a map dropdown id ('builtin:x' or 'cloud:<uuid>') to LevelData. */
+  /** Resolve a map dropdown id (builtin / local / workshop) to LevelData. */
   const loadMapById = useCallback(async (mapId: string): Promise<LevelData> => {
-    if (mapId.startsWith('builtin:')) {
-      return loadBuiltinLevel(mapId.slice('builtin:'.length));
-    }
-    if (mapId.startsWith('cloud:')) {
-      return contentApi.loadLevel(mapId.slice('cloud:'.length));
-    }
-    throw new Error(`Unknown map id: ${mapId}`);
+    return loadLevelById(mapId);
   }, []);
 
-  /** Populate the Map dropdown options on mount: every built-in + every
-   * cloud level the user can see (their own if signed in, else public). */
+  /** Populate the Map dropdown options: every built-in + every local + every
+   * subscribed Workshop map. */
   const refreshMapOptions = useCallback(async () => {
-    const options: MapOption[] = [];
     try {
-      const manifest = await getAvailableLevels();
-      for (const entry of manifest) {
-        options.push({
-          id: `builtin:${entry.id}`,
-          name: entry.name,
-          source: 'builtin',
-          // Default solo_racing so older entries without `levelTypes` still surface
-          // under at least one mode rather than vanishing from every dropdown.
-          levelTypes: entry.levelTypes && entry.levelTypes.length > 0
-            ? entry.levelTypes
-            : ['solo_racing'],
-        });
-      }
+      const merged = await listAllLevels();
+      const options: MapOption[] = merged.map(m => ({
+        id: m.id,
+        name: m.name,
+        source: m.source,
+        levelTypes: m.levelTypes,
+      }));
+      if (options.length > 0) setMapOptions(options);
     } catch (err) {
-      console.warn('Failed to load level manifest:', err);
+      console.warn('Failed to refresh map options:', err);
     }
-    try {
-      const session = authSessionRef.current;
-      const cloudItems = session
-        ? await contentApi.listLevels(session)
-        : await contentApi.listPublicLevels();
-      for (const item of cloudItems) {
-        // Cloud levels: we can't introspect without fetching the JSON. Show
-        // them under every mode and let the runtime adapt — KOTH hill zones
-        // still force KOTH; otherwise the override mode applies.
-        options.push({
-          id: `cloud:${item.id}`,
-          name: item.name,
-          source: 'cloud',
-          levelTypes: ['solo_racing', 'team_racing', 'party', 'koth'],
-        });
-      }
-    } catch (err) {
-      console.warn('Failed to fetch cloud levels:', err);
-    }
-    if (options.length > 0) setMapOptions(options);
   }, []);
 
   // ─── Core game lifecycle ──────────────────────────────────────────────────
@@ -553,6 +678,8 @@ export default function GameMaster() {
 
     const game = new BouncyBlobsGame();
     gameRef.current = game;
+    game.setRngSeed(sessionSeedRef.current);
+    installHostBroadcastHook(game);
 
     const mode = new FreeplayMode(arena);
     game.setGameMode(mode);
@@ -566,11 +693,15 @@ export default function GameMaster() {
 
     const levelId = `playground-${Date.now()}`;
     currentLevelRef.current = { levelId, levelData: arena, levelType: 'solo_racing' };
+    // freeplay:true tells guests this is the pre-round playground — they
+    // should use FreeplayMode (no countdown, no round timer) just like the host.
     managerRef.current?.broadcast('state', JSON.stringify({
       type: 'level_loaded',
       levelId,
       levelData: arena,
       levelType: 'solo_racing',
+      freeplay: true,
+      rngSeed: sessionSeedRef.current,
     }), 'screen');
 
     setPhase('lobby');
@@ -582,6 +713,8 @@ export default function GameMaster() {
   const startGameWithLevel = useCallback((sid: string, levelData: LevelData, overrideMode?: LevelType) => {
     const game = new BouncyBlobsGame();
     gameRef.current = game;
+    game.setRngSeed(sessionSeedRef.current);
+    installHostBroadcastHook(game);
 
     const mode = createModeForLevel(levelData, broadcastToControllers, overrideMode);
     game.setGameMode(mode);
@@ -596,6 +729,7 @@ export default function GameMaster() {
       levelId,
       levelData,
       levelType: resolvedType,
+      rngSeed: sessionSeedRef.current,
     }), 'screen');
     game.setBroadcastToControllers(broadcastToControllers);
     partyModeRef.current = mode instanceof PartyMode ? mode : null;
@@ -703,6 +837,17 @@ export default function GameMaster() {
               } else if (evt.type === 'player_leave' && typeof evt.playerId === 'string') {
                 game.onPlayerDisconnect(ctx, evt.playerId);
                 guestPlayersRef.current.delete(evt.playerId);
+              } else if (evt.type === 'customization' && typeof evt.playerId === 'string') {
+                // Guest pushed a color/face change for one of their players.
+                // Apply it to the live blob and update our tracking so the
+                // roster broadcast and taken-set computations stay correct.
+                const existing = guestPlayersRef.current.get(evt.playerId);
+                if (existing) {
+                  if (typeof evt.color === 'string') existing.color = evt.color;
+                  if (typeof evt.faceId === 'string') existing.faceId = evt.faceId;
+                  guestPlayersRef.current.set(evt.playerId, existing);
+                }
+                game.onPlayerCustomizationUpdate(ctx, evt.playerId, evt.color, evt.faceId);
               }
             } catch (err) {
               console.warn('[room] bad reliable event from screen:', err);
@@ -734,6 +879,10 @@ export default function GameMaster() {
             if (kind === 'phone') {
               setTimeout(() => sendCustomizationTo(peerId), 100);
             } else if (kind === 'screen') {
+              // New screen peer — force the next binary snapshot to be a
+              // full keyframe so they can sync without waiting for the
+              // periodic keyframe interval.
+              forceKeyframeRef.current = true;
               // Late joiner — push current level so its local sim catches up.
               const lvl = currentLevelRef.current;
               if (lvl) {
@@ -742,7 +891,53 @@ export default function GameMaster() {
                   levelId: lvl.levelId,
                   levelData: lvl.levelData,
                   levelType: lvl.levelType,
+                  // While the host is still in the lobby phase the running
+                  // sim is FreeplayMode — tell the late joiner so they
+                  // don't run a competitive countdown over the playground.
+                  freeplay: phaseRef.current !== 'playing',
+                  rngSeed: sessionSeedRef.current,
                 }));
+              }
+              // Followed by the lobby_state snapshot so they can render their
+              // GuestLobbyPanel immediately. May be null on the first peer
+              // connecting before the state-tracking effect has run; the
+              // effect's first run will catch them up.
+              if (lobbyStateRef.current) {
+                managerRef.current?.send(peerId, 'state', JSON.stringify(lobbyStateRef.current));
+              }
+
+              // Late-joiner replay bundle:
+              //   1. rng_state — align the guest's PRNG to ours so any
+              //      subsequent draw (AI decisions etc) matches.
+              //   2. Latest cached keyframe — guest snaps positions and
+              //      sets world.tick to the keyframe's tick.
+              //   3. Aggregated inputs covering every tick since the
+              //      keyframe — guest catches up by stepping the sim
+              //      forward through each tick.
+              const game = gameRef.current;
+              const world = game?.getWorld();
+              if (world) {
+                const rngEvt: ReliableEvent = {
+                  type: 'rng_state',
+                  tick: world.tick,
+                  state: world.rng.getState(),
+                };
+                managerRef.current?.send(peerId, 'state', JSON.stringify(rngEvt));
+              }
+              if (latestKeyframeRef.current) {
+                managerRef.current?.send(peerId, 'state', latestKeyframeRef.current.buf);
+              }
+              // Replay the most-recent manager-state alongside the keyframe.
+              // Order matters: keyframe snaps positions, then manager_state
+              // restores cooldowns/timers, then buffered inputs replay
+              // forward. Without this, late joiners start every spring pad
+              // in `loaded` and snap visibly on first interaction.
+              if (latestManagerStateRef.current) {
+                managerRef.current?.send(peerId, 'state', latestManagerStateRef.current.json);
+              }
+              if (inputHistoryRef.current.length > 0) {
+                const bundle = encodeAggregatedInputs({ ticks: inputHistoryRef.current });
+                managerRef.current?.send(peerId, 'state', bundle);
               }
             }
           },
@@ -804,7 +999,11 @@ export default function GameMaster() {
             game_id: GAME_ID,
             display_name: 'Bouncy Lobby',
             host_kind: 'screen',
-            max_peers: 4,
+            // Use the current `maxPlayers` (defaults to 8) instead of a
+            // hardcoded 4. Live slider changes hit the server via
+            // changeMaxPlayers → setMaxPeers; this just keeps the initial
+            // room creation in sync with the UI default.
+            max_peers: maxPlayers,
             visibility: 'private',
           },
           callbacks,
@@ -823,6 +1022,37 @@ export default function GameMaster() {
         setJoinCode(result.join_code);
         setRoomReady(true);
         setIsPublic(false);
+
+        // Opportunistically stand up a Steam Lobby + Networking listener so
+        // PC friends can be invited via the Steam overlay. Failures here are
+        // non-fatal — the WebRTC room-code path keeps working regardless.
+        try {
+          if (await isSteamAvailable()) {
+            await steamNetStartListening();
+            const { lobbyId } = await createLobby(maxPlayers, 'friends');
+            const selfSteamId = await getSelfSteamId();
+            steamLobbyIdRef.current = lobbyId;
+            const unlisten = await onMemberChanged((_lobbyId, userChanged, state) => {
+              const mgr = managerRef.current;
+              if (!mgr) return;
+              if (userChanged === selfSteamId) return; // skip self
+              if (state === 'entered') {
+                // Pre-register the incoming SteamTransport. The actual P2P
+                // connection lands via the steam_net://connected event and
+                // gets bound to the SteamID we just registered.
+                SteamTransport.accept(userChanged, mgr.callbacksFor(userChanged))
+                  .then((t) => mgr.attachTransport(t))
+                  .catch((err) => console.warn('[steam] accept failed:', err));
+              } else if (state === 'left' || state === 'disconnected' || state === 'kicked') {
+                mgr.disposePeer(userChanged);
+              }
+            });
+            steamMemberUnlistenRef.current = unlisten;
+            if (!cancelled) setSteamLobbyReady(true);
+          }
+        } catch (err) {
+          console.warn('[steam] lobby/networking setup failed (non-fatal):', err);
+        }
 
         // In dev, use the LAN IP so phones on the same network can connect
         let origin = window.location.origin;
@@ -871,66 +1101,469 @@ export default function GameMaster() {
       // End the room on unmount — same semantics as the old dual endSession +
       // endLobby. Fire-and-forget; the cleanup cron will sweep stragglers.
       void roomRef.current?.endRoom().catch(() => {});
+      // Tear down Steam Lobby + Networking if we stood them up.
+      steamMemberUnlistenRef.current?.();
+      steamMemberUnlistenRef.current = null;
+      if (steamLobbyIdRef.current) {
+        void leaveLobby().catch(() => {});
+        steamLobbyIdRef.current = null;
+      }
+      void steamNetCloseAll().catch(() => {});
       managerRef.current = null;
       roomRef.current = null;
       inputManagerRef.current.clear();
     };
   }, []);
 
-  // Broadcast world snapshots to remote screens at 20 Hz when an online match is active.
+  // Broadcast binary world-snapshot frames to remote screens at 20 Hz when an
+  // online match is active. Wire format defined in src/lib/wireProtocol.ts:
+  // root + activeMask + quantized hull-node offsets per entity. Per-peer
+  // delta compression and the settled/sleep flag are wired in S2.3 / S2.5;
+  // for now every frame is a full keyframe (activeMask=0xFFFF).
   useEffect(() => {
     if (!roomReady) return;
     let tick = 0;
+
+    // Keyframe every 60 ticks (~3 seconds at 20 Hz). Receivers recover from
+    // missed deltas at each keyframe even without an ACK channel.
+    const KEYFRAME_INTERVAL = 60;
+    // Per-node delta threshold in px. Anything smaller is ignored in delta
+    // frames (the receiver keeps its last value). MAX_OFFSET/32767 ≈ 0.006 px
+    // is the encoder's quantum, so 0.5 px ≈ 80 quanta — comfortably above
+    // floating-point noise.
+    const DELTA_THRESHOLD = 0.5;
+    // Number of consecutive ticks with no offset changes AND no root change
+    // before we flag an entity as `settled`. Receivers can then skip
+    // per-tick reconciliation work for it until it moves again.
+    const SETTLED_FRAMES = 20;
+    // Root-position change considered noise. The settled detector ignores
+    // shifts below this magnitude.
+    const ROOT_REST_THRESHOLD = 0.5;
+
+    /** Build a per-entity record from a set of particle indices. The first
+     * index is the "root" (centroid reference); remaining indices are
+     * encoded as offsets relative to the root. On non-keyframe ticks we
+     * clear bits for nodes whose offset hasn't moved more than
+     * DELTA_THRESHOLD since the last sent record for this entity. Returns a
+     * `settled` flag computed from the still-tick counter so receivers can
+     * skip reconciliation for resting entities. */
+    const buildRecord = (
+      world: { pos: readonly { x: number; y: number }[]; vel: readonly { x: number; y: number }[] } | null,
+      id: string,
+      indices: number[],
+      isKeyframe: boolean,
+    ): {
+      rootX: number; rootY: number;
+      rootVx: number; rootVy: number;
+      activeMask: number;
+      offsets: EntityOffset[];
+      settled: boolean;
+    } | null => {
+      if (!world || indices.length === 0) return null;
+      const rootIdx = indices[0];
+      const root = world.pos[rootIdx];
+      const rootVel = world.vel[rootIdx];
+      if (!root || !rootVel) return null;
+      const offsetIndices = indices.slice(1, 17); // up to 16 hull nodes
+      const last = lastSentRef.current.get(id);
+      const newOffsets = new Float32Array(16 * 2);
+      const offsets: EntityOffset[] = [];
+      let mask = 0;
+      let anyOffsetMoved = false;
+      for (let i = 0; i < offsetIndices.length; i++) {
+        const p = world.pos[offsetIndices[i]];
+        const v = world.vel[offsetIndices[i]];
+        if (!p || !v) continue;
+        const ox = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, p.x - root.x));
+        const oy = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, p.y - root.y));
+        newOffsets[i * 2] = ox;
+        newOffsets[i * 2 + 1] = oy;
+
+        let moved = false;
+        if (last) {
+          const dx = ox - last.offsets[i * 2];
+          const dy = oy - last.offsets[i * 2 + 1];
+          if (Math.abs(dx) > DELTA_THRESHOLD || Math.abs(dy) > DELTA_THRESHOLD) moved = true;
+        }
+        anyOffsetMoved = anyOffsetMoved || moved;
+        if (isKeyframe || !last || moved) {
+          offsets.push({ idx: i, ox, oy, vx: v.x, vy: v.y });
+          mask |= 1 << i;
+        }
+      }
+
+      const rootMoved = last
+        ? (Math.abs(root.x - last.rootX) > ROOT_REST_THRESHOLD
+            || Math.abs(root.y - last.rootY) > ROOT_REST_THRESHOLD)
+        : true;
+      const movedThisTick = rootMoved || anyOffsetMoved;
+      const stillTicks = movedThisTick ? 0 : ((last?.stillTicks ?? 0) + 1);
+      const settled = stillTicks >= SETTLED_FRAMES;
+
+      lastSentRef.current.set(id, {
+        rootX: root.x, rootY: root.y,
+        offsets: newOffsets,
+        stillTicks,
+      });
+      return {
+        rootX: root.x, rootY: root.y,
+        rootVx: rootVel.x, rootVy: rootVel.y,
+        activeMask: mask, offsets, settled,
+      };
+    };
+
+    /** World-object record builder — emits all particle positions as
+     * absolute coords. No quantization, no 16-node cap. Used for NPC blobs,
+     * soft platforms, and point shapes. Computes a centroid (used as the
+     * rootX/rootY in the wire record for camera/proximity, not for
+     * reconstruction). Returns null on missing indices. */
+    const buildWorldRecord = (
+      world: { pos: readonly { x: number; y: number }[]; vel: readonly { x: number; y: number }[] } | null,
+      id: string,
+      indices: number[],
+    ): { rootX: number; rootY: number; nodes: { x: number; y: number; vx: number; vy: number }[]; settled: boolean } | null => {
+      if (!world || indices.length === 0) return null;
+      const positions = new Float32Array(indices.length * 2);
+      const nodes: { x: number; y: number; vx: number; vy: number }[] = new Array(indices.length);
+      let cx = 0, cy = 0;
+      for (let i = 0; i < indices.length; i++) {
+        const p = world.pos[indices[i]];
+        const v = world.vel[indices[i]];
+        if (!p || !v) return null;
+        positions[i * 2] = p.x;
+        positions[i * 2 + 1] = p.y;
+        nodes[i] = { x: p.x, y: p.y, vx: v.x, vy: v.y };
+        cx += p.x;
+        cy += p.y;
+      }
+      cx /= indices.length;
+      cy /= indices.length;
+
+      // Settled detection: a particle moved by more than ROOT_REST_THRESHOLD
+      // anywhere in the entity counts as movement. Stays-still long enough →
+      // flag as settled and the guest can skip reconciliation for this tick.
+      const last = lastSentWorldRef.current.get(id);
+      let movedThisTick = !last;
+      if (last && last.positions.length === positions.length) {
+        for (let i = 0; i < positions.length; i++) {
+          if (Math.abs(positions[i] - last.positions[i]) > ROOT_REST_THRESHOLD) {
+            movedThisTick = true;
+            break;
+          }
+        }
+      } else if (last) {
+        // Length mismatch (e.g. level reload) — treat as moved.
+        movedThisTick = true;
+      }
+      const stillTicks = movedThisTick ? 0 : (last!.stillTicks + 1);
+      const settled = stillTicks >= SETTLED_FRAMES;
+
+      lastSentWorldRef.current.set(id, { cx, cy, positions, stillTicks });
+      return { rootX: cx, rootY: cy, nodes, settled };
+    };
+
     const interval = setInterval(() => {
       const manager = managerRef.current;
       const game = gameRef.current;
       if (!manager || !game) return;
       const pm = game.getPlayerManager();
       if (!pm) return;
+      const world = game.getWorld();
+      if (!world) return;
       const modeMgr = (game as any).state?.modeManager;
       const modeState = modeMgr?.getState?.() ?? null;
       const scores: Record<string, number> = {};
       if (modeState?.scores instanceof Map) {
         for (const [k, v] of modeState.scores) scores[k] = v as number;
       }
-      const snap: WorldSnapshot = {
-        tick: tick++,
-        ts: Date.now(),
-        levelId: currentLevelRef.current?.levelId ?? null,
-        modeState: {
-          phase: modeState?.phase ?? 'playing',
-          timeRemainingMs: typeof modeState?.timeRemaining === 'number'
-            ? modeState.timeRemaining * 1000
-            : undefined,
-          scores,
-          winner: modeState?.winner ?? null,
-        },
-        players: pm.getAllPlayers().map((p) => {
-          const c = p.blob.getCentroid();
-          return {
-            id: p.playerId,
-            name: p.name,
-            color: p.color,
-            faceId: p.faceId,
-            x: c.x,
-            y: c.y,
-            vx: 0,
-            vy: 0,
-            radius: 48,
-            moveX: p.moveX,
-            moveY: p.moveY,
-            expanding: !!p.expanding,
-            expandScale: p.blob.getExpandScale(),
-            score: scores[p.playerId] ?? 0,
-            ownerScreenSlot: 1,
-          };
-        }),
+
+      // Determine keyframe vs delta for this tick.
+      const isKeyframe = forceKeyframeRef.current || ticksSinceKeyframeRef.current >= KEYFRAME_INTERVAL;
+      forceKeyframeRef.current = false;
+      ticksSinceKeyframeRef.current = isKeyframe ? 0 : ticksSinceKeyframeRef.current + 1;
+
+      const players: PlayerRecord[] = [];
+      for (const p of pm.getAllPlayers()) {
+        // Players: center is the root, hull nodes are the offsets.
+        const indices = [p.blob.centerIdx, ...p.blob.hullIndices];
+        const rec = buildRecord(world, p.playerId, indices, isKeyframe);
+        if (!rec) continue;
+        players.push({
+          id: p.playerId,
+          rootX: rec.rootX,
+          rootY: rec.rootY,
+          rootVx: rec.rootVx,
+          rootVy: rec.rootVy,
+          activeMask: rec.activeMask,
+          offsets: rec.offsets,
+          // Same rationale as the per-tick broadcast: read input values
+          // from the blob (which captured them via setInput at the start
+          // of the tick that built this keyframe's positions) rather
+          // than from the ManagedPlayer (which may have been overwritten
+          // by an async input event arriving AFTER the tick ran).
+          // Keeps the keyframe's input fields consistent with its
+          // position fields — both reflect the same logical tick.
+          moveX: p.blob.getStickX(),
+          moveY: p.blob.getStickY(),
+          expandScale: p.blob.getExpandScale(),
+          expanding: p.blob.isExpanding(),
+          settled: false,
+          score: scores[p.playerId] ?? 0,
+        });
+      }
+
+      const worldRecords: WorldRecord[] = [];
+      // World records use absolute positions for every particle — root+offset
+      // can't handle a 560-px-wide platform with 18 hull nodes (the spec's
+      // u16/16-node-mask/±MAX_OFFSET budget is sized for ~50 px player blobs).
+      // Settled entities are still included so the receiver knows their
+      // current positions on the first keyframe after they wake; we just
+      // skip them in the host-side delta accounting via the settled flag.
+      const npcBlobs = game.getNpcBlobs();
+      for (let i = 0; i < npcBlobs.length; i++) {
+        const b = npcBlobs[i];
+        const id = `npc-${i}`;
+        const rec = buildWorldRecord(world, id, [b.centerIdx, ...b.hullIndices]);
+        if (!rec) continue;
+        if (rec.settled && !isKeyframe) continue; // skip steady-state on deltas
+        worldRecords.push({
+          kind: ENTITY_KIND_NPC,
+          id,
+          rootX: rec.rootX,
+          rootY: rec.rootY,
+          settled: rec.settled,
+          nodes: rec.nodes,
+        });
+      }
+      for (const sp of game.getSoftPlatforms()) {
+        const rec = buildWorldRecord(world, `plat:${sp.id}`, sp.hullIndices);
+        if (!rec) continue;
+        if (rec.settled && !isKeyframe) continue;
+        worldRecords.push({
+          kind: ENTITY_KIND_PLATFORM,
+          id: sp.id,
+          rootX: rec.rootX,
+          rootY: rec.rootY,
+          settled: rec.settled,
+          nodes: rec.nodes,
+        });
+      }
+      for (const [id, indices] of game.getPointShapeParticles()) {
+        const rec = buildWorldRecord(world, `ps:${id}`, indices);
+        if (!rec) continue;
+        if (rec.settled && !isKeyframe) continue;
+        worldRecords.push({
+          kind: ENTITY_KIND_POINT_SHAPE,
+          id,
+          rootX: rec.rootX,
+          rootY: rec.rootY,
+          settled: rec.settled,
+          nodes: rec.nodes,
+        });
+      }
+
+      // Tag the keyframe with the world's actual tick, NOT a separate
+      // counter. The guest uses this to align `world.tick` so subsequent
+      // live aggregated-input broadcasts (which also tag with world.tick)
+      // map correctly into the lockstep input buffer. The old counter
+      // approach made guest.world.tick advance 1 per second instead of
+      // jumping to the host's real tick number, so the gate never found
+      // matching ticks and the sim froze.
+      tick++; // unused now, kept to avoid touching outer-scope deps
+      const keyframeTick = world.tick;
+      const buf = encodeSnapshot({
+        version: 1,
+        isKeyframe,
+        tick: keyframeTick,
+        players,
+        world: worldRecords,
+      });
+      // Cache for late-joiner replay — peers that connect after this tick
+      // need this keyframe + the input history that follows it. Reset the
+      // input history every time we cache a new keyframe; replay only
+      // needs to cover from the keyframe forward.
+      latestKeyframeRef.current = { tick: keyframeTick, buf };
+      inputHistoryRef.current = [];
+      // Broadcast to screen peers. Phones don't need physics state.
+      manager.broadcast('state', buf, 'screen');
+      // Re-align every guest's PRNG to ours alongside the keyframe. Host
+      // and guest PRNG streams drift over time if either consumes a value
+      // the other didn't (an AI decision firing one tick earlier, etc.).
+      // 1 Hz re-align bounds that drift to ≤ 1 s of decisions. Cheap.
+      const rngEvt: ReliableEvent = {
+        type: 'rng_state',
+        tick: world.tick,
+        state: world.rng.getState(),
       };
-      // Broadcast world snapshot only to screen peers — phones don't need it.
-      manager.broadcast('state', serializeSnapshot(snap), 'screen');
-    }, 50);
+      manager.broadcast('state', JSON.stringify(rngEvt), 'screen');
+
+      // Sync stateful-manager state alongside the keyframe. The keyframe
+      // already covers particle positions/velocities and the world's RNG,
+      // but managers like SpringPadManager carry their own mutable state
+      // (cooldowns, state-machine slot, plate offset) that lockstep alone
+      // can't reproduce because the host has typically been running for
+      // longer than the guest. Without this, a player hitting a spring
+      // pad on the host bounces; on the guest the pad's local cooldown
+      // says "reloading" and the player just lands. The two sims then
+      // diverge until the next keyframe yanks positions back, producing
+      // the visible "snap" the user is reporting.
+      const gameRef2 = gameRef.current;
+      if (gameRef2) {
+        // Per-blob ground-contact tally per player. This is populated
+        // inside `world.step`'s collision pass and read by the NEXT tick's
+        // `SlimeBlob.update` (for the `grounded` air-move multiplier). A
+        // freshly-keyframed guest reads a stale (or zero) value for one
+        // tick, applies the wrong force, and drifts by a small fraction
+        // of a pixel — which the next keyframe yanks back as a snap.
+        // Determinism test (`determinism.test.ts:replicateState` step 4)
+        // proved this is the missing field needed for bit-identical
+        // late-joiner replication.
+        const blobGroundContacts: Record<string, number> = {};
+        const pm2 = gameRef2.getPlayerManager();
+        if (pm2) {
+          for (const p of pm2.getAllPlayers()) {
+            blobGroundContacts[p.playerId] = world.getBlobGroundContacts(p.blob.blobId);
+          }
+        }
+        const managerStateEvt = {
+          type: 'manager_state',
+          tick: world.tick,
+          state: {
+            springPads: gameRef2.getSpringPadManager()?.dumpState() ?? null,
+            blobGroundContacts,
+          },
+        };
+        const managerStateJson = JSON.stringify(managerStateEvt);
+        manager.broadcast('state', managerStateJson, 'screen');
+        latestManagerStateRef.current = { tick: world.tick, json: managerStateJson };
+      }
+    }, 250); // 4 Hz keyframe — the local sim runs deterministically on each
+             // client, so the keyframe is mostly a drift-recovery safety
+             // net; but in practice tiny per-tick float-math noise OR
+             // any-state-we-haven't-found-yet accumulates over enough
+             // ticks to become visible as a snap. 1 Hz left ~60 ticks of
+             // accumulation. 4 Hz bounds it to ~15 ticks, making any
+             // residual snap small enough to read as smooth correction
+             // rather than teleport. Bandwidth at 4 Hz is still tiny
+             // (~5 KB × 4 = 20 KB/s outbound + 4 KB/s input echo).
     return () => clearInterval(interval);
   }, [roomReady]);
+
+  // 30 Hz aggregated-input broadcast — host → all screen peers. Each tick
+  // we sample every player's current input state (host's keyboard, each
+  // guest's last-received input, AI controllers' decisions) and broadcast
+  // them as the canonical input set for the current sim tick. Guests apply
+  // these to drive their own local sim's remote players, keeping every
+  // client in deterministic lockstep with the host.
+  // Helper: install the host's per-tick broadcast hook on a freshly
+  // created BouncyBlobsGame. Fires AFTER each logic tick with the world's
+  // current tick. Broadcasts the inputs that were applied this tick so
+  // every connected guest can apply them at exactly the matching tick on
+  // its side — true input-paced lockstep instead of "apply at current
+  // wall-clock time," which was the source of the visible desync.
+  //
+  // Bandwidth: 4 players × ~16 bytes × 60 Hz ≈ 4 KB/s. Tiny.
+  const installHostBroadcastHook = useCallback((game: BouncyBlobsGame) => {
+    game.setPostTickHook((world) => {
+      const manager = managerRef.current;
+      const pm = game.getPlayerManager();
+      if (!manager || !pm) return;
+      // CRITICAL: read the input values the BLOB used this tick, not the
+      // ManagedPlayer's current values. `ManagedPlayer.moveX/Y/expanding`
+      // can be overwritten by an async input event arriving via
+      // `BouncyBlobsGame.onPlayerInput` BETWEEN `updateAll` (which read
+      // them into `blob.setInput`) and `postTickHook` (which fires after
+      // `world.step`). The blob's `stickX/Y/expandPressed` fields are
+      // captured by `setInput` at the start of the tick and are
+      // immutable for the rest of the tick — so they always reflect what
+      // physics actually computed with. Broadcasting `ManagedPlayer.*`
+      // would tell the guest to apply the NEW value at this tick, but
+      // the host's physics for this tick used the OLD value — guest
+      // diverges by one tick of input every async event. With WebRTC
+      // input batches arriving at 30 Hz and physics ticking at 60 Hz,
+      // this happens constantly during any input change.
+      const inputs = pm.getAllPlayers().map((p) => ({
+        playerId: p.playerId,
+        moveX: p.blob.getStickX(),
+        moveY: p.blob.getStickY(),
+        expanding: p.blob.isExpanding(),
+      }));
+      const buf = encodeAggregatedInputs({
+        ticks: [{ tick: world.tick, inputs }],
+      });
+      manager.broadcast('state', buf, 'screen');
+
+      // Append to the late-joiner replay buffer. The keyframe broadcast
+      // clears this whenever a new keyframe is cached, so the buffer
+      // contents are always "what happened since the latest keyframe."
+      inputHistoryRef.current.push({ tick: world.tick, inputs });
+      if (inputHistoryRef.current.length > INPUT_HISTORY_MAX) {
+        inputHistoryRef.current.shift();
+      }
+    });
+  }, []);
+
+  // lobby_state broadcast loop. Rebuilds the LobbyStateEvent at ~2 Hz so that
+  // remote guests render an up-to-date GuestLobbyPanel even when nothing
+  // about React-level state has visibly changed (e.g. guest customization
+  // round-trips, phone player joins). Also keeps `lobbyStateRef` warm so the
+  // onPeerConnected hand-off has something to send.
+  useEffect(() => {
+    if (!roomReady) return;
+    const broadcast = () => {
+      const game = gameRef.current;
+      if (!game) return;
+      const pm = game.getPlayerManager();
+      if (!pm) return;
+
+      const botIds = new Set(bots.map((b) => b.playerId));
+      const guestIds = new Set(guestPlayersRef.current.keys());
+      const players = pm.getAllPlayers().map((p) => {
+        let kind: 'host' | 'guest' | 'bot' = 'guest';
+        if (p.playerId === LOCAL_PLAYER_ID) kind = 'host';
+        else if (botIds.has(p.playerId)) kind = 'bot';
+        return {
+          id: p.playerId,
+          name: p.name,
+          color: p.color,
+          faceId: p.faceId,
+          kind,
+        };
+      });
+
+      const modeMgr = (game as any).state?.modeManager;
+      const ms = modeMgr?.getState?.() ?? null;
+      const scores: Record<string, number> = {};
+      if (ms?.scores instanceof Map) {
+        for (const [k, v] of ms.scores) scores[k] = v as number;
+      }
+
+      const evt: LobbyStateEvent = {
+        type: 'lobby_state',
+        // Use the host's actual session-phase state machine — `currentLevelRef`
+        // is also set by createPlaygroundGame during the lobby phase, so it
+        // can't disambiguate "lobby with playground arena" from "real round".
+        phase: phase === 'playing' ? 'playing' : 'lobby',
+        selectedMapId,
+        selectedModeId,
+        maxPlayers,
+        isPublic,
+        mapOptions: mapOptions.map((m) => ({ id: m.id, name: m.name })),
+        players,
+        modeState: ms ? {
+          phase: ms.phase ?? 'playing',
+          timeRemainingMs: typeof ms.timeRemaining === 'number' ? ms.timeRemaining * 1000 : undefined,
+          scores,
+          winner: ms.winner ?? null,
+        } : undefined,
+      };
+      lobbyStateRef.current = evt;
+      managerRef.current?.broadcast('state', JSON.stringify(evt), 'screen');
+    };
+    broadcast(); // initial fire so a peer that just connected gets it ASAP
+    const interval = setInterval(broadcast, 500);
+    return () => clearInterval(interval);
+  }, [roomReady, bots, selectedMapId, selectedModeId, maxPlayers, isPublic, mapOptions, phase]);
 
   // Poll the room for new peers. Connects to each new one (phones get a
   // single ordered channel; screens get the state+input pair). Then derive
@@ -1085,6 +1718,7 @@ export default function GameMaster() {
     if (!game) return;
     game.setCanvas(ctx.canvas, ctx, width, height);
     game.start();
+    installDebugBridge(game);
   }, []);
 
   const onCanvasResize = useCallback((width: number, height: number) => {
@@ -1150,6 +1784,47 @@ export default function GameMaster() {
         />
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
           <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+
+          {/* Invite Friends on Steam — bottom-right, above QR. Paper+tape
+              styling matches the Home menu sticky notes. */}
+          {steamLobbyReady && (
+            <button
+              onClick={() => { void openInviteOverlay().catch(() => {}); }}
+              title="Open the Steam friend picker to invite friends"
+              style={{
+                position: 'absolute',
+                bottom: 160,
+                right: 16,
+                fontSize: 14,
+                fontWeight: 800,
+                padding: '10px 18px 9px',
+                background: '#fffae6',
+                color: '#1a0f2e',
+                border: '3px solid #0a0612',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                letterSpacing: 0.4,
+                boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
+                transform: 'rotate(-2deg)',
+              }}
+            >
+              <span style={{
+                position: 'absolute',
+                top: -8,
+                left: '50%',
+                transform: 'translateX(-50%) rotate(-3deg)',
+                width: '60%',
+                height: 12,
+                background: '#5dd6ff',
+                border: '1px solid rgba(0,0,0,0.25)',
+                opacity: 0.85,
+                pointerEvents: 'none',
+                boxShadow: '0 2px 3px rgba(0,0,0,0.2)',
+              }} />
+              Invite Friends
+            </button>
+          )}
 
           {/* Join QR — bottom-right, click to copy */}
           {joinUrl && (

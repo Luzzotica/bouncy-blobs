@@ -1,7 +1,10 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Vec2, vec2 } from '../physics/vec2';
-import { SpikeDef } from '../levels/types';
+import { SpikeDef, ZoneDef } from '../levels/types';
 import { PlayerManager } from './playerManager';
+import { getSprite, getSpriteWorldSize } from '../assets/spriteRegistry';
+import { drawSprite as drawSpriteImg } from '../renderer/spriteRenderer';
 
 const KILL_RADIUS = 50;
 const RESPAWN_INVULNERABILITY = 1.5; // seconds
@@ -23,20 +26,33 @@ interface RegisteredSpike {
 
 export class SpikeManager {
   private spikes: RegisteredSpike[] = [];
-  private world: SoftBodyWorld | null = null;
+  private world: SoftBodyEngine | null = null;
   private playerManager: PlayerManager | null = null;
   /** Tracks invulnerability timers per player */
   private invulnerable = new Map<string, number>();
-  /** Optional callback when a player is killed by spikes */
-  onKill?: (killedPlayerId: string) => void;
+  /** Optional callback when a player is killed by spikes. `deathPosition` is
+   * the blob's centroid at the moment of death — call sites must snapshot it
+   * before the player is teleported away. */
+  onKill?: (killedPlayerId: string, deathPosition: Vec2) => void;
   /** Set of spike IDs that were placed by players (for tracking trap kills) */
   private playerPlacedSpikeIds = new Set<string>();
   /** Death behavior: instant respawn, no respawn, or timed respawn */
   deathMode: DeathMode = 'instant';
   /** Players currently dead (not respawned) */
   private deadPlayers = new Map<string, DeadPlayer>();
+  private deathZones: ZoneDef[] = [];
+  /** Y coordinate below which any blob is killed (fall-off-the-map). null = disabled. */
+  private killBelowY: number | null = null;
 
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager, defs: SpikeDef[]): void {
+  setDeathZones(zones: ZoneDef[]): void {
+    this.deathZones = zones;
+  }
+
+  setKillBelowY(y: number | null): void {
+    this.killBelowY = y;
+  }
+
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager, defs: SpikeDef[]): void {
     this.world = world;
     this.playerManager = playerManager;
     this.spikes = [];
@@ -96,11 +112,28 @@ export class SpikeManager {
 
       const centroid = player.blob.getCentroid();
 
+      let killed = false;
       for (const spike of this.spikes) {
         if (this.isInsideSpikeZone(centroid, spike.def)) {
           this.killPlayer(player.playerId);
+          killed = true;
           break;
         }
+      }
+      if (killed) continue;
+
+      for (const z of this.deathZones) {
+        if (centroid.x >= z.x - z.width / 2 && centroid.x <= z.x + z.width / 2 &&
+            centroid.y >= z.y - z.height / 2 && centroid.y <= z.y + z.height / 2) {
+          this.killPlayer(player.playerId);
+          killed = true;
+          break;
+        }
+      }
+      if (killed) continue;
+
+      if (this.killBelowY !== null && centroid.y > this.killBelowY) {
+        this.killPlayer(player.playerId);
       }
     }
   }
@@ -151,9 +184,11 @@ export class SpikeManager {
     const deathPos = player.blob.getCentroid();
 
     if (this.deathMode === 'instant') {
-      // Original behavior: teleport to spawn immediately
+      // Original behavior: teleport to spawn immediately. Pull from the
+      // world's seeded RNG so respawn points match across host + guests.
       const spawnPoints = this.playerManager.getSpawnPoints();
-      const spawnIdx = Math.floor(Math.random() * spawnPoints.length);
+      const r = this.world.rng?.next() ?? Math.random();
+      const spawnIdx = Math.floor(r * spawnPoints.length);
       this.world.teleportBlob(player.blob.blobId, spawnPoints[spawnIdx]);
       this.invulnerable.set(playerId, RESPAWN_INVULNERABILITY);
     } else {
@@ -165,8 +200,8 @@ export class SpikeManager {
       });
     }
 
-    // Notify kill callback
-    this.onKill?.(playerId);
+    // Notify kill callback (after teleport, so deathPos was snapshotted above).
+    this.onKill?.(playerId, deathPos);
   }
 
   private respawnPlayer(playerId: string): void {
@@ -176,7 +211,8 @@ export class SpikeManager {
     if (!player) return;
 
     const spawnPoints = this.playerManager.getSpawnPoints();
-    const spawnIdx = Math.floor(Math.random() * spawnPoints.length);
+    const r = this.world.rng?.next() ?? Math.random();
+    const spawnIdx = Math.floor(r * spawnPoints.length);
     this.world.teleportBlob(player.blob.blobId, spawnPoints[spawnIdx]);
 
     this.deadPlayers.delete(playerId);
@@ -203,8 +239,41 @@ export class SpikeManager {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    // Death zones — translucent red rectangles with hatched border.
+    for (const z of this.deathZones) {
+      ctx.save();
+      ctx.translate(z.x, z.y);
+      ctx.fillStyle = 'rgba(220, 40, 40, 0.18)';
+      ctx.fillRect(-z.width / 2, -z.height / 2, z.width, z.height);
+      ctx.strokeStyle = 'rgba(255, 70, 70, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 6]);
+      ctx.strokeRect(-z.width / 2, -z.height / 2, z.width, z.height);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     for (const spike of this.spikes) {
       const { def } = spike;
+
+      // Sprite path — scale to the editor-configured footprint so authored
+      // levels behave the same way visually as they did pre-art-pass. The
+      // sprite has its tip pointing up and base anchored near the bottom
+      // (anchor.y ≈ 0.85 in the manifest), so translating to def.x/def.y
+      // keeps spike teeth poking above the base bar where physics expects.
+      const spriteSpike = getSprite('spike');
+      if (spriteSpike) {
+        const natural = getSpriteWorldSize(spriteSpike);
+        const sx = def.width / natural.width;
+        const sy = def.height / (natural.height * 0.7); // teeth ≈ 70% of image
+        ctx.save();
+        ctx.translate(def.x, def.y);
+        ctx.rotate(def.rotation);
+        ctx.scale(sx, sy);
+        drawSpriteImg(ctx, spriteSpike, 0, 0);
+        ctx.restore();
+        continue;
+      }
 
       ctx.save();
       ctx.translate(def.x, def.y);

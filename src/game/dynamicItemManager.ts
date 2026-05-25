@@ -1,4 +1,5 @@
 import { SoftBodyWorld } from '../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Vec2, vec2, add, scale, sub, length, normalize, distanceTo } from '../physics/vec2';
 import { PlayerManager } from './playerManager';
 import { PartyItemType } from './partyItems/types';
@@ -52,11 +53,11 @@ const WRECKING_ACTIVE_DURATION = 0.3;
 
 export class DynamicItemManager {
   private items: DynamicItem[] = [];
-  private world: SoftBodyWorld | null = null;
+  private world: SoftBodyEngine | null = null;
   private playerManager: PlayerManager | null = null;
   private time = 0;
 
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
     this.world = world;
     this.playerManager = playerManager;
     this.items = [];
@@ -166,8 +167,10 @@ export class DynamicItemManager {
       // Slow down all particles in this blob
       const r = this.world!.blobRanges[player.blob.blobId];
       if (!r) continue;
+      const vels = this.world!.vel;
       for (let i = r.start; i < r.end; i++) {
-        this.world!.vel[i] = scale(this.world!.vel[i], STICKY_DRAG);
+        const v = scale(vels[i], STICKY_DRAG);
+        this.world!.setParticleVel(i, v.x, v.y);
       }
     }
     item.active = true;

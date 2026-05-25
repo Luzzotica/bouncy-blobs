@@ -1,26 +1,4 @@
-import { GameModeState } from '../game/gameModes/types';
 import { ManagedPlayer } from '../game/playerManager';
-import { Camera } from './camera';
-import { Vec2 } from '../physics/vec2';
-
-/** Draw player name labels above blobs (world-space, call inside camera transform). */
-export function drawPlayerLabels(
-  ctx: CanvasRenderingContext2D,
-  players: ManagedPlayer[],
-): void {
-  ctx.save();
-  ctx.font = 'bold 14px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-
-  for (const p of players) {
-    const centroid = p.blob.getCentroid();
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.fillText(p.name, centroid.x, centroid.y - 60);
-  }
-
-  ctx.restore();
-}
 
 /** Draw scores as horizontal bars in top-right corner. */
 export function drawScoreBoard(

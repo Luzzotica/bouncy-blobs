@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { LevelData } from '../levels/types';
 import MapPreview from './MapPreview';
 import type { MapOption } from './LobbyPanel';
+import { playSfx } from '../utils/audio';
 
 interface MapPickerModalProps {
   open: boolean;
@@ -27,8 +28,15 @@ export default function MapPickerModal({
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
 
   // Reset pending selection whenever the modal is reopened.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) setPendingId(currentMapId);
+    if (open && !wasOpenRef.current) {
+      setPendingId(currentMapId);
+      playSfx('ui-modal-open', { volume: 0.6 });
+    } else if (!open && wasOpenRef.current) {
+      playSfx('ui-modal-close', { volume: 0.5 });
+    }
+    wasOpenRef.current = open;
   }, [open, currentMapId]);
 
   // Lazy-load level data for each visible card. Cache across openings via the
@@ -160,7 +168,7 @@ export default function MapPickerModal({
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.name}
                   </span>
-                  {m.source === 'cloud' && (
+                  {(m.source === 'local' || m.source === 'workshop') && (
                     <span
                       data-testid="custom-badge"
                       style={{

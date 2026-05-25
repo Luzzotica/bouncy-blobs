@@ -7,6 +7,8 @@ import {
 } from './collision';
 import { solveWeld, solveWeightedAnchor, solveDistanceMax } from './constraints';
 import { centroidFromIndices, averageAngle, frameTransform, applyTransform } from './shapeMatching';
+import { LAYER_DEFAULT, LAYER_BLOB, LAYER_CHAIN, LAYER_WORLD, LAYER_ALL, canCollide } from './layers';
+import { createRng, type SeededRng } from '../lib/rng';
 
 const EPS = 1e-6;
 
@@ -57,6 +59,11 @@ export interface SoftBodyWorldConfig {
   hullVertexDampingPerSec?: number;
   centerHullDampingPerSec?: number;
   hullDampSkipAboveSpeed?: number;
+  /** Seed for the world's deterministic RNG. Anything that affects physics
+   * (AI decisions, spawn jitter, powerup type, spike spawn) consumes from
+   * this stream — never `Math.random()`. Two clients seeded the same and
+   * fed the same inputs in the same order produce identical states. */
+  rngSeed?: number;
 }
 
 export class SoftBodyWorld {
@@ -66,6 +73,9 @@ export class SoftBodyWorld {
   mass: number[] = [];
   invMass: number[] = [];
   particleRadius: number[] = [];
+  // Per-particle bitmask layer + mask. See physics/layers.ts.
+  particleLayer: number[] = [];
+  particleMask: number[] = [];
 
   // Springs — owned by blobs (each blob has a contiguous [springBegin, springEnd) range)
   springs: Spring[] = [];
@@ -90,14 +100,34 @@ export class SoftBodyWorld {
   private welds: [number, number][] = [];
   private anchors: { indicesA: number[]; weightsA: number[]; indicesB: number[]; weightsB: number[] }[] = [];
   private distanceMaxConstraints: [number, number, number][] = [];
-  /** Tether springs: [particleA, particleB, restLength, stiffness, damping]. Only pull when stretched beyond rest. */
-  private tetherSprings: [number, number, number, number, number][] = [];
+
+  /**
+   * Chains: ordered runs of particles where each adjacent pair must be no
+   * more than `maxSegmentLength` apart. Solved sequentially by
+   * {@link solveChains} with a forward+backward sweep per iteration — this
+   * lets force propagate end-to-end faster than the general constraint
+   * iteration loop can manage when the chain is long and the endpoints are
+   * much heavier than the segments.
+   */
+  private chains: { particleIndices: number[]; maxSegmentLength: number; iterations: number }[] = [];
 
   // Trigger state
   private triggerPrev: Map<string, boolean> = new Map();
 
   // Ground contact tracking — reset each step, counts hull particles touching static geometry
   private blobGroundContacts: number[] = [];
+  // First ground contact (point + outward surface normal + the static polygon)
+  // captured this step, or null. Used by VFX to place splats on the actual
+  // surface (and clip them to its polygon so goop never floats past a corner).
+  private blobGroundContactPoint: (Vec2 | null)[] = [];
+  private blobGroundContactNormal: (Vec2 | null)[] = [];
+  private blobGroundContactPoly: (Vec2[] | null)[] = [];
+
+  // Any-surface impact contact (walls/ceilings too) — captured each step, or null.
+  // Used by VFX to spawn splats on walls/ceilings on hard impact.
+  private blobImpactContactPoint: (Vec2 | null)[] = [];
+  private blobImpactContactNormal: (Vec2 | null)[] = [];
+  private blobImpactContactPoly: (Vec2[] | null)[] = [];
 
   // Sticky contact tracking — reset each step. count = hull particles touching a 'sticky' surface;
   // normalSum is the unnormalized sum of those contact normals (averaged on read).
@@ -133,11 +163,24 @@ export class SoftBodyWorld {
   centerHullDampingPerSec: number;
   hullDampSkipAboveSpeed: number;
 
+  // Deterministic time + randomness — see SoftBodyWorldConfig.rngSeed.
+  /** Monotonic logical tick counter. Incremented once per fixed-dt step by
+   * the game loop. Use `tick * fixedDt` anywhere you'd otherwise reach for
+   * `performance.now()`. */
+  tick: number = 0;
+  /** Seeded deterministic RNG. Replaces all physics-affecting `Math.random()`
+   * calls. Particle/decal cosmetics still use `Math.random()`. */
+  rng!: SeededRng;
+
   // Callbacks
   onTriggerEntered?: (triggerShapeIdx: number, blobId: number) => void;
   onTriggerExited?: (triggerShapeIdx: number, blobId: number) => void;
 
   constructor(config: SoftBodyWorldConfig = {}) {
+    // Default seed is 1 — callers (BouncyBlobsGame, the determinism harness)
+    // should pass their own. Mismatched seeds across host/guest cause
+    // simulations to diverge immediately.
+    this.rng = createRng(config.rngSeed ?? 1);
     this.gravityScale = config.gravityScale ?? 4.0;
     this.gravity = config.gravity ?? vec2(0, 980.0 * this.gravityScale);
     this.fixedDt = config.fixedDt ?? 1 / 60;
@@ -159,8 +202,19 @@ export class SoftBodyWorld {
 
   // --- Public API ---
 
-  registerStaticPolygon(poly: Vec2[], material: SurfaceMaterial = 'default', id?: string): StaticSurface {
-    const surface: StaticSurface = { poly: poly.map(p => ({ ...p })), material, id };
+  registerStaticPolygon(
+    poly: Vec2[],
+    material: SurfaceMaterial = 'default',
+    id?: string,
+    opts: { layer?: number; mask?: number } = {},
+  ): StaticSurface {
+    const surface: StaticSurface = {
+      poly: poly.map(p => ({ ...p })),
+      material,
+      id,
+      layer: opts.layer ?? LAYER_WORLD,
+      mask: opts.mask ?? LAYER_ALL,
+    };
     this.staticSurfaces.push(surface);
     return surface;
   }
@@ -220,6 +274,12 @@ export class SoftBodyWorld {
     shapeMatchK: number;
     shapeMatchDamp: number;
     worldOrigin: Vec2;
+    /** Stable cross-client identifier for this blob — used to sort collision
+     * pair iteration so host and guest produce identical results even when
+     * their local insertion order differs. Pass the playerId for player
+     * blobs, the NPC id for NPCs, etc. Defaults to a hash of construction
+     * order so single-player and tests that don't care still work. */
+    sortKey?: string;
     /** Indices into hullRestLocal whose particles are locked in space
      * (mass=0, invMass=0). For soft platforms with fixed anchor points.
      * The center particle is never static. */
@@ -231,7 +291,7 @@ export class SoftBodyWorld {
       hullRestLocal, centerLocal = ZERO,
       centerMass, hullMass, springK, springDamp,
       radialK, radialDamp, pressureK, shapeMatchK, shapeMatchDamp,
-      worldOrigin, staticHullIndices, staticCenter = false,
+      worldOrigin, sortKey, staticHullIndices, staticCenter = false,
     } = params;
 
     const staticSet = new Set(staticHullIndices ?? []);
@@ -248,6 +308,8 @@ export class SoftBodyWorld {
     this.mass.push(cMass);
     this.invMass.push(cMass > 0.001 ? 1 / cMass : 0);
     this.particleRadius.push(0);
+    this.particleLayer.push(LAYER_BLOB);
+    this.particleMask.push(LAYER_ALL);
 
     // Hull particles
     const hullIndices: number[] = [];
@@ -259,6 +321,8 @@ export class SoftBodyWorld {
       this.mass.push(m);
       this.invMass.push(m > 0.001 ? 1 / m : 0);
       this.particleRadius.push(0);
+      this.particleLayer.push(LAYER_BLOB);
+      this.particleMask.push(LAYER_ALL);
       hullIndices.push(start + 1 + i);
     }
 
@@ -316,6 +380,8 @@ export class SoftBodyWorld {
       frameOverride: { cos: 1, sin: 0, tx: 0, ty: 0 },
       gravityField: null,
       centerIdx: start,
+      layer: LAYER_BLOB,
+      mask: LAYER_ALL,
     };
     this.shapes.push(shape);
     const shapeIdx = this.shapes.length - 1;
@@ -331,6 +397,11 @@ export class SoftBodyWorld {
       springEnd,
       springStiffnessScale: 1,
       springDampScale: 1,
+      // Fallback sortKey for blobs whose caller doesn't supply one (tests,
+      // editor, etc.). The string-padded blob id keeps lexicographic order
+      // matching numeric order for up to 999,999 blobs — well beyond any
+      // realistic count.
+      sortKey: sortKey ?? `__blob_${String(blobId).padStart(6, '0')}`,
     });
 
     return { blobId, centerIdx: start, hullIndices, shapeIdx };
@@ -479,6 +550,52 @@ export class SoftBodyWorld {
   getBlobGroundContacts(blobId: number): number {
     if (blobId < 0 || blobId >= this.blobGroundContacts.length) return 0;
     return this.blobGroundContacts[blobId];
+  }
+
+  /** Set the ground-contact tally for a blob — used by network state sync
+   * to restore a host-authoritative value on the guest. This tally is
+   * populated during the collision pass of `step()` and READ by the
+   * next tick's `SlimeBlob.update` (for the `grounded ? 1.0 :
+   * AIR_MOVE_MULTIPLIER` switch). Without sync, a freshly-keyframed
+   * client reads a stale or zero value for one tick and applies the
+   * wrong horizontal-move force — a small per-tick drift that produces
+   * a visible snap when the next keyframe corrects positions. */
+  setBlobGroundContacts(blobId: number, count: number): void {
+    if (blobId < 0) return;
+    while (this.blobGroundContacts.length <= blobId) this.blobGroundContacts.push(0);
+    this.blobGroundContacts[blobId] = Math.max(0, count | 0);
+  }
+
+  /** Returns a representative ground contact (point on the surface + outward
+   * normal) captured during the most recent step, or null if the blob isn't
+   * touching anything ground-facing. The point is on the actual surface and
+   * the normal points away from it — both in world space. */
+  getBlobGroundContact(blobId: number): { point: Vec2; normal: Vec2; poly: Vec2[] | null } | null {
+    if (blobId < 0 || blobId >= this.blobGroundContactPoint.length) return null;
+    const point = this.blobGroundContactPoint[blobId];
+    const normal = this.blobGroundContactNormal[blobId];
+    if (!point || !normal) return null;
+    return {
+      point: { x: point.x, y: point.y },
+      normal: { x: normal.x, y: normal.y },
+      poly: this.blobGroundContactPoly[blobId] ?? null,
+    };
+  }
+
+  /** Returns a representative impact contact (any static surface — floor, wall,
+   * or ceiling) captured during the most recent step, or null if the blob isn't
+   * touching any static geometry. Used by VFX to spawn splats on hard impacts
+   * regardless of surface orientation. */
+  getBlobImpactContact(blobId: number): { point: Vec2; normal: Vec2; poly: Vec2[] | null } | null {
+    if (blobId < 0 || blobId >= this.blobImpactContactPoint.length) return null;
+    const point = this.blobImpactContactPoint[blobId];
+    const normal = this.blobImpactContactNormal[blobId];
+    if (!point || !normal) return null;
+    return {
+      point: { x: point.x, y: point.y },
+      normal: { x: normal.x, y: normal.y },
+      poly: this.blobImpactContactPoly[blobId] ?? null,
+    };
   }
 
   /** Returns the number of hull points touching a 'sticky' material surface this step,
@@ -698,9 +815,77 @@ export class SoftBodyWorld {
     this.distanceMaxConstraints.push([i, j, maxDist]);
   }
 
-  /** Add a spring that only pulls when distance exceeds restLength (like a slack rope). */
-  addTetherSpring(i: number, j: number, restLength: number, stiffness: number, damping: number): void {
-    this.tetherSprings.push([i, j, restLength, stiffness, damping]);
+  /**
+   * Build a discrete-particle rope between two existing particles. Creates
+   * intermediate point particles connected by per-segment max-distance
+   * constraints (no forces, no springs — the rope only pulls when a pair
+   * exceeds its max segment length, and it pulls only that pair).
+   *
+   * The number of segments is derived from `totalLength / maxSegmentLength`.
+   *
+   * Each segment particle sits on `layer` (default LAYER_CHAIN) and
+   * accepts `mask` (default LAYER_WORLD) — collides with world geometry
+   * but not with blobs (including the two endpoints) or other chains.
+   *
+   * The chain is registered with a dedicated sequential solver
+   * ({@link solveChains}) that runs forward+backward sweeps per substep
+   * so force propagates end-to-end without being drowned out by other
+   * constraints.
+   *
+   * @returns The newly-created interior particle indices in order.
+   */
+  addRopeChain(
+    idxA: number,
+    idxB: number,
+    opts: {
+      /** Target total rope length. Acts as a budget — actual rope can
+       *  drape over geometry up to this length. */
+      totalLength: number
+      /** Max distance between any two adjacent chain points. Smaller →
+       *  denser rope, more compute, less visual clip-through. */
+      maxSegmentLength: number
+      segmentMass?: number
+      segmentRadius?: number
+      layer?: number
+      mask?: number
+      /** Iterations of the chain-specific solver per substep.
+       *  Each iteration does a forward + backward sweep. Default 12. */
+      iterations?: number
+    },
+  ): { particleIndices: number[] } {
+    const maxL = opts.maxSegmentLength;
+    const segments = Math.max(2, Math.ceil(opts.totalLength / maxL));
+    const segMass = opts.segmentMass ?? 0.5;
+    const segRad = opts.segmentRadius ?? 10;
+    const layer = opts.layer ?? LAYER_CHAIN;
+    const mask = opts.mask ?? LAYER_WORLD;
+    const iterations = Math.max(1, opts.iterations ?? 12);
+
+    const pA = this.pos[idxA];
+    const pB = this.pos[idxB];
+    const newIndices: number[] = [];
+    const innerCount = segments - 1;
+
+    for (let s = 1; s <= innerCount; s++) {
+      const t = s / segments;
+      const p: Vec2 = { x: pA.x + (pB.x - pA.x) * t, y: pA.y + (pB.y - pA.y) * t };
+      this.pos.push(p);
+      this.vel.push({ x: 0, y: 0 });
+      this.mass.push(segMass);
+      this.invMass.push(segMass > 0.001 ? 1 / segMass : 0);
+      this.particleRadius.push(segRad);
+      this.particleLayer.push(layer);
+      this.particleMask.push(mask);
+      newIndices.push(this.pos.length - 1);
+    }
+
+    this.chains.push({
+      particleIndices: [idxA, ...newIndices, idxB],
+      maxSegmentLength: maxL,
+      iterations,
+    });
+
+    return { particleIndices: newIndices };
   }
 
   addWeightedAnchor(indicesA: number[], weightsA: number[], indicesB: number[], weightsB: number[]): void {
@@ -713,12 +898,15 @@ export class SoftBodyWorld {
     this.mass.length = 0;
     this.invMass.length = 0;
     this.particleRadius.length = 0;
+    this.particleLayer.length = 0;
+    this.particleMask.length = 0;
     this.springs.length = 0;
     this.shapes = this.shapes.filter(sh => sh.isTrigger);
     this.blobRanges.length = 0;
     this.welds.length = 0;
     this.anchors.length = 0;
     this.distanceMaxConstraints.length = 0;
+    this.chains.length = 0;
     this.triggerPrev.clear();
     this.timeAccum = 0;
   }
@@ -778,6 +966,10 @@ export class SoftBodyWorld {
     for (let s = 0; s < this.substeps; s++) {
       this.substep();
     }
+    // Monotonic tick — anything that needs a deterministic time source
+    // (AI decision timers, replay tagging) should multiply this by
+    // fixedDt instead of reading `performance.now`.
+    this.tick += 1;
   }
 
   private substep(): void {
@@ -826,7 +1018,6 @@ export class SoftBodyWorld {
 
     // 3-5. Forces
     this.applySprings(dt);
-    this.applyTetherSprings(dt);
     this.applyPressure(dt);
     this.applyShapeMatching(dt);
 
@@ -844,6 +1035,8 @@ export class SoftBodyWorld {
 
     // 6b. CCD sweep: detect and resolve tunneling through static geometry
     this.sweepStaticCCD(prevPos);
+    // 6c. CCD sweep: detect and resolve tunneling between moving blobs.
+    this.sweepBlobCCD(prevPos);
 
     // 7. Constraints
     for (let it = 0; it < this.constraintIters; it++) {
@@ -855,14 +1048,31 @@ export class SoftBodyWorld {
         solveDistanceMax(this.pos, this.invMass, d[0], d[1], d[2]);
       }
     }
+    // Chain-specific solver — bi-directional sweeps over each rope. Runs
+    // after the general constraint loop so the chain is enforced against
+    // whatever the welds/anchors did, and before collisions so any
+    // penetration the chain creates gets cleaned up.
+    this.solveChains();
 
     // 8-9. Collisions — reset ground + sticky contact counts
     this.blobGroundContacts.length = this.blobRanges.length;
     this.blobStickyContactCount.length = this.blobRanges.length;
     this.blobStickyContactNormalSum.length = this.blobRanges.length;
+    this.blobGroundContactPoint.length = this.blobRanges.length;
+    this.blobGroundContactNormal.length = this.blobRanges.length;
+    this.blobGroundContactPoly.length = this.blobRanges.length;
+    this.blobImpactContactPoint.length = this.blobRanges.length;
+    this.blobImpactContactNormal.length = this.blobRanges.length;
+    this.blobImpactContactPoly.length = this.blobRanges.length;
     for (let i = 0; i < this.blobRanges.length; i++) {
       this.blobStickyContactCount[i] = 0;
       this.blobStickyContactNormalSum[i] = { x: 0, y: 0 };
+      this.blobGroundContactPoint[i] = null;
+      this.blobGroundContactNormal[i] = null;
+      this.blobGroundContactPoly[i] = null;
+      this.blobImpactContactPoint[i] = null;
+      this.blobImpactContactNormal[i] = null;
+      this.blobImpactContactPoly[i] = null;
     }
     this.blobGroundContacts.fill(0);
     this.solveCollisions(dt);
@@ -949,21 +1159,66 @@ export class SoftBodyWorld {
     }
   }
 
-  private applyTetherSprings(dt: number): void {
-    for (const [ia, ib, rest, k, damp] of this.tetherSprings) {
-      const diff = sub(this.pos[ib], this.pos[ia]);
-      const dist = length(diff);
-      if (dist <= rest || dist < 0.0001) continue; // slack — no force
-      const dir = scale(diff, 1 / dist);
-      const stretch = dist - rest;
-      const relVel = dot(sub(this.vel[ib], this.vel[ia]), dir);
-      const force = scale(dir, k * stretch + damp * relVel);
-      if (this.invMass[ia] > 0) {
-        this.vel[ia] = add(this.vel[ia], scale(force, this.invMass[ia] * dt));
+  /**
+   * Per-chain constraint solver. Each chain is a list of particles where
+   * adjacent pairs must be no further apart than the chain's
+   * `maxSegmentLength`. We do K iterations of a forward + backward sweep
+   * over each chain so pull from either endpoint can propagate to the
+   * other within a single substep — the general constraint loop can't do
+   * this fast enough when blob centers are an order of magnitude heavier
+   * than the chain segments.
+   *
+   * Cheap: a 30-segment chain at 12 iterations is ~720 `solveDistanceMax`
+   * calls per substep. The math inside is sub + length + scale per pair.
+   */
+  private solveChains(): void {
+    for (const chain of this.chains) {
+      const idx = chain.particleIndices;
+      const maxL = chain.maxSegmentLength;
+      const K = chain.iterations;
+      for (let it = 0; it < K; it++) {
+        // Forward sweep — propagates pull from endpoint A toward B.
+        for (let k = 0; k < idx.length - 1; k++) {
+          this.solveChainPair(idx[k], idx[k + 1], maxL);
+        }
+        // Backward sweep — propagates pull from B toward A.
+        for (let k = idx.length - 2; k >= 0; k--) {
+          this.solveChainPair(idx[k], idx[k + 1], maxL);
+        }
       }
-      if (this.invMass[ib] > 0) {
-        this.vel[ib] = sub(this.vel[ib], scale(force, this.invMass[ib] * dt));
-      }
+    }
+  }
+
+  /**
+   * Resolve a single chain pair: enforces max-distance via position AND
+   * velocity. Velocity correction kills the separating component of the
+   * pair's relative motion so continuous outward input force can't slowly
+   * leak the chain past its budget — without that, position-only PBD is
+   * always slightly elastic.
+   *
+   * Converging motion (the pair already moving toward each other) is left
+   * untouched — only outward separation gets clipped.
+   */
+  private solveChainPair(i: number, j: number, maxL: number): void {
+    const d = sub(this.pos[j], this.pos[i]);
+    const len = length(d);
+    if (len <= maxL || len < EPS) return;
+    const n = scale(d, 1 / len);
+    const overlap = len - maxL;
+    const wi = this.invMass[i];
+    const wj = this.invMass[j];
+    const wSum = wi + wj;
+    if (wSum < EPS) return;
+    // Position correction.
+    const corr = overlap / wSum;
+    this.pos[i] = add(this.pos[i], scale(n, corr * wj));
+    this.pos[j] = sub(this.pos[j], scale(n, corr * wi));
+    // Velocity correction along the constraint normal — kill outward only.
+    const vRel = dot(sub(this.vel[j], this.vel[i]), n);
+    if (vRel > 0) {
+      const vCorr = vRel / wSum;
+      this.vel[i] = add(this.vel[i], scale(n, vCorr * wj));
+      this.vel[j] = sub(this.vel[j], scale(n, vCorr * wi));
     }
   }
 
@@ -1064,17 +1319,52 @@ export class SoftBodyWorld {
   // --- Collisions ---
 
   private solveCollisions(dt: number): void {
-    // Blob-blob first, then blob-static
-    for (let a = 0; a < this.blobRanges.length; a++) {
-      if (this.blobRanges[a].inactive) continue;
-      for (let b = a + 1; b < this.blobRanges.length; b++) {
-        if (this.blobRanges[b].inactive) continue;
+    // Blob-blob first, then blob-static. Both paths are gated by the
+    // bitmask layer/mask filter (see physics/layers.ts).
+    //
+    // Pair iteration sorted by `BlobRange.sortKey` (not raw blob `id`) so
+    // host and guest process the same physical pair in the same role
+    // order. Raw-id ordering breaks this: host's PM adds host's player
+    // first then receives the guest's player_join, guest's PM adds its
+    // own first then synthesizes the host's blob from the keyframe, so
+    // the local `id`s for the two players are swapped between clients.
+    // `collideBlobs(a, b)` is asymmetric (it pushes `a`'s hull first,
+    // then `b`'s, against frozen polygons captured before the first
+    // push), so swapping the roles produces a small but real position
+    // delta — exactly the kind of drift that triggers a visible snap on
+    // the next keyframe. Sorting by a stable, level-derived sort key
+    // makes the iteration agree on every client.
+    const sortedIndices = this.blobRanges
+      .map((r, i) => ({ i, key: r.sortKey }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .map((entry) => entry.i);
+    for (let ai = 0; ai < sortedIndices.length; ai++) {
+      const a = sortedIndices[ai];
+      const ra = this.blobRanges[a];
+      if (ra.inactive) continue;
+      const sa = this.shapes[ra.shapeIdx];
+      if (!sa) continue;
+      for (let bi = ai + 1; bi < sortedIndices.length; bi++) {
+        const b = sortedIndices[bi];
+        const rb = this.blobRanges[b];
+        if (rb.inactive) continue;
+        const sb = this.shapes[rb.shapeIdx];
+        if (!sb) continue;
+        if (!canCollide(sa.layer ?? LAYER_BLOB, sa.mask ?? LAYER_ALL,
+                        sb.layer ?? LAYER_BLOB, sb.mask ?? LAYER_ALL)) continue;
         this.collideBlobs(a, b);
       }
     }
     for (const surface of this.staticSurfaces) {
+      const surfLayer = surface.layer ?? LAYER_WORLD;
+      const surfMask = surface.mask ?? LAYER_ALL;
       for (let bi = 0; bi < this.blobRanges.length; bi++) {
-        if (this.blobRanges[bi].inactive) continue;
+        const r = this.blobRanges[bi];
+        if (r.inactive) continue;
+        const sh = this.shapes[r.shapeIdx];
+        if (!sh) continue;
+        if (!canCollide(sh.layer ?? LAYER_BLOB, sh.mask ?? LAYER_ALL,
+                        surfLayer, surfMask)) continue;
         this.collideBlobWithPoly(bi, surface.poly, true, dt, surface.material, surface.velocity);
       }
     }
@@ -1224,6 +1514,24 @@ export class SoftBodyWorld {
         // Track ground contacts (contact with upward-facing normal)
         if (n.y < -0.3) {
           this.blobGroundContacts[blobId]++;
+          // Capture the most upward-facing contact this step. Prefer the
+          // contact whose normal is closest to "straight up" (most negative
+          // n.y) so splats land on the flattest part of the surface the
+          // blob actually settled on, not on an incidental side touch.
+          const existing = this.blobGroundContactNormal[blobId];
+          if (!existing || n.y < existing.y) {
+            this.blobGroundContactPoint[blobId] = { x: closest.x, y: closest.y };
+            this.blobGroundContactNormal[blobId] = { x: n.x, y: n.y };
+            this.blobGroundContactPoly[blobId] = polyWorld;
+          }
+        }
+
+        // Capture any-surface contact (walls/ceilings too) for splat VFX.
+        // First contact wins for the step.
+        if (this.blobImpactContactPoint[blobId] === null) {
+          this.blobImpactContactPoint[blobId] = { x: closest.x, y: closest.y };
+          this.blobImpactContactNormal[blobId] = { x: n.x, y: n.y };
+          this.blobImpactContactPoly[blobId] = polyWorld;
         }
 
         // Track sticky contacts (accumulate count + normal for averaging on read)
@@ -1347,16 +1655,138 @@ export class SoftBodyWorld {
     }
   }
 
+  /**
+   * Blob-vs-blob CCD: for each hull particle whose motion segment over the
+   * substep crosses an edge of another blob's *previous* hull, clamp the
+   * particle to the entry point + margin along the outward edge normal and
+   * exchange momentum with the two edge vertices via the same three-body
+   * impulse resolver the discrete path uses. "Previous" hulls are taken from
+   * `prevPos` (the snapshot saved before integration this substep) so the
+   * sweep is symmetric — A's particles are tested against B's prev hull and
+   * vice-versa — and stable even when both blobs are moving.
+   *
+   * Why three-body impulse (not just zeroing the particle's inward velocity):
+   * a fast incoming particle carries momentum that *must* be transferred to
+   * the target blob's edge vertices, otherwise the target blob never gets
+   * pushed and high-speed collisions feel like dead-cat hits. The discrete
+   * resolver in `collideBlobs` does this via `resolveThreeBodyVelocity`; the
+   * CCD path mirrors it, with friction halved per pass since ordered pairs
+   * (a,b) and (b,a) both fire — matching the discrete code's halving rule.
+   *
+   * This pass exists because the discrete blob-vs-blob resolver picks a
+   * contact edge using `closestPointOnPolygonBoundary`: under deep
+   * penetration (>~half a blob), the nearest edge is the *far* side, and the
+   * resolver pushes the particle through instead of back out, leaving the
+   * blobs centroid-merged.
+   */
+  private sweepBlobCCD(prevPos: Vec2[]): void {
+    const nBlobs = this.blobRanges.length;
+    for (let a = 0; a < nBlobs; a++) {
+      const ra = this.blobRanges[a];
+      if (ra.inactive) continue;
+      const sa = this.shapes[ra.shapeIdx];
+      if (!sa) continue;
+      for (let b = 0; b < nBlobs; b++) {
+        if (a === b) continue;
+        const rb = this.blobRanges[b];
+        if (rb.inactive) continue;
+        const sb = this.shapes[rb.shapeIdx];
+        if (!sb) continue;
+        if (!canCollide(sa.layer ?? LAYER_BLOB, sa.mask ?? LAYER_ALL,
+                        sb.layer ?? LAYER_BLOB, sb.mask ?? LAYER_ALL)) continue;
+
+        const pn = rb.hull.length;
+        if (pn < 3) continue;
+        // B's previous hull polygon = the swept-from reference for A's particles.
+        const polyBPrev: Vec2[] = new Array(pn);
+        for (let k = 0; k < pn; k++) polyBPrev[k] = prevPos[rb.hull[k]];
+
+        for (const pi of ra.hull) {
+          if (this.invMass[pi] === 0) continue;
+          const oldP = prevPos[pi];
+          const newP = this.pos[pi];
+          const dx = newP.x - oldP.x;
+          const dy = newP.y - oldP.y;
+          if (dx * dx + dy * dy < 1e-4) continue;
+
+          let bestT = Infinity;
+          let bestPoint: Vec2 | null = null;
+          let bestNormal: Vec2 | null = null;
+          let bestEdge = -1;
+          let bestEdgeDir: Vec2 = ZERO;
+
+          for (let e = 0; e < pn; e++) {
+            const ea = polyBPrev[e];
+            const eb = polyBPrev[(e + 1) % pn];
+            const hit = segmentIntersectionT(oldP, newP, ea, eb);
+            if (!hit || hit.t >= bestT) continue;
+            const edgeX = eb.x - ea.x;
+            const edgeY = eb.y - ea.y;
+            const elen = Math.sqrt(edgeX * edgeX + edgeY * edgeY);
+            if (elen < 1e-10) continue;
+            // Outward normal points from the edge toward oldP (the side we came from).
+            let nx = -edgeY / elen;
+            let ny = edgeX / elen;
+            const toOld = (oldP.x - ea.x) * nx + (oldP.y - ea.y) * ny;
+            if (toOld < 0) { nx = -nx; ny = -ny; }
+            bestT = hit.t;
+            bestPoint = hit.point;
+            bestNormal = vec2(nx, ny);
+            bestEdge = e;
+            bestEdgeDir = vec2(edgeX / elen, edgeY / elen);
+          }
+
+          if (!bestPoint || !bestNormal || bestEdge < 0) continue;
+
+          // Position correction: clamp particle to entry + margin, just outside
+          // the swept-from edge.
+          this.pos[pi] = add(bestPoint, scale(bestNormal, this.collisionMargin));
+
+          // Velocity-level impulse exchange with the two edge vertices of B.
+          const ib0 = rb.hull[bestEdge];
+          const ib1 = rb.hull[(bestEdge + 1) % pn];
+          const eA = polyBPrev[bestEdge];
+          const eB = polyBPrev[(bestEdge + 1) % pn];
+          const { wb, wc } = edgeVertexWeights(bestPoint, eA, eB);
+
+          const [vaNew, vbNew, vcNew] = resolveThreeBodyVelocity(
+            this.vel[pi], this.mass[pi],
+            this.vel[ib0], this.mass[ib0],
+            this.vel[ib1], this.mass[ib1],
+            bestNormal, wb, wc,
+            this.collisionRestitution,
+            this.blobBlobFrictionMu * 0.5,
+            bestEdgeDir,
+            this.blobBlobFrictionImpulseScale * 0.5,
+            0,
+          );
+          this.vel[pi] = vaNew;
+          this.vel[ib0] = vbNew;
+          this.vel[ib1] = vcNew;
+        }
+      }
+    }
+  }
+
   private solveParticleCollisions(_dt: number): void {
     for (let i = 0; i < this.pos.length; i++) {
       const rad = this.particleRadius[i];
       if (rad <= 0) continue;
 
+      const pLayer = this.particleLayer[i] ?? LAYER_DEFAULT;
+      const pMask = this.particleMask[i] ?? LAYER_ALL;
+
       for (const surface of this.staticSurfaces) {
+        const sLayer = surface.layer ?? LAYER_WORLD;
+        const sMask = surface.mask ?? LAYER_ALL;
+        if (!canCollide(pLayer, pMask, sLayer, sMask)) continue;
         this.resolveParticleVsPoly(i, rad, surface.poly);
       }
       for (const sh of this.shapes) {
         if (sh.isTrigger || sh.inactive) continue;
+        const shLayer = sh.layer ?? LAYER_BLOB;
+        const shMask = sh.mask ?? LAYER_ALL;
+        if (!canCollide(pLayer, pMask, shLayer, shMask)) continue;
         if (sh.isStatic) {
           if (sh.staticPoly.length > 0) this.resolveParticleVsPoly(i, rad, sh.staticPoly);
         } else {
@@ -1458,6 +1888,74 @@ export class SoftBodyWorld {
   buildPolygonFromIndices(indices: number[]): Vec2[] {
     return indices.map(i => this.pos[i]);
   }
+
+  // ---------------------------------------------------------------
+  // SoftBodyEngine surface adapters.
+  //
+  // Most of the interface is already satisfied by methods defined
+  // above. These additions either expose properties as method calls
+  // (so the wasm-backed wrapper can mirror them) or provide stubs
+  // for interface methods that don't apply to the TS sim.
+  // ---------------------------------------------------------------
+
+  /** Return blob's contiguous particle range + hull indices. */
+  getBlobRange(blobId: number): { start: number; end: number; hull: readonly number[] } | null {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return null;
+    const r = this.blobRanges[blobId];
+    return { start: r.start, end: r.end, hull: r.hull };
+  }
+
+  /** Snapshot of static surfaces (returns the live array — TS sim only;
+   *  the Rust engine returns a fresh copy each call). */
+  getStaticSurfacesSnapshot(): readonly StaticSurface[] {
+    return this.staticSurfaces;
+  }
+
+  /** Snapshot of shapes, optionally filtering out triggers. */
+  getShapesSnapshot(includeTriggers = true): readonly Shape[] {
+    if (includeTriggers) return this.shapes;
+    return this.shapes.filter(s => !s.isTrigger);
+  }
+
+  /** Push a level-author extra spring (not owned by any blob). */
+  addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void {
+    this.extraSprings.push([i, j, rest, k, damp]);
+  }
+
+  /** Pull a particle toward a fixed world-position with k/damp. */
+  addHomeAnchor(idx: number, home: Vec2, k: number, damp: number): void {
+    this.homeAnchors.push({ idx, home: { x: home.x, y: home.y }, k, damp });
+  }
+
+  /** State hash — TS sim is non-deterministic across browsers, so this
+   *  is intentionally a stub. The Rust engine returns a real FNV-1a hash. */
+  stateHash(): string { return ''; }
+
+  /** Reset the RNG seed. Mirrors the wasm engine's `setRngSeed` for the
+   *  SoftBodyEngine contract. */
+  setRngSeed(seed: number): void { this.rng = createRng((seed >>> 0) || 1); }
+
+  /** Per-particle position write (replaces direct `world.pos[i] = ...`). */
+  setParticlePos(i: number, x: number, y: number): void {
+    if (i < 0 || i >= this.pos.length) return;
+    this.pos[i] = { x, y };
+  }
+  /** Per-particle velocity write. */
+  setParticleVel(i: number, x: number, y: number): void {
+    if (i < 0 || i >= this.vel.length) return;
+    this.vel[i] = { x, y };
+  }
+  /** Override the logical tick counter (netcode keyframe restore). */
+  setTick(t: number): void { this.tick = t; }
+
+  /** SoftBodyEngine contract — no-op on the TS sim because the JS-side
+   *  `StaticSurface` object IS the same reference the engine reads, so
+   *  any mutation to `.poly` / `.velocity` is already visible. The
+   *  wasm-backed engine needs an explicit sync (see softBodyWorldRust.ts). */
+  commitStaticSurface(_surface: StaticSurface): void { /* no-op */ }
+
+  /** Logical tick getter mirroring the Rust engine's interface property. */
+  // (already exposed as `tick: number` field above.)
 }
 
 // --- Utility: segment intersection ---

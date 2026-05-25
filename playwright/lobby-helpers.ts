@@ -1,7 +1,7 @@
 import { type Page, expect } from "@playwright/test";
 
 export const PARTY_API_URL =
-  process.env.VITE_PARTY_API_URL ?? "http://192.168.86.118:3000";
+  process.env.VITE_PARTY_API_URL ?? "http://192.168.1.11:3000";
 export const MP_API_KEY =
   process.env.VITE_MP_API_KEY ?? "mpk_live_OIXff-qF_jHThMV9pDGvwh0PsHe2xP0o";
 

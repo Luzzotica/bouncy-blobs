@@ -1,4 +1,5 @@
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { Vec2, vec2 } from '../../physics/vec2';
 import { isPointInPolygon } from '../../physics/collision';
 import { PlayerManager, ManagedPlayer } from '../playerManager';
@@ -11,6 +12,8 @@ import {
   POWERUP_DEFS,
   POWERUP_TYPES,
 } from './types';
+import { getSprite } from '../../assets/spriteRegistry';
+import { drawSprite } from '../../renderer/spriteRenderer';
 
 const PICKUP_RADIUS = 50;
 const RESPAWN_DELAY = 10;
@@ -20,18 +23,23 @@ const BOB_AMPLITUDE = 8;
 export class PowerupManager {
   private spawned: SpawnedPowerup[] = [];
   private activePowerups: Map<string, ActivePowerup[]> = new Map(); // playerId -> active effects
-  private world: SoftBodyWorld | null = null;
+  private world: SoftBodyEngine | null = null;
   private time = 0;
+  /** Fired on pickup. Receives the collecting player and the powerup's
+   * world position + display color (for VFX). */
+  onCollect?: (player: ManagedPlayer, color: string, position: Vec2) => void;
 
-  initialize(world: SoftBodyWorld, spawnDefs: PowerupSpawnDef[]): void {
+  initialize(world: SoftBodyEngine, spawnDefs: PowerupSpawnDef[]): void {
     this.world = world;
     this.spawned = [];
     this.activePowerups.clear();
     this.time = 0;
 
-    // Create spawned powerups with random types
+    // Create spawned powerups with random types. Pull from the world's
+    // seeded RNG so two clients pick the same type for each spawner.
     for (const spawn of spawnDefs) {
-      const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+      const r = world.rng?.next() ?? Math.random();
+      const type = POWERUP_TYPES[Math.floor(r * POWERUP_TYPES.length)];
       this.spawned.push({
         id: spawn.id,
         def: POWERUP_DEFS[type],
@@ -52,8 +60,9 @@ export class PowerupManager {
         powerup.respawnTimer -= dt;
         if (powerup.respawnTimer <= 0) {
           powerup.collected = false;
-          // Randomize type on respawn
-          const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+          // Randomize type on respawn — deterministic via the world's seeded RNG.
+          const r = this.world?.rng?.next() ?? Math.random();
+          const type = POWERUP_TYPES[Math.floor(r * POWERUP_TYPES.length)];
           powerup.def = POWERUP_DEFS[type];
         }
         continue;
@@ -91,6 +100,7 @@ export class PowerupManager {
   private collectPowerup(powerup: SpawnedPowerup, player: ManagedPlayer): void {
     powerup.collected = true;
     powerup.respawnTimer = RESPAWN_DELAY;
+    this.onCollect?.(player, powerup.def.color, powerup.position);
 
     // Apply effect
     const active: ActivePowerup = {
@@ -152,6 +162,28 @@ export class PowerupManager {
       const bobY = position.y + Math.sin(this.time * BOB_SPEED) * BOB_AMPLITUDE;
 
       ctx.save();
+
+      // Sprite path — single painted orb with baked-in glow. Powerup color
+      // is conveyed by a tinted overlay since the sprite is one design.
+      const orbSprite = getSprite('powerup_orb');
+      if (orbSprite) {
+        drawSprite(ctx, orbSprite, position.x, bobY, 0, 1, 1);
+        // Color cue + label still useful so player can tell what they're
+        // grabbing without learning the orb art by heart.
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = def.color + '55';
+        ctx.beginPath();
+        ctx.arc(position.x, bobY, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(def.label, position.x, bobY);
+        ctx.restore();
+        continue;
+      }
 
       // Glow
       ctx.beginPath();

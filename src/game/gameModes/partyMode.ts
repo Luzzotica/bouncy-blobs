@@ -1,10 +1,11 @@
 import { GameMode, GameModeConfig, GameModeState, GamePhase } from './types';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
 import { LevelData, ZoneDef, PlatformDef, SpikeDef, SpringPadDef } from '../../levels/types';
 import { drawGoalZone } from '../../renderer/zoneRenderer';
-import { drawPlayerLabels, drawTimer } from '../../renderer/hudRenderer';
+import { drawTimer } from '../../renderer/hudRenderer';
 import { PARTY_ITEM_CATALOG, PartyItem } from '../partyItems/types';
 import { DynamicItemManager } from '../dynamicItemManager';
 
@@ -38,7 +39,7 @@ export class PartyMode implements GameMode {
 
   private levelData: LevelData;
   private goalZone: ZoneDef | null = null;
-  private world: SoftBodyWorld | null = null;
+  private world: SoftBodyEngine | null = null;
   private playerManager: PlayerManager | null = null;
 
   // Internal state machine
@@ -92,7 +93,7 @@ export class PartyMode implements GameMode {
     return this.subPhase === 'run';
   }
 
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
     this.world = world;
     this.playerManager = playerManager;
     this.goalZone = this.levelData.goalZones?.[0] ?? null;
@@ -150,7 +151,7 @@ export class PartyMode implements GameMode {
     }
   }
 
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyWorld): void {
+  update(dt: number, state: GameModeState, playerManager: PlayerManager, _world: SoftBodyEngine): void {
     this.gameTime += dt;
     this.subPhaseTimer -= dt;
 
@@ -294,7 +295,15 @@ export class PartyMode implements GameMode {
     this.subPhaseTimer = PARTY_BOX_TIME;
     this.playerSelections.clear();
 
-    // Generate items ensuring variety: pick from different categories
+    // Generate items ensuring variety: pick from different categories.
+    // Uses the world's seeded RNG so host and guest pick the same items in
+    // the same order. `Math.random()` would diverge per client and produce
+    // different placement choices that would then drive the physics into
+    // different states until the next keyframe yanks them back.
+    const rng = this.world?.rng;
+    const rand = () => (rng ? rng.next() : Math.random());
+    const randInt = (n: number) => Math.floor(rand() * n);
+
     const byCategory = new Map<string, PartyItem[]>();
     for (const item of PARTY_ITEM_CATALOG) {
       const list = byCategory.get(item.category) ?? [];
@@ -302,18 +311,26 @@ export class PartyMode implements GameMode {
       byCategory.set(item.category, list);
     }
     const picks: PartyItem[] = [];
-    const categories = [...byCategory.keys()].sort(() => Math.random() - 0.5);
+    // Fisher-Yates shuffle. The old `.sort(() => Math.random() - 0.5)`
+    // pattern is both non-deterministic AND statistically broken (it
+    // doesn't produce a uniform shuffle, since `Array.sort` doesn't
+    // guarantee how many times the comparator is called).
+    const categories = [...byCategory.keys()];
+    for (let i = categories.length - 1; i > 0; i--) {
+      const j = randInt(i + 1);
+      [categories[i], categories[j]] = [categories[j], categories[i]];
+    }
     // Pick one from each category first, then fill randomly
     for (const cat of categories) {
       const items = byCategory.get(cat)!;
-      const pick = items[Math.floor(Math.random() * items.length)];
+      const pick = items[randInt(items.length)];
       picks.push(pick);
       if (picks.length >= ITEMS_PER_ROUND) break;
     }
     while (picks.length < ITEMS_PER_ROUND) {
       const all = PARTY_ITEM_CATALOG.filter(i => !picks.includes(i));
       if (all.length === 0) break;
-      picks.push(all[Math.floor(Math.random() * all.length)]);
+      picks.push(all[randInt(all.length)]);
     }
     this.availableItems = picks;
 
@@ -339,11 +356,14 @@ export class PartyMode implements GameMode {
 
     // All players selected or time's up
     if (this.playerSelections.size >= totalPlayers || this.subPhaseTimer <= 0) {
-      // Auto-assign random items to players who didn't pick
+      // Auto-assign random items to players who didn't pick. Seeded RNG so
+      // host and guest assign the same item to the same player.
       if (this.playerManager) {
+        const rng = this.world?.rng;
+        const rand = () => (rng ? rng.next() : Math.random());
         for (const p of this.playerManager.getAllPlayers()) {
           if (!this.playerSelections.has(p.playerId)) {
-            this.playerSelections.set(p.playerId, Math.floor(Math.random() * this.availableItems.length));
+            this.playerSelections.set(p.playerId, Math.floor(rand() * this.availableItems.length));
           }
         }
       }
@@ -585,10 +605,10 @@ export class PartyMode implements GameMode {
         // === Spring pads / Trampoline ===
         case 'spring_pad':
         case 'trampoline': {
-          const force = item.type === 'trampoline' ? 700 : 500;
+          const fireSpeed = item.type === 'trampoline' ? 1800 : 1100;
           const springDef: SpringPadDef = {
             id, x, y, width: item.width, height: item.height,
-            rotation: item.rotation, force,
+            rotation: item.rotation, fireSpeed,
           };
           if (this.springPadManager) {
             this.springPadManager.addSpring(springDef);
@@ -659,7 +679,7 @@ export class PartyMode implements GameMode {
     return null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, state: GameModeState, playerManager: PlayerManager): void {
+  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, _playerManager: PlayerManager): void {
     // Draw goal zone
     if (this.goalZone) {
       drawGoalZone(ctx, this.goalZone, this.gameTime);
@@ -672,9 +692,6 @@ export class PartyMode implements GameMode {
     if (this.subPhase === 'placement') {
       this.renderPlacementCursors(ctx);
     }
-
-    // Draw player labels
-    drawPlayerLabels(ctx, playerManager.getAllPlayers());
   }
 
   private renderPlacementCursors(ctx: CanvasRenderingContext2D): void {

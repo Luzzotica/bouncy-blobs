@@ -113,7 +113,23 @@ export class RoomService {
   }
 
   // Convenience wrappers — these are what callers use 99% of the time.
-  endRoom(): Promise<void>                            { return this.patchRoom({ status: "ended" }); }
+  /** End the room. Uses `keepalive: true` so the PATCH still lands when
+   * called from an unmount/cleanup path or just before the tab closes —
+   * `patchRoom` goes through `fetchWithTimeout` which doesn't keepalive
+   * and gets cancelled if the JS context is shutting down. */
+  async endRoom(): Promise<void> {
+    if (!this.roomId || !this.hostSecret) return;
+    try {
+      await fetch(`${this.baseUrl}/api/rooms/${this.roomId}`, {
+        method: "PATCH",
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ host_secret: this.hostSecret, status: "ended" }),
+        keepalive: true,
+      });
+    } catch {
+      /* best-effort — backend's room cleanup cron sweeps stragglers */
+    }
+  }
   setVisibility(v: RoomVisibility): Promise<void>     { return this.patchRoom({ visibility: v }); }
   setJoinable(joinable: boolean): Promise<void>       { return this.patchRoom({ joinable }); }
   setMaxPeers(max: number): Promise<void>             { return this.patchRoom({ max_peers: max }); }
@@ -144,10 +160,18 @@ export class RoomService {
 
   async leaveRoom(): Promise<void> {
     if (!this.roomId || !this.peerId || !this.peerSecret) return;
-    await this.fetchWithTimeout(
-      `${this.baseUrl}/api/rooms/${this.roomId}/peers/${this.peerId}?peer_secret=${encodeURIComponent(this.peerSecret)}`,
-      { method: "DELETE", headers: this.authHeaders() },
-    );
+    // `keepalive: true` lets the DELETE complete even if the tab is closing
+    // or the user navigates with hash/back — without it the browser cancels
+    // the request mid-flight and the peer row lingers, inflating peer_count
+    // until backend TTL cleanup.
+    try {
+      await fetch(
+        `${this.baseUrl}/api/rooms/${this.roomId}/peers/${this.peerId}?peer_secret=${encodeURIComponent(this.peerSecret)}`,
+        { method: "DELETE", headers: this.authHeaders(), keepalive: true },
+      );
+    } catch {
+      /* best-effort — the backend's room cleanup cron sweeps stragglers */
+    }
   }
 
   // ─── Signaling ────────────────────────────────────────────────────────────

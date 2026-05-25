@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { EditorState, EditorTool } from './EditorState';
-import { useAuth } from '../contexts/AuthContext';
-import * as contentApi from '../lib/contentApi';
-import type { ContentItem } from '../lib/contentApi';
+import PublishDialog from './PublishDialog';
+import { writeLocalMap } from '../lib/mapsStore';
+import { exportLocalMap, importLocalMap } from '../lib/localMaps';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { isTauri } from '../lib/runtime';
 
 interface EditorToolbarProps {
   state: EditorState;
   onUpdate: () => void;
   onTestPlay: () => void;
+  steamAvailable: boolean;
 }
 
 const tools: { id: EditorTool; label: string; hotkey: string }[] = [
@@ -21,130 +24,64 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
   { id: 'hillZone', label: 'Hill', hotkey: '8' },
   { id: 'powerup', label: 'Powerup', hotkey: '9' },
   { id: 'pointShape', label: 'Shape', hotkey: 'Q' },
-  { id: 'plate', label: 'Plate', hotkey: 'W' },
-  { id: 'trigger', label: 'Trigger', hotkey: 'E' },
+  { id: 'trigger', label: 'Trigger', hotkey: 'W' },
+  { id: 'action', label: 'Action', hotkey: 'E' },
   { id: 'softPlatform', label: 'Soft Platform', hotkey: 'R' },
+  { id: 'deathZone', label: 'Death', hotkey: 'D' },
+  { id: 'sprite', label: 'Sprite', hotkey: 'T' },
 ];
 
-export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToolbarProps) {
-  const { user, session, signIn, signOut } = useAuth();
-  const [saving, setSaving] = useState(false);
-  const [loadPanelOpen, setLoadPanelOpen] = useState(false);
-  const [loadItems, setLoadItems] = useState<ContentItem[]>([]);
-  const [loadingList, setLoadingList] = useState(false);
+export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvailable }: EditorToolbarProps) {
+  const [publishOpen, setPublishOpen] = useState(false);
 
-  const handleExport = () => {
-    const json = state.toJSON();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${state.level.name || 'level'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        state.loadJSON(reader.result as string);
-        state.contentId = null;
-        state.isPublished = false;
-        onUpdate();
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-
-  const handleSave = async () => {
-    if (!session) return;
-    setSaving(true);
+  const handleExport = async () => {
+    if (!state.localId) {
+      alert('Save the map first (it autosaves once you make a change).');
+      return;
+    }
     try {
-      if (state.contentId) {
-        // Update existing
-        await contentApi.updateLevel(session, state.contentId, {
-          name: state.level.name,
-          contentJson: state.level,
-        });
-      } else {
-        // Create new — prompt for name if empty
-        let name = state.level.name;
-        if (!name || name === 'New Level') {
-          const input = prompt('Level name:', state.level.name || 'My Level');
-          if (!input) { setSaving(false); return; }
-          name = input;
-          state.level.name = name;
-        }
-        const result = await contentApi.saveLevel(session, name, '', state.level);
-        state.contentId = result.id;
-      }
+      const dest = await saveDialog({
+        defaultPath: `${state.level.name || 'level'}.json`,
+        filters: [{ name: 'Level JSON', extensions: ['json'] }],
+      });
+      if (!dest) return;
+      await exportLocalMap(state.localId, dest);
+    } catch (err: any) {
+      alert('Export failed: ' + (err?.message ?? err));
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const src = await openDialog({
+        multiple: false,
+        filters: [{ name: 'Level JSON', extensions: ['json'] }],
+      });
+      if (!src || typeof src !== 'string') return;
+      const result = await importLocalMap(src);
+      // Refresh editor state from imported map.
+      const json = await fetch(`file://${result.path}`).then(r => r.text()).catch(() => null);
+      if (json) state.loadJSON(JSON.parse(json).level ? JSON.stringify(JSON.parse(json).level) : json);
+      state.localId = result.id;
+      state.workshopId = null;
       onUpdate();
     } catch (err: any) {
-      alert('Save failed: ' + err.message);
-    } finally {
-      setSaving(false);
+      alert('Import failed: ' + (err?.message ?? err));
     }
   };
 
-  const handleLoad = async () => {
-    if (!session) return;
-    setLoadPanelOpen(true);
-    setLoadingList(true);
+  const handleSaveNow = async () => {
+    // Manual save trigger — bypasses debounce.
     try {
-      const items = await contentApi.listLevels(session);
-      setLoadItems(items);
-    } catch (err: any) {
-      alert('Failed to load list: ' + err.message);
-    } finally {
-      setLoadingList(false);
-    }
-  };
-
-  const handleLoadItem = async (item: ContentItem) => {
-    try {
-      const levelData = await contentApi.loadLevel(item.id, session ?? undefined);
-      state.loadJSON(JSON.stringify(levelData));
-      state.contentId = item.id;
-      state.isPublished = item.isPublic;
-      setLoadPanelOpen(false);
+      const result = await writeLocalMap({
+        id: state.localId ?? undefined,
+        workshopId: state.workshopId,
+        level: state.level,
+      });
+      state.localId = result.id;
       onUpdate();
     } catch (err: any) {
-      alert('Failed to load level: ' + err.message);
-    }
-  };
-
-  const handleDeleteItem = async (item: ContentItem) => {
-    if (!session) return;
-    if (!confirm(`Delete "${item.name}"?`)) return;
-    try {
-      await contentApi.deleteLevel(session, item.id);
-      setLoadItems(prev => prev.filter(i => i.id !== item.id));
-      if (state.contentId === item.id) {
-        state.contentId = null;
-        state.isPublished = false;
-        onUpdate();
-      }
-    } catch (err: any) {
-      alert('Delete failed: ' + err.message);
-    }
-  };
-
-  const handlePublishToggle = async () => {
-    if (!session || !state.contentId) return;
-    try {
-      const newPublic = !state.isPublished;
-      await contentApi.publishLevel(session, state.contentId, newPublic);
-      state.isPublished = newPublic;
-      onUpdate();
-    } catch (err: any) {
-      alert('Publish failed: ' + err.message);
+      alert('Save failed: ' + (err?.message ?? err));
     }
   };
 
@@ -164,10 +101,10 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToo
             key={t.id}
             onClick={() => {
               if (state.draftPointShape && t.id !== 'pointShape') state.cancelDraftPointShape();
-              if (state.draftTrigger && t.id !== 'trigger') state.cancelDraftTrigger();
+              if (state.draftAction && t.id !== 'action') state.cancelDraftAction();
               state.selectedTool = t.id;
               if (t.id === 'pointShape' && !state.draftPointShape) state.beginDraftPointShape();
-              if (t.id === 'trigger' && !state.draftTrigger) state.beginDraftTrigger();
+              if (t.id === 'action' && !state.draftAction) state.beginDraftAction();
               onUpdate();
             }}
             title={`${t.label} (${t.hotkey})`}
@@ -188,96 +125,36 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay }: EditorToo
 
         <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
 
-        <button onClick={() => { state.newLevel(); state.contentId = null; state.isPublished = false; onUpdate(); }}
+        <button onClick={() => { state.newLevel(); state.localId = null; state.workshopId = null; onUpdate(); }}
           style={actionBtnStyle('#8b4513')}>
           New
         </button>
-        <button onClick={handleImport} style={actionBtnStyle('#2d6a4f')}>Import</button>
-        <button onClick={handleExport} style={actionBtnStyle('#2d6a4f')}>Export</button>
+        <button onClick={handleSaveNow} style={actionBtnStyle('#1a6aaa')}>Save</button>
+        {isTauri() && <button onClick={handleImport} style={actionBtnStyle('#2d6a4f')}>Import</button>}
+        {isTauri() && <button onClick={handleExport} style={actionBtnStyle('#2d6a4f')}>Export</button>}
 
-        {session && (
-          <>
-            <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
-            <button onClick={handleSave} disabled={saving}
-              style={actionBtnStyle(saving ? '#555' : '#1a6aaa')}>
-              {saving ? 'Saving...' : state.contentId ? 'Save' : 'Save to Cloud'}
-            </button>
-            <button onClick={handleLoad} style={actionBtnStyle('#1a6aaa')}>Load</button>
-            {state.contentId && (
-              <button onClick={handlePublishToggle}
-                style={actionBtnStyle(state.isPublished ? '#2d8a4f' : '#6a5a1a')}>
-                {state.isPublished ? 'Public' : 'Private'}
-              </button>
-            )}
-          </>
-        )}
+        <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
+
+        <button
+          onClick={() => setPublishOpen(true)}
+          disabled={!steamAvailable}
+          title={steamAvailable ? 'Publish to Steam Workshop' : 'Steam is not running'}
+          style={actionBtnStyle(steamAvailable ? (state.workshopId ? '#2d8a4f' : '#c77dff') : '#444')}
+        >
+          {state.workshopId ? 'Update Workshop' : 'Publish to Workshop'}
+        </button>
 
         <div style={{ flex: 1 }} />
 
         <button onClick={onTestPlay} style={actionBtnStyle('#c77dff')}>Test Play</button>
-
-        <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
-
-        {user ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: '#aaa' }}>{user.email?.split('@')[0]}</span>
-            <button onClick={signOut} style={{ ...actionBtnStyle('#555'), fontSize: 11, padding: '3px 8px' }}>
-              Sign Out
-            </button>
-          </div>
-        ) : (
-          <button onClick={signIn} style={actionBtnStyle('#4a6a8a')}>Sign In</button>
-        )}
       </div>
 
-      {/* Load panel overlay */}
-      {loadPanelOpen && (
-        <div style={{
-          position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)',
-          width: 480, maxHeight: 400, background: '#1a2240', border: '1px solid #444',
-          borderRadius: 8, zIndex: 100, display: 'flex', flexDirection: 'column',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #333' }}>
-            <span style={{ color: '#ccc', fontSize: 14, fontWeight: 'bold' }}>Load Level</span>
-            <button onClick={() => setLoadPanelOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#888', fontSize: 18, cursor: 'pointer' }}>
-              x
-            </button>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            {loadingList ? (
-              <p style={{ color: '#888', fontSize: 13, textAlign: 'center', padding: 20 }}>Loading...</p>
-            ) : loadItems.length === 0 ? (
-              <p style={{ color: '#666', fontSize: 13, textAlign: 'center', padding: 20 }}>No saved levels yet</p>
-            ) : (
-              loadItems.map(item => (
-                <div key={item.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                  borderRadius: 4, cursor: 'pointer', marginBottom: 4,
-                  background: '#222b4a',
-                }} onMouseEnter={e => (e.currentTarget.style.background = '#2a3a5a')}
-                   onMouseLeave={e => (e.currentTarget.style.background = '#222b4a')}>
-                  <div style={{ flex: 1 }} onClick={() => handleLoadItem(item)}>
-                    <div style={{ color: '#ddd', fontSize: 13, fontWeight: 500 }}>{item.name}</div>
-                    <div style={{ color: '#888', fontSize: 11 }}>
-                      {item.isPublic ? 'Public' : 'Private'}
-                      {item.creatorId !== user?.id ? ' (community)' : ''}
-                      {' · '}
-                      {new Date(item.updatedAt).toLocaleDateString()}
-                    </div>
-                  </div>
-                  {item.creatorId === user?.id && (
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteItem(item); }}
-                      style={{ background: '#6b0000', border: 'none', borderRadius: 3, color: '#faa', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>
-                      Del
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+      {publishOpen && (
+        <PublishDialog
+          state={state}
+          onClose={() => setPublishOpen(false)}
+          onPublished={(id) => { state.workshopId = id; onUpdate(); setPublishOpen(false); }}
+        />
       )}
     </>
   );

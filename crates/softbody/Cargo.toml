@@ -1,0 +1,18 @@
+[package]
+name = "softbody"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic fixed-point softbody physics for bouncy-blobs."
+build = "build.rs"
+
+[lib]
+name = "softbody"
+crate-type = ["rlib"]
+
+[features]
+default = ["std"]
+# `std` only gates test/dev conveniences (println, f64-based golden parsers).
+# The sim itself stays no_std + alloc.
+std = []

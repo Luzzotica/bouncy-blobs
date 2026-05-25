@@ -1,4 +1,5 @@
 import { SoftBodyWorld } from '../../physics/softBodyWorld';
+import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
 import { Camera } from '../../renderer/camera';
 import { PlayerManager, ManagedPlayer } from '../playerManager';
 import { LevelData } from '../../levels/types';
@@ -30,9 +31,9 @@ export interface GameModeState {
 export interface GameMode {
   readonly config: GameModeConfig;
   getLevel(): LevelData;
-  initialize(world: SoftBodyWorld, playerManager: PlayerManager): void;
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void;
   onPhaseStart(phase: GamePhase, state: GameModeState): void;
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, world: SoftBodyWorld): void;
+  update(dt: number, state: GameModeState, playerManager: PlayerManager, world: SoftBodyEngine): void;
   /** Returns winner playerId or null. */
   checkWinCondition(state: GameModeState, playerManager: PlayerManager): string | null;
   /** Draw world-space overlays (zones, chains) — called inside camera transform. */

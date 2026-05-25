@@ -14,7 +14,9 @@ export type PersonalityName =
   | 'fleer'
   | 'wanderer'
   | 'hill_camper'
-  | 'bouncer';
+  | 'bouncer'
+  | 'march_left'
+  | 'march_right';
 
 export interface AIInput {
   moveX: number;        // -1..1
@@ -42,8 +44,15 @@ export interface AIWorldView {
   hillCenter: Vec2 | null;
   /** dt for this tick in seconds. */
   dt: number;
-  /** Wall-clock seconds since match start (cheap stand-in for tick counter). */
+  /** Deterministic seconds since this bot's controller was reset
+   * (`(world.tick - startedAtTick) * world.fixedDt`). Replaces the old
+   * wall-clock `performance.now()` reading. */
   elapsed: number;
+  /** World's seeded RNG. Personality functions must consume from this
+   * instead of `Math.random()` so multiple clients running the same sim
+   * make the same decisions. May be undefined for legacy world-less
+   * call paths (tests). */
+  rng?: import('../lib/rng').SeededRng;
 }
 
 export interface PersonalityState {
@@ -229,11 +238,16 @@ const wanderer: PersonalityFn = (_self, world, state) => {
   let dirY = 0;
   let expanding = (state.scratch.expanding as boolean) ?? false;
   if (world.elapsed >= nextRoll) {
-    dirX = Math.random() < 0.5 ? -1 : 1;
-    expanding = Math.random() < 0.2;
+    // Pull from the world's deterministic RNG so two clients reach the
+    // same decision in the same order. Fallback to Math.random() only
+    // when no rng is wired in (legacy / test world-less calls).
+    const r = world.rng ?? null;
+    const rand = () => (r ? r.next() : Math.random());
+    dirX = rand() < 0.5 ? -1 : 1;
+    expanding = rand() < 0.2;
     state.scratch.dirX = dirX;
     state.scratch.expanding = expanding;
-    state.scratch.nextRoll = world.elapsed + 1.0 + Math.random() * 1.5;
+    state.scratch.nextRoll = world.elapsed + 1.0 + rand() * 1.5;
   }
   return { moveX: dirX, moveY: dirY, expanding };
 };
@@ -262,6 +276,11 @@ const bouncer: PersonalityFn = (_self, world, state) => {
   return { moveX, moveY: 0, expanding: wantExpand };
 };
 
+// Diagnostic personalities: hold a single direction forever. Used to record
+// chain-rope behaviour where the two endpoints pull in opposite directions.
+const march_left: PersonalityFn = () => ({ moveX: -1, moveY: 0, expanding: false });
+const march_right: PersonalityFn = () => ({ moveX: 1, moveY: 0, expanding: false });
+
 export const PERSONALITIES: Record<PersonalityName, PersonalityFn> = {
   goal_seeker,
   chaser,
@@ -269,6 +288,8 @@ export const PERSONALITIES: Record<PersonalityName, PersonalityFn> = {
   wanderer,
   hill_camper,
   bouncer,
+  march_left,
+  march_right,
 };
 
 export const PERSONALITY_LABELS: Record<PersonalityName, string> = {
@@ -278,6 +299,8 @@ export const PERSONALITY_LABELS: Record<PersonalityName, string> = {
   wanderer: '🤖 Wanderer',
   hill_camper: '🤖 Hill Camper',
   bouncer: '🤖 Bouncer',
+  march_left: '⬅️ March Left',
+  march_right: '➡️ March Right',
 };
 
 /** Default suggested colors per personality (so they're visually distinct in clips). */
@@ -288,6 +311,8 @@ export const PERSONALITY_COLORS: Record<PersonalityName, string> = {
   wanderer: '#f4a261',     // orange
   hill_camper: '#9d4edd',  // purple
   bouncer: '#ffd60a',      // yellow
+  march_left: '#c77dff',   // lavender
+  march_right: '#ffd166',  // amber
 };
 
 /** What you get when you click "+ Add AI Bot" without specifying a personality. */
@@ -315,6 +340,8 @@ export const ALL_PERSONALITIES: PersonalityName[] = [
   'wanderer',
   'hill_camper',
   'bouncer',
+  'march_left',
+  'march_right',
 ];
 
 export function isPersonalityName(s: string): s is PersonalityName {

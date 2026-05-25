@@ -27,10 +27,31 @@ export interface LevelData {
   powerupSpawns?: PowerupSpawnDef[];
   springPads?: SpringPadDef[];
   spikes?: SpikeDef[];
+  /** Rectangular zones that instantly kill any blob whose centroid enters. */
+  deathZones?: ZoneDef[];
   pointShapes?: PointShapeDef[];
   softPlatforms?: SoftPlatformDef[];
-  pressurePlates?: PressurePlateDef[];
+  /** Areas that detect blobs (formerly pressurePlates). Actions subscribe to these. */
   triggers?: TriggerDef[];
+  /** Movement effects (formerly triggers). Each action subscribes to one or more triggers. */
+  actions?: ActionDef[];
+  /** Placed sprite instances — props from public/sprites/manifest.json with
+   * per-asset collision shapes. Physics integration is staged: visuals load
+   * via the sprite registry, collision wiring is wired up per-asset as each
+   * gets editor-tuned hulls. */
+  sprites?: SpriteInstanceDef[];
+}
+
+/** An instance of a sprite from the registry placed in a level. The sprite
+ * `id` references public/sprites/manifest.json; everything else is the
+ * per-placement transform. */
+export interface SpriteInstanceDef {
+  id: string;          // instance id (unique within the level)
+  spriteId: string;    // sprite registry id (e.g. 'pencil')
+  x: number;
+  y: number;
+  rotation: number;    // radians
+  scale?: number;      // default 1
 }
 
 export type SoftAnchorPattern = 'corners' | 'ends' | 'left' | 'right' | 'top' | 'bottom';
@@ -79,41 +100,54 @@ export interface PointShapeDef {
   closed?: boolean;
 }
 
-export interface PressurePlateDef {
+/** An area that detects blobs. Wired to one or more Actions via the action's
+ *  `sourceTriggerIds`. Pressed-state can require a charge-up of `chargeSeconds`. */
+export interface TriggerDef {
   id: string;
   x: number;
   y: number;
   width: number;
   height: number;
   rotation: number;
-  triggerIds: string[];
-  oneShot?: boolean;
   /** Optional override for the trigger detection zone's width. Defaults to
    * `width`. Use when the visible plate should be small but the sensor area
    * should be larger. */
-  triggerWidth?: number;
+  sensorWidth?: number;
   /** Optional override for the trigger detection zone's height. Defaults to
    * `height`. The trigger zone is anchored so its bottom aligns with the
    * plate's bottom — extra height extends upward, where blobs approach from. */
-  triggerHeight?: number;
+  sensorHeight?: number;
+  /** Seconds of continuous occupancy required before `pressed` flips true.
+   *  0 = instant. Charge resets to 0 the moment occupancy drops to zero. */
+  chargeSeconds?: number;
 }
 
-export type TriggerEasing = 'linear' | 'easeInOut' | 'easeOut';
+export type ActionEasing = 'linear' | 'easeInOut' | 'easeOut';
+export type ActionMode = 'switch' | 'continuous' | 'oneShot';
+export type RequireMode = 'any' | 'all';
 
-export interface TriggerTarget {
-  shapeId: string;
-  pointIndex: number;
-  endX: number;
-  endY: number;
-}
+export type ActionTarget =
+  | { kind: 'shapePoint'; shapeId: string; pointIndex: number; endX: number; endY: number }
+  | { kind: 'platform'; platformId: string; endX: number; endY: number };
 
-export interface TriggerDef {
+/** A movement effect. Subscribes to one or more Triggers via `sourceTriggerIds`
+ *  and animates its targets between their closed (initial) and open (endX/endY)
+ *  positions according to `mode`. */
+export interface ActionDef {
   id: string;
   kind: 'movePoints';
-  targets: TriggerTarget[];
+  targets: ActionTarget[];
   /** Seconds. */
   duration: number;
-  easing?: TriggerEasing;
+  easing?: ActionEasing;
+  /** Triggers whose pressed-state feeds this action. */
+  sourceTriggerIds: string[];
+  /** Combine pressed-state of sources into a single activated signal. */
+  requireMode: RequireMode;
+  /** How activation maps to motion. */
+  mode: ActionMode;
+  /** Seconds to wait after activation rises before applying the move. */
+  delaySeconds?: number;
 }
 
 export interface SpikeDef {
