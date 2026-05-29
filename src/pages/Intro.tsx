@@ -36,11 +36,11 @@ interface Manifest {
 }
 
 const BASE = '/intro/'
-const PAGE_DURATION_MS = 8000
+const PAGE_DURATION_MS = 24000
 const PANEL_STAGGER_MS = 250
 const CONTROLS_HIDE_MS = 4000
 // Toggle filename overlays in each panel for debugging / iteration.
-const SHOW_PANEL_LABELS = true
+const SHOW_PANEL_LABELS = false
 
 export default function Intro() {
   const navigate = useNavigate()
@@ -58,14 +58,36 @@ export default function Intro() {
   const remainingMsRef = useRef<number>(PAGE_DURATION_MS)
 
   useEffect(() => {
+    let cancelled = false
     fetch(`${BASE}manifest.json`)
       .then(r => r.json())
-      .then(setManifest)
+      .then(async (m: Manifest) => {
+        if (cancelled) return
+        const urls = Array.from(
+          new Set(m.pages.flatMap(p => p.panels.map(panel => `${BASE}${panel.image}`))),
+        )
+        await Promise.all(
+          urls.map(
+            url =>
+              new Promise<void>(resolve => {
+                const img = new Image()
+                img.onload = () => resolve()
+                img.onerror = () => resolve()
+                img.src = url
+              }),
+          ),
+        )
+        if (cancelled) return
+        setManifest(m)
+        startMusic()
+        setStarted(true)
+      })
       .catch(err => {
         console.error('Failed to load intro manifest', err)
         finish()
       })
     return () => {
+      cancelled = true
       if (advanceRef.current) window.clearTimeout(advanceRef.current)
       if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
       sfxRef.current?.pause()
@@ -103,12 +125,6 @@ export default function Intro() {
         finish()
       }
     }, ms)
-  }
-
-  function start() {
-    if (!manifest) return
-    startMusic()
-    setStarted(true)
   }
 
   function showControls() {
@@ -164,22 +180,8 @@ export default function Intro() {
     navigate('/')
   }
 
-  if (!manifest) {
-    return <div style={shell}><p style={{ color: '#888' }}>Loading…</p></div>
-  }
-
-  if (!started) {
-    return (
-      <div style={shell}>
-        <h1 style={{ fontSize: 64, fontWeight: 900, margin: 0, color: '#fffae6', textShadow: '4px 4px 0 #c77dff' }}>
-          Bouncy Blobs
-        </h1>
-        <p style={{ color: '#aaa', fontSize: 18, marginTop: 8, marginBottom: 32 }}>
-          A short comic, in five pages.
-        </p>
-        <button onClick={start} style={primaryBtn}>▶ Start</button>
-      </div>
-    )
+  if (!manifest || !started) {
+    return <div style={shell} />
   }
 
   const page = manifest.pages[pageIdx]
@@ -315,17 +317,6 @@ const shell: React.CSSProperties = {
   padding: 0,
   boxSizing: 'border-box',
   cursor: 'pointer',
-}
-
-const primaryBtn: React.CSSProperties = {
-  fontSize: 22,
-  padding: '16px 40px',
-  background: '#c77dff',
-  border: 'none',
-  color: 'white',
-  borderRadius: 8,
-  cursor: 'pointer',
-  fontWeight: 700,
 }
 
 const controlsBar: React.CSSProperties = {

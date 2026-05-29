@@ -29,7 +29,14 @@ export class Camera {
     this.zoom += (this.targetZoom - this.zoom) * alpha;
   }
 
-  followTargets(targets: Vec2[], canvasWidth: number, canvasHeight: number, padding = 200): void {
+  followTargets(
+    targets: Vec2[],
+    canvasWidth: number,
+    canvasHeight: number,
+    padding = 200,
+    maxZoom = 0.592,
+    minZoom = 0.254,
+  ): void {
     if (targets.length === 0) return;
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -48,8 +55,8 @@ export class Camera {
     const spanY = (maxY - minY) + padding * 2;
     const zoomX = canvasWidth / spanX;
     const zoomY = canvasHeight / spanY;
-    this.targetZoom = Math.min(zoomX, zoomY, 0.592);
-    this.targetZoom = Math.max(this.targetZoom, 0.254);
+    this.targetZoom = Math.min(zoomX, zoomY, maxZoom);
+    this.targetZoom = Math.max(this.targetZoom, minZoom);
   }
 
   worldToScreen(world: Vec2, canvasWidth: number, canvasHeight: number): Vec2 {

@@ -124,6 +124,16 @@ export class BouncyBlobsGame implements Game {
    * AFTER physics has advanced. Use case: host broadcasts the inputs
    * that were just applied, tagged with the exact tick they applied at. */
   private postTickHook: ((world: SoftBodyEngine) => void) | null = null;
+  /** Player IDs the camera should follow. If null, follows ALL players
+   * (legacy behavior). When set, the camera tracks only these blobs and
+   * uses a fixed-zoom view targeted at ~10% blob-on-screen. Used by the
+   * host (laptop local player) and online guests so the view stays
+   * centered on the player(s) controlled on THIS machine. */
+  private localPlayerIds: Set<string> | null = null;
+
+  setLocalPlayerIds(ids: string[] | null): void {
+    this.localPlayerIds = ids ? new Set(ids) : null;
+  }
 
   setLogicGate(fn: ((world: SoftBodyEngine) => boolean) | null): void {
     this.logicGate = fn;
@@ -387,8 +397,10 @@ export class BouncyBlobsGame implements Game {
       // produces a visible "ghosting" / double-image artifact at high
       // blob speeds because the camera transform shifts mid-physics-step
       // relative to the last drawn blob position.
+      const localIds = this.localPlayerIds;
+      const isLocal = (pid: string) => localIds === null || localIds.has(pid);
       const cameraTargets: Vec2[] = playerManager.getAllPlayers()
-        .filter(p => !spikeManager?.isDead(p.playerId))
+        .filter(p => isLocal(p.playerId) && !spikeManager?.isDead(p.playerId))
         .map(p => p.blob.getCentroid());
 
       if (spikeManager) {
@@ -397,18 +409,43 @@ export class BouncyBlobsGame implements Game {
           const spawnPoints = playerManager.getSpawnPoints();
           const defaultSpawn = spawnPoints[0] ?? { x: 0, y: 400 };
           const { cameraFollower } = this.state;
-          const deadTargets = Array.from(deadMap).map(([pid, dead]) => ({
-            id: pid,
-            deathPosition: dead.deathPosition,
-            driftTo: defaultSpawn,
-          }));
+          const deadTargets = Array.from(deadMap)
+            .filter(([pid]) => isLocal(pid))
+            .map(([pid, dead]) => ({
+              id: pid,
+              deathPosition: dead.deathPosition,
+              driftTo: defaultSpawn,
+            }));
           cameraFollower.update(dt, [], deadTargets);
           cameraTargets.push(...cameraFollower.getPositions());
         }
       }
 
       if (cameraTargets.length > 0 && this.state.canvasWidth > 0) {
-        camera.followTargets(cameraTargets, this.state.canvasWidth, this.state.canvasHeight);
+        // When following only the local player(s): pin the resting view
+        // so a single blob is ~5% of the SHORTER screen dimension. Using
+        // min(width, height) keeps the blob feeling the same physical
+        // size across aspect ratios (ultrawide, square, portrait) — if
+        // we keyed off width, an ultrawide would make the blob tiny;
+        // off height, a portrait window would make it tiny. If local
+        // blobs spread past this view, we zoom OUT to fit.
+        // BLOB_RADIUS = 48 → diameter 96. 96 / 0.05 = 1920 world units
+        // along the shorter axis at rest.
+        if (localIds !== null) {
+          const REF_DIM = Math.min(this.state.canvasWidth, this.state.canvasHeight);
+          const MIN_VISIBLE_WORLD_DIM = 1920;
+          const maxZoom = REF_DIM / MIN_VISIBLE_WORLD_DIM;
+          camera.followTargets(
+            cameraTargets,
+            this.state.canvasWidth,
+            this.state.canvasHeight,
+            200,
+            maxZoom,
+            0, // no lower clamp — let the view zoom out as far as it needs to
+          );
+        } else {
+          camera.followTargets(cameraTargets, this.state.canvasWidth, this.state.canvasHeight);
+        }
         camera.update(dt);
       }
 

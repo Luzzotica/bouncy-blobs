@@ -561,6 +561,12 @@ export default function OnlineGuest() {
     gameContextRef.current = context;
     game.initialize(context);
     game.setCanvas(ctx.canvas, ctx, width, height);
+    // Guest camera follows only the local player — other blobs simulated
+    // here are just visualization of remote players; we don't want them
+    // pulling the view around.
+    if (localPlayerIdRef.current) {
+      game.setLocalPlayerIds([localPlayerIdRef.current]);
+    }
 
     if (usePrediction) {
       // ── Prediction gate ─────────────────────────────────────────────
@@ -1031,6 +1037,7 @@ export default function OnlineGuest() {
     const ctx = gameContextRef.current;
     if (game && ctx) {
       game.onPlayerJoin(ctx, synth);
+      game.setLocalPlayerIds([localPlayerIdRef.current]);
     } else {
       pendingLocalSpawnRef.current = synth;
     }

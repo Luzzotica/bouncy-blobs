@@ -276,6 +276,10 @@ export default function GameMaster() {
       faceId: localFaceId,
     } as Player;
     game.onPlayerJoin(ctx, player);
+    // Camera on the host follows ONLY the laptop player while joined —
+    // matches the guest behavior and keeps the view from getting yanked
+    // around by remote players / bots.
+    game.setLocalPlayerIds([LOCAL_PLAYER_ID]);
     // Mirror the local player's customization into the shared taken-list ref
     // so phone controllers and bot-color-avoidance see this slot as taken.
     playerCustomRef.current.set(LOCAL_PLAYER_ID, { color: localColor, faceId: localFaceId });
@@ -286,7 +290,11 @@ export default function GameMaster() {
     if (!localPlayerJoined) return;
     const game = gameRef.current;
     const ctx = contextRef.current;
-    if (game && ctx) game.onPlayerDisconnect(ctx, LOCAL_PLAYER_ID);
+    if (game && ctx) {
+      game.onPlayerDisconnect(ctx, LOCAL_PLAYER_ID);
+      // No local player anymore — fall back to the legacy fit-everyone camera.
+      game.setLocalPlayerIds(null);
+    }
     playerCustomRef.current.delete(LOCAL_PLAYER_ID);
     setLocalPlayerJoined(false);
   }, [localPlayerJoined]);
