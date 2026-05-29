@@ -286,12 +286,18 @@ export class SoftBodyWorld {
     staticHullIndices?: number[];
     /** When true, the center particle is also locked. Default false. */
     staticCenter?: boolean;
+    /** When true, lock the shape-match frame to (worldOrigin, identity) so
+     *  the blob stays rooted in place without requiring per-vertex anchors.
+     *  Every hull particle is still dynamic — they can deform locally — but
+     *  shape-match yanks them toward their original rest world position. */
+    pinFrame?: boolean;
   }): BlobResult {
     const {
       hullRestLocal, centerLocal = ZERO,
       centerMass, hullMass, springK, springDamp,
       radialK, radialDamp, pressureK, shapeMatchK, shapeMatchDamp,
       worldOrigin, sortKey, staticHullIndices, staticCenter = false,
+      pinFrame = false,
     } = params;
 
     const staticSet = new Set(staticHullIndices ?? []);
@@ -376,8 +382,8 @@ export class SoftBodyWorld {
       shapeMatchDamp,
       restLocal,
       shapeMatchRestScale: 1,
-      useFrameOverride: false,
-      frameOverride: { cos: 1, sin: 0, tx: 0, ty: 0 },
+      useFrameOverride: pinFrame,
+      frameOverride: { cos: 1, sin: 0, tx: worldOrigin.x, ty: worldOrigin.y },
       gravityField: null,
       centerIdx: start,
       layer: LAYER_BLOB,
@@ -1264,8 +1270,33 @@ export class SoftBodyWorld {
         center = { x: sh.frameOverride.tx, y: sh.frameOverride.ty };
         angle = Math.atan2(sh.frameOverride.sin, sh.frameOverride.cos);
       } else {
-        center = centroidFromIndices(this.pos, indices);
-        angle = averageAngle(restLocal, this.pos, indices, center);
+        // If any hull particles are anchored (invMass=0), they fully define
+        // the shape-match frame: locked points sit at their original rest
+        // world coordinates by construction, so the best-fit rigid transform
+        // mapping rest→current for that subset is exactly the original
+        // (worldOrigin, identity) frame. Letting the centroid be the
+        // unweighted average of ALL particles makes the frame drift with
+        // gravity sag, which then yanks every dynamic neighbor toward the
+        // wrong target — producing a visible "smile" right at each anchor.
+        // With ≥1 anchor, derive t = mean(pos - restLocal) over anchors and
+        // hold angle at 0 (any rest rotation is already baked into restLocal
+        // at blob construction time).
+        let anchorCount = 0;
+        let tx = 0, ty = 0;
+        for (let k = 0; k < indices.length; k++) {
+          if (this.invMass[indices[k]] === 0) {
+            anchorCount++;
+            tx += this.pos[indices[k]].x - restLocal[k].x;
+            ty += this.pos[indices[k]].y - restLocal[k].y;
+          }
+        }
+        if (anchorCount >= 1) {
+          center = { x: tx / anchorCount, y: ty / anchorCount };
+          angle = 0;
+        } else {
+          center = centroidFromIndices(this.pos, indices);
+          angle = averageAngle(restLocal, this.pos, indices, center);
+        }
       }
       const frame = frameTransform(center, angle);
       const smScale = Math.max(sh.shapeMatchRestScale, 0.05);
@@ -1947,6 +1978,15 @@ export class SoftBodyWorld {
   }
   /** Override the logical tick counter (netcode keyframe restore). */
   setTick(t: number): void { this.tick = t; }
+
+  /** Snapshot/restore stubs — rollback netcode runs on the wasm engine
+   *  only (TS sim's float ops aren't bit-deterministic across browsers
+   *  so rollback replay wouldn't reproduce the original state). */
+  serializeState(): Uint8Array { return new Uint8Array(); }
+  restoreState(_buf: Uint8Array): boolean { return false; }
+
+  /** Cheap particle-count read (avoids allocations in rollback hot path). */
+  particleCount(): number { return this.pos.length; }
 
   /** SoftBodyEngine contract — no-op on the TS sim because the JS-side
    *  `StaticSurface` object IS the same reference the engine reads, so

@@ -84,17 +84,30 @@ export class SoftBodyWorldHandle {
      * @param {string} sort_key
      * @param {Uint32Array} static_hull_indices
      * @param {boolean} static_center
+     * @param {boolean} pin_frame
      * @returns {BlobHandle}
      */
-    addBlobFromHull(hull_rest_local, center_local_x, center_local_y, center_mass, hull_mass, spring_k, spring_damp, radial_k, radial_damp, pressure_k, shape_match_k, shape_match_damp, world_origin_x, world_origin_y, sort_key, static_hull_indices, static_center) {
+    addBlobFromHull(hull_rest_local, center_local_x, center_local_y, center_mass, hull_mass, spring_k, spring_damp, radial_k, radial_damp, pressure_k, shape_match_k, shape_match_damp, world_origin_x, world_origin_y, sort_key, static_hull_indices, static_center, pin_frame) {
         const ptr0 = passArrayF64ToWasm0(hull_rest_local, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(sort_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passArray32ToWasm0(static_hull_indices, wasm.__wbindgen_export);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.softbodyworldhandle_addBlobFromHull(this.__wbg_ptr, ptr0, len0, center_local_x, center_local_y, center_mass, hull_mass, spring_k, spring_damp, radial_k, radial_damp, pressure_k, shape_match_k, shape_match_damp, world_origin_x, world_origin_y, ptr1, len1, ptr2, len2, static_center);
+        const ret = wasm.softbodyworldhandle_addBlobFromHull(this.__wbg_ptr, ptr0, len0, center_local_x, center_local_y, center_mass, hull_mass, spring_k, spring_damp, radial_k, radial_damp, pressure_k, shape_match_k, shape_match_damp, world_origin_x, world_origin_y, ptr1, len1, ptr2, len2, static_center, pin_frame);
         return BlobHandle.__wrap(ret);
+    }
+    /**
+     * Hard max-distance constraint between two particles. Solved in
+     * step 7 alongside welds and anchors, repeated `constraint_iters`
+     * times. Use this for a real "rope length" cap that doesn't depend
+     * on PBD propagation through dozens of chain segments.
+     * @param {number} idx_a
+     * @param {number} idx_b
+     * @param {number} max_dist
+     */
+    addDistanceMax(idx_a, idx_b, max_dist) {
+        wasm.softbodyworldhandle_addDistanceMax(this.__wbg_ptr, idx_a, idx_b, max_dist);
     }
     /**
      * @param {number} i
@@ -414,6 +427,19 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_resetBlobMassScale(this.__wbg_ptr, blob_id);
     }
     /**
+     * Restore state from a buffer produced by `serializeState`. Returns
+     * true on success; false if the buffer is malformed or world layout
+     * (particle/blob/shape/static-surface counts) doesn't match.
+     * @param {Uint8Array} buf
+     * @returns {boolean}
+     */
+    restoreState(buf) {
+        const ptr0 = passArray8ToWasm0(buf, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.softbodyworldhandle_restoreState(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * Mirrors the TS `rng.next()` — uniform in [0, 1). Consumes one RNG draw.
      * @returns {number}
      */
@@ -427,6 +453,16 @@ export class SoftBodyWorldHandle {
     rngState() {
         const ret = wasm.softbodyworldhandle_rngState(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Capture full mutable engine state to a binary buffer. Used by
+     * the rollback netcode controller to checkpoint each tick. See
+     * `softbody::snapshot` for the binary format.
+     * @returns {Uint8Array}
+     */
+    serializeState() {
+        const ret = wasm.softbodyworldhandle_serializeState(this.__wbg_ptr);
+        return takeObject(ret);
     }
     /**
      * @param {number} blob_id
@@ -575,6 +611,17 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_step(this.__wbg_ptr, delta_seconds);
     }
     /**
+     * Drain pending crush events. Returns a flat array of blob_ids
+     * whose physics state exploded during the most recent `step()` —
+     * typically a blob crushed between a moving platform and static
+     * geometry. The game wrapper turns each id into a player kill.
+     * @returns {Uint32Array}
+     */
+    takeCrushEvents() {
+        const ret = wasm.softbodyworldhandle_takeCrushEvents(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
      * Drain pending trigger-entered events. Returns flat (shape_idx, blob_id) pairs.
      * @returns {Uint32Array}
      */
@@ -641,6 +688,10 @@ function __wbg_get_imports() {
         __wbg___wbindgen_throw_1506f2235d1bdba0: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
+        __wbg_new_from_slice_18fa1f71286d66b8: function(arg0, arg1) {
+            const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+            return addHeapObject(ret);
+        },
         __wbg_new_from_slice_3c93d0bc613de8f0: function(arg0, arg1) {
             const ret = new Float64Array(getArrayF64FromWasm0(arg0, arg1));
             return addHeapObject(ret);
@@ -688,6 +739,11 @@ function getArrayU32FromWasm0(ptr, len) {
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
 let cachedFloat64ArrayMemory0 = null;
 function getFloat64ArrayMemory0() {
     if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
@@ -726,6 +782,13 @@ let heap_next = heap.length;
 function passArray32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }

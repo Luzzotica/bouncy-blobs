@@ -1,6 +1,19 @@
 // Persistent slime splat decals. Round-scoped: cleared whenever the game
 // phase leaves 'playing' so every round starts clean. Capped at MAX so a
 // long round can't accumulate forever; oldest is dropped when full.
+//
+// Splats can be anchored to a surface so they follow it:
+//   - 'platform' : translation-only follow of a kinematic static surface
+//                  (current PlatformMover only translates platforms, never
+//                  rotates them — change here if that ever stops being true)
+//   - 'hull'     : lerp between two soft-body hull particles plus a
+//                  perpendicular offset; rotation aligns with the edge so
+//                  the splat re-orients as the hull deforms
+//   - 'world'    : pinned to absolute world coords (default / legacy)
+//
+// The renderer resolves anchors at draw time via a module-level lookup
+// registry (`setDecalResolvers`) so callers don't have to thread args
+// through every render call.
 
 import { Vec2 } from '../physics/vec2'
 
@@ -10,8 +23,18 @@ const TRAIL_LIFE_SEC = 1.4
 
 type SplatKind = 'impact' | 'trail'
 
+export type SplatAnchor =
+  | { kind: 'world' }
+  /** Local-frame offset against a moving platform's live position. */
+  | { kind: 'platform'; platformId: string; lx: number; ly: number; rot: number }
+  /** Two adjacent hull particles + lerp factor (t∈[0,1]) + signed perpendicular
+   *  offset. Splat sits at lerp(posA, posB, t) + perp * perpOffset, and
+   *  rotates with the edge so a deforming hull carries the splat with it. */
+  | { kind: 'hull'; idxA: number; idxB: number; t: number; perpOffset: number }
+
 interface Splat {
   kind: SplatKind
+  /** World coords if anchor.kind === 'world'; otherwise stale fallback. */
   x: number
   y: number
   rotation: number
@@ -19,9 +42,11 @@ interface Splat {
   color: string     // 'r,g,b'
   /** Per-splat random seed used to vary the dripping outline. */
   seed: number
-  /** World-space polygon to clip the splat against, so no goop floats past a
-   * corner of the surface it landed on. Snapshotted at spawn time. */
+  /** World-space polygon to clip the splat against — captured for 'world'
+   * anchors; resolved at render time for 'platform' anchors; absent for
+   * 'hull' anchors (the splat is small enough that overflow is invisible). */
   clipPoly: Vec2[] | null
+  anchor: SplatAnchor
   /** Remaining life in seconds. Trail splats fade out; impact splats keep
    * their visual until the round ends (life = Infinity). */
   life: number
@@ -29,6 +54,26 @@ interface Splat {
 }
 
 const decals: Splat[] = []
+
+// ── Resolver registry ─────────────────────────────────────────────────────
+// Wired once by the game/sandbox initialiser. renderDecals reads from this
+// to resolve `platform` / `hull` anchors to live world coordinates. Setting
+// undefined leaves the resolver disabled (splats fall back to stale coords).
+
+export interface DecalResolvers {
+  /** Live world position of a platform by id (PlatformMover.getLivePosition). */
+  getPlatformLivePos?: (id: string) => { x: number; y: number } | null
+  /** Live world polygon of a platform by id (for clipping moving splats). */
+  getPlatformLivePoly?: (id: string) => Vec2[] | null
+  /** Live world position of a soft-body particle by global index. */
+  getParticlePos?: (idx: number) => Vec2 | null
+}
+
+let resolvers: DecalResolvers = {}
+
+export function setDecalResolvers(r: DecalResolvers): void {
+  resolvers = r
+}
 
 function hexToRgbCsv(hex: string): string {
   const h = hex.startsWith('#') ? hex.slice(1) : hex
@@ -47,14 +92,23 @@ export function addSplat(
   size: number,
   normal: Vec2 = { x: 0, y: -1 },
   clipPoly: Vec2[] | null = null,
+  anchor: SplatAnchor = { kind: 'world' },
 ): void {
-  if (decals.length >= MAX_DECALS) decals.shift() // drop oldest
+  if (decals.length >= MAX_DECALS) {
+    // Drop oldest IMPACT splat (not a trail) so a long slide can't evict
+    // permanent splatter.
+    for (let i = 0; i < decals.length; i++) {
+      if (decals[i].kind === 'impact') { decals.splice(i, 1); break }
+    }
+    if (decals.length >= MAX_DECALS) decals.shift()
+  }
   // Lay the splat tangent to the surface; the +X local axis points along the
   // surface, +Y away from it (along the normal).
   const rotation = Math.atan2(-normal.x, normal.y)
-  // Snapshot the clip polygon so a later in-place mutation by physics can't
-  // shift it under us.
-  const polySnap = clipPoly ? clipPoly.map(p => ({ x: p.x, y: p.y })) : null
+  // Snapshot the clip polygon for world-anchored splats so a later in-place
+  // mutation by physics can't shift it under us. For platform-anchored
+  // splats the clip is resolved live at render time from the resolver.
+  const polySnap = anchor.kind === 'world' && clipPoly ? clipPoly.map(p => ({ x: p.x, y: p.y })) : null
   decals.push({
     kind: 'impact',
     x: pos.x,
@@ -64,31 +118,32 @@ export function addSplat(
     color: hexToRgbCsv(color),
     seed: Math.random() * 1000,
     clipPoly: polySnap,
+    anchor,
     life: Infinity,
     maxLife: Infinity,
   })
 }
 
-/** Add a fast-fading trail splat at the blob-ground contact point. Visually
- * smaller and lower-alpha than an impact splat, fades out over ~1.4s. */
+/** Add a fast-fading trail splat. Smaller + lower-alpha than an impact;
+ * fades over ~1.4s. Supports anchors the same way addSplat does. */
 export function addTrailSplat(
   pos: Vec2,
   color: string,
   size: number,
   normal: Vec2 = { x: 0, y: -1 },
   clipPoly: Vec2[] | null = null,
+  anchor: SplatAnchor = { kind: 'world' },
 ): void {
   // Separate cap so a long slide can't evict permanent impact splats.
   let trailCount = 0
   for (let i = 0; i < decals.length; i++) if (decals[i].kind === 'trail') trailCount++
   if (trailCount >= MAX_TRAIL) {
-    // Drop the oldest trail splat
     for (let i = 0; i < decals.length; i++) {
       if (decals[i].kind === 'trail') { decals.splice(i, 1); break }
     }
   }
   const rotation = Math.atan2(-normal.x, normal.y)
-  const polySnap = clipPoly ? clipPoly.map(p => ({ x: p.x, y: p.y })) : null
+  const polySnap = anchor.kind === 'world' && clipPoly ? clipPoly.map(p => ({ x: p.x, y: p.y })) : null
   decals.push({
     kind: 'trail',
     x: pos.x,
@@ -98,6 +153,7 @@ export function addTrailSplat(
     color: hexToRgbCsv(color),
     seed: Math.random() * 1000,
     clipPoly: polySnap,
+    anchor,
     life: TRAIL_LIFE_SEC,
     maxLife: TRAIL_LIFE_SEC,
   })
@@ -113,56 +169,108 @@ export function tickDecals(dt: number): void {
   }
 }
 
+/** Resolve a splat's live world transform + (optional) clip poly from its
+ * anchor. Returns null if the anchored entity has gone away — the splat is
+ * then skipped this frame (and will be dropped on the next anchor sweep
+ * if you wire one; currently we just don't render). */
+function resolveSplatTransform(d: Splat): {
+  x: number; y: number; rot: number; clipPoly: Vec2[] | null
+} | null {
+  const a = d.anchor
+  if (a.kind === 'world') {
+    return { x: d.x, y: d.y, rot: d.rotation, clipPoly: d.clipPoly }
+  }
+  if (a.kind === 'platform') {
+    const pose = resolvers.getPlatformLivePos?.(a.platformId)
+    if (!pose) return { x: d.x, y: d.y, rot: d.rotation, clipPoly: d.clipPoly }
+    return {
+      x: pose.x + a.lx,
+      y: pose.y + a.ly,
+      rot: a.rot,
+      clipPoly: resolvers.getPlatformLivePoly?.(a.platformId) ?? null,
+    }
+  }
+  // hull
+  const pa = resolvers.getParticlePos?.(a.idxA)
+  const pb = resolvers.getParticlePos?.(a.idxB)
+  if (!pa || !pb) return null
+  const ex = pb.x - pa.x
+  const ey = pb.y - pa.y
+  const len = Math.hypot(ex, ey) || 1
+  const ux = ex / len
+  const uy = ey / len
+  // perpendicular pointing OUTWARD by convention (consistent with how the
+  // detector picks perpOffset): rotate edge tangent +90° → (-uy, ux)
+  const px = -uy
+  const py = ux
+  const baseX = pa.x + ex * a.t
+  const baseY = pa.y + ey * a.t
+  return {
+    x: baseX + px * a.perpOffset,
+    y: baseY + py * a.perpOffset,
+    // Splat's +X axis aligns with edge tangent, +Y along its outward normal
+    // (matches the static-surface convention in atan2(-n.x, n.y)).
+    rot: Math.atan2(-px, py),
+    clipPoly: null,
+  }
+}
+
 /** Render every splat. Call inside the camera transform, BEFORE blobs so
  * blobs sit on top of their own drippings. */
 export function renderDecals(ctx: CanvasRenderingContext2D): void {
   for (const d of decals) {
+    const t = resolveSplatTransform(d)
+    if (!t) continue  // anchor entity is gone
+
     ctx.save()
-    // Clip to the static surface polygon the splat landed on, so goop can
-    // never extend past a corner into open air. Set up the clip in world
-    // coords BEFORE the splat-local translate/rotate.
-    if (d.clipPoly && d.clipPoly.length >= 3) {
+    // Clip to the surface polygon (if any) BEFORE the splat-local transform.
+    if (t.clipPoly && t.clipPoly.length >= 3) {
       ctx.beginPath()
-      ctx.moveTo(d.clipPoly[0].x, d.clipPoly[0].y)
-      for (let i = 1; i < d.clipPoly.length; i++) {
-        ctx.lineTo(d.clipPoly[i].x, d.clipPoly[i].y)
+      ctx.moveTo(t.clipPoly[0].x, t.clipPoly[0].y)
+      for (let i = 1; i < t.clipPoly.length; i++) {
+        ctx.lineTo(t.clipPoly[i].x, t.clipPoly[i].y)
       }
       ctx.closePath()
       ctx.clip()
     }
-    ctx.translate(d.x, d.y)
-    ctx.rotate(d.rotation)
+    ctx.translate(t.x, t.y)
+    ctx.rotate(t.rot)
     // Main blot — heavily squashed along the surface normal so it reads as
     // flat paint rather than a 3D blob lying on the floor. Trail splats are
     // simpler shapes with a lifetime fade so a sliding blob's wake reads as
     // motion rather than permanent paint.
     const isTrail = d.kind === 'trail'
+    // Hull-anchored splats lack a clip polygon (the soft body deforms every
+    // frame), so they're drawn smaller + tighter + drip-free to avoid
+    // visible overflow past the silhouette as the hull jiggles.
+    const isHull = d.anchor.kind === 'hull'
     const baseAlpha = isTrail ? 0.32 : 0.55
     const lifeFade = isTrail ? Math.max(0, Math.min(1, d.life / d.maxLife)) : 1
     ctx.fillStyle = `rgba(${d.color},${(baseAlpha * lifeFade).toFixed(3)})`
     ctx.beginPath()
-    const lobes = isTrail ? 5 : 7
+    const lobes = isTrail ? 5 : (isHull ? 6 : 7)
+    // Hull splats are slightly tighter than landing splats — less ragged
+    // outline and flatter Y profile so overflow past the deforming
+    // silhouette stays minimal without being invisible.
+    const radiusBias = isHull ? 0.7 : 0.7
+    const radiusVar = isHull ? 0.55 : 0.9
+    const ySquash = isHull ? 0.36 : 0.45
     for (let i = 0; i <= lobes; i++) {
-      const t = (i / lobes) * Math.PI * 2
-      // Pseudo-random radius per lobe — stable across frames thanks to seed.
+      const th = (i / lobes) * Math.PI * 2
       const noise = Math.sin(d.seed + i * 1.7) * 0.35 + Math.cos(d.seed * 0.7 + i * 2.3) * 0.2
-      const r = d.size * (0.7 + noise * 0.9)
-      const x = Math.cos(t) * r
-      // Squash along the surface normal so the splat hugs the surface, but
-      // give it real depth so the half clipped inside the platform reads as
-      // thick paint, not a sliver.
-      const y = Math.sin(t) * r * 0.45
+      const r = d.size * (radiusBias + noise * radiusVar)
+      const x = Math.cos(th) * r
+      const y = Math.sin(th) * r * ySquash
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     }
     ctx.closePath()
     ctx.fill()
 
-    // Drip satellites — small blots offset along the surface tangent. Seeded
-    // so they stay put across frames; one on each side of the main blot.
-    // Trail splats skip satellites — they should read as a quick smear, not
-    // a permanent splatter.
-    const satelliteCount = isTrail ? 0 : 2
+    // Drip satellites — small blots offset along the surface tangent.
+    // Trail + hull splats skip satellites (trails are too brief, hull splats
+    // can't be clipped to the deforming silhouette).
+    const satelliteCount = (isTrail || isHull) ? 0 : 2
     for (let k = 0; k < satelliteCount; k++) {
       const sign = k === 0 ? -1 : 1
       const jitter = Math.sin(d.seed * 0.31 + k * 7.3)

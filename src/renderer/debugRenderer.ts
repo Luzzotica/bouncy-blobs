@@ -21,25 +21,84 @@ export function drawSprings(
   }
 }
 
+/** Draw, for every blob with a shape-match constraint, the rest-pose hull
+ *  rotated/translated/scaled into world space — i.e. exactly where the
+ *  shape-match force is trying to pull each hull vertex this frame. Also
+ *  draws (a) the frame centroid the engine computed from the current hull
+ *  positions, and (b) the center particle position (which may differ from
+ *  the centroid if the center isn't pinned). Useful for debugging "blob
+ *  goes oblong" / "blob flies on expand" / "expand isn't symmetric" cases. */
 export function drawShapeMatchTargets(
   ctx: CanvasRenderingContext2D,
   world: SoftBodyEngine,
-  color = 'rgba(0, 255, 200, 0.4)',
+  color = 'rgba(0, 255, 200, 0.85)',
 ): void {
+  const positions = world.getPositions();
   for (let bi = 0; bi < world.getBlobCount(); bi++) {
+    const r = world.blobRanges[bi];
+    if (r.inactive) continue;
     const targets = world.getBlobShapeMatchTargetHull(bi);
-    if (targets.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(targets[0].x, targets[0].y);
-    for (let i = 1; i < targets.length; i++) {
-      ctx.lineTo(targets[i].x, targets[i].y);
+    if (targets.length >= 2) {
+      ctx.save();
+      // Target hull — dashed cyan outline + tiny markers at each target vert.
+      ctx.beginPath();
+      ctx.moveTo(targets[0].x, targets[0].y);
+      for (let i = 1; i < targets.length; i++) {
+        ctx.lineTo(targets[i].x, targets[i].y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = color;
+      for (const t of targets) {
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
-    ctx.closePath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+
+    // Frame centroid (mean of current hull positions) — magenta cross.
+    if (r.hull.length > 0) {
+      let cx = 0, cy = 0;
+      for (const idx of r.hull) {
+        cx += positions[idx].x;
+        cy += positions[idx].y;
+      }
+      cx /= r.hull.length;
+      cy /= r.hull.length;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 80, 220, 0.95)';
+      ctx.lineWidth = 2;
+      const s = 6;
+      ctx.beginPath();
+      ctx.moveTo(cx - s, cy); ctx.lineTo(cx + s, cy);
+      ctx.moveTo(cx, cy - s); ctx.lineTo(cx, cy + s);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Center particle — yellow filled dot. Lets you see at a glance
+    // whether the center has drifted off the hull centroid (cross).
+    const shape = world.shapes[r.shapeIdx];
+    if (shape) {
+      const ci = shape.centerIdx;
+      const p = positions[ci];
+      if (p) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 230, 80, 0.95)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
   }
 }
 

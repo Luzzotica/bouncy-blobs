@@ -15,98 +15,136 @@ function emptyLevel(): LevelData {
   };
 }
 
-describe('levelLoader — PointShape hydration', () => {
-  it('creates one particle per point and one spring per edge', () => {
+describe('levelLoader — PointShape hydration (soft-blob)', () => {
+  it('expands a closed hull into a soft-body blob: 1 center + N hull particles', () => {
     const world = new SoftBodyWorld();
     const level: LevelData = {
       ...emptyLevel(),
       pointShapes: [{
-        id: 'bridge',
+        id: 'tri',
         points: [
-          { x: -100, y: 0, anchored: true },
-          { x: 0, y: 0, anchored: false },
-          { x: 100, y: 0, anchored: true },
+          { x: 0, y: -100, anchored: false },
+          { x: 100, y: 50, anchored: false },
+          { x: -100, y: 50, anchored: false },
         ],
-        edges: [
-          { a: 0, b: 1 },
-          { a: 1, b: 2 },
-        ],
+        edges: [],
+        closed: true,
       }],
     };
 
     const loaded = loadLevel(world, level);
 
-    expect(world.pos.length).toBe(3);
-    expect(world.extraSprings.length).toBe(2);
-    const ids = loaded.pointShapeParticles.get('bridge')!;
-    expect(ids).toEqual([0, 1, 2]);
+    // 1 center particle + 3 hull particles
+    expect(world.pos.length).toBe(4);
+    const info = loaded.pointShapes[0];
+    expect(info.id).toBe('tri');
+    expect(info.hullIndices).toHaveLength(3);
   });
 
-  it('anchored points get invMass=0; dynamic points get invMass>0', () => {
+  it('anchored points become static hull particles (invMass=0)', () => {
     const world = new SoftBodyWorld();
     const level: LevelData = {
       ...emptyLevel(),
       pointShapes: [{
         id: 's',
         points: [
-          { x: 0, y: 0, anchored: true },
-          { x: 50, y: 0, anchored: false },
-          { x: 100, y: 0, anchored: false, mass: 2 },
+          { x: 0, y: -100, anchored: true },
+          { x: 100, y: 50, anchored: false },
+          { x: -100, y: 50, anchored: false },
         ],
         edges: [],
-      }],
-    };
-
-    loadLevel(world, level);
-
-    expect(world.invMass[0]).toBe(0);
-    expect(world.invMass[1]).toBeGreaterThan(0);
-    expect(world.invMass[2]).toBeCloseTo(0.5, 5); // mass 2 → invMass 0.5
-  });
-
-  it('spring rest length equals the authored distance between points', () => {
-    const world = new SoftBodyWorld();
-    const level: LevelData = {
-      ...emptyLevel(),
-      pointShapes: [{
-        id: 's',
-        points: [
-          { x: 0, y: 0, anchored: true },
-          { x: 30, y: 40, anchored: false }, // distance 50
-        ],
-        edges: [{ a: 0, b: 1 }],
-      }],
-    };
-
-    loadLevel(world, level);
-
-    const [, , rest] = world.extraSprings[0];
-    expect(rest).toBeCloseTo(50, 5);
-  });
-
-  it('closed=true appends an implicit last→first edge', () => {
-    const world = new SoftBodyWorld();
-    const level: LevelData = {
-      ...emptyLevel(),
-      pointShapes: [{
-        id: 's',
-        points: [
-          { x: 0, y: 0, anchored: false },
-          { x: 100, y: 0, anchored: false },
-          { x: 50, y: 100, anchored: false },
-        ],
-        edges: [{ a: 0, b: 1 }, { a: 1, b: 2 }],
         closed: true,
       }],
     };
 
     loadLevel(world, level);
 
-    expect(world.extraSprings.length).toBe(3);
-    const last = world.extraSprings[2];
-    // Closing edge connects particle 2 → particle 0
-    expect(last[0]).toBe(2);
-    expect(last[1]).toBe(0);
+    // Find the static hull particle — should have invMass 0; the other two > 0.
+    const hullInvs = [world.invMass[1], world.invMass[2], world.invMass[3]];
+    const zeroCount = hullInvs.filter(m => m === 0).length;
+    const dynamicCount = hullInvs.filter(m => m > 0).length;
+    expect(zeroCount).toBe(1);
+    expect(dynamicCount).toBe(2);
+  });
+
+  it('skips degenerate (<3 points) shapes', () => {
+    const world = new SoftBodyWorld();
+    const level: LevelData = {
+      ...emptyLevel(),
+      pointShapes: [{
+        id: 's',
+        points: [{ x: 0, y: 0, anchored: false }, { x: 50, y: 0, anchored: false }],
+        edges: [],
+      }],
+    };
+
+    const loaded = loadLevel(world, level);
+    expect(loaded.pointShapes).toHaveLength(0);
+    expect(world.pos.length).toBe(0);
+  });
+
+  it('reverses CW point rings so the hull is CCW for the engine', () => {
+    const world = new SoftBodyWorld();
+    // CW triangle in screen coords (y-down): vertices ordered clockwise.
+    const level: LevelData = {
+      ...emptyLevel(),
+      pointShapes: [{
+        id: 'cw',
+        points: [
+          { x: 0, y: -100, anchored: false },
+          { x: -100, y: 50, anchored: false },
+          { x: 100, y: 50, anchored: false },
+        ],
+        edges: [],
+        closed: true,
+      }],
+    };
+
+    const loaded = loadLevel(world, level);
+    // Still produces a valid blob: 1 center + 3 hull particles.
+    expect(loaded.pointShapes).toHaveLength(1);
+    expect(world.pos.length).toBe(4);
+  });
+});
+
+describe('levelLoader — Chain hydration', () => {
+  it('creates a rope between two fixed anchors with inner segment particles', () => {
+    const world = new SoftBodyWorld();
+    const level: LevelData = {
+      ...emptyLevel(),
+      chains: [{
+        id: 'rope',
+        endpointA: { kind: 'fixed', x: 0, y: 0 },
+        endpointB: { kind: 'fixed', x: 100, y: 0 },
+        totalLength: 100,
+        maxSegmentLength: 25,
+      }],
+    };
+
+    const loaded = loadLevel(world, level);
+    expect(loaded.chains).toHaveLength(1);
+    const chain = loaded.chains[0];
+    // Endpoints + at least 1 inner segment particle.
+    expect(chain.particleIndices.length).toBeGreaterThanOrEqual(3);
+    // Fixed-anchor endpoints are static (mass = 0).
+    expect(world.invMass[chain.particleIndices[0]]).toBe(0);
+    expect(world.invMass[chain.particleIndices[chain.particleIndices.length - 1]]).toBe(0);
+  });
+
+  it('drops chains whose endpoint references a missing blob', () => {
+    const world = new SoftBodyWorld();
+    const level: LevelData = {
+      ...emptyLevel(),
+      chains: [{
+        id: 'orphan',
+        endpointA: { kind: 'fixed', x: 0, y: 0 },
+        endpointB: { kind: 'blob', entity: 'npc', id: 'does-not-exist' },
+        totalLength: 100,
+      }],
+    };
+
+    const loaded = loadLevel(world, level);
+    expect(loaded.chains).toHaveLength(0);
   });
 });
 

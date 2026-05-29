@@ -216,4 +216,50 @@ export class PowerupManager {
     this.activePowerups.clear();
     this.world = null;
   }
+
+  /** Rollback snapshot. Captures spawn collected/timer state +
+   *  per-player active effects + the manager clock. Powerup types are
+   *  serialized as the type string; restore re-resolves to POWERUP_DEFS. */
+  dumpState(): {
+    time: number;
+    spawned: Array<{ id: string; type: PowerupType; respawnTimer: number; collected: boolean }>;
+    activePowerups: Array<[string, Array<{ type: PowerupType; remainingTime: number; multiplier: number }>]>;
+  } {
+    return {
+      time: this.time,
+      spawned: this.spawned.map(s => ({
+        id: s.id,
+        type: s.def.type,
+        respawnTimer: s.respawnTimer,
+        collected: s.collected,
+      })),
+      activePowerups: [...this.activePowerups.entries()]
+        .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)
+        .map(([pid, effs]) => [pid, effs.map(e => ({
+          type: e.type,
+          remainingTime: e.remainingTime,
+          multiplier: e.multiplier,
+        }))]),
+    };
+  }
+
+  restoreState(state: ReturnType<PowerupManager['dumpState']>): void {
+    this.time = state.time;
+    const byId = new Map(this.spawned.map(s => [s.id, s] as const));
+    for (const entry of state.spawned) {
+      const s = byId.get(entry.id);
+      if (!s) continue;
+      s.def = POWERUP_DEFS[entry.type];
+      s.respawnTimer = entry.respawnTimer;
+      s.collected = entry.collected;
+    }
+    this.activePowerups.clear();
+    for (const [pid, effs] of state.activePowerups) {
+      this.activePowerups.set(pid, effs.map(e => ({
+        type: e.type,
+        remainingTime: e.remainingTime,
+        multiplier: e.multiplier,
+      })));
+    }
+  }
 }

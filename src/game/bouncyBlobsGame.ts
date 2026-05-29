@@ -6,13 +6,14 @@ import { createSoftBodyEngine } from '../physics/engineSelector';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from '../renderer/camera';
 import { render, RenderOptions, PlayerRenderData } from '../renderer/canvasRenderer';
-import { GameLoop } from './gameLoop';
+import { GameLoop, recordPhaseTime } from './gameLoop';
 import { PlayerManager } from './playerManager';
 import { AIController, nextBotIdentity } from './aiController';
 import { PERSONALITY_COLORS, type PersonalityName } from './aiPersonalities';
 import { loadLevel } from '../levels/levelLoader';
 import { preloadSprites, getSprite } from '../assets/spriteRegistry';
-import { drawSprite } from '../renderer/spriteRenderer';
+import { preloadBackground } from '../renderer/backgroundRenderer';
+import type { GetSpriteShape } from '../levels/levelLoader';
 import { defaultLevel } from '../levels/defaultLevel';
 import { LevelData } from '../levels/types';
 import { DEFAULT_CONTROLLER_CONFIG } from '../types/controllerConfig';
@@ -27,6 +28,9 @@ import { PowerupManager } from './powerups/powerupManager';
 import { SpringPadManager } from './springPadManager';
 import { SpikeManager } from './spikeManager';
 import { DynamicItemManager } from './dynamicItemManager';
+import { TriggerManager } from './triggerManager';
+import { ActionManager } from './actionManager';
+import { PlatformMover } from './platformMover';
 import { CameraFollower } from '../renderer/cameraFollower';
 import { Vec2 } from '../physics/vec2';
 import { EffectsBindings } from './effectsBindings';
@@ -51,9 +55,19 @@ export interface BouncyBlobsGameState {
   springPadManager: SpringPadManager | null;
   spikeManager: SpikeManager | null;
   dynamicItemManager: DynamicItemManager | null;
+  /** Drives editor-authored "trigger area" plates (formerly pressure plates). */
+  triggerManager: TriggerManager | null;
+  /** Polls triggers + animates platform / shape-point targets each frame. */
+  actionManager: ActionManager | null;
+  /** Owns moving-platform surfaces — ActionManager talks to it. */
+  platformMover: PlatformMover | null;
   triggerIndices: Map<string, number>;
   /** Soft-platform info from levelLoader — id + hull-particle indices. */
-  softPlatforms: Array<{ id: string; hullIndices: number[] }>;
+  softPlatforms: Array<{ id: string; blobId: number; hullIndices: number[]; staticHullIndices: number[] }>;
+  /** Point-shape (soft-blob) info — same shape as softPlatforms; rendered the same way. */
+  pointShapes: Array<{ id: string; blobId: number; hullIndices: number[] }>;
+  /** Editor-authored chains. */
+  chains: Array<{ id: string; particleIndices: number[]; totalLength: number }>;
   /** point-shape id → ordered particle indices in the world. */
   pointShapeParticles: Map<string, number[]>;
   gameTime: number;
@@ -140,17 +154,33 @@ export class BouncyBlobsGame implements Game {
     // their primitive drawing if a sprite hasn't arrived yet, so the first
     // frames are safe to draw before this resolves.
     void preloadSprites();
+    // Background image — same fire-and-forget; renderer falls back to the
+    // solid color until it's ready.
+    preloadBackground();
 
     // Use the game mode's level if available, otherwise fall back
     const level = this.gameMode?.getLevel() ?? this.state?.level ?? defaultLevel;
 
     const world = createSoftBodyEngine({
+      // 4 substeps: enough for normal CCD on the integer engine.
+      // The prev_poly kinematic-CCD sweep (StaticSurface.prev_poly +
+      // sweep_static_ccd in world.rs) catches fast-moving platforms
+      // tunneling between commits, which previously needed 8 substeps
+      // to mask. The discrete pass also iterates 3× to untangle deep
+      // merges. At 8 substeps × 3 iterations the logic tick ran ~6ms,
+      // burning the whole 60Hz vsync budget; at 4 substeps it's ~3ms
+      // with the same gameplay behavior.
       substeps: 4,
       gravityScale: 4.0,
       rngSeed: this.rngSeed,
     });
 
-    const { playerSpawnPoints, npcBlobs, triggerIndices, softPlatforms, pointShapeParticles } = loadLevel(world, level);
+    const getSpriteShape: GetSpriteShape = (id) => getSprite(id)?.def.shape ?? null;
+    const {
+      playerSpawnPoints, npcBlobs, triggerIndices,
+      softPlatforms, pointShapes, chains, pointShapeParticles,
+      triggerShapeIdxToId, softPlatformStaticParticles, platformSurfaces,
+    } = loadLevel(world, level, getSpriteShape);
     const playerManager = new PlayerManager(playerSpawnPoints);
     const camera = new Camera();
     camera.snapTo(playerSpawnPoints[0] ?? { x: 0, y: 400 }, 0.592);
@@ -221,6 +251,35 @@ export class BouncyBlobsGame implements Game {
       dynamicItemManager.initialize(world, playerManager);
     }
 
+    // Trigger / action / platform-mover wiring. Previously these were
+    // only set up in Sandbox (the editor's Test Play path); host / online
+    // play went through this `initialize()` which never created them, so
+    // editor-authored triggers and actions were silently dead in real
+    // gameplay. The level loader already registers the trigger polygons
+    // in the physics world — we just need the JS-side managers that poll
+    // them and drive their actions.
+    const platformMover = new PlatformMover();
+    platformMover.initialize(level.platforms, platformSurfaces, world);
+
+    const npcBlobIds = new Set(npcBlobs.map(b => b.blobId));
+    const triggerManager = new TriggerManager();
+    triggerManager.initialize(
+      world,
+      level.triggers ?? [],
+      triggerShapeIdxToId,
+      (blobId) => npcBlobIds.has(blobId),
+    );
+
+    const actionManager = new ActionManager();
+    actionManager.initialize(
+      world,
+      level.actions ?? [],
+      pointShapeParticles,
+      softPlatformStaticParticles,
+      platformMover,
+      triggerManager,
+    );
+
     // Wire party mode integrations
     if (this.gameMode instanceof PartyMode) {
       const partyMode = this.gameMode;
@@ -236,6 +295,19 @@ export class BouncyBlobsGame implements Game {
         partyMode?.handleSpikeKill(killedPlayerId);
       };
     }
+
+    // Physics crush events: wired unconditionally. The Rust solver flags
+    // a blob whose hull has stretched past CRUSH_HULL_SPREAD_RATIO_SQ ×
+    // rest extent — typically a blob pinched against static geometry by
+    // a moving platform. The Rust side has already collapsed the blob's
+    // particles back to its centroid (defense in depth); here we route
+    // the event through the death pipeline when a spike manager exists,
+    // and log otherwise so the dev-mode dropout is visible.
+    const sm = spikeManager;
+    world.onBlobCrushed = (blobId) => {
+      console.warn(`[physics] blob ${blobId} crushed — collapsed in solver`);
+      sm?.killPlayerByBlobId(blobId);
+    };
 
     const loop = new GameLoop({
       onLogic: (dt) => {
@@ -253,27 +325,53 @@ export class BouncyBlobsGame implements Game {
         // Game mode controls when physics runs
         const shouldRunPhysics = modeManager.update(dt, playerManager, world);
         if (shouldRunPhysics) {
+          let t0 = performance.now();
           playerManager.updateAll(dt, world);
+          recordPhaseTime('playerMgr', performance.now() - t0);
+          t0 = performance.now();
           world.step(dt);
+          recordPhaseTime('worldStep', performance.now() - t0);
+          t0 = performance.now();
           powerupManager?.update(dt, playerManager);
           springPadManager?.update(dt);
           spikeManager?.update(dt);
           dynamicItemManager?.update(dt);
-          this.state.effects.update(dt, playerManager);
+          triggerManager.update(dt);
+          actionManager.update(dt);
+          recordPhaseTime('managers', performance.now() - t0);
+          t0 = performance.now();
+          this.state.effects.update(
+            dt, playerManager, npcBlobs, world,
+            [...this.state.softPlatforms, ...this.state.pointShapes],
+          );
+          recordPhaseTime('effects', performance.now() - t0);
         }
         // Countdown ticks fire even though physics is frozen.
         if (modeManager.getPhase() === 'countdown') {
           this.state.effects.onCountdownTimer(modeManager.getState().phaseTimer);
         }
       } else {
-        // Sandbox mode — always run
+        // Sandbox mode — always run.
+        // Per-phase timing — folded into the frame profile so we can
+        // see which inner sub-system dominates a slow tick.
+        let t0 = performance.now();
         playerManager.updateAll(dt, world);
+        recordPhaseTime('playerMgr', performance.now() - t0);
+        t0 = performance.now();
         world.step(dt);
+        recordPhaseTime('worldStep', performance.now() - t0);
+        t0 = performance.now();
         powerupManager?.update(dt, playerManager);
         springPadManager?.update(dt);
         spikeManager?.update(dt);
         dynamicItemManager?.update(dt);
-        this.state.effects.update(dt, playerManager);
+        recordPhaseTime('managers', performance.now() - t0);
+        t0 = performance.now();
+        this.state.effects.update(
+          dt, playerManager, npcBlobs, world,
+          [...this.state.softPlatforms, ...this.state.pointShapes],
+        );
+        recordPhaseTime('effects', performance.now() - t0);
       }
 
       // Particles tick every frame regardless of physics — so a dying frame
@@ -344,22 +442,16 @@ export class BouncyBlobsGame implements Game {
           this.state.canvasHeight,
           renderOptions,
           // Pass mode manager for overlay rendering
-          modeManager || powerupManager || springPadManager || spikeManager || dynamicItemManager
+          modeManager || powerupManager || springPadManager || spikeManager || dynamicItemManager || triggerManager
             ? {
                 renderWorld: (ctx) => {
                   modeManager?.renderWorld(ctx, camera, playerManager);
-                  // Placed sprite instances — decorative props for now;
-                  // collision wiring per asset comes in follow-up batches.
-                  for (const inst of level.sprites ?? []) {
-                    const sp = getSprite(inst.spriteId);
-                    if (!sp) continue;
-                    drawSprite(ctx, sp, inst.x, inst.y, inst.rotation, inst.scale ?? 1, 1);
-                  }
                   springPadManager?.render(ctx);
                   powerupManager?.render(ctx);
                   spikeManager?.render(ctx);
                   spikeManager?.renderDeadPlayers(ctx);
                   dynamicItemManager?.render(ctx);
+                  triggerManager.render(ctx);
                 },
                 renderHUD: (ctx, w, h) => {
                   modeManager?.renderHUD(ctx, w, h, playerManager);
@@ -367,7 +459,8 @@ export class BouncyBlobsGame implements Game {
               }
             : undefined,
           playerRenderData,
-          softPlatforms,
+          [...softPlatforms, ...pointShapes],
+          chains,
         );
       },
     });
@@ -389,8 +482,13 @@ export class BouncyBlobsGame implements Game {
       springPadManager,
       spikeManager,
       dynamicItemManager,
+      triggerManager,
+      actionManager,
+      platformMover,
       triggerIndices,
       softPlatforms,
+      pointShapes,
+      chains,
       pointShapeParticles,
       gameTime: 0,
       cameraFollower: new CameraFollower(),
@@ -578,4 +676,74 @@ export class BouncyBlobsGame implements Game {
     clearDecals();
     this.state = null;
   }
+
+  // =================================================================
+  // Rollback netcode snapshot/restore.
+  //
+  // `snapshotGameState()` captures every TS-side piece of state that
+  // affects subsequent physics outcomes — fan-out across all managers
+  // and per-blob SlimeBlob state. `restoreGameState()` reverses.
+  //
+  // Pair with `world.serializeState()` / `world.restoreState()` (engine
+  // side) per tick to enable rollback.
+  // =================================================================
+
+  /** Capture all TS-side mutable game state to a JSON-serializable
+   *  object. ~1–3 KB per call depending on number of blobs + active
+   *  managers. */
+  snapshotGameState(): GameStateSnapshot {
+    const s = this.state;
+    if (!s) return { gameTime: 0, slimeBlobs: [] };
+    const allBlobs: SlimeBlob[] = [];
+    for (const p of s.playerManager.getAllPlayers()) allBlobs.push(p.blob);
+    for (const npc of s.npcBlobs) allBlobs.push(npc);
+    return {
+      gameTime: s.gameTime,
+      slimeBlobs: allBlobs.map(b => ({ blobId: b.blobId, state: b.dumpState() })),
+      actionManager: s.actionManager?.dumpState?.(),
+      triggerManager: s.triggerManager?.dumpState?.(),
+      springPadManager: s.springPadManager?.dumpState?.(),
+      spikeManager: s.spikeManager?.dumpState?.(),
+      powerupManager: s.powerupManager?.dumpState?.(),
+      dynamicItemManager: s.dynamicItemManager?.dumpState?.(),
+      platformMover: s.platformMover?.dumpState?.(),
+      modeManager: s.modeManager?.dumpState?.(),
+    };
+  }
+
+  /** Restore from a snapshot captured by `snapshotGameState`. */
+  restoreGameState(snap: GameStateSnapshot): void {
+    const s = this.state;
+    if (!s) return;
+    s.gameTime = snap.gameTime;
+    if (snap.slimeBlobs) {
+      const byId = new Map<number, SlimeBlob>();
+      for (const p of s.playerManager.getAllPlayers()) byId.set(p.blob.blobId, p.blob);
+      for (const npc of s.npcBlobs) byId.set(npc.blobId, npc);
+      for (const entry of snap.slimeBlobs) {
+        byId.get(entry.blobId)?.restoreState(entry.state as any);
+      }
+    }
+    if (snap.actionManager) s.actionManager?.restoreState?.(snap.actionManager as any);
+    if (snap.triggerManager) s.triggerManager?.restoreState?.(snap.triggerManager as any);
+    if (snap.springPadManager) s.springPadManager?.restoreState?.(snap.springPadManager as any);
+    if (snap.spikeManager) s.spikeManager?.restoreState?.(snap.spikeManager as any);
+    if (snap.powerupManager) s.powerupManager?.restoreState?.(snap.powerupManager as any);
+    if (snap.dynamicItemManager) s.dynamicItemManager?.restoreState?.(snap.dynamicItemManager as any);
+    if (snap.platformMover) s.platformMover?.restoreState?.(snap.platformMover as any);
+    if (snap.modeManager) s.modeManager?.restoreState?.(snap.modeManager as any);
+  }
+}
+
+export interface GameStateSnapshot {
+  gameTime: number;
+  slimeBlobs: Array<{ blobId: number; state: unknown }>;
+  actionManager?: unknown;
+  triggerManager?: unknown;
+  springPadManager?: unknown;
+  spikeManager?: unknown;
+  powerupManager?: unknown;
+  dynamicItemManager?: unknown;
+  platformMover?: unknown;
+  modeManager?: unknown;
 }

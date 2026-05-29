@@ -25,7 +25,14 @@ export class SoftBodyWorldHandle {
      * array for a fully-dynamic blob.
      * Returns a BlobHandle with the blob id + key particle indices.
      */
-    addBlobFromHull(hull_rest_local: Float64Array, center_local_x: number, center_local_y: number, center_mass: number, hull_mass: number, spring_k: number, spring_damp: number, radial_k: number, radial_damp: number, pressure_k: number, shape_match_k: number, shape_match_damp: number, world_origin_x: number, world_origin_y: number, sort_key: string, static_hull_indices: Uint32Array, static_center: boolean): BlobHandle;
+    addBlobFromHull(hull_rest_local: Float64Array, center_local_x: number, center_local_y: number, center_mass: number, hull_mass: number, spring_k: number, spring_damp: number, radial_k: number, radial_damp: number, pressure_k: number, shape_match_k: number, shape_match_damp: number, world_origin_x: number, world_origin_y: number, sort_key: string, static_hull_indices: Uint32Array, static_center: boolean, pin_frame: boolean): BlobHandle;
+    /**
+     * Hard max-distance constraint between two particles. Solved in
+     * step 7 alongside welds and anchors, repeated `constraint_iters`
+     * times. Use this for a real "rope length" cap that doesn't depend
+     * on PBD propagation through dozens of chain segments.
+     */
+    addDistanceMax(idx_a: number, idx_b: number, max_dist: number): void;
     addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void;
     addHomeAnchor(idx: number, home_x: number, home_y: number, k: number, damp: number): void;
     /**
@@ -120,10 +127,22 @@ export class SoftBodyWorldHandle {
     removeStaticSurface(idx: number): void;
     resetBlobMassScale(blob_id: number): void;
     /**
+     * Restore state from a buffer produced by `serializeState`. Returns
+     * true on success; false if the buffer is malformed or world layout
+     * (particle/blob/shape/static-surface counts) doesn't match.
+     */
+    restoreState(buf: Uint8Array): boolean;
+    /**
      * Mirrors the TS `rng.next()` — uniform in [0, 1). Consumes one RNG draw.
      */
     rngNextUnit(): number;
     rngState(): number;
+    /**
+     * Capture full mutable engine state to a binary buffer. Used by
+     * the rollback netcode controller to checkpoint each tick. See
+     * `softbody::snapshot` for the binary format.
+     */
+    serializeState(): Uint8Array;
     setBlobGravityOverride(blob_id: number, gx: number, gy: number, clear: boolean): void;
     setBlobGroundContacts(blob_id: number, count: number): void;
     setBlobMassScale(blob_id: number, scale: number): void;
@@ -177,6 +196,13 @@ export class SoftBodyWorldHandle {
      */
     step(delta_seconds: number): void;
     /**
+     * Drain pending crush events. Returns a flat array of blob_ids
+     * whose physics state exploded during the most recent `step()` —
+     * typically a blob crushed between a moving platform and static
+     * geometry. The game wrapper turns each id into a player kill.
+     */
+    takeCrushEvents(): Uint32Array;
+    /**
      * Drain pending trigger-entered events. Returns flat (shape_idx, blob_id) pairs.
      */
     takeTriggerEntered(): Uint32Array;
@@ -207,7 +233,8 @@ export interface InitOutput {
     readonly __wbg_get_blobhandle_shape_idx: (a: number) => number;
     readonly __wbg_softbodyworldhandle_free: (a: number, b: number) => void;
     readonly blobhandle_hullIndices: (a: number) => number;
-    readonly softbodyworldhandle_addBlobFromHull: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number) => number;
+    readonly softbodyworldhandle_addBlobFromHull: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
+    readonly softbodyworldhandle_addDistanceMax: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_addExtraSpring: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_addHomeAnchor: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_addParticle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
@@ -242,8 +269,10 @@ export interface InitOutput {
     readonly softbodyworldhandle_removeBlob: (a: number, b: number) => void;
     readonly softbodyworldhandle_removeStaticSurface: (a: number, b: number) => void;
     readonly softbodyworldhandle_resetBlobMassScale: (a: number, b: number) => void;
+    readonly softbodyworldhandle_restoreState: (a: number, b: number, c: number) => number;
     readonly softbodyworldhandle_rngNextUnit: (a: number) => number;
     readonly softbodyworldhandle_rngState: (a: number) => number;
+    readonly softbodyworldhandle_serializeState: (a: number) => number;
     readonly softbodyworldhandle_setBlobGravityOverride: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly softbodyworldhandle_setBlobGroundContacts: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobMassScale: (a: number, b: number, c: number) => void;
@@ -261,6 +290,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_stateHash: (a: number) => bigint;
     readonly softbodyworldhandle_staticSurfacesSnapshot: (a: number) => number;
     readonly softbodyworldhandle_step: (a: number, b: number) => void;
+    readonly softbodyworldhandle_takeCrushEvents: (a: number) => number;
     readonly softbodyworldhandle_takeTriggerEntered: (a: number) => number;
     readonly softbodyworldhandle_takeTriggerExited: (a: number) => number;
     readonly softbodyworldhandle_teleportBlob: (a: number, b: number, c: number, d: number) => void;

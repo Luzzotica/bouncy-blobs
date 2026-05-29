@@ -5,8 +5,10 @@ import { StaticSurface } from '../physics/types';
 import { SpringPadDef } from '../levels/types';
 import { drawSpring } from './springRenderer';
 
-/** Plate thickness along the launch axis, in world units. */
-const PLATE_THICKNESS = 36;
+/** Plate thickness along the launch axis, in world units. Thicker = harder
+ * to glitch through during a high-speed fire. Keep in sync with the visual
+ * `PLATE_THICKNESS` in springRenderer.ts. */
+const PLATE_THICKNESS = 72;
 /** Multiplier applied to `def.height` to get the plate's perpendicular width. */
 const PLATE_WIDTH_SCALE = 8;
 /** How far the plate retracts when cocked, as a fraction of def.width. */

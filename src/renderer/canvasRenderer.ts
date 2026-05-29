@@ -2,18 +2,75 @@ import { SoftBodyWorld } from '../physics/softBodyWorld';
 import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from './camera';
-import { drawBlob, drawBlobShine } from './blobRenderer';
+import { drawBlob, drawBlobShine, perturbHullForWind } from './blobRenderer';
+import { drawJellyCandy, SOFT_PLATFORM_PALETTE, setCandyParallax } from './candySkin';
 import { drawStaticPolygon } from './levelRenderer';
 import { drawSprings, drawShapeMatchTargets, drawBlobPoints } from './debugRenderer';
 import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
 import { drawBlobFace } from './faceRenderer';
+import { drawChain } from './chainRenderer';
 import { renderDecals } from './decals';
+import { drawGameBackground } from './backgroundRenderer';
 import { renderParticles } from './particles';
-import { impactsNear } from './blobImpacts';
+import { impactsFor } from './blobImpacts';
+import { Vec2 } from '../physics/vec2';
+
+// Render-only velocity tracker: per-blob {prevCentroid, prevTimeMs}. Used to
+// drive wind ripples + leading-edge perturbation. The physics engine has its
+// own velocity, but threading it through every render layer is messy and the
+// shine doesn't need exact values — a centroid-delta estimate is plenty.
+//
+// `armed` is a debouncer for the wind perturbation: the reported velocity is
+// zeroed until the blob has sustained motion above WIND_ARM_SPEED for
+// WIND_ARM_SECONDS. Without this, fresh-spawned blobs (which fall into place
+// from their spawn point) flash the wind ruffle on landing, and a settled
+// blob's residual centroid jitter can also flicker it on. Disarms instantly
+// when speed drops below threshold so a blob that stops moving snaps back to
+// its raw hull.
+const WIND_ARM_SPEED = 140;
+const WIND_ARM_SECONDS = 0.15;
+const renderVel = new Map<number, {
+  x: number; y: number; vx: number; vy: number; t: number;
+  armTimer: number; armed: boolean;
+}>();
+function sampleBlobVelocity(blob: SlimeBlob, c: Vec2, nowMs: number): { x: number; y: number } {
+  const prev = renderVel.get(blob.blobId);
+  let vx = 0, vy = 0;
+  let armTimer = 0;
+  let armed = false;
+  if (prev) {
+    const dt = Math.max(0.001, (nowMs - prev.t) / 1000);
+    // Cap dt so a long pause (tab backgrounded) doesn't produce huge spikes.
+    const safeDt = Math.min(dt, 0.1);
+    vx = (c.x - prev.x) / safeDt;
+    vy = (c.y - prev.y) / safeDt;
+    // Soft EMA so per-frame jitter doesn't strobe the rim/wind effects.
+    const a = 0.4;
+    vx = prev.vx * (1 - a) + vx * a;
+    vy = prev.vy * (1 - a) + vy * a;
+    const speed = Math.hypot(vx, vy);
+    if (speed >= WIND_ARM_SPEED) {
+      armTimer = Math.min(WIND_ARM_SECONDS, prev.armTimer + safeDt);
+      armed = prev.armed || armTimer >= WIND_ARM_SECONDS;
+    } else {
+      armTimer = 0;
+      armed = false;
+    }
+  }
+  renderVel.set(blob.blobId, { x: c.x, y: c.y, vx, vy, t: nowMs, armTimer, armed });
+  if (!armed) return { x: 0, y: 0 };
+  return { x: vx, y: vy };
+}
 
 export interface SoftPlatformRenderInfo {
+  id: string;
   hullIndices: number[];
   staticHullIndices: number[];
+}
+
+export interface ChainRenderInfo {
+  particleIndices: number[];
+  totalLength: number;
 }
 
 export interface RenderOptions {
@@ -48,10 +105,10 @@ export function render(
   modeOverlay?: ModeOverlay,
   playerData?: PlayerRenderData[],
   softPlatforms: SoftPlatformRenderInfo[] = [],
+  chains: ChainRenderInfo[] = [],
 ): void {
-  // Clear
-  ctx.fillStyle = BACKGROUND_COLOR;
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  // Background image (or solid fallback color while it's still loading).
+  drawGameBackground(ctx, camera, canvasWidth, canvasHeight, BACKGROUND_COLOR);
 
   ctx.save();
 
@@ -64,6 +121,10 @@ export function render(
   // Mode world overlays (zones, behind everything)
   modeOverlay?.renderWorld(ctx);
 
+  // Parallax anchor for candy-skin inclusions — bubbles inside the candy
+  // drift gently with the camera to fake interior depth.
+  setCandyParallax(camera.position.x, camera.position.y);
+
   // Static polygons
   for (const surface of world.staticSurfaces) {
     drawStaticPolygon(ctx, surface.poly, surface.material);
@@ -74,7 +135,7 @@ export function render(
     if (sp.hullIndices.length < 3) continue;
     const positions = world.getPositions();
     const hull = sp.hullIndices.map(i => positions[i]);
-    drawBlob(ctx, hull, '#9aa6c0', '#4f5874', 2.5, 0.18);
+    drawJellyCandy(ctx, hull, SOFT_PLATFORM_PALETTE, 0.18, `soft-${sp.id}`);
     // Static-point highlights (yellow dots) — debug-only
     if (options.showPoints) {
       const staticSet = new Set(sp.staticHullIndices);
@@ -186,22 +247,33 @@ export function render(
   // Shared monotonic seconds for ambient ripple phase + any future time-
   // driven effects in the blob shine. Lives in the renderer so blobs in
   // unrelated game modes share one clock.
-  const shineTime = performance.now() / 1000;
+  const nowMs = performance.now();
+  const shineTime = nowMs / 1000;
 
-  // NPC blobs
+  // NPC blobs — no wind perturbation; NPCs render with their raw hull so
+  // they don't appear to jitter when idle (the soft-body sim already
+  // produces a tiny centroid wobble that would otherwise drive the wind
+  // shader on a stationary NPC).
   for (let i = 0; i < npcBlobs.length; i++) {
     const npc = npcBlobs[i];
     const hull = npc.getHullPolygon();
+    const c = npc.getCentroid();
+    const v = sampleBlobVelocity(npc, c, nowMs);
     const hue = NPC_HUES[i % NPC_HUES.length];
     const fill = npcColor(hue);
     drawBlob(ctx, hull, fill, fill, 2.25);
-    const c = npc.getCentroid();
-    drawBlobShine(ctx, hull, shineTime, impactsNear(c, 240));
+    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(npc.blobId));
   }
 
   // Player blobs
   for (let i = 0; i < playerBlobs.length; i++) {
-    const hull = playerBlobs[i].getHullPolygon();
+    const blob = playerBlobs[i];
+    const rawHull = blob.getHullPolygon();
+    const c = blob.getCentroid();
+    const v = sampleBlobVelocity(blob, c, nowMs);
+    // Wind perturbation disabled — was flashing on idle/spawn. Re-enable
+    // once the velocity source is reworked to be wobble-free at rest.
+    const hull = rawHull;
     const pd = playerData?.[i];
 
     // Use player's custom color or fall back to palette
@@ -216,8 +288,7 @@ export function render(
     }
 
     drawBlob(ctx, hull, fill, stroke, 2.5);
-    const centroidForShine = playerBlobs[i].getCentroid();
-    drawBlobShine(ctx, hull, shineTime, impactsNear(centroidForShine, 240));
+    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(blob.blobId));
 
     // Draw face on blob
     if (pd) {
@@ -244,6 +315,11 @@ export function render(
       ctx.stroke();
     }
     ctx.setLineDash([]);
+  }
+
+  // Editor-authored chains. Drawn on top of blobs so the rope visibly drapes.
+  for (const chain of chains) {
+    drawChain(ctx, world, chain.particleIndices, chain.totalLength);
   }
 
   // Sticky-wall aim indicator: arrow from blob centroid showing release direction

@@ -11,6 +11,7 @@ pub mod layers;
 pub mod math;
 pub mod rng;
 pub mod shape_matching;
+pub mod snapshot;
 pub mod tuning;
 pub mod types;
 pub mod world;

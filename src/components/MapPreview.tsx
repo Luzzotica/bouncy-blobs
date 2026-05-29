@@ -1,5 +1,11 @@
 import React from 'react';
 import type { LevelData } from '../levels/types';
+import {
+  materialPreviewColors,
+  SOFT_PLATFORM_PALETTE,
+  SPIKE_CRYSTAL_PALETTE,
+  SPIKE_BASE_PALETTE,
+} from '../renderer/candySkin';
 
 interface MapPreviewProps {
   level: LevelData;
@@ -42,6 +48,7 @@ export default function MapPreview({ level, width = 200, height = 130 }: MapPrev
   for (const sp of level.spawnPoints) expandPoint(sp.x, sp.y);
   for (const ps of level.pointShapes ?? []) for (const pt of ps.points) expandPoint(pt.x, pt.y);
   for (const sp of level.softPlatforms ?? []) expandRect(sp.x, sp.y, sp.width, sp.height);
+  for (const t of level.triggers ?? []) expandRect(t.x, t.y, t.width, t.height);
 
   let vbX: number, vbY: number, vbW: number, vbH: number;
   if (!Number.isFinite(minX)) {
@@ -108,44 +115,112 @@ export default function MapPreview({ level, width = 200, height = 130 }: MapPrev
         />
       ))}
 
-      {/* Spikes (red) */}
-      {(level.spikes ?? []).map((s) => (
+      {/* Soft platforms — green-apple jelly */}
+      {(level.softPlatforms ?? []).map((sp) => (
         <rect
-          key={`spike-${s.id}`}
-          x={s.x - s.width / 2}
-          y={s.y - s.height / 2}
-          width={s.width}
-          height={s.height}
-          fill="#ff4444"
-          opacity={0.8}
-          transform={`rotate(${(s.rotation * 180) / Math.PI} ${s.x} ${s.y})`}
-        />
-      ))}
-
-      {/* Platforms (rotated rectangles) */}
-      {level.platforms.map((p) => (
-        <rect
-          key={p.id}
-          x={p.x - p.width / 2}
-          y={p.y - p.height / 2}
-          width={p.width}
-          height={p.height}
-          fill="#4a5570"
-          stroke="#5a6580"
+          key={`soft-${sp.id}`}
+          x={sp.x - sp.width / 2}
+          y={sp.y - sp.height / 2}
+          width={sp.width}
+          height={sp.height}
+          fill={SOFT_PLATFORM_PALETTE.base}
+          stroke={SOFT_PLATFORM_PALETTE.deep}
           strokeWidth={2}
-          transform={`rotate(${(p.rotation * 180) / Math.PI} ${p.x} ${p.y})`}
+          opacity={0.92}
+          rx={sp.width * 0.12}
+          ry={sp.height * 0.12}
+          transform={`rotate(${((sp.rotation ?? 0) * 180) / Math.PI} ${sp.x} ${sp.y})`}
         />
       ))}
 
-      {/* Walls (polylines) */}
-      {level.walls.map((w) => (
-        <polyline
-          key={w.id}
-          points={w.points.map((pt) => `${pt.x},${pt.y}`).join(' ')}
-          fill="none"
-          stroke="#5a6580"
-          strokeWidth={6}
-          strokeLinecap="round"
+      {/* Spikes — caramel base + pink rock-candy teeth */}
+      {(level.spikes ?? []).map((s) => {
+        const cx = s.x;
+        const cy = s.y;
+        const hw = s.width / 2;
+        const numTeeth = Math.max(2, Math.floor(s.width / 30));
+        const toothW = s.width / numTeeth;
+        const rot = `rotate(${(s.rotation * 180) / Math.PI} ${cx} ${cy})`;
+        const teeth: string[] = [];
+        for (let i = 0; i < numTeeth; i++) {
+          const tx = -hw + i * toothW;
+          teeth.push(
+            `M ${tx} 0 L ${tx + toothW} 0 L ${tx + toothW / 2} ${-s.height} Z`,
+          );
+        }
+        return (
+          <g key={`spike-${s.id}`} transform={`translate(${cx} ${cy}) ${rot.replace(`${cx} ${cy}`, '0 0')}`}>
+            <rect
+              x={-hw}
+              y={-4}
+              width={s.width}
+              height={8}
+              fill={SPIKE_BASE_PALETTE.base}
+              stroke={SPIKE_BASE_PALETTE.outline}
+              strokeWidth={1}
+            />
+            <path
+              d={teeth.join(' ')}
+              fill={SPIKE_CRYSTAL_PALETTE.base}
+              stroke={SPIKE_CRYSTAL_PALETTE.outline}
+              strokeWidth={1}
+              strokeLinejoin="round"
+            />
+          </g>
+        );
+      })}
+
+      {/* Platforms (rotated rectangles) — colored by material */}
+      {level.platforms.map((p) => {
+        const colors = materialPreviewColors(p.material);
+        return (
+          <rect
+            key={p.id}
+            x={p.x - p.width / 2}
+            y={p.y - p.height / 2}
+            width={p.width}
+            height={p.height}
+            fill={colors.fill}
+            stroke={colors.outline}
+            strokeWidth={2}
+            opacity={0.92}
+            transform={`rotate(${(p.rotation * 180) / Math.PI} ${p.x} ${p.y})`}
+          />
+        );
+      })}
+
+      {/* Walls (polylines) — colored by material */}
+      {level.walls.map((w) => {
+        const colors = materialPreviewColors(w.material);
+        return (
+          <polyline
+            key={w.id}
+            points={w.points.map((pt) => `${pt.x},${pt.y}`).join(' ')}
+            fill="none"
+            stroke={colors.fill}
+            strokeWidth={6}
+            strokeLinecap="round"
+            opacity={0.95}
+          />
+        );
+      })}
+
+      {/* Trigger plates (editor-authored "trigger area" sensors) — yellow
+          dashed rect so they're visually distinct from zones and platforms.
+          Drawn near the top of the z-order so they're visible above the
+          things they typically sit on. */}
+      {(level.triggers ?? []).map((t) => (
+        <rect
+          key={`trig-${t.id}`}
+          x={t.x - t.width / 2}
+          y={t.y - t.height / 2}
+          width={t.width}
+          height={t.height}
+          fill="rgba(255, 215, 64, 0.25)"
+          stroke="#ffd740"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          transform={`rotate(${(t.rotation * 180) / Math.PI} ${t.x} ${t.y})`}
         />
       ))}
 

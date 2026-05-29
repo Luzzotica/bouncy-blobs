@@ -1,11 +1,14 @@
-import { LevelData, LevelType, PlatformDef, SpawnPointDef, NpcBlobDef, SpringPadDef, SpikeDef, ZoneDef, PowerupSpawnDef, PointShapeDef, PointShapePoint, TriggerDef, ActionDef, ActionTarget, SoftPlatformDef, SoftAnchorPattern, SpriteInstanceDef } from '../levels/types';
+import { LevelData, LevelType, PlatformDef, SpawnPointDef, NpcBlobDef, SpringPadDef, SpikeDef, ZoneDef, PowerupSpawnDef, PointShapeDef, PointShapePoint, TriggerDef, ActionDef, ActionTarget, SoftPlatformDef, SoftAnchorPattern, SpriteInstanceDef, ChainDef, ChainAnchorRef, GravityZoneDef } from '../levels/types';
+import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+import { allSprites } from '../assets/spriteRegistry';
 import { defaultLevel } from '../levels/defaultLevel';
 import type { HullPreset } from '../physics/slimeBlob';
 
 export type EditorTool =
   | 'select' | 'platform' | 'spawn' | 'npc' | 'spring' | 'spike'
   | 'goalZone' | 'hillZone' | 'powerup' | 'deathZone'
-  | 'pointShape' | 'trigger' | 'action' | 'softPlatform' | 'sprite';
+  | 'pointShape' | 'trigger' | 'action' | 'softPlatform' | 'sprite' | 'chain'
+  | 'gravityZone';
 
 export type EditorElement =
   | { type: 'platform'; id: string }
@@ -23,7 +26,9 @@ export type EditorElement =
   | { type: 'trigger'; id: string }
   | { type: 'action'; id: string }
   | { type: 'softPlatform'; id: string }
-  | { type: 'sprite'; id: string };
+  | { type: 'sprite'; id: string }
+  | { type: 'chain'; id: string }
+  | { type: 'gravityZone'; id: string };
 
 export type ResizeHandle = 'left' | 'right' | 'top' | 'bottom';
 
@@ -43,16 +48,13 @@ export const TOOL_HOTKEYS: Record<string, EditorTool> = {
   'r': 'softPlatform',
   'd': 'deathZone',
   't': 'sprite',
+  'c': 'chain',
+  'g': 'gravityZone',
 };
 
-/** Default sprite id placed by the Sprite tool when the user hasn't picked
- * a specific asset yet. Cycle through this list with `placementSpriteId`
- * for now — a proper sprite picker UI comes in a follow-up pass. */
-export const DEFAULT_SPRITE_PALETTE = ['pencil', 'spring_pad', 'spike', 'goal_flag', 'powerup_orb'];
+const POINT_HIT_RADIUS_SQ = 600;
 
-const POINT_HIT_RADIUS_SQ = 200;
-
-const RECT_TYPES = new Set<string>(['platform', 'spike', 'goalZone', 'hillZone', 'deathZone', 'trigger', 'softPlatform']);
+const RECT_TYPES = new Set<string>(['platform', 'spike', 'goalZone', 'hillZone', 'deathZone', 'trigger', 'softPlatform', 'gravityZone']);
 
 export const SPRING_SIZE_PRESETS: { label: string; width: number; height: number }[] = [
   { label: 'Small', width: 70, height: 30 },
@@ -68,6 +70,46 @@ export interface UndoEntry {
 let nextId = 1;
 function genId(prefix: string): string {
   return `${prefix}_${nextId++}`;
+}
+
+/** Walk every typed array in a level and bump `nextId` past the highest
+ * numeric suffix found. Without this, loading a saved level leaves the
+ * module-level `nextId` at 1, and the next `genId('plat')` call returns
+ * `plat_1` — colliding with the existing `plat_1` and silently mutating
+ * the wrong record via findSelectedData's `.find()`. Called from the
+ * constructor and from `loadJSON`. */
+function bumpNextIdPastLevel(level: LevelData): void {
+  const suffixRe = /_(\d+)$/;
+  let max = nextId - 1;
+  const collect = (arr: ReadonlyArray<{ id?: string }> | undefined): void => {
+    if (!arr) return;
+    for (const item of arr) {
+      const id = item?.id;
+      if (!id) continue;
+      const m = suffixRe.exec(id);
+      if (!m) continue;
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+  };
+  collect(level.platforms);
+  collect(level.walls);
+  collect(level.spawnPoints);
+  collect(level.npcBlobs);
+  collect(level.goalZones);
+  collect(level.hillZones);
+  collect(level.gravityZones);
+  collect(level.powerupSpawns);
+  collect(level.springPads);
+  collect(level.spikes);
+  collect(level.deathZones);
+  collect(level.pointShapes);
+  collect(level.softPlatforms);
+  collect(level.triggers);
+  collect(level.actions);
+  collect(level.sprites);
+  collect(level.chains);
+  nextId = max + 1;
 }
 
 /** Snap (x, y) so its angle from (ox, oy) lands on the nearest 15° increment,
@@ -146,6 +188,12 @@ export class EditorState {
   cursorY = 0;
   /** Whether Shift is currently held — used by shape drafting to snap angles. */
   angleSnapHeld = false;
+  /** Whether Option/Alt or Ctrl is currently held — drives the action-tool
+   *  rotation-target preview highlight on the canvas. */
+  modifierHeld = false;
+  /** Toggle: show entity id labels on every object on the canvas. Toggled
+   *  with the 'I' hotkey or the toolbar Labels button. */
+  showIds = true;
 
   /** Which blob reference ghosts are currently shown at the cursor. */
   blobGhosts: { normal: boolean; large: boolean; crouching: boolean } = {
@@ -153,6 +201,12 @@ export class EditorState {
     large: false,
     crouching: false,
   };
+
+  /** Two-click chain authoring. After click 1, endpointA is filled; click 2
+   *  fills endpointB and commits. Each click resolves to a blob entity at
+   *  the cursor (NPC / softPlatform / pointShape) or falls back to a fixed
+   *  world point. */
+  draftChain: { id: string; endpointA: ChainAnchorRef | null } | null = null;
 
   // Draft state for Action authoring
   /** Phase 'pickPoints': click vertices/platforms to add. Phase 'placeEnds': drag ghosts to set end positions. */
@@ -167,6 +221,10 @@ export class EditorState {
   } | null = null;
   /** Index of the action target ghost currently being dragged (in placeEnds phase). */
   draggingActionTarget: number | null = null;
+  /** Dragging a ghost of an already-committed (selected) action. Distinct
+   *  from `draggingActionTarget` (which is draft-only) so the two drag
+   *  states don't tangle. */
+  draggingCommittedActionTarget: { actionId: string; index: number } | null = null;
 
   // Local + Workshop tracking
   /** Local file id (uuid) once saved to disk. Null for unsaved levels. */
@@ -178,6 +236,7 @@ export class EditorState {
 
   constructor(level?: LevelData) {
     this.level = level ? JSON.parse(JSON.stringify(level)) : JSON.parse(JSON.stringify(defaultLevel));
+    bumpNextIdPastLevel(this.level);
   }
 
   private pushUndo(): void {
@@ -209,6 +268,19 @@ export class EditorState {
     return Math.round(v / this.gridSize) * this.gridSize;
   }
 
+  /** Snap a CENTRE such that the entity's left/top EDGE lands on a grid
+   *  line (not the centre itself). With centre-snapping, a rect with
+   *  width 24 placed at a grid-aligned centre has its edges at centre±12 —
+   *  visibly "between" grid lines. Snapping by edge keeps the silhouette
+   *  glued to the grid regardless of dimension parity.
+   *
+   *  result = round((centre - halfExtent) / gridSize) * gridSize + halfExtent
+   */
+  snapForExtent(centre: number, halfExtent: number): number {
+    if (!this.snapToGrid) return centre;
+    return Math.round((centre - halfExtent) / this.gridSize) * this.gridSize + halfExtent;
+  }
+
   // --- Find selected element data ---
 
   findSelectedData(): any | null {
@@ -221,6 +293,7 @@ export class EditorState {
       case 'goalZone': return (this.level.goalZones ?? []).find(z => z.id === sel.id);
       case 'hillZone': return (this.level.hillZones ?? []).find(z => z.id === sel.id);
       case 'deathZone': return (this.level.deathZones ?? []).find(z => z.id === sel.id);
+      case 'gravityZone': return (this.level.gravityZones ?? []).find(z => z.id === sel.id);
       case 'spawn': return this.level.spawnPoints.find(s => s.id === sel.id);
       case 'npc': return this.level.npcBlobs.find(n => n.id === sel.id);
       case 'powerup': return (this.level.powerupSpawns ?? []).find(p => p.id === sel.id);
@@ -233,6 +306,7 @@ export class EditorState {
       case 'action': return (this.level.actions ?? []).find(a => a.id === sel.id);
       case 'sprite': return (this.level.sprites ?? []).find(s => s.id === sel.id);
       case 'softPlatform': return (this.level.softPlatforms ?? []).find(s => s.id === sel.id);
+      case 'chain': return (this.level.chains ?? []).find(c => c.id === sel.id);
       default: return null;
     }
   }
@@ -332,14 +406,31 @@ export class EditorState {
     this.onChange?.();
   }
 
-  /** Drop a sprite instance at the cursor. Defaults to the first id in
-   * DEFAULT_SPRITE_PALETTE; a proper picker comes later. */
-  addSpriteInstance(x: number, y: number, spriteId: string = DEFAULT_SPRITE_PALETTE[0]): void {
+  /** Sprite id the Sprite tool will place next. Set by the picker in
+   * EditorProperties; falls back to the first sprite in the registry on use. */
+  placementSpriteId: string | null = null;
+
+  setPlacementSpriteId(id: string | null): void {
+    this.placementSpriteId = id;
+    this.onChange?.();
+  }
+
+  /** Drop a sprite instance at the cursor using `placementSpriteId`, or
+   * the first sprite the registry knows about as a fallback. */
+  addSpriteInstance(x: number, y: number, spriteId?: string): void {
+    // Resolve the sprite id to place. Local import to avoid a load-order
+    // cycle between the editor state and the registry singleton.
+    let resolved = spriteId ?? this.placementSpriteId;
+    if (!resolved) {
+      const first = allSprites()[0];
+      if (first) resolved = first.def.id;
+    }
+    if (!resolved) return; // empty manifest — nothing to place
     this.pushUndo();
     if (!this.level.sprites) this.level.sprites = [];
     const inst: SpriteInstanceDef = {
       id: genId('sprite'),
-      spriteId,
+      spriteId: resolved,
       x: this.snap(x),
       y: this.snap(y),
       rotation: 0,
@@ -403,6 +494,76 @@ export class EditorState {
     this.onChange?.();
   }
 
+  /** Add a gravity zone. Defaults to UNIFORM gravity pulling downward at
+   *  ~1g; users switch to point gravity via the properties panel. */
+  addGravityZone(x: number, y: number): void {
+    this.pushUndo();
+    if (!this.level.gravityZones) this.level.gravityZones = [];
+    const zone: GravityZoneDef = {
+      id: genId('grav'),
+      x: this.snap(x),
+      y: this.snap(y),
+      width: 300,
+      height: 300,
+      field: { kind: 'uniform', vector: { x: 0, y: 1000 } },
+    };
+    this.level.gravityZones.push(zone);
+    this.selectedElement = { type: 'gravityZone', id: zone.id };
+    this.selectedTool = 'select';
+    this.onChange?.();
+  }
+
+  /** Switch a gravity zone's field type. Initializes sensible defaults for
+   *  the new variant so the user doesn't see a blank/zero field. */
+  setGravityFieldType(zoneId: string, kind: 'uniform' | 'point'): void {
+    const zone = (this.level.gravityZones ?? []).find(z => z.id === zoneId);
+    if (!zone || zone.field.kind === kind) return;
+    this.pushUndo();
+    if (kind === 'uniform') {
+      zone.field = { kind: 'uniform', vector: { x: 0, y: 1000 } };
+    } else {
+      // Point gravity centred on the zone, pulling inward at default strength.
+      zone.field = {
+        kind: 'point',
+        center: { x: zone.x, y: zone.y },
+        strength: 2000,
+        falloff: 'inverseSquare',
+      };
+    }
+    this.onChange?.();
+  }
+
+  /** Edit the uniform field's vector (per-component). No-op if the zone
+   *  isn't currently uniform. */
+  setGravityUniformVector(zoneId: string, vx: number, vy: number): void {
+    const zone = (this.level.gravityZones ?? []).find(z => z.id === zoneId);
+    if (!zone || zone.field.kind !== 'uniform') return;
+    this.pushUndo();
+    zone.field = { kind: 'uniform', vector: { x: vx, y: vy } };
+    this.onChange?.();
+  }
+
+  /** Whenever a gravity zone's centre moves (via drag / placement / resize /
+   *  numeric input), keep the point-field's `center` glued to the zone's
+   *  centre. The UI never exposes center separately — it always tracks. */
+  private syncGravityCenterIfPoint(data: any): void {
+    if (!data || typeof data !== 'object') return;
+    const f = (data as { field?: { kind?: string; center?: { x: number; y: number } } }).field;
+    if (f && f.kind === 'point' && typeof data.x === 'number' && typeof data.y === 'number') {
+      f.center = { x: data.x, y: data.y };
+    }
+  }
+
+  /** Edit the point field's strength + falloff. Center auto-tracks the
+   *  zone's position via the moveSelected path (see below). */
+  setGravityPointParams(zoneId: string, strength: number, falloff: 'linear' | 'inverseSquare'): void {
+    const zone = (this.level.gravityZones ?? []).find(z => z.id === zoneId);
+    if (!zone || zone.field.kind !== 'point') return;
+    this.pushUndo();
+    zone.field = { kind: 'point', center: zone.field.center, strength, falloff };
+    this.onChange?.();
+  }
+
   // --- PointShape authoring ---
 
   beginDraftPointShape(): void {
@@ -418,7 +579,7 @@ export class EditorState {
       const first = draft.points[0];
       const dx = x - first.x;
       const dy = y - first.y;
-      if (dx * dx + dy * dy < 200) {
+      if (dx * dx + dy * dy < 600) {
         draft.closed = true;
         this.commitDraftPointShape();
         return;
@@ -429,23 +590,21 @@ export class EditorState {
   }
 
   /** Finalize the active draft shape into a real PointShapeDef. Esc cancels. */
-  commitDraftPointShape(closed?: boolean): void {
+  commitDraftPointShape(_closed?: boolean): void {
     const draft = this.draftPointShape;
     this.draftPointShape = null;
-    if (!draft || draft.points.length < 2) {
+    // Point shapes are always closed soft-blob hulls — need ≥3 points.
+    if (!draft || draft.points.length < 3) {
       this.onChange?.();
       return;
     }
     this.pushUndo();
-    if (closed !== undefined) draft.closed = closed;
     if (!this.level.pointShapes) this.level.pointShapes = [];
-    const edges = [];
-    for (let i = 0; i < draft.points.length - 1; i++) edges.push({ a: i, b: i + 1 });
     const shape: PointShapeDef = {
       id: draft.id,
       points: draft.points,
-      edges,
-      closed: draft.closed,
+      edges: [],
+      closed: true,
     };
     this.level.pointShapes.push(shape);
     this.selectedElement = { type: 'pointShape', id: shape.id };
@@ -532,6 +691,11 @@ export class EditorState {
       shapeId, pointIndex,
       endX: pt.x + 100, endY: pt.y - 100,
     });
+    // Auto-advance to placeEnds after the first target so users immediately
+    // see a draggable endpoint instead of getting stuck in pickPoints.
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
     this.onChange?.();
   }
 
@@ -547,6 +711,61 @@ export class EditorState {
       platformId,
       endX: plat.x + 200, endY: plat.y,
     });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
+    this.onChange?.();
+  }
+
+  /** Alt/Option/Ctrl-click on a static platform: add a target that rotates
+   *  the platform by 90° from its closed pose (no translation). If a
+   *  translation target for this platform already exists in the draft,
+   *  augment it with endRotation rather than adding a duplicate target. */
+  appendActionTargetRotatePlatform(platformId: string): void {
+    const plat = this.level.platforms.find(p => p.id === platformId);
+    if (!plat) return;
+    if (!this.draftAction) this.beginDraftAction();
+    const draft = this.draftAction!;
+    const defaultEndRotation = plat.rotation + Math.PI / 2;
+    const existingIdx = draft.targets.findIndex(t => t.kind === 'platform' && t.platformId === platformId);
+    if (existingIdx >= 0) {
+      const t = draft.targets[existingIdx];
+      if (t.kind === 'platform') t.endRotation = defaultEndRotation;
+      if (draft.phase === 'pickPoints') draft.phase = 'placeEnds';
+      this.onChange?.();
+      return;
+    }
+    draft.targets.push({
+      kind: 'platform',
+      platformId,
+      // No translation — pure rotation animation by default. User can drag
+      // the ghost to add translation, or tune endRotation in the panel.
+      endX: plat.x,
+      endY: plat.y,
+      endRotation: defaultEndRotation,
+    });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
+    this.onChange?.();
+  }
+
+  /** Alt-click on a point-shape soft body: add a rotation target. The
+   *  rotation animates the whole hull around its rest centroid. */
+  appendActionTargetRotateShape(shapeId: string): void {
+    const shape = (this.level.pointShapes ?? []).find(p => p.id === shapeId);
+    if (!shape) return;
+    if (!this.draftAction) this.beginDraftAction();
+    const draft = this.draftAction!;
+    if (draft.targets.some(t => t.kind === 'rotateShape' && t.shapeId === shapeId)) return;
+    draft.targets.push({
+      kind: 'rotateShape',
+      shapeId,
+      endRotation: Math.PI / 2, // default ¼ turn — easy to tweak in the panel
+    });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
     this.onChange?.();
   }
 
@@ -586,11 +805,136 @@ export class EditorState {
     this.onChange?.();
   }
 
-  /** Drag a target endpoint while in placeEnds phase. */
+  /** Bake a SoftPlatform into a PointShape: the rect's subdivided hull
+   *  becomes individually-editable vertices, with anchors transferred. */
+  convertSoftPlatformToPointShape(id: string): void {
+    const sp = (this.level.softPlatforms ?? []).find(s => s.id === id);
+    if (!sp) return;
+    this.pushUndo();
+    const segW = sp.segW ?? 8;
+    const segH = sp.segH ?? 1;
+    const hull = hullRect(sp.width, sp.height, segW, segH);
+    const rot = sp.rotation ?? 0;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const anchorIdxs = new Set(
+      Array.isArray(sp.anchors) ? sp.anchors : rectAnchorIndices(segW, segH, sp.anchors ?? 'corners'),
+    );
+    const points: PointShapePoint[] = hull.map((p, i) => ({
+      x: this.snap(sp.x + p.x * cos - p.y * sin),
+      y: this.snap(sp.y + p.x * sin + p.y * cos),
+      anchored: anchorIdxs.has(i),
+    }));
+    const newId = genId('shape');
+    const shape: PointShapeDef = {
+      id: newId,
+      points,
+      edges: [],
+      closed: true,
+      stiffness: sp.stiffness ?? 1.0,
+    };
+    if (!this.level.pointShapes) this.level.pointShapes = [];
+    this.level.pointShapes.push(shape);
+    this.level.softPlatforms = (this.level.softPlatforms ?? []).filter(s => s.id !== id);
+    // Drop chains anchored to this soft platform — the new pointShape has a
+    // different id and centroid. Re-anchor in the editor if needed.
+    this.dropChainsReferencing('softPlatform', id);
+    this.selectedElement = { type: 'pointShape', id: newId };
+    this.selectedTool = 'select';
+    this.onChange?.();
+  }
+
+  // --- Chain authoring ---
+
+  beginDraftChain(): void {
+    this.draftChain = { id: genId('chain'), endpointA: null };
+  }
+
+  cancelDraftChain(): void {
+    this.draftChain = null;
+    this.onChange?.();
+  }
+
+  /** Resolve a click to a chain anchor: tries blob entities first, falls back
+   *  to a fixed world point at the cursor. */
+  private resolveChainAnchorAt(x: number, y: number): ChainAnchorRef {
+    for (const npc of this.level.npcBlobs) {
+      const dx = x - npc.x, dy = y - npc.y;
+      if (dx * dx + dy * dy < 900) return { kind: 'blob', entity: 'npc', id: npc.id };
+    }
+    for (const sp of this.level.softPlatforms ?? []) {
+      if (this.hitTestRect(x, y, sp)) return { kind: 'blob', entity: 'softPlatform', id: sp.id };
+    }
+    for (const ps of this.level.pointShapes ?? []) {
+      if (ps.points.length >= 3 && pointInPolygon(x, y, ps.points)) {
+        return { kind: 'blob', entity: 'pointShape', id: ps.id };
+      }
+    }
+    return { kind: 'fixed', x: this.snap(x), y: this.snap(y) };
+  }
+
+  /** Click handler for chain placement. First click picks endpointA; second
+   *  click picks endpointB and commits. */
+  appendChainEndpoint(x: number, y: number): void {
+    if (!this.draftChain) this.beginDraftChain();
+    const draft = this.draftChain!;
+    const anchor = this.resolveChainAnchorAt(x, y);
+    if (!draft.endpointA) {
+      draft.endpointA = anchor;
+      this.onChange?.();
+      return;
+    }
+    // Second click → commit.
+    this.pushUndo();
+    if (!this.level.chains) this.level.chains = [];
+    const a = this.anchorPosition(draft.endpointA);
+    const b = this.anchorPosition(anchor);
+    const dx = (b?.x ?? 0) - (a?.x ?? 0);
+    const dy = (b?.y ?? 0) - (a?.y ?? 0);
+    const straight = Math.sqrt(dx * dx + dy * dy);
+    const chain: ChainDef = {
+      id: draft.id,
+      endpointA: draft.endpointA,
+      endpointB: anchor,
+      // Default slack: 1.4× straight-line, with a sensible floor.
+      totalLength: Math.max(200, Math.round(straight * 1.4)),
+    };
+    this.level.chains.push(chain);
+    this.draftChain = null;
+    this.selectedElement = { type: 'chain', id: chain.id };
+    this.selectedTool = 'select';
+    this.onChange?.();
+  }
+
+  /** World-space position of a chain anchor reference. Returns null if the
+   *  referenced entity has gone missing (caller should treat as no-op). */
+  anchorPosition(ref: ChainAnchorRef): { x: number; y: number } | null {
+    if (ref.kind === 'fixed') return { x: ref.x, y: ref.y };
+    if (ref.entity === 'npc') {
+      const n = this.level.npcBlobs.find(b => b.id === ref.id);
+      return n ? { x: n.x, y: n.y } : null;
+    }
+    if (ref.entity === 'softPlatform') {
+      const s = (this.level.softPlatforms ?? []).find(p => p.id === ref.id);
+      return s ? { x: s.x, y: s.y } : null;
+    }
+    if (ref.entity === 'pointShape') {
+      const ps = (this.level.pointShapes ?? []).find(p => p.id === ref.id);
+      if (!ps || ps.points.length === 0) return null;
+      let cx = 0, cy = 0;
+      for (const p of ps.points) { cx += p.x; cy += p.y; }
+      return { x: cx / ps.points.length, y: cy / ps.points.length };
+    }
+    return null;
+  }
+
+  /** Drag a target endpoint while in placeEnds phase. No-op for
+   *  rotateShape targets (they don't have a position to drag). */
   setDraftActionTargetEnd(index: number, x: number, y: number): void {
     if (!this.draftAction) return;
     const t = this.draftAction.targets[index];
     if (!t) return;
+    if (t.kind === 'rotateShape') return;
     t.endX = this.snap(x);
     t.endY = this.snap(y);
     this.onChange?.();
@@ -602,8 +946,26 @@ export class EditorState {
     if (!action) return;
     const t = action.targets[index];
     if (!t) return;
+    if (t.kind === 'rotateShape') return;
     t.endX = this.snap(x);
     t.endY = this.snap(y);
+    this.onChange?.();
+  }
+
+  /** Edit a target's end rotation (radians). Works for both 'platform'
+   *  (optional endRotation) and 'rotateShape' (required endRotation). */
+  setActionTargetEndRotation(actionId: string, index: number, rotation: number): void {
+    const action = (this.level.actions ?? []).find(a => a.id === actionId);
+    if (!action) return;
+    const t = action.targets[index];
+    if (!t) return;
+    if (t.kind === 'platform') {
+      (t as { endRotation?: number }).endRotation = rotation;
+    } else if (t.kind === 'rotateShape') {
+      t.endRotation = rotation;
+    } else {
+      return; // shapePoint has no rotation
+    }
     this.onChange?.();
   }
 
@@ -635,6 +997,7 @@ export class EditorState {
       case 'goalZone': this.addGoalZone(x, y); break;
       case 'hillZone': this.addHillZone(x, y); break;
       case 'deathZone': this.addDeathZone(x, y); break;
+      case 'gravityZone': this.addGravityZone(x, y); break;
       case 'trigger': this.addTrigger(x, y); break;
       case 'softPlatform': this.addSoftPlatform(x, y); break;
       default: this.isPlacing = false; return;
@@ -668,6 +1031,7 @@ export class EditorState {
     data.y = (sy + ey) / 2;
     data.width = Math.abs(ex - sx);
     data.height = Math.abs(ey - sy);
+    this.syncGravityCenterIfPoint(data);
     this.onChange?.();
   }
 
@@ -677,18 +1041,29 @@ export class EditorState {
 
     const data = this.findSelectedData();
     if (data && 'width' in data) {
-      // If the user just clicked without dragging, apply sensible defaults
+      // If the user just clicked without dragging, apply sensible defaults.
+      // Dimensions are deliberately multiples of the default gridSize (20)
+      // so single-click drops have their edges on grid lines, not centred
+      // at a half-grid offset.
       if (data.width < 20 && data.height < 20) {
         switch (this.placementTool) {
-          case 'platform': data.width = 200; data.height = 24; break;
-          case 'spike': data.width = 200; data.height = 35; break;
+          case 'platform': data.width = 200; data.height = 20; break;
+          case 'spike': data.width = 200; data.height = 40; break;
           case 'goalZone': data.width = 400; data.height = 400; break;
-          case 'hillZone': data.width = 500; data.height = 250; break;
+          case 'hillZone': data.width = 500; data.height = 240; break;
           case 'deathZone': data.width = 400; data.height = 120; break;
-          case 'trigger': data.width = 120; data.height = 24; break;
+          case 'gravityZone': data.width = 300; data.height = 300; break;
+          case 'trigger': data.width = 120; data.height = 20; break;
           case 'softPlatform': data.width = 400; data.height = 60; break;
         }
       }
+      // Re-anchor centre so left/top edges land on grid. The placement
+      // centre was set from the click point (already snapped) but with the
+      // new dimensions the edges may now be off-grid; snapForExtent fixes
+      // that without nudging the visible silhouette far from the click.
+      data.x = this.snapForExtent(data.x, data.width / 2);
+      data.y = this.snapForExtent(data.y, data.height / 2);
+      this.syncGravityCenterIfPoint(data);
     }
 
     this.selectedTool = 'select';
@@ -698,6 +1073,17 @@ export class EditorState {
 
   // --- Delete ---
 
+  /** Drop any chains whose endpoint references a blob entity matching
+   *  (entity, id). Used to cascade-clean when a referenced blob is deleted. */
+  private dropChainsReferencing(entity: 'npc' | 'softPlatform' | 'pointShape', id: string): void {
+    if (!this.level.chains) return;
+    const refersTo = (ref: ChainAnchorRef) =>
+      ref.kind === 'blob' && ref.entity === entity && ref.id === id;
+    this.level.chains = this.level.chains.filter(
+      c => !refersTo(c.endpointA) && !refersTo(c.endpointB),
+    );
+  }
+
   deleteSelected(): void {
     if (!this.selectedElement) return;
     this.pushUndo();
@@ -705,15 +1091,22 @@ export class EditorState {
     switch (sel.type) {
       case 'platform': this.level.platforms = this.level.platforms.filter(p => p.id !== sel.id); break;
       case 'spawn': this.level.spawnPoints = this.level.spawnPoints.filter(s => s.id !== sel.id); break;
-      case 'npc': this.level.npcBlobs = this.level.npcBlobs.filter(n => n.id !== sel.id); break;
+      case 'npc':
+        this.level.npcBlobs = this.level.npcBlobs.filter(n => n.id !== sel.id);
+        this.dropChainsReferencing('npc', sel.id);
+        break;
       case 'wall': this.level.walls = this.level.walls.filter(w => w.id !== sel.id); break;
       case 'spring': this.level.springPads = (this.level.springPads ?? []).filter(s => s.id !== sel.id); break;
       case 'spike': this.level.spikes = (this.level.spikes ?? []).filter(s => s.id !== sel.id); break;
       case 'goalZone': this.level.goalZones = (this.level.goalZones ?? []).filter(z => z.id !== sel.id); break;
       case 'hillZone': this.level.hillZones = (this.level.hillZones ?? []).filter(z => z.id !== sel.id); break;
       case 'deathZone': this.level.deathZones = (this.level.deathZones ?? []).filter(z => z.id !== sel.id); break;
+      case 'gravityZone': this.level.gravityZones = (this.level.gravityZones ?? []).filter(z => z.id !== sel.id); break;
       case 'powerup': this.level.powerupSpawns = (this.level.powerupSpawns ?? []).filter(p => p.id !== sel.id); break;
-      case 'softPlatform': this.level.softPlatforms = (this.level.softPlatforms ?? []).filter(s => s.id !== sel.id); break;
+      case 'softPlatform':
+        this.level.softPlatforms = (this.level.softPlatforms ?? []).filter(s => s.id !== sel.id);
+        this.dropChainsReferencing('softPlatform', sel.id);
+        break;
       case 'trigger': {
         const removedId = sel.id;
         this.level.triggers = (this.level.triggers ?? []).filter(t => t.id !== removedId);
@@ -731,6 +1124,7 @@ export class EditorState {
           ...a,
           targets: a.targets.filter(t => t.kind !== 'shapePoint' || t.shapeId !== removedId),
         })).filter(a => a.targets.length > 0);
+        this.dropChainsReferencing('pointShape', removedId);
         break;
       }
       case 'pointShapeVertex': {
@@ -758,6 +1152,11 @@ export class EditorState {
       case 'action': {
         const removedId = sel.id;
         this.level.actions = (this.level.actions ?? []).filter(a => a.id !== removedId);
+        break;
+      }
+      case 'chain': {
+        const removedId = sel.id;
+        this.level.chains = (this.level.chains ?? []).filter(c => c.id !== removedId);
         break;
       }
     }
@@ -825,7 +1224,31 @@ export class EditorState {
         if (!this.level.pointShapes) this.level.pointShapes = [];
         this.level.pointShapes.push(clone); newId = clone.id; break;
       }
-      // wall / action / pointShapeVertex: skip — not meaningfully duplicable.
+      case 'chain': {
+        clone.id = genId('chain');
+        if (!this.level.chains) this.level.chains = [];
+        this.level.chains.push(clone); newId = clone.id; break;
+      }
+      case 'sprite':
+        clone.id = genId('sprite');
+        if (!this.level.sprites) this.level.sprites = [];
+        this.level.sprites.push(clone); newId = clone.id; break;
+      case 'gravityZone':
+        clone.id = genId('grav');
+        // Keep field.center in sync with the cloned position.
+        if (clone.field?.kind === 'point') {
+          clone.field.center = { x: clone.x, y: clone.y };
+        }
+        if (!this.level.gravityZones) this.level.gravityZones = [];
+        this.level.gravityZones.push(clone); newId = clone.id; break;
+      case 'action':
+        // Duplicating an action keeps every target's reference (same
+        // platform/shape/vertex) and source-trigger list intact — the new
+        // copy fires the same wiring with a fresh id.
+        clone.id = genId('act');
+        if (!this.level.actions) this.level.actions = [];
+        this.level.actions.push(clone); newId = clone.id; break;
+      // wall / pointShapeVertex: skip — not meaningfully duplicable.
       default: return;
     }
 
@@ -856,8 +1279,19 @@ export class EditorState {
       return;
     }
     if (typeof data.x !== 'number' || typeof data.y !== 'number') return;
-    data.x = this.snap(this.dragElementStartX + dx);
-    data.y = this.snap(this.dragElementStartY + dy);
+    const newX = this.dragElementStartX + dx;
+    const newY = this.dragElementStartY + dy;
+    // For rectangular entities (with width/height), snap so the LEFT/TOP
+    // EDGE lands on a grid line. For point entities (spawn, npc, powerup,
+    // sprite) the centre is the visible position, so plain snap is correct.
+    if (typeof data.width === 'number' && typeof data.height === 'number') {
+      data.x = this.snapForExtent(newX, data.width / 2);
+      data.y = this.snapForExtent(newY, data.height / 2);
+    } else {
+      data.x = this.snap(newX);
+      data.y = this.snap(newY);
+    }
+    this.syncGravityCenterIfPoint(data);
     this.onChange?.();
   }
 
@@ -983,30 +1417,37 @@ export class EditorState {
     // shifting def.y (which would move the base off the ground).
     const isSpike = this.selectedElement?.type === 'spike';
 
+    // Edge-anchored resize: the OPPOSITE edge stays put (matches user
+    // intent — the handle being dragged moves) and the new width/height
+    // is snapped to a grid multiple. With both ends thus grid-aligned,
+    // edges sit on grid lines instead of drifting by half-grid amounts.
     switch (handle) {
       case 'right': {
         const newW = Math.max(minSize, this.snap(init.width + localDx));
-        const shift = (newW - init.width) / 2;
+        // Left edge stays: it was at init.x - (init.width/2)*cos along x and
+        // matching offset along y. New centre = leftEdge + (newW/2)*cos.
+        const offset = (newW - init.width) / 2;
         data.width = newW;
-        data.x = init.x + shift * cos;
-        data.y = init.y + shift * sin;
+        data.x = init.x + offset * cos;
+        data.y = init.y + offset * sin;
         break;
       }
       case 'left': {
         const newW = Math.max(minSize, this.snap(init.width - localDx));
-        const shift = -(newW - init.width) / 2;
+        // Right edge stays — shift centre back by the width delta.
+        const offset = -(newW - init.width) / 2;
         data.width = newW;
-        data.x = init.x + shift * cos;
-        data.y = init.y + shift * sin;
+        data.x = init.x + offset * cos;
+        data.y = init.y + offset * sin;
         break;
       }
       case 'bottom': {
         const newH = Math.max(minSize, this.snap(init.height + localDy));
         data.height = newH;
         if (!isSpike) {
-          const shift = (newH - init.height) / 2;
-          data.x = init.x - shift * sin;
-          data.y = init.y + shift * cos;
+          const offset = (newH - init.height) / 2;
+          data.x = init.x - offset * sin;
+          data.y = init.y + offset * cos;
         }
         break;
       }
@@ -1014,13 +1455,22 @@ export class EditorState {
         const newH = Math.max(minSize, this.snap(init.height - localDy));
         data.height = newH;
         if (!isSpike) {
-          const shift = -(newH - init.height) / 2;
-          data.x = init.x - shift * sin;
-          data.y = init.y + shift * cos;
+          const offset = -(newH - init.height) / 2;
+          data.x = init.x - offset * sin;
+          data.y = init.y + offset * cos;
         }
         break;
       }
     }
+    // After resize, re-snap the centre so the moving edge lands on grid.
+    // For axis-aligned (rotation ≈ 0) entities this guarantees the right /
+    // left / top / bottom edge is grid-aligned; for rotated entities we
+    // skip the re-snap (snapping in world coords would skew the rect).
+    if (Math.abs(init.rotation) < 0.001 && typeof data.width === 'number' && typeof data.height === 'number') {
+      data.x = this.snapForExtent(data.x, data.width / 2);
+      data.y = this.snapForExtent(data.y, data.height / 2);
+    }
+    this.syncGravityCenterIfPoint(data);
     this.onChange?.();
   }
 
@@ -1049,16 +1499,63 @@ export class EditorState {
     return best ? { shapeId: best.shapeId, pointIndex: best.pointIndex } : null;
   }
 
-  /** Hit-test a draft-action end ghost handle (in placeEnds phase). Returns index in targets. */
-  hitTestDraftActionEnd(worldX: number, worldY: number): number | null {
-    if (!this.draftAction || this.draftAction.phase !== 'placeEnds') return null;
-    for (let i = 0; i < this.draftAction.targets.length; i++) {
-      const t = this.draftAction.targets[i];
+  /** Hit-test logic shared by draft + committed action ghosts. Returns the
+   *  index of the first target whose ghost contains the given world point.
+   *
+   *  Per-kind hit shape:
+   *    - shapePoint: small circle (POINT_HIT_RADIUS_SQ) around endX/endY.
+   *      Matches the visual: it's drawn as a 7px-radius dot.
+   *    - platform:   full ghost RECTANGLE — the platform's width × height,
+   *      anchored at endX/endY and rotated by endRotation (or the
+   *      platform's closed-pose rotation when endRotation is absent).
+   *      Without this, clicking inside the giant rectangle would miss the
+   *      tiny centre-point hit-test and the user couldn't drag the ghost.
+   *    - rotateShape: NOT draggable (no position). Returns no hit.
+   */
+  private targetHitTest(targets: readonly ActionTarget[], worldX: number, worldY: number): number | null {
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      if (t.kind === 'rotateShape') continue;
+      if (t.kind === 'shapePoint') {
+        const dx = worldX - t.endX;
+        const dy = worldY - t.endY;
+        if (dx * dx + dy * dy < POINT_HIT_RADIUS_SQ) return i;
+        continue;
+      }
+      // platform: hit-test the full rotated rect at (endX, endY)
+      const plat = this.level.platforms.find(p => p.id === t.platformId);
+      if (!plat) continue;
+      const endRot = t.endRotation ?? plat.rotation;
       const dx = worldX - t.endX;
       const dy = worldY - t.endY;
-      if (dx * dx + dy * dy < POINT_HIT_RADIUS_SQ) return i;
+      const cos = Math.cos(-endRot);
+      const sin = Math.sin(-endRot);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      const hw = plat.width / 2;
+      const hh = plat.height / 2;
+      if (Math.abs(lx) <= hw && Math.abs(ly) <= hh) return i;
     }
     return null;
+  }
+
+  /** Hit-test a DRAFT action's end ghost (in placeEnds phase). */
+  hitTestDraftActionEnd(worldX: number, worldY: number): number | null {
+    if (!this.draftAction || this.draftAction.phase !== 'placeEnds') return null;
+    return this.targetHitTest(this.draftAction.targets, worldX, worldY);
+  }
+
+  /** Hit-test a SELECTED committed action's end ghost. Returns the target
+   *  index (relative to the selected action) when hit. Used to drag a
+   *  committed action's ghost on the canvas without going through the
+   *  side-panel numeric inputs. */
+  hitTestSelectedActionEnd(worldX: number, worldY: number): { actionId: string; index: number } | null {
+    const sel = this.selectedElement;
+    if (!sel || sel.type !== 'action') return null;
+    const action = (this.level.actions ?? []).find(a => a.id === sel.id);
+    if (!action) return null;
+    const idx = this.targetHitTest(action.targets, worldX, worldY);
+    return idx === null ? null : { actionId: action.id, index: idx };
   }
 
   hitTest(worldX: number, worldY: number): EditorElement | null {
@@ -1100,6 +1597,9 @@ export class EditorState {
     for (const z of this.level.deathZones ?? []) {
       if (this.hitTestRect(worldX, worldY, z)) return { type: 'deathZone', id: z.id };
     }
+    for (const z of this.level.gravityZones ?? []) {
+      if (this.hitTestRect(worldX, worldY, z)) return { type: 'gravityZone', id: z.id };
+    }
     // Point elements
     for (const s of this.level.spawnPoints) {
       const dx = worldX - s.x, dy = worldY - s.y;
@@ -1113,7 +1613,61 @@ export class EditorState {
       const dx = worldX - p.x, dy = worldY - p.y;
       if (dx * dx + dy * dy < 400) return { type: 'powerup', id: p.id };
     }
+    // Chains — straight-line distance from cursor to the segment between endpoints.
+    const chainThresholdSq = (8 / this.zoom) * (8 / this.zoom);
+    for (const c of this.level.chains ?? []) {
+      const a = this.anchorPosition(c.endpointA);
+      const b = this.anchorPosition(c.endpointB);
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1) continue;
+      const t = Math.max(0, Math.min(1, ((worldX - a.x) * dx + (worldY - a.y) * dy) / lenSq));
+      const px = a.x + t * dx, py = a.y + t * dy;
+      const ddx = worldX - px, ddy = worldY - py;
+      if (ddx * ddx + ddy * ddy < chainThresholdSq) return { type: 'chain', id: c.id };
+    }
+
+    // Last priority: action ghosts. Clicking the pink target ghost (or the
+    // line connecting source → end) selects that action so users have a
+    // discoverable path to pick actions without going through the side
+    // panel. Hit-test target ghosts first (large rectangle = easy to hit),
+    // then the dashed lines.
+    for (const action of this.level.actions ?? []) {
+      const idx = this.targetHitTest(action.targets, worldX, worldY);
+      if (idx !== null) return { type: 'action', id: action.id };
+    }
+    const lineHitSq = 144; // 12 px in world units
+    for (const action of this.level.actions ?? []) {
+      for (const t of action.targets) {
+        if (t.kind === 'rotateShape') continue;
+        const src = this.actionTargetSourcePos(t);
+        if (!src) continue;
+        const dx = t.endX - src.x;
+        const dy = t.endY - src.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 1) continue;
+        const u = Math.max(0, Math.min(1, ((worldX - src.x) * dx + (worldY - src.y) * dy) / lenSq));
+        const px = src.x + u * dx, py = src.y + u * dy;
+        const ddx = worldX - px, ddy = worldY - py;
+        if (ddx * ddx + ddy * ddy < lineHitSq) return { type: 'action', id: action.id };
+      }
+    }
     return null;
+  }
+
+  /** Source-point a target's arrow originates from. Mirrors what
+   *  EditorCanvas draws so hit-testing the arrow line picks the right one. */
+  private actionTargetSourcePos(t: ActionTarget): { x: number; y: number } | null {
+    if (t.kind === 'shapePoint') {
+      const shape = (this.level.pointShapes ?? []).find(s => s.id === t.shapeId);
+      const pt = shape?.points[t.pointIndex];
+      return pt ? { x: pt.x, y: pt.y } : null;
+    }
+    if (t.kind === 'rotateShape') return null; // no arrow drawn
+    const plat = this.level.platforms.find(p => p.id === t.platformId);
+    return plat ? { x: plat.x, y: plat.y } : null;
   }
 
   private hitTestRect(
@@ -1166,7 +1720,23 @@ export class EditorState {
     const data = this.findSelectedData();
     if (!data) return;
     this.pushUndo();
-    data[key] = value;
+    // Normalize rotation so it stays in (-π, π]. Without this, the user
+    // typing into the rotation field — or repeated R-key presses bypassing
+    // this code path — could drift past π and then action lerps would take
+    // the long way around.
+    if (key === 'rotation' && typeof value === 'number') {
+      let r = value % (Math.PI * 2);
+      if (r > Math.PI) r -= Math.PI * 2;
+      else if (r <= -Math.PI) r += Math.PI * 2;
+      data[key] = r;
+    } else {
+      data[key] = value;
+    }
+    // x/y/width/height edits on a point-gravity zone need to drag the
+    // field's centre along so it stays at the zone centre.
+    if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
+      this.syncGravityCenterIfPoint(data);
+    }
     this.onChange?.();
   }
 
@@ -1195,6 +1765,7 @@ export class EditorState {
       const parsed = JSON.parse(json) as LevelData;
       this.pushUndo();
       this.level = parsed;
+      bumpNextIdPastLevel(this.level);
       this.selectedElement = null;
       this.onChange?.();
     } catch (e) {
@@ -1263,6 +1834,15 @@ export class EditorState {
     this.pushUndo();
     const v = items[0].data[axis];
     for (let i = 1; i < items.length; i++) items[i].data[axis] = v;
+    this.onChange?.();
+  }
+
+  /** Replace the level's enabled game modes. Auto-clears the legacy
+   *  `levelType` singular field so it doesn't shadow the new array. */
+  setLevelTypes(types: LevelType[]): void {
+    this.pushUndo();
+    this.level.levelTypes = [...types];
+    this.level.levelType = undefined;
     this.onChange?.();
   }
 

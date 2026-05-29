@@ -1010,4 +1010,51 @@ export class PartyMode implements GameMode {
     this.placementConfirmed.clear();
     this.placedItems = [];
   }
+
+  /** Rollback snapshot. Party mode has a complex sub-phase state machine
+   *  but most of it transitions only at sub-phase boundaries (seconds
+   *  apart, not per-tick). Within a typical rollback window (~30 ticks /
+   *  0.5 s) only `subPhaseTimer`, `gameTime`, and per-tick scoring
+   *  bookkeeping changes. We snapshot the full state anyway — it's only
+   *  ~1 KB of JSON. */
+  dumpState(): unknown {
+    return {
+      subPhase: this.subPhase,
+      subPhaseTimer: this.subPhaseTimer,
+      round: this.round,
+      scores: [...this.scores.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1),
+      roundFinishers: [...this.roundFinishers],
+      firstFinisher: this.firstFinisher,
+      trapKills: [...this.trapKills.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1),
+      tooEasy: this.tooEasy,
+      gameTime: this.gameTime,
+      availableItems: this.availableItems.slice(),
+      playerSelections: [...this.playerSelections.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1),
+      placementCursors: [...this.placementCursors.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)
+        .map(([id, p]) => [id, { x: p.x, y: p.y }]),
+      placementConfirmed: [...this.placementConfirmed].sort(),
+      placedItems: this.placedItems.slice(),
+      committedCount: this.committedCount,
+      gameWinner: this.gameWinner,
+    };
+  }
+
+  restoreState(snap: any): void {
+    this.subPhase = snap.subPhase;
+    this.subPhaseTimer = snap.subPhaseTimer;
+    this.round = snap.round;
+    this.scores = new Map(snap.scores);
+    this.roundFinishers = snap.roundFinishers.slice();
+    this.firstFinisher = snap.firstFinisher;
+    this.trapKills = new Map(snap.trapKills);
+    this.tooEasy = snap.tooEasy;
+    this.gameTime = snap.gameTime;
+    this.availableItems = snap.availableItems.slice();
+    this.playerSelections = new Map(snap.playerSelections);
+    this.placementCursors = new Map(snap.placementCursors.map(([id, p]: [string, { x: number; y: number }]) => [id, { x: p.x, y: p.y }]));
+    this.placementConfirmed = new Set(snap.placementConfirmed);
+    this.placedItems = snap.placedItems.slice();
+    this.committedCount = snap.committedCount;
+    this.gameWinner = snap.gameWinner;
+  }
 }

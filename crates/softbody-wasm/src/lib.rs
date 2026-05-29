@@ -170,6 +170,7 @@ impl SoftBodyWorldHandle {
         sort_key: &str,
         static_hull_indices: &[u32],
         static_center: bool,
+        pin_frame: bool,
     ) -> BlobHandle {
         let hull = poly_from_f64_pairs(hull_rest_local);
         let res = self.inner.add_blob_from_hull(AddBlobParams {
@@ -188,6 +189,7 @@ impl SoftBodyWorldHandle {
             sort_key: if sort_key.is_empty() { None } else { Some(sort_key.to_string()) },
             static_hull_indices: static_hull_indices.iter().map(|&i| i as usize).collect(),
             static_center,
+            pin_frame,
         });
         BlobHandle {
             blob_id: res.blob_id,
@@ -266,6 +268,23 @@ impl SoftBodyWorldHandle {
 
     // ---- determinism aid: a stable hash of the full sim state ----
 
+    /// Capture full mutable engine state to a binary buffer. Used by
+    /// the rollback netcode controller to checkpoint each tick. See
+    /// `softbody::snapshot` for the binary format.
+    #[wasm_bindgen(js_name = serializeState)]
+    pub fn serialize_state(&self) -> js_sys::Uint8Array {
+        let buf = self.inner.serialize_state();
+        js_sys::Uint8Array::from(&buf[..])
+    }
+
+    /// Restore state from a buffer produced by `serializeState`. Returns
+    /// true on success; false if the buffer is malformed or world layout
+    /// (particle/blob/shape/static-surface counts) doesn't match.
+    #[wasm_bindgen(js_name = restoreState)]
+    pub fn restore_state(&mut self, buf: &[u8]) -> bool {
+        self.inner.restore_state(buf).is_ok()
+    }
+
     /// FNV-1a 64-bit hash of every (pos.raw, vel.raw) i64 in the sim.
     /// Two clients with the same state arrays produce the same hash.
     /// Useful for cheap divergence checks in netplay.
@@ -299,6 +318,16 @@ impl SoftBodyWorldHandle {
         let mut buf = Vec::with_capacity(events.len() * 2);
         for (s, b) in events { buf.push(s); buf.push(b); }
         js_sys::Uint32Array::from(&buf[..])
+    }
+
+    /// Drain pending crush events. Returns a flat array of blob_ids
+    /// whose physics state exploded during the most recent `step()` —
+    /// typically a blob crushed between a moving platform and static
+    /// geometry. The game wrapper turns each id into a player kill.
+    #[wasm_bindgen(js_name = takeCrushEvents)]
+    pub fn take_crush_events(&mut self) -> js_sys::Uint32Array {
+        let events = self.inner.take_crush_events();
+        js_sys::Uint32Array::from(&events[..])
     }
 
     // =================================================================
@@ -577,6 +606,15 @@ impl SoftBodyWorldHandle {
     #[wasm_bindgen(js_name = addHomeAnchor)]
     pub fn add_home_anchor(&mut self, idx: u32, home_x: f64, home_y: f64, k: f64, damp: f64) {
         self.inner.add_home_anchor(idx, fv(home_x, home_y), Fx::from_f64(k), Fx::from_f64(damp));
+    }
+
+    /// Hard max-distance constraint between two particles. Solved in
+    /// step 7 alongside welds and anchors, repeated `constraint_iters`
+    /// times. Use this for a real "rope length" cap that doesn't depend
+    /// on PBD propagation through dozens of chain segments.
+    #[wasm_bindgen(js_name = addDistanceMax)]
+    pub fn add_distance_max(&mut self, idx_a: u32, idx_b: u32, max_dist: f64) {
+        self.inner.add_distance_max(idx_a, idx_b, Fx::from_f64(max_dist));
     }
 
     // ---- snapshots for renderer ----

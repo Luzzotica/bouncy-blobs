@@ -5,7 +5,7 @@
 const MUSIC_KEY = 'bb_music_volume'
 const SFX_KEY = 'bb_sfx_volume'
 const COLOR_KEY = 'bb_player_color'
-const DEFAULT_MUSIC = 0.45
+const DEFAULT_MUSIC = 0.34
 const DEFAULT_SFX = 0.85
 const DEFAULT_COLOR = '#4ea1ff'
 

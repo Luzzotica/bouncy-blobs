@@ -32,6 +32,34 @@ use crate::types::*;
 
 const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 
+// --------- Crush detection ---------
+//
+// Symptom (see `crush_repro_logs_blob_state`): when a blob is pinched
+// between a moving surface and static geometry hard enough that the
+// position solver can't resolve, the hull doesn't *fly* anywhere — the
+// centroid drifts only a couple of units per frame. What blows up is
+// the *hull extent*: some particles get stuck on the descending
+// platform, others on the floor, and welds/distance-max constraints
+// stretch the hull between them. Per-frame centroid displacement is
+// useless here; hull spread relative to rest size is the real signal.
+//
+// We flag a blob when:
+//   (a) max(distance from hull centroid) > sqrt(RATIO_SQ) × rest max
+//       radius (default RATIO_SQ = 4 → 2× rest extent). A healthy blob
+//       under squish/stretch stays well under this; the repro test
+//       jumps from ~28 (rest = 28.28) to 62 the frame it explodes.
+//   (b) Any hull particle ends a step beyond ±CRUSH_MAX_COORD on either
+//       axis. Belt-and-suspenders for Fx saturation / NaN-style blowups
+//       that the ratio check might miss if both rest and current grow
+//       together.
+// 1.5² = 2.25 in Fx (= 2.25 << 32 = 9 << 30). Caught the test-case
+// explosion at ratio 2.20 with the old 2× threshold; in real game
+// scenarios with stronger constraint relaxation the hull may only
+// stretch 1.5–1.8× before falling apart, so we tighten.
+pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(9i64 << 30);
+
+pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
+
 const FX_FRAC_1_60: Fx = Fx::from_raw((1i64 << 32) / 60); // 1/60
 const FX_FRAC_1_240: Fx = Fx::from_raw((1i64 << 32) / 240); // 1/240
 const FX_FRAC_1_20: Fx = Fx::from_raw((1i64 << 32) / 20); // 1/20
@@ -124,26 +152,26 @@ pub struct SoftBodyWorld {
     pub blob_ranges: Vec<BlobRange>,
     pub static_surfaces: Vec<StaticSurface>,
 
-    welds: Vec<(usize, usize)>,
-    anchors: Vec<Anchor>,
-    distance_max_constraints: Vec<(usize, usize, Fx)>,
-    chains: Vec<Chain>,
+    pub(crate) welds: Vec<(usize, usize)>,
+    pub(crate) anchors: Vec<Anchor>,
+    pub(crate) distance_max_constraints: Vec<(usize, usize, Fx)>,
+    pub(crate) chains: Vec<Chain>,
 
-    trigger_prev: Vec<(String, bool)>, // sorted Vec acts as deterministic map
+    pub(crate) trigger_prev: Vec<(String, bool)>, // sorted Vec acts as deterministic map
 
     // Ground / impact / sticky contact tracking — reset each substep.
-    blob_ground_contacts: Vec<i32>,
-    blob_ground_contact_point: Vec<Option<FxVec2>>,
-    blob_ground_contact_normal: Vec<Option<FxVec2>>,
-    blob_impact_contact_point: Vec<Option<FxVec2>>,
-    blob_impact_contact_normal: Vec<Option<FxVec2>>,
-    blob_sticky_contact_count: Vec<i32>,
-    blob_sticky_contact_normal_sum: Vec<FxVec2>,
+    pub(crate) blob_ground_contacts: Vec<i32>,
+    pub(crate) blob_ground_contact_point: Vec<Option<FxVec2>>,
+    pub(crate) blob_ground_contact_normal: Vec<Option<FxVec2>>,
+    pub(crate) blob_impact_contact_point: Vec<Option<FxVec2>>,
+    pub(crate) blob_impact_contact_normal: Vec<Option<FxVec2>>,
+    pub(crate) blob_sticky_contact_count: Vec<i32>,
+    pub(crate) blob_sticky_contact_normal_sum: Vec<FxVec2>,
 
-    blob_gravity_override: Vec<Option<FxVec2>>,
-    blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
+    pub(crate) blob_gravity_override: Vec<Option<FxVec2>>,
+    pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
-    base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
+    pub(crate) base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
 
     pub config: WorldConfig,
     pub tick: u64,
@@ -153,8 +181,13 @@ pub struct SoftBodyWorld {
     // Pending trigger events. Drained by `take_trigger_entered/exited`
     // each frame. (TS uses callbacks; FFI layer can either poll these or
     // be given a callback later in Phase 4.)
-    pending_trigger_entered: Vec<(ShapeIdx, BlobId)>,
-    pending_trigger_exited: Vec<(ShapeIdx, BlobId)>,
+    pub(crate) pending_trigger_entered: Vec<(ShapeIdx, BlobId)>,
+    pub(crate) pending_trigger_exited: Vec<(ShapeIdx, BlobId)>,
+
+    // Crush events emitted by `step()` when a blob's hull centroid moves
+    // implausibly far in one frame, or when any hull particle ends a step
+    // out of world sanity bounds. Drained by `take_crush_events`.
+    pub(crate) pending_crush_events: Vec<BlobId>,
 }
 
 impl Default for WorldConfig {
@@ -165,12 +198,20 @@ impl Default for WorldConfig {
             gravity_scale,
             fixed_dt: FX_FRAC_1_60,
             substeps: 2,
-            collision_margin: Fx::HALF,
+            // Smaller margin → smaller visible "float" above resting
+            // surfaces (was 0.5, ~0.6 unit visible hover after
+            // resting-contact bump) and smaller no-mans-land where a
+            // blob can wedge its hull straddling a surface edge.
+            collision_margin: fx_lit(15, 100),  // 0.15
             collision_restitution: fx_lit(25, 100),
             constraint_iters: 8,
             collision_iterations: 3,
             static_restitution: Fx::ZERO,
-            static_contact_slop: Fx::from_int(4),
+            // Tighter slop band so a blob hovering 0.15 units above a
+            // surface doesn't get treated as resting from 4 units away.
+            // Still wide enough to absorb numerical jitter at typical
+            // gravity / spring-impact speeds.
+            static_contact_slop: fx_lit(15, 10),  // 1.5
             blob_blob_friction_mu: fx_lit(12, 10),
             blob_blob_friction_impulse_scale: Fx::ONE,
             static_edge_friction_mu: fx_lit(164, 100),
@@ -220,6 +261,7 @@ impl SoftBodyWorld {
             time_accum: Fx::ZERO,
             pending_trigger_entered: Vec::new(),
             pending_trigger_exited: Vec::new(),
+            pending_crush_events: Vec::new(),
         }
     }
 
@@ -291,6 +333,11 @@ pub struct AddBlobParams {
     pub sort_key: Option<String>,
     pub static_hull_indices: Vec<usize>,
     pub static_center: bool,
+    /// Lock the shape-match frame to (world_origin, identity). The whole
+    /// blob stays rooted in place without per-vertex anchors; every hull
+    /// particle remains dynamic and free to flex locally. Mirrors
+    /// `pinFrame` on the TS side. Default false.
+    pub pin_frame: bool,
 }
 
 impl SoftBodyWorld {
@@ -346,12 +393,20 @@ impl SoftBodyWorld {
                 self.springs.push(Spring { i: ia, j: ib, rest, k_base: k, damp_base: params.spring_damp });
             }
         }
-        // Radial springs
-        for i in 0..num_hull {
-            let ip = (start + 1 + i as ParticleIdx) as ParticleIdx;
-            let mut rest_r = params.center_local.sub(params.hull_rest_local[i]).length();
-            if rest_r < fx_lit(1, 1000) { rest_r = fx_lit(1, 1000); }
-            self.springs.push(Spring { i: start, j: ip, rest: rest_r, k_base: params.radial_k, damp_base: params.radial_damp });
+        // Radial springs (center ↔ hull). Skipped entirely when radial_k=0
+        // — callers (e.g. SlimeBlob with the virtual-center-pin scheme)
+        // disable these because the center particle is now derived from
+        // the hull centroid each substep, so radial-spring tension is
+        // Newton-3rd asymmetric (the reaction on the center is dropped
+        // by the pin) and acts as a net thrust on the hull. Shape-match
+        // alone is responsible for cohesion in that case.
+        if params.radial_k > Fx::ZERO {
+            for i in 0..num_hull {
+                let ip = (start + 1 + i as ParticleIdx) as ParticleIdx;
+                let mut rest_r = params.center_local.sub(params.hull_rest_local[i]).length();
+                if rest_r < fx_lit(1, 1000) { rest_r = fx_lit(1, 1000); }
+                self.springs.push(Spring { i: start, j: ip, rest: rest_r, k_base: params.radial_k, damp_base: params.radial_damp });
+            }
         }
         let spring_end = self.springs.len() as SpringIdx;
 
@@ -371,8 +426,11 @@ impl SoftBodyWorld {
             shape_match_damp: params.shape_match_damp,
             rest_local: params.hull_rest_local.clone(),
             shape_match_rest_scale: Fx::ONE,
-            use_frame_override: false,
-            frame_override: Transform2D { cos: Fx::ONE, sin: Fx::ZERO, tx: Fx::ZERO, ty: Fx::ZERO },
+            use_frame_override: params.pin_frame,
+            frame_override: Transform2D {
+                cos: Fx::ONE, sin: Fx::ZERO,
+                tx: params.world_origin.x, ty: params.world_origin.y,
+            },
             gravity_field: None,
             center_idx: start,
             inactive: false,
@@ -460,18 +518,99 @@ impl SoftBodyWorld {
         if dt < FX_FRAC_1_240 { dt = FX_FRAC_1_240; }
         if dt > FX_FRAC_1_20  { dt = FX_FRAC_1_20;  }
         self.config.fixed_dt = dt;
-        for _ in 0..self.config.substeps {
+
+        let n_sub = self.config.substeps as usize;
+        for i in 0..n_sub {
             self.substep();
+            // Consume `prev_poly` snapshots after the FIRST substep. They
+            // capture a kinematic jump between frames (e.g. spring plate
+            // firing) — a one-shot event. The CCD surface-relative sweep
+            // resolves that jump in substep 0; leaving prev_poly around
+            // for substeps 1..N would re-fire the relative sweep with
+            // the same delta and ghost-collide with a phantom edge,
+            // making the particle "stick" to fast-moving surfaces.
+            if i == 0 {
+                for s in &mut self.static_surfaces {
+                    s.prev_poly = None;
+                }
+            }
         }
-        // Consume any `prev_poly` snapshots captured by
-        // `update_static_surface` this frame — they were only meant to
-        // catch kinematic motion across the boundary between commit and
-        // the next world step. Leaving them around would turn a stale
-        // old position into a phantom collider on subsequent frames.
-        for s in &mut self.static_surfaces {
-            s.prev_poly = None;
-        }
+
+        self.detect_crush_events();
+
         self.tick += 1;
+    }
+
+    /// Flag any blob whose hull has stretched beyond a plausible
+    /// multiple of its rest extent, or whose particles have escaped
+    /// world sanity bounds. See `CRUSH_HULL_SPREAD_RATIO_SQ` /
+    /// `CRUSH_MAX_COORD` for the thresholds and rationale. Pushes the
+    /// blob_id onto `pending_crush_events`, drained by TS each frame.
+    fn detect_crush_events(&mut self) {
+        for bi in 0..self.blob_ranges.len() {
+            let r = &self.blob_ranges[bi];
+            if r.inactive || r.hull.is_empty() { continue; }
+
+            let si = r.shape_idx as usize;
+            if si >= self.shapes.len() { continue; }
+            let sh = &self.shapes[si];
+            if sh.rest_local.is_empty() { continue; }
+
+            // Rest max radius² in local coords (rest_local is centered
+            // at the blob origin). Multiply by the shape-match rest
+            // scale squared so callers that grow/shrink the blob via
+            // `set_blob_shape_match_rest_scale` aren't false-flagged.
+            let sm_scale = sh.shape_match_rest_scale;
+            let scale_sq = sm_scale * sm_scale;
+            let mut rest_max_sq = Fx::ZERO;
+            for &p in &sh.rest_local {
+                let r_sq = p.x * p.x + p.y * p.y;
+                if r_sq > rest_max_sq { rest_max_sq = r_sq; }
+            }
+            let rest_max_sq_scaled = rest_max_sq * scale_sq;
+
+            // Current max radius² from the hull centroid.
+            let hull_us: Vec<usize> = r.hull.iter().map(|&i| i as usize).collect();
+            let c = centroid_from_indices(&self.pos, &hull_us);
+            let mut cur_max_sq = Fx::ZERO;
+            let mut out_of_bounds = false;
+            for &idx in &r.hull {
+                let p = self.pos[idx as usize];
+                if p.x.abs() > CRUSH_MAX_COORD || p.y.abs() > CRUSH_MAX_COORD {
+                    out_of_bounds = true;
+                }
+                let dx = p.x - c.x;
+                let dy = p.y - c.y;
+                let r_sq = dx * dx + dy * dy;
+                if r_sq > cur_max_sq { cur_max_sq = r_sq; }
+            }
+
+            let blow_up_threshold_sq = rest_max_sq_scaled * CRUSH_HULL_SPREAD_RATIO_SQ;
+            let crushed = out_of_bounds || cur_max_sq > blow_up_threshold_sq;
+
+            if crushed {
+                let bid = bi as BlobId;
+                if !self.pending_crush_events.contains(&bid) {
+                    self.pending_crush_events.push(bid);
+                }
+                // Defense in depth: collapse the blob's particles to its
+                // centroid and zero their velocities. Even if the TS-side
+                // listener never fires (or no-ops), the constraint solver
+                // re-inflates the blob to its rest pose next frame instead
+                // of leaving an exploded mess on screen. If the crusher
+                // is still active we re-detect next frame and re-collapse
+                // — bounded oscillation, not lightyear sprawl.
+                let cx = c.x.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
+                let cy = c.y.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
+                let collapse = FxVec2::new(cx, cy);
+                let rng = self.blob_ranges[bi].clone();
+                for i in rng.start..rng.end {
+                    let u = i as usize;
+                    self.pos[u] = collapse;
+                    self.vel[u] = FxVec2::ZERO;
+                }
+            }
+        }
     }
 
     fn substep(&mut self) {
@@ -592,6 +731,39 @@ impl SoftBodyWorld {
                 }
             }
         }
+
+        // 13. Center-particle pin — the center is a virtual control
+        // point (no collision, no independent integration target). Each
+        // substep we snap it to the geometric centroid of the hull so
+        // (a) the blob silhouette stays round (asymmetric radial-spring
+        // pull from a drifting center used to make the blob go oblong
+        // under expand), and (b) the center can never be wedged inside
+        // a polygon since it's always recomputed from hull positions.
+        self.pin_blob_centers_to_hull_centroid();
+    }
+
+    fn pin_blob_centers_to_hull_centroid(&mut self) {
+        for bi in 0..self.blob_ranges.len() {
+            let r = self.blob_ranges[bi].clone();
+            if r.inactive { continue; }
+            if r.hull.is_empty() { continue; }
+            let center_idx = match self.shapes.get(r.shape_idx as usize) {
+                Some(s) => s.center_idx as usize,
+                None => continue,
+            };
+            if center_idx >= self.pos.len() { continue; }
+            let mut cx = Fx::ZERO; let mut cy = Fx::ZERO;
+            let mut vx = Fx::ZERO; let mut vy = Fx::ZERO;
+            for &hi in &r.hull {
+                let h = hi as usize;
+                cx += self.pos[h].x; cy += self.pos[h].y;
+                vx += self.vel[h].x; vy += self.vel[h].y;
+            }
+            let n = Fx::from_int(r.hull.len() as i32);
+            let inv_n = Fx::ONE / n;
+            self.pos[center_idx] = FxVec2::new(cx * inv_n, cy * inv_n);
+            self.vel[center_idx] = FxVec2::new(vx * inv_n, vy * inv_n);
+        }
     }
 
     fn apply_springs(&mut self, dt: Fx) {
@@ -708,9 +880,33 @@ impl SoftBodyWorld {
                 let a = crate::math::atan2_fx(sh.frame_override.sin, sh.frame_override.cos);
                 (c, a)
             } else {
-                let c = centroid_from_indices(&self.pos, &indices_us);
-                let a = average_angle(&sh.rest_local, &self.pos, &indices_us, c);
-                (c, a)
+                // Anchored particles (inv_mass=0) define the rest frame when
+                // present: they sit at their original rest world positions, so
+                // the best-fit rigid transform mapping rest→current for that
+                // subset is exactly the original (worldOrigin, identity). Using
+                // an unweighted centroid over ALL particles lets gravity sag
+                // the dynamic majority and drift the frame, producing a
+                // "smile" at each anchor. See the TS sibling in
+                // `softBodyWorld.ts::applyShapeMatching`.
+                let mut anchor_count: u32 = 0;
+                let mut tx = Fx::ZERO;
+                let mut ty = Fx::ZERO;
+                for k in 0..sh.indices.len() {
+                    let pi = indices_us[k];
+                    if self.inv_mass[pi] == Fx::ZERO {
+                        anchor_count += 1;
+                        tx += self.pos[pi].x - sh.rest_local[k].x;
+                        ty += self.pos[pi].y - sh.rest_local[k].y;
+                    }
+                }
+                if anchor_count >= 1 {
+                    let inv_n = Fx::ONE / Fx::from_int(anchor_count as i32);
+                    (FxVec2::new(tx * inv_n, ty * inv_n), Fx::ZERO)
+                } else {
+                    let c = centroid_from_indices(&self.pos, &indices_us);
+                    let a = average_angle(&sh.rest_local, &self.pos, &indices_us, c);
+                    (c, a)
+                }
             };
             let frame = frame_transform(center, angle);
             let sm_scale = sh.shape_match_rest_scale.max(fx_lit(5, 100));
@@ -837,17 +1033,23 @@ impl SoftBodyWorld {
         let half = Fx::HALF;
         // A's hull into B
         for k in 0..ra.hull.len() {
-            self.resolve_point_in_shape(ra.hull[k] as usize, &poly_b, &rb.hull, half, dt, apply_velocity_impulses);
+            self.resolve_point_in_shape(ra.hull[k] as usize, a_id, &poly_b, &rb.hull, half, dt, apply_velocity_impulses);
         }
         // B's hull into A
         for k in 0..rb.hull.len() {
-            self.resolve_point_in_shape(rb.hull[k] as usize, &poly_a, &ra.hull, half, dt, apply_velocity_impulses);
+            self.resolve_point_in_shape(rb.hull[k] as usize, b_id, &poly_a, &ra.hull, half, dt, apply_velocity_impulses);
         }
     }
 
     fn resolve_point_in_shape(
         &mut self,
         pi: usize,
+        // Blob owning `pi` — needed so ground/impact contact gets attributed
+        // to the right blob when a hull vertex of one blob penetrates another.
+        // Without this, `isGrounded()` returns false when standing on a
+        // softbody platform (which goes through this blob-vs-blob path
+        // instead of `collide_blob_with_poly`), making input feel airborne.
+        owner_blob_id: usize,
         poly_world: &[FxVec2],
         poly_indices: &[ParticleIdx],
         friction_scale: Fx,
@@ -856,6 +1058,14 @@ impl SoftBodyWorld {
     ) {
         let p = self.pos[pi];
         if !is_point_in_polygon(p, poly_world) { return; }
+
+        // An anchored query particle can't move, and resolving "the polygon
+        // around it" by displacing the dynamic edge verts inward yanks the
+        // containing blob's hull around for no good reason — every iter
+        // per substep. Skip entirely: the A-into-B pass already pushed any
+        // dynamic verts of the *other* blob out of this one, which is the
+        // physically meaningful resolution.
+        if self.inv_mass[pi].is_zero() { return; }
 
         let info = closest_point_on_polygon_boundary(p, poly_world);
         let n = info.normal.neg(); // flip: interior → push outward
@@ -867,8 +1077,19 @@ impl SoftBodyWorld {
         let ib0 = poly_indices[edge_i] as usize;
         let ib1 = poly_indices[(edge_i + 1) % poly_indices.len()] as usize;
 
-        let mut pen = p.sub(closest).dot(n);
-        if pen <= Fx::ZERO { pen = self.config.collision_margin; }
+        // Use the actual penetration depth = |p - closest|. The dot product
+        // against the outward normal `n` is always ≤ 0 here (we're inside
+        // the polygon by the guard above, and `closest_point_on_polygon_boundary`
+        // returns a normal pre-oriented toward the particle — flipping it
+        // makes the dot negative). The old `pen = dot, then clamp to
+        // margin` path under-pushed deep penetrations and let particles
+        // stay wedged.
+        let pen_actual = p.sub(closest).length();
+        let pen = if pen_actual > self.config.collision_margin {
+            pen_actual
+        } else {
+            self.config.collision_margin
+        };
 
         let inv_a = self.inv_mass[pi];
         let inv_b = self.inv_mass[ib0];
@@ -876,7 +1097,35 @@ impl SoftBodyWorld {
         let w_sum = inv_a + inv_b * wb * wb + inv_c * wc * wc;
         if w_sum < Fx::from_raw(1 << 6) { return; } // ~1e-8
 
-        let corr = pen / w_sum;
+        // Ground/impact contact tracking — mirrors `collide_blob_with_poly`
+        // so a blob standing on a softbody platform (which goes through this
+        // path instead of the static-poly path) registers as grounded.
+        // Without this, `isGrounded()` returns false on softbody platforms
+        // and the player-input controller treats the blob as airborne
+        // (reduced lateral authority, gravity dominating) — feels slow.
+        let neg_three_tenths = Fx::from_raw((-3i64 * (1i64 << 32)) / 10);
+        if n.y < neg_three_tenths {
+            self.blob_ground_contacts[owner_blob_id] += 1;
+            let existing = self.blob_ground_contact_normal[owner_blob_id];
+            if existing.map_or(true, |e| n.y < e.y) {
+                self.blob_ground_contact_point[owner_blob_id]  = Some(closest);
+                self.blob_ground_contact_normal[owner_blob_id] = Some(n);
+            }
+        }
+        if self.blob_impact_contact_point[owner_blob_id].is_none() {
+            self.blob_impact_contact_point[owner_blob_id]  = Some(closest);
+            self.blob_impact_contact_normal[owner_blob_id] = Some(n);
+        }
+
+        // Push by pen + margin (not just pen) so the query particle clears
+        // the surface with breathing room — matching `collide_blob_with_poly`'s
+        // `push_dist = pen + collision_margin`. Without the margin, the
+        // particle ends up exactly on the surface and gravity dips it back
+        // inside every substep; the resulting per-iter micro-correction
+        // loop is what made lateral movement on softbody platforms feel
+        // sticky compared to static polygons.
+        let push_dist = pen + self.config.collision_margin;
+        let corr = push_dist / w_sum;
         self.pos[pi]  = self.pos[pi].add(n.scale(corr * inv_a));
         self.pos[ib0] = self.pos[ib0].sub(n.scale(corr * inv_b * wb));
         self.pos[ib1] = self.pos[ib1].sub(n.scale(corr * inv_c * wc));
@@ -960,8 +1209,18 @@ impl SoftBodyWorld {
 
             if inside {
                 n = n_base.neg();
-                let mut pen = p.sub(closest).dot(n);
-                if pen <= Fx::ZERO { pen = self.config.collision_margin; }
+                // Use the actual penetration depth, not the dot product
+                // against the outward normal. `closest_point_on_polygon_boundary`
+                // pre-orients its normal toward the particle, so for an
+                // inside particle that normal points inward; flipping it
+                // (n = n_base.neg()) makes (p - closest) · n always
+                // negative, which used to clamp pen to collision_margin.
+                // That under-pushed deep penetrations by a lot — a blob
+                // wedged 10 units into a corner only got margin-sized
+                // shoves per iter and stayed stuck. dist_b is the true
+                // depth (= |p - closest|) since the closest point sits
+                // on the boundary.
+                let pen = dist_b.max(self.config.collision_margin);
                 push_dist = pen + self.config.collision_margin;
                 use_static = poly_is_static;
             } else if poly_is_static && dist_b <= self.config.static_contact_slop {
@@ -1069,33 +1328,64 @@ impl SoftBodyWorld {
 
     fn sweep_static_ccd(&mut self, prev_pos: &[FxVec2]) {
         let surfaces = self.static_surfaces.clone(); // borrow gymnastics
+
+        // Precompute each surface's translation since the last frame
+        // (curr_poly[0] - prev_poly[0], assuming rigid translation —
+        // springs and Action-moved platforms qualify). Used for the
+        // surface-relative sweep below: in the surface's frame the
+        // edge is stationary and the particle's effective path is
+        // `old_p → new_p - surf_delta`, which catches the case where
+        // a fast-moving plate sweeps past a roughly-stationary particle
+        // (path too short to intersect either poly snapshot in the
+        // world frame). Stationary surfaces produce zero delta and the
+        // pass is skipped.
+        let surf_deltas: Vec<FxVec2> = surfaces
+            .iter()
+            .map(|s| match s.prev_poly.as_ref() {
+                Some(prev) if !prev.is_empty() && !s.poly.is_empty() => FxVec2::new(
+                    s.poly[0].x - prev[0].x,
+                    s.poly[0].y - prev[0].y,
+                ),
+                _ => FxVec2::ZERO,
+            })
+            .collect();
+        let motion_eps_sq = Fx::from_raw(1 << 18); // ~6e-5
+
         for bi in 0..self.blob_ranges.len() {
             let r = self.blob_ranges[bi].clone();
             if r.inactive { continue; }
-            let center_idx = self.shapes.get(r.shape_idx as usize).map(|s| s.center_idx);
-            let mut to_check: Vec<ParticleIdx> = r.hull.clone();
-            if let Some(ci) = center_idx {
-                if (ci as usize) < self.pos.len() { to_check.push(ci); }
-            }
-            for &pidx in &to_check {
+            // Center particle is virtual — pinned to hull centroid each
+            // substep by `pin_blob_centers_to_hull_centroid`, no collision
+            // surface to react against. Excluding it from CCD prevents the
+            // "center wedges in a fast rotating platform" failure mode.
+            let to_check: &[ParticleIdx] = &r.hull;
+            for &pidx in to_check {
                 let pi = pidx as usize;
                 let old_p = prev_pos[pi];
                 let new_p = self.pos[pi];
                 let dx = new_p.x - old_p.x;
                 let dy = new_p.y - old_p.y;
-                if (dx * dx + dy * dy) < Fx::from_raw(1 << 18) { continue; } // ~6e-5
+                let particle_moved_sq = dx * dx + dy * dy;
 
                 let mut best_t: Option<Fx> = None;
                 let mut best_point = FxVec2::ZERO;
                 let mut best_normal = FxVec2::ZERO;
                 let mut best_surf_vel: Option<FxVec2> = None;
 
-                for surface in &surfaces {
-                    // Sweep against BOTH the surface's current poly AND its
-                    // poly at the start of the frame. A spring pad firing
-                    // (poly jumps top y=120→y=80 between frames) sweeps the
-                    // particle's path against the OLD edge so kinematic
-                    // motion through stationary particles is caught.
+                for (si, surface) in surfaces.iter().enumerate() {
+                    let surf_delta = surf_deltas[si];
+                    let surf_moved_sq = surf_delta.x * surf_delta.x + surf_delta.y * surf_delta.y;
+
+                    // Skip this surface entirely when neither it nor the
+                    // particle moved meaningfully — keeps the per-particle
+                    // perf the same as before for the common case of
+                    // stationary particles on stationary geometry.
+                    if particle_moved_sq < motion_eps_sq && surf_moved_sq < motion_eps_sq {
+                        continue;
+                    }
+
+                    // World-frame sweep against current + previous poly
+                    // (catches a particle moving into either snapshot).
                     let polys: [&[FxVec2]; 2] = [
                         surface.poly.as_slice(),
                         surface.prev_poly.as_deref().unwrap_or(&[]),
@@ -1108,7 +1398,6 @@ impl SoftBodyWorld {
                             let b = poly[(e + 1) % pn];
                             let Some((t, hit_point)) = segment_intersection_t(old_p, new_p, a, b) else { continue };
                             if best_t.map_or(false, |bt| t >= bt) { continue; }
-                            // Outward edge normal pointing toward old_p (the side we came from).
                             let edge = b.sub(a);
                             let elen = edge.length();
                             if elen < Fx::from_raw(1 << 4) { continue; }
@@ -1121,6 +1410,138 @@ impl SoftBodyWorld {
                             best_point = hit_point;
                             best_normal = FxVec2::new(nx, ny);
                             best_surf_vel = surface.velocity;
+                        }
+                    }
+
+                    // Multi-snapshot sweep — catches rotating (and other
+                    // non-translation) kinematic motion that the linear
+                    // surface-relative sweep below can't handle. We per-
+                    // vertex lerp `prev_poly → poly` at a few intermediate
+                    // τ values, lerp the particle to the same τ, and test
+                    // `is_point_in_polygon`. If the particle is inside the
+                    // surface's interpolated pose, the edge swept past
+                    // (or wrapped around) the particle even though the
+                    // particle's path didn't cross either snapshot. Each
+                    // vertex follows its own linear chord between prev
+                    // and curr, so rotation + translation are both
+                    // handled with the same loop.
+                    let prev_poly = surface.prev_poly.as_deref().unwrap_or(&[]);
+                    if prev_poly.len() >= 3 && prev_poly.len() == surface.poly.len() {
+                        // Adaptive sample count: pick N to keep the chord
+                        // each vertex moves between samples below
+                        // TARGET_CHORD_SQ. A long rotating arm's tip can
+                        // travel 50+ units/frame and skip a stationary
+                        // particle between samples — bumping N as a
+                        // function of max per-vertex displacement catches
+                        // those. Clamped so a slow nudge doesn't spin up
+                        // 20 snapshots and a runaway speed doesn't tank
+                        // perf.
+                        let target_chord_sq = Fx::from_int(64); // ~8 units between consecutive snapshots
+                        let mut max_disp_sq = Fx::ZERO;
+                        for j in 0..prev_poly.len() {
+                            let dxv = surface.poly[j].x - prev_poly[j].x;
+                            let dyv = surface.poly[j].y - prev_poly[j].y;
+                            let d = dxv * dxv + dyv * dyv;
+                            if d > max_disp_sq { max_disp_sq = d; }
+                        }
+                        // N such that (max_disp / (N+1))² ≤ target_chord_sq
+                        // → (N+1)² ≥ max_disp_sq / target_chord_sq.
+                        // Approximate sqrt by iterating squares; cheap up to N=12.
+                        let mut n_interior: usize = 3;
+                        while n_interior < 12 {
+                            let n_plus_1 = Fx::from_int((n_interior + 1) as i32);
+                            if n_plus_1 * n_plus_1 * target_chord_sq >= max_disp_sq {
+                                break;
+                            }
+                            n_interior += 1;
+                        }
+                        for k in 1..=n_interior {
+                            let tau = Fx::from_int(k as i32) / Fx::from_int((n_interior + 1) as i32);
+                            // Particle at time τ along its linear path.
+                            let mid_p = FxVec2::new(
+                                old_p.x + (new_p.x - old_p.x) * tau,
+                                old_p.y + (new_p.y - old_p.y) * tau,
+                            );
+                            // Surface pose at time τ — per-vertex lerp.
+                            let n_verts = prev_poly.len();
+                            let mut snap: Vec<FxVec2> = Vec::with_capacity(n_verts);
+                            for j in 0..n_verts {
+                                snap.push(FxVec2::new(
+                                    prev_poly[j].x + (surface.poly[j].x - prev_poly[j].x) * tau,
+                                    prev_poly[j].y + (surface.poly[j].y - prev_poly[j].y) * tau,
+                                ));
+                            }
+                            if !is_point_in_polygon(mid_p, &snap) { continue; }
+                            if best_t.map_or(false, |bt| tau >= bt) { continue; }
+
+                            // Hit detected. Project to the surface's FINAL
+                            // (t=1) pose so the post-resolution position
+                            // is consistent with where the surface ends
+                            // the substep — same trick as the linear
+                            // surface-relative sweep for translation.
+                            let info_final = closest_point_on_polygon_boundary(mid_p, &surface.poly);
+                            // Orient outward normal toward old_p (the
+                            // side the particle came from).
+                            let edge = info_final.b.sub(info_final.a);
+                            let elen = edge.length();
+                            if elen < Fx::from_raw(1 << 4) { continue; }
+                            let inv = Fx::ONE / elen;
+                            let mut nx = -edge.y * inv;
+                            let mut ny = edge.x * inv;
+                            let to_old = (old_p.x - info_final.a.x) * nx
+                                       + (old_p.y - info_final.a.y) * ny;
+                            if to_old < Fx::ZERO { nx = -nx; ny = -ny; }
+                            best_t = Some(tau);
+                            best_point = info_final.closest;
+                            best_normal = FxVec2::new(nx, ny);
+                            best_surf_vel = surface.velocity;
+                        }
+                    }
+
+                    // Surface-relative sweep: in the surface's local frame
+                    // the edge is stationary and the particle's effective
+                    // path is `old_p → new_p - surf_delta`. Catches a
+                    // moving edge sweeping past a particle that didn't
+                    // move enough in the world frame to cross either
+                    // poly snapshot (the spring-fires-past-resting-blob
+                    // case). Only meaningful when the surface moved.
+                    if surf_moved_sq >= motion_eps_sq {
+                        let prev_poly = surface.prev_poly.as_deref().unwrap_or(&[]);
+                        let pn = prev_poly.len();
+                        if pn >= 2 {
+                            let adj_new_p = FxVec2::new(new_p.x - surf_delta.x, new_p.y - surf_delta.y);
+                            for e in 0..pn {
+                                let a = prev_poly[e];
+                                let b = prev_poly[(e + 1) % pn];
+                                let Some((t, hit_local)) = segment_intersection_t(old_p, adj_new_p, a, b) else { continue };
+                                if best_t.map_or(false, |bt| t >= bt) { continue; }
+                                let edge = b.sub(a);
+                                let elen = edge.length();
+                                if elen < Fx::from_raw(1 << 4) { continue; }
+                                let inv = Fx::ONE / elen;
+                                let mut nx = -edge.y * inv;
+                                let mut ny = edge.x * inv;
+                                let to_old = (old_p.x - a.x) * nx + (old_p.y - a.y) * ny;
+                                if to_old < Fx::ZERO { nx = -nx; ny = -ny; }
+                                best_t = Some(t);
+                                // Place the corrected position at the
+                                // surface's FINAL (t=1) location, not its
+                                // position at collision time t. The
+                                // surface keeps translating after the
+                                // collision; at very high speeds the
+                                // remaining (1-t)*surf_delta is many
+                                // particle radii and would leave the
+                                // player engulfed below the plate's
+                                // final position. Riding the contact
+                                // along with the surface keeps the
+                                // particle above it regardless of speed.
+                                best_point = FxVec2::new(
+                                    hit_local.x + surf_delta.x,
+                                    hit_local.y + surf_delta.y,
+                                );
+                                best_normal = FxVec2::new(nx, ny);
+                                best_surf_vel = surface.velocity;
+                            }
                         }
                     }
                 }
@@ -1393,6 +1814,9 @@ impl SoftBodyWorld {
     }
     pub fn take_trigger_exited(&mut self) -> Vec<(ShapeIdx, BlobId)> {
         core::mem::take(&mut self.pending_trigger_exited)
+    }
+    pub fn take_crush_events(&mut self) -> Vec<BlobId> {
+        core::mem::take(&mut self.pending_crush_events)
     }
 }
 
@@ -1828,6 +2252,14 @@ impl SoftBodyWorld {
         self.home_anchors.push(HomeAnchor { idx, home, k, damp });
     }
 
+    /// Append a hard max-distance constraint between two particles. The
+    /// step-7 constraint pass iterates these every substep alongside
+    /// welds and anchors, so this is independent of the chain solver
+    /// and works regardless of mass ratios or segment count.
+    pub fn add_distance_max(&mut self, i: ParticleIdx, j: ParticleIdx, max: Fx) {
+        self.distance_max_constraints.push((i as usize, j as usize, max));
+    }
+
     // ---- static-surface snapshot for renderer ----
 
     /// Flat description of every static surface: (material_id, point_count,
@@ -1942,6 +2374,7 @@ mod tests {
             sort_key: None,
             static_hull_indices: Vec::new(),
             static_center: false,
+            pin_frame: false,
         });
 
         let dt = Fx::ONE / Fx::from_int(60);
@@ -1986,6 +2419,7 @@ mod tests {
             sort_key: Some(sort_key.into()),
             static_hull_indices: Vec::new(),
             static_center: false,
+            pin_frame: false,
         })
     }
 
@@ -2143,6 +2577,84 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_round_trip_reproduces_state() {
+        // Set up a non-trivial scene (gravity, floor, two blobs, head-on
+        // collision so all the contact-tracking arrays get populated).
+        // Snapshot at tick 30, then continue to tick 60 on world A.
+        // Separately: snapshot world B at the same point, restore from
+        // A's snapshot, step to 60. Both worlds must agree byte-for-byte.
+        fn build() -> SoftBodyWorld {
+            let mut cfg = WorldConfig::default();
+            cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+            cfg.substeps = 4;
+            let mut w = SoftBodyWorld::new(cfg, 42);
+            w.register_static_polygon(
+                vec![
+                    FxVec2::new(fx(-500), fx(200)),
+                    FxVec2::new(fx( 500), fx(200)),
+                    FxVec2::new(fx( 500), fx(260)),
+                    FxVec2::new(fx(-500), fx(260)),
+                ],
+                SurfaceMaterial::Default, None, None, None,
+            );
+            let a = standard_square_blob(&mut w, FxVec2::new(fx(-50), fx(0)), "a");
+            let _b = standard_square_blob(&mut w, FxVec2::new(fx( 50), fx(0)), "b");
+            w.apply_blob_linear_velocity_delta(a.blob_id, FxVec2::new(fx(800), Fx::ZERO));
+            w
+        }
+
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut wa = build();
+        for _ in 0..30 { wa.step(dt); }
+
+        // Snapshot at tick 30.
+        let snap = wa.serialize_state();
+
+        // Continue wa to tick 60.
+        for _ in 0..30 { wa.step(dt); }
+
+        // Build a fresh world, restore from snap, step the same 30 ticks.
+        let mut wb = build();
+        wb.restore_state(&snap).expect("restore should succeed");
+        for _ in 0..30 { wb.step(dt); }
+
+        // Byte-equal pos + vel + tick.
+        assert_eq!(wa.tick, wb.tick);
+        for i in 0..wa.pos.len() {
+            assert_eq!(wa.pos[i], wb.pos[i], "pos[{}] diverged after restore+replay", i);
+            assert_eq!(wa.vel[i], wb.vel[i], "vel[{}] diverged after restore+replay", i);
+        }
+    }
+
+    #[test]
+    fn snapshot_restore_after_mutation_recovers_original() {
+        // Take a snapshot, mutate the world arbitrarily, restore, assert
+        // state matches the original (positions, mass scales, ...).
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::ZERO;
+        let mut w = SoftBodyWorld::new(cfg, 7);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "x");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..10 { w.step(dt); }
+
+        let snap = w.serialize_state();
+        let original_pos = w.pos.clone();
+        let original_tick = w.tick;
+
+        // Mutate: apply a velocity delta, step a bunch, scale mass.
+        w.apply_blob_linear_velocity_delta(res.blob_id, FxVec2::new(fx(500), Fx::ZERO));
+        for _ in 0..30 { w.step(dt); }
+        w.set_blob_mass_scale(res.blob_id, fx(3));
+
+        // Now restore.
+        w.restore_state(&snap).expect("restore");
+        assert_eq!(w.tick, original_tick);
+        for i in 0..w.pos.len() {
+            assert_eq!(w.pos[i], original_pos[i], "pos[{}] not restored", i);
+        }
+    }
+
+    #[test]
     fn two_worlds_same_seed_byte_identical_state() {
         // Run the same scenario in two fresh worlds; positions and velocities
         // after N substeps must be byte-equal. This is the Phase 2.6 exit
@@ -2201,6 +2713,7 @@ mod tests {
             sort_key: Some("p0".into()),
             static_hull_indices: Vec::new(),
             static_center: false,
+            pin_frame: false,
         });
         assert_eq!(res.blob_id, 0);
         assert_eq!(res.center_idx, 0);
@@ -2211,5 +2724,174 @@ mod tests {
         assert_eq!(w.pos[0], FxVec2::new(fx(100), fx(200)));
         // 4 edge + 4 shear + 4 radial = 12 springs
         assert_eq!(w.springs.len(), 12);
+    }
+
+    /// Repro of the "blob spreads out over the whole screen" crush bug.
+    /// A blob is sandwiched between a fixed floor and a ceiling that
+    /// descends one unit per frame until they overlap, then keeps
+    /// descending. We log per-step diagnostics so we can see what the
+    /// blob actually does — centroid travel, hull bbox spread, max
+    /// distance from centroid, max particle coord, and the contents of
+    /// `pending_crush_events`. Goal: identify the symptom signature so
+    /// the production detector matches it.
+    #[test]
+    fn crush_repro_logs_blob_state() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+        cfg.substeps = 2;
+        let mut w = SoftBodyWorld::new(cfg, 1);
+
+        // Floor at y = 100 (top edge), 40 tall.
+        w.register_static_polygon(
+            vec![
+                FxVec2::new(fx(-500), fx(100)),
+                FxVec2::new(fx( 500), fx(100)),
+                FxVec2::new(fx( 500), fx(140)),
+                FxVec2::new(fx(-500), fx(140)),
+            ],
+            SurfaceMaterial::Default, None, None, None,
+        );
+        // Ceiling: bottom edge initially at y = -10 (60 units above floor
+        // top at y=100, blob is 40 tall and centered at y=40).
+        let ceiling_idx = w.register_static_polygon(
+            vec![
+                FxVec2::new(fx(-500), fx(-50)),
+                FxVec2::new(fx( 500), fx(-50)),
+                FxVec2::new(fx( 500), fx(-10)),
+                FxVec2::new(fx(-500), fx(-10)),
+            ],
+            SurfaceMaterial::Default, None, None, None,
+        );
+
+        // Standard 40x40 blob centered at (0, 40).
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(40)), "victim");
+        let center_idx = res.center_idx as usize;
+        let hull: Vec<usize> = res.hull_indices.iter().map(|&i| i as usize).collect();
+
+        let dt = Fx::ONE / Fx::from_int(60);
+
+        // Let it settle for a few frames so it's resting on the floor.
+        for _ in 0..10 { w.step(dt); }
+        eprintln!("=== settled, beginning crush ===");
+        eprintln!("settled center: ({}, {})", w.pos[center_idx].x.to_f64(), w.pos[center_idx].y.to_f64());
+
+        // PIXELS_PER_FRAME — how fast the ceiling descends. 1 px/frame is
+        // a slow squeeze and produces a mild explosion (bbox grows ~2.5×
+        // rest); 4-8 px/frame mimics a real spring plate or moving
+        // platform and produces the dramatic full-screen explosion the
+        // game shows.
+        const PIXELS_PER_FRAME: i32 = 4;
+        // Now slam the ceiling down PIXELS_PER_FRAME unit(s) per frame for 200 frames.
+        // Floor-top is y=100, blob is ~40 tall resting on it so its top
+        // hull is at ~y=60. Ceiling starts with bottom at y=-10, descends
+        // at 1 unit/frame. They first touch around frame 70, and from
+        // frame 110 onward the ceiling has crossed the floor by 40+
+        // units — the blob has no escape route.
+        let mut prev_centroid = centroid_from_indices(&w.pos, &hull);
+        let mut max_centroid_jump_sq = Fx::ZERO;
+        let mut max_spread_w = Fx::ZERO;
+        let mut max_spread_h = Fx::ZERO;
+        let mut max_coord = Fx::ZERO;
+        let mut max_radius_from_centroid_sq = Fx::ZERO;
+        let mut first_crush_frame: Option<i32> = None;
+
+        for frame in 0..200 {
+            // Move ceiling down 1 unit/frame. Velocity = 60 units/sec.
+            let descent = (frame + 1) * PIXELS_PER_FRAME;
+            let new_top    = fx(-50 + descent);
+            let new_bottom = fx(-10 + descent);
+            w.update_static_surface(
+                ceiling_idx,
+                vec![
+                    FxVec2::new(fx(-500), new_top),
+                    FxVec2::new(fx( 500), new_top),
+                    FxVec2::new(fx( 500), new_bottom),
+                    FxVec2::new(fx(-500), new_bottom),
+                ],
+                Some(FxVec2::new(Fx::ZERO, fx(60 * PIXELS_PER_FRAME))),
+            );
+            w.step(dt);
+
+            // Per-frame diagnostics.
+            let c = centroid_from_indices(&w.pos, &hull);
+            let dx = c.x - prev_centroid.x;
+            let dy = c.y - prev_centroid.y;
+            let jump_sq = dx*dx + dy*dy;
+            if jump_sq > max_centroid_jump_sq { max_centroid_jump_sq = jump_sq; }
+            prev_centroid = c;
+
+            // Hull bbox.
+            let mut min_x = w.pos[hull[0]].x;
+            let mut max_x = min_x;
+            let mut min_y = w.pos[hull[0]].y;
+            let mut max_y = min_y;
+            let mut blob_max_coord = Fx::ZERO;
+            let mut max_r_sq = Fx::ZERO;
+            for &h in &hull {
+                let p = w.pos[h];
+                if p.x < min_x { min_x = p.x; }
+                if p.x > max_x { max_x = p.x; }
+                if p.y < min_y { min_y = p.y; }
+                if p.y > max_y { max_y = p.y; }
+                let ax = p.x.abs();
+                let ay = p.y.abs();
+                if ax > blob_max_coord { blob_max_coord = ax; }
+                if ay > blob_max_coord { blob_max_coord = ay; }
+                let rx = p.x - c.x;
+                let ry = p.y - c.y;
+                let r_sq = rx*rx + ry*ry;
+                if r_sq > max_r_sq { max_r_sq = r_sq; }
+            }
+            let spread_w = max_x - min_x;
+            let spread_h = max_y - min_y;
+            if spread_w > max_spread_w { max_spread_w = spread_w; }
+            if spread_h > max_spread_h { max_spread_h = spread_h; }
+            if blob_max_coord > max_coord { max_coord = blob_max_coord; }
+            if max_r_sq > max_radius_from_centroid_sq { max_radius_from_centroid_sq = max_r_sq; }
+
+            let crush = w.take_crush_events();
+            if !crush.is_empty() && first_crush_frame.is_none() {
+                first_crush_frame = Some(frame);
+            }
+
+            // Log every frame in the danger zone (and a few before/after).
+            // Always log around the impact frame and every 10 elsewhere.
+            let impact = 60 / PIXELS_PER_FRAME;
+            if (frame >= impact - 5 && frame <= impact + 30) || frame % 10 == 0 {
+                eprintln!(
+                    "frame {:3}: c=({:8.2},{:8.2}) jump={:7.2} bbox=({:7.2}x{:7.2}) maxR={:7.2} maxCoord={:9.2} crushFlagged={}",
+                    frame,
+                    c.x.to_f64(), c.y.to_f64(),
+                    crate::math::sqrt_fx(jump_sq).to_f64(),
+                    spread_w.to_f64(), spread_h.to_f64(),
+                    crate::math::sqrt_fx(max_r_sq).to_f64(),
+                    blob_max_coord.to_f64(),
+                    !crush.is_empty(),
+                );
+            }
+        }
+
+        eprintln!("=== summary ===");
+        eprintln!("max centroid jump   = {:.2}", crate::math::sqrt_fx(max_centroid_jump_sq).to_f64());
+        eprintln!("max bbox width      = {:.2}", max_spread_w.to_f64());
+        eprintln!("max bbox height     = {:.2}", max_spread_h.to_f64());
+        eprintln!("max radius from c   = {:.2}", crate::math::sqrt_fx(max_radius_from_centroid_sq).to_f64());
+        eprintln!("max |coord|         = {:.2}", max_coord.to_f64());
+        eprintln!("first crush frame   = {:?}", first_crush_frame);
+        // Rest-length of the 40x40 hull is 40 (edge) and ~56.6 (diagonal).
+        // A "healthy" blob's max radius from centroid sits near ~28 (half
+        // diagonal). Anything dramatically larger means the blob exploded.
+
+        // Regression assertion: at 4 px/frame ceiling descent, the
+        // physics solver loses control on frame 27 (impact at ~frame
+        // 17, then ~10 frames of forced compression). The detector must
+        // catch the explosion within the first 35 squeeze frames — past
+        // that we're failing to protect the player.
+        let first = first_crush_frame.expect("crush detector failed to flag any frame");
+        assert!(
+            first <= 35,
+            "crush detection too late: first flagged frame = {} (expected <= 35)",
+            first,
+        );
     }
 }

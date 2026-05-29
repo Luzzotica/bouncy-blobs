@@ -25,6 +25,62 @@ export const FIXED_DT = 1 / 60;
  * was backgrounded for minutes. Frames past this just get dropped on the floor. */
 const MAX_STEPS_PER_FRAME = 5;
 
+// ---------------------------------------------------------------------------
+// Frame-timing profiler.
+//
+// Each RAF appends a {frameMs, logicMs, renderMs, logicSteps, ts} entry to a
+// ring buffer (capped at PROFILE_RING_SIZE). `__bbDebug.getFrameProfile()`
+// returns the buffer for inspection. Used to pinpoint per-frame cost when
+// framerate drops without an obvious culprit.
+// ---------------------------------------------------------------------------
+
+const PROFILE_RING_SIZE = 600; // ~10s @ 60Hz
+
+export interface FrameSample {
+  ts: number;       // performance.now() at RAF entry
+  frameMs: number;  // wall-clock since last RAF
+  logicMs: number;  // sum of onLogic invocations this RAF
+  renderMs: number; // onRender duration
+  logicSteps: number; // count of onLogic calls this RAF (0 if gated)
+  /** Optional per-phase timings populated by callers via
+   *  `recordPhaseTime`. Keyed by phase name (e.g. 'worldStep',
+   *  'managers', 'camera'). Captures sum across all logic steps in the
+   *  RAF. Use to identify which sub-phase dominates a slow tick. */
+  phases?: Record<string, number>;
+}
+
+/** Accumulator shared between phase-time recorders and the GameLoop's
+ *  RAF tick. Cleared at the start of every RAF; folded into the next
+ *  FrameSample at the end. Avoids passing a "current frame" handle into
+ *  every consumer. */
+const phaseAccum: Record<string, number> = {};
+export function recordPhaseTime(phase: string, ms: number): void {
+  phaseAccum[phase] = (phaseAccum[phase] ?? 0) + ms;
+}
+function takePhaseAccum(): Record<string, number> | undefined {
+  const keys = Object.keys(phaseAccum);
+  if (keys.length === 0) return undefined;
+  const out: Record<string, number> = {};
+  for (const k of keys) {
+    out[k] = phaseAccum[k];
+    delete phaseAccum[k];
+  }
+  return out;
+}
+
+const frameProfileRing: FrameSample[] = [];
+
+/** Module-level accessor — wired into the debug bridge so the playwright
+ *  diagnostic harness can pull samples without coupling to a specific
+ *  GameLoop instance. */
+export function getFrameProfile(): FrameSample[] {
+  return frameProfileRing.slice();
+}
+
+export function resetFrameProfile(): void {
+  frameProfileRing.length = 0;
+}
+
 export interface GameLoopCallbacks {
   /** Runs N times per RAF (0 ≤ N ≤ MAX_STEPS_PER_FRAME). Always invoked with
    * `FIXED_DT`. Mutates simulation state.
@@ -79,30 +135,33 @@ export class GameLoop {
     // Cap the real elapsed at ~250 ms so a backgrounded tab doesn't try to
     // burn the cpu catching up. Anything past that just gets discarded.
     const real = Math.min((now - this.lastTime) / 1000, 0.25);
+    const frameMs = (now - this.lastTime);
     this.lastTime = now;
     this.accumulator += real;
 
+    const logicStart = performance.now();
     let steps = 0;
     let gated = false;
     while (this.accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
       const ran = this.onLogic(FIXED_DT);
       if (ran === false) {
-        // Gated — sim doesn't advance this frame. Leave accumulator full
-        // so the next RAF tries again. Common case: lockstep client
-        // waiting for inputs that haven't arrived yet.
         gated = true;
         break;
       }
       this.accumulator -= FIXED_DT;
       steps += 1;
     }
-    // Spiral-of-death prevention: only drop overflow when we actually
-    // tried and couldn't keep up — never when the gate was blocking.
     if (!gated && steps === MAX_STEPS_PER_FRAME && this.accumulator >= FIXED_DT) {
       this.accumulator = 0;
     }
+    const logicMs = performance.now() - logicStart;
 
+    const renderStart = performance.now();
     this.onRender?.(this.accumulator / FIXED_DT);
+    const renderMs = performance.now() - renderStart;
+
+    frameProfileRing.push({ ts: now, frameMs, logicMs, renderMs, logicSteps: steps, phases: takePhaseAccum() });
+    if (frameProfileRing.length > PROFILE_RING_SIZE) frameProfileRing.shift();
 
     this.rafId = requestAnimationFrame(this.tick);
   };

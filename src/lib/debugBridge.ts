@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { BouncyBlobsGame } from "../game/bouncyBlobsGame";
+import { getFrameProfile, resetFrameProfile, type FrameSample } from "../game/gameLoop";
 
 interface DebugBridge {
   /** Returns the latest installed game (host or guest) or null if none. */
@@ -38,10 +39,39 @@ interface DebugBridge {
    *  agree on every bit of physics state. Used by Playwright to validate
    *  cross-context determinism and by netcode to detect desyncs. */
   getStateHash: () => string | null;
+  /** Rollback netcode stats (guest only, prediction mode on). Returns
+   *  null if rollback isn't enabled. */
+  /** Returns the recent frame samples captured by `GameLoop`. Each sample
+   *  carries timestamp + frame/logic/render millisecond costs. Used by
+   *  the playwright diagnostic harness. */
+  getFrameProfile: () => FrameSample[];
+  /** Drops the in-memory frame samples. Used at the start of a profiling
+   *  session so the ring captures only the period of interest. */
+  resetFrameProfile: () => void;
+  getRollbackStats: () => {
+    rollbacksApplied: number;
+    lastDepth: number;
+    smoothingActive: number;
+    ringInvalidations: number;
+    failedRestores: number;
+    avgSnapshotMs: number;
+    avgCheapTickMs: number;
+    avgReconcileMs: number;
+  } | null;
 }
 
 let netDiagAccessor: (() => { bufferSize: number; latestHostTick: number; gap: number } | null) | null = null;
 let snapsAccessor: (() => Array<{ tick: number; playerId: string; dist: number; dx: number; dy: number; at: number }>) | null = null;
+let rollbackStatsAccessor: (() => {
+  rollbacksApplied: number;
+  lastDepth: number;
+  smoothingActive: number;
+  ringInvalidations: number;
+  failedRestores: number;
+  avgSnapshotMs: number;
+  avgCheapTickMs: number;
+  avgReconcileMs: number;
+} | null) | null = null;
 
 export function setNetDiagAccessor(
   fn: (() => { bufferSize: number; latestHostTick: number; gap: number } | null) | null,
@@ -53,6 +83,21 @@ export function setSnapsAccessor(
   fn: (() => Array<{ tick: number; playerId: string; dist: number; dx: number; dy: number; at: number }>) | null,
 ): void {
   snapsAccessor = fn;
+}
+
+export function setRollbackStatsAccessor(
+  fn: (() => {
+    rollbacksApplied: number;
+    lastDepth: number;
+    smoothingActive: number;
+    ringInvalidations: number;
+    failedRestores: number;
+    avgSnapshotMs: number;
+    avgCheapTickMs: number;
+    avgReconcileMs: number;
+  } | null) | null,
+): void {
+  rollbackStatsAccessor = fn;
 }
 
 let installedGame: BouncyBlobsGame | null = null;
@@ -88,6 +133,9 @@ export function installDebugBridge(game: BouncyBlobsGame | null): void {
       // TS sim returns ''; Rust sim returns FNV-1a hex.
       return w.stateHash();
     },
+    getRollbackStats: () => rollbackStatsAccessor ? rollbackStatsAccessor() : null,
+    getFrameProfile: () => getFrameProfile(),
+    resetFrameProfile: () => resetFrameProfile(),
   };
   (window as unknown as { __bbDebug: DebugBridge }).__bbDebug = bridge;
 }

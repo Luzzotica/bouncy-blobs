@@ -49,13 +49,16 @@ done
 # (filename, prompt, duration-seconds, prompt-influence)
 # ElevenLabs requires duration >= 0.5s. Influence ~0.6-0.8 keeps prompts on-brief.
 SFX=(
-  # — Landing: three pitch variants so repeat hits don't sound identical —
-  "land-squelch-1.mp3|wet cartoon slime squelch impact, soft splat, single hit, no music, dry|0.6|0.75"
-  "land-squelch-2.mp3|wet cartoon slime squelch impact, slightly higher pitch, single hit, no music|0.6|0.75"
-  "land-squelch-3.mp3|wet cartoon slime squelch impact, slightly lower pitch, deeper splat, single hit|0.6|0.75"
+  # — Landing: single sound; pitch jitter at playback gives the variety.
+  #   Prompt deliberately avoids "splat" / "crack" / "slap" — those make
+  #   ElevenLabs return metallic-sounding impacts. The goal is dull, damp,
+  #   low-frequency fabric on wood, with audible water content.
+  "land-squelch.mp3|sound effect of a bare hand covered in thick gooey slime smacking flat against a hard wooden table, single short wet smack, sloppy gooey impact with audible slimy peel-off afterward, organic squishy, close-mic dry, mid-range, no sub-bass thud, no metallic ring, no music, no reverb|0.7|0.92"
 
-  # — Puff up: cartoon balloon stretch / surprise inhale —
-  "puff-up.mp3|short cartoon balloon stretch inhale, rising squeak, playful, no music|0.5|0.8"
+  # — Puff up: the user recorded their own variants (puff-up-1/-2/-3.mp3).
+  #   Don't regenerate over them; this entry stays commented as historical
+  #   reference for what we tried before the recordings landed.
+  # "puff-up.mp3|sharp short hissing inhale sucking air through pursed wet lips, audible fast rush of air being drawn into the mouth, dominant airflow sound with a faint moist lip texture, single quick gasp, close-mic, no slurping, no licking, no tongue sounds, no swallowing, no music|0.5|0.9"
 
   # — Sticky wall —
   "wall-stick.mp3|sticky goo grab, suction stick to surface, short wet thwip, no music|0.5|0.8"
@@ -76,7 +79,7 @@ SFX=(
   "round-win.mp3|short victory sting, triumphant cartoon fanfare, ends clean, no music bed|1.6|0.7"
 
   # — UI —
-  "ui-hover.mp3|very short soft UI hover tick, subtle, no music|0.5|0.7"
+  "ui-hover.mp3|sound effect of one paperstock playing card sliding out from a stack of cards, short soft paper-on-paper slide whisper, close-mic dry, no music|0.5|0.85"
   "ui-click.mp3|crisp UI button click pop, snappy, no music|0.5|0.75"
   "ui-confirm.mp3|short bright UI confirm chime, two-note positive, no music|0.5|0.7"
   "ui-modal-open.mp3|short whoosh-in UI panel open, paper rip-on, playful, no music|0.5|0.75"

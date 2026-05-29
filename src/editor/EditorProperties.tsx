@@ -1,6 +1,7 @@
 import React from 'react';
 import { EditorState, SPRING_SIZE_PRESETS } from './EditorState';
 import type { HullPreset } from '../physics/slimeBlob';
+import { allSprites } from '../assets/spriteRegistry';
 
 interface EditorPropertiesProps {
   state: EditorState;
@@ -11,6 +12,86 @@ const HULL_PRESETS: HullPreset[] = ['circle16', 'square', 'triangle', 'star', 'd
 
 function radToDeg(r: number): number { return Math.round(r * 180 / Math.PI); }
 function degToRad(d: number): number { return d * Math.PI / 180; }
+
+/** Lists every action whose targets rotate this entity, with editable
+ *  endRotation per row. Lets you see/tune rotation from the entity's
+ *  perspective (selecting the platform / shape itself) without diving
+ *  through the action panel. */
+function RotationActionsSection({
+  state,
+  entityKind,
+  entityId,
+  onUpdate,
+}: {
+  state: EditorState;
+  entityKind: 'platform' | 'rotateShape';
+  entityId: string;
+  onUpdate: () => void;
+}) {
+  const matches: { action: import('../levels/types').ActionDef; target: import('../levels/types').ActionTarget; idx: number }[] = [];
+  for (const action of state.level.actions ?? []) {
+    for (let idx = 0; idx < action.targets.length; idx++) {
+      const t = action.targets[idx];
+      if (entityKind === 'platform') {
+        if (t.kind === 'platform' && t.platformId === entityId && t.endRotation !== undefined) {
+          matches.push({ action, target: t, idx });
+        }
+      } else {
+        if (t.kind === 'rotateShape' && t.shapeId === entityId) {
+          matches.push({ action, target: t, idx });
+        }
+      }
+    }
+  }
+  if (matches.length === 0) return null;
+  return (
+    <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
+      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Rotation animations</div>
+      {matches.map(({ action, target, idx }) => {
+        // Display the DELTA from rest pose so the number matches what the
+        // action will actually animate (this matches the canvas badge).
+        // shapePoint targets are filtered out upstream, so the only kinds
+        // here are 'platform' and 'rotateShape'.
+        if (target.kind === 'shapePoint') return null;
+        let restRot = 0;
+        if (target.kind === 'platform') {
+          const plat = state.level.platforms.find(p => p.id === target.platformId);
+          restRot = plat?.rotation ?? 0;
+        }
+        const endRot = target.kind === 'platform' ? (target.endRotation ?? restRot) : target.endRotation;
+        const deltaDeg = radToDeg(endRot - restRot);
+        return (
+          <div key={`${action.id}#${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, fontSize: 11 }}>
+            <button
+              onClick={() => { state.selectedElement = { type: 'action', id: action.id }; onUpdate(); }}
+              data-no-sfx="true"
+              title="Open this action's panel"
+              style={{
+                flex: 1, textAlign: 'left',
+                background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                color: '#bbb', fontSize: 11,
+              }}
+            >
+              {action.id} <span style={{ color: '#666' }}>({action.mode})</span>
+            </button>
+            <input
+              type="number"
+              step={15}
+              value={deltaDeg}
+              onChange={e => {
+                const newDeltaDeg = parseFloat(e.target.value) || 0;
+                state.setActionTargetEndRotation(action.id, idx, restRot + degToRad(newDeltaDeg));
+                onUpdate();
+              }}
+              style={{ background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '2px 4px', fontSize: 11, width: 60 }}
+            />
+            <span style={{ color: '#666', fontSize: 10 }}>°</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function EditorProperties({ state, onUpdate }: EditorPropertiesProps) {
   const sel = state.selectedElement;
@@ -48,6 +129,16 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
   }
 
   if (!sel) {
+    // Sprite-tool active without a selection → show the sprite picker so the
+    // user can pick which asset to drop on the next canvas click.
+    if (state.selectedTool === 'sprite') {
+      return (
+        <div style={panelStyle}>
+          <h3 style={titleStyle}>Place sprite</h3>
+          <SpritePicker state={state} onUpdate={onUpdate} />
+        </div>
+      );
+    }
     return (
       <div style={panelStyle}>
         <h3 style={{ margin: '0 0 8px', fontSize: 14, color: '#888' }}>Properties</h3>
@@ -66,6 +157,57 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
             Esc: Deselect<br />
             Ctrl+Z/Y: Undo/Redo
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Per-instance editor for a placed sprite — id, transform, material.
+  if (sel.type === 'sprite') {
+    const inst = (state.level.sprites ?? []).find(s => s.id === sel.id);
+    if (!inst) return null;
+    const sprites = allSprites();
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Sprite Instance</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Asset</label>
+          <select
+            value={inst.spriteId}
+            onChange={e => { state.updateProperty('spriteId', e.target.value); onUpdate(); }}
+            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+          >
+            {sprites.length === 0 && <option value={inst.spriteId}>{inst.spriteId}</option>}
+            {sprites.map(s => (
+              <option key={s.def.id} value={s.def.id}>{s.def.id}</option>
+            ))}
+          </select>
+        </div>
+        <NumInput label="X" value={inst.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
+        <NumInput label="Y" value={inst.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
+        <NumInput label="Rotation" value={radToDeg(inst.rotation)} step={15}
+          onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
+        <NumInput label="Scale" value={inst.scale ?? 1} step={0.1}
+          onChange={v => { state.updateProperty('scale', Math.max(0.1, v)); onUpdate(); }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Material</label>
+          <select
+            value={inst.material ?? 'default'}
+            onChange={e => { state.updateProperty('material', e.target.value); onUpdate(); }}
+            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+          >
+            <option value="default">Default</option>
+            <option value="ice">Ice</option>
+            <option value="sticky">Sticky</option>
+            <option value="bouncy">Bouncy</option>
+          </select>
+        </div>
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+          Material only applies to polygon/circle hulls. Point-shape props (pencil) flex regardless.
+        </p>
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
+          <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
         </div>
       </div>
     );
@@ -102,7 +244,24 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Stiffness" value={sp.stiffness ?? 1.0} step={0.1} onChange={v => { state.updateProperty('stiffness', Math.max(0.1, v)); onUpdate(); }} />
         <NumInput label="Segments W" value={sp.segW ?? 8} step={1} onChange={v => { state.updateProperty('segW', Math.max(2, Math.floor(v))); onUpdate(); }} />
         <NumInput label="Segments H" value={sp.segH ?? 1} step={1} onChange={v => { state.updateProperty('segH', Math.max(1, Math.floor(v))); onUpdate(); }} />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Higher stiffness = more rigid. Higher segments = smoother sag.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Pinned</label>
+          <input type="checkbox" checked={!!sp.pinned}
+            onChange={e => { state.updateProperty('pinned', e.target.checked); onUpdate(); }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Frame lock</label>
+          <input type="checkbox" checked={!!sp.frameLocked}
+            onChange={e => { state.updateProperty('frameLocked', e.target.checked); onUpdate(); }} />
+        </div>
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to its rest position (jelly). Frame lock = whole body wobbles on a global spring (rigid platform feel). Combinable.</p>
+        <button
+          onClick={() => { state.convertSoftPlatformToPointShape(sp.id); onUpdate(); }}
+          style={{ ...actionStyle, marginTop: 6, background: '#3a4a6a' }}
+          title="Bake into an editable point-shape (per-vertex control)."
+        >
+          Convert to Point Shape
+        </button>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
@@ -122,6 +281,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Width" value={p.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
         <NumInput label="Height" value={p.height} onChange={v => { state.updateProperty('height', Math.max(10, v)); onUpdate(); }} />
         <NumInput label="Rotation" value={radToDeg(p.rotation)} step={15} onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
+        <RotationActionsSection state={state} entityKind="platform" entityId={p.id} onUpdate={onUpdate} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
@@ -247,6 +407,81 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     );
   }
 
+  if (sel.type === 'gravityZone') {
+    const z = (state.level.gravityZones ?? []).find(z => z.id === sel.id);
+    if (!z) return null;
+    const f = z.field;
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Gravity Zone</h3>
+        <p style={{ color: '#888', fontSize: 11, margin: '0 0 8px' }}>
+          Overrides gravity for any blob whose centroid enters this zone.
+        </p>
+        <NumInput label="X" value={z.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
+        <NumInput label="Y" value={z.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
+        <NumInput label="Width" value={z.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
+        <NumInput label="Height" value={z.height} onChange={v => { state.updateProperty('height', Math.max(20, v)); onUpdate(); }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, marginBottom: 4 }}>
+          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Field</label>
+          <select
+            value={f.kind}
+            onChange={e => { state.setGravityFieldType(z.id, e.target.value as 'uniform' | 'point'); onUpdate(); }}
+            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+          >
+            <option value="uniform">Uniform (direction + strength)</option>
+            <option value="point">Point (pull toward centre)</option>
+          </select>
+        </div>
+        {f.kind === 'uniform' ? (
+          <>
+            <NumInput
+              label="Force X"
+              value={f.vector.x}
+              step={50}
+              onChange={v => { state.setGravityUniformVector(z.id, v, f.vector.y); onUpdate(); }}
+            />
+            <NumInput
+              label="Force Y"
+              value={f.vector.y}
+              step={50}
+              onChange={v => { state.setGravityUniformVector(z.id, f.vector.x, v); onUpdate(); }}
+            />
+            <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+              Positive Y = down. (0, 0) = zero-G. Default game gravity is ~+Y.
+            </p>
+          </>
+        ) : (
+          <>
+            <NumInput
+              label="Strength"
+              value={f.strength}
+              step={100}
+              onChange={v => { state.setGravityPointParams(z.id, v, f.falloff); onUpdate(); }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, marginBottom: 4 }}>
+              <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Falloff</label>
+              <select
+                value={f.falloff}
+                onChange={e => { state.setGravityPointParams(z.id, f.strength, e.target.value as 'linear' | 'inverseSquare'); onUpdate(); }}
+                style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+              >
+                <option value="linear">Linear</option>
+                <option value="inverseSquare">Inverse-square (gravity-like)</option>
+              </select>
+            </div>
+            <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+              Center auto-tracks the zone's position. Negative strength = push outward.
+            </p>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
+          <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
+        </div>
+      </div>
+    );
+  }
+
   if (sel.type === 'spawn') {
     const s = state.level.spawnPoints.find(s => s.id === sel.id);
     if (!s) return null;
@@ -319,12 +554,12 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
   if (sel.type === 'trigger') {
     const trig = (state.level.triggers ?? []).find(p => p.id === sel.id);
     if (!trig) return null;
-    const subscribers = (state.level.actions ?? []).filter(a => a.sourceTriggerIds.includes(trig.id));
+    const allActions = state.level.actions ?? [];
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Trigger</h3>
         <p style={{ color: '#888', fontSize: 11, margin: '0 0 6px' }}>
-          Area that detects blobs. Actions subscribe to triggers — link them from the Action's panel.
+          Area that detects blobs. Tick an action below to make this trigger fire it.
         </p>
         <NumInput label="X" value={trig.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
         <NumInput label="Y" value={trig.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
@@ -341,14 +576,39 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
           0 = instant. With charge &gt; 0, blob must stay continuously for that long.
         </p>
+        <div style={rowStyle}>
+          <label style={labelStyle}>Ignore NPCs</label>
+          <input
+            type="checkbox"
+            checked={!!trig.ignoreNpcs}
+            onChange={e => { state.updateProperty('ignoreNpcs', e.target.checked); onUpdate(); }}
+          />
+        </div>
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+          When on, only player blobs can press this trigger.
+        </p>
         <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
           <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Fires actions</div>
-          {subscribers.length === 0 ? (
-            <p style={{ color: '#555', fontSize: 11 }}>No actions reference this trigger yet</p>
+          {allActions.length === 0 ? (
+            <p style={{ color: '#555', fontSize: 11 }}>No actions in level yet — place one with the Action tool</p>
           ) : (
-            subscribers.map(a => (
-              <div key={a.id} style={{ fontSize: 11, color: '#bbb', marginBottom: 2 }}>{a.id} <span style={{ color: '#666' }}>({a.mode})</span></div>
-            ))
+            allActions.map(a => {
+              const linked = a.sourceTriggerIds.includes(trig.id);
+              return (
+                <label
+                  key={a.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: '#bbb', cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={linked}
+                    onChange={() => { state.toggleActionSourceTrigger(a.id, trig.id); onUpdate(); }}
+                  />
+                  <span>{a.id}</span>
+                  <span style={{ color: '#666' }}>({a.mode}, {a.targets.length} target{a.targets.length === 1 ? '' : 's'})</span>
+                </label>
+              );
+            })
           )}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -369,10 +629,19 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           {shape.points.length} points, {shape.edges.length}{shape.closed ? '+1' : ''} edges
         </div>
         <div style={rowStyle}>
-          <label style={labelStyle}>Closed</label>
-          <input type="checkbox" checked={!!shape.closed}
-            onChange={e => { state.updateProperty('closed', e.target.checked); onUpdate(); }} />
+          <label style={labelStyle}>Pinned</label>
+          <input type="checkbox" checked={!!shape.pinned}
+            onChange={e => { state.updateProperty('pinned', e.target.checked); onUpdate(); }} />
         </div>
+        <div style={rowStyle}>
+          <label style={labelStyle}>Frame lock</label>
+          <input type="checkbox" checked={!!shape.frameLocked}
+            onChange={e => { state.updateProperty('frameLocked', e.target.checked); onUpdate(); }} />
+        </div>
+        <NumInput label="Stiffness" value={shape.stiffness ?? 1.0} step={0.1}
+          onChange={v => { state.updateProperty('stiffness', Math.max(0.1, v)); onUpdate(); }} />
+        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to rest (jelly). Frame lock = whole body wobbles on a global spring. Higher stiffness = more rigid.</p>
+        <RotationActionsSection state={state} entityKind="rotateShape" entityId={shape.id} onUpdate={onUpdate} />
         <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
           {shape.points.map((pt, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, fontSize: 11 }}>
@@ -423,7 +692,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     const action = (state.level.actions ?? []).find(a => a.id === sel.id);
     if (!action) return null;
     const easings = ['linear', 'easeInOut', 'easeOut'] as const;
-    const modes = ['switch', 'continuous', 'oneShot'] as const;
+    const modes = ['switch', 'continuous', 'oneShot', 'timer'] as const;
     const allTriggers = state.level.triggers ?? [];
     return (
       <div style={panelStyle}>
@@ -442,10 +711,21 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           {action.mode === 'continuous' && 'Open while pressed, close on release.'}
           {action.mode === 'switch' && 'Press to toggle. Press again to flip back.'}
           {action.mode === 'oneShot' && 'Fire once on first press, then deaf forever.'}
+          {action.mode === 'timer' && 'Runs every N seconds — open, close, wait, repeat. Triggers are ignored.'}
         </p>
 
         <NumInput label="Delay" value={action.delaySeconds ?? 0} step={0.1} suffix="s"
           onChange={v => { state.updateProperty('delaySeconds', Math.max(0, v)); onUpdate(); }} />
+
+        {action.mode === 'timer' && (
+          <NumInput
+            label="Interval"
+            value={action.intervalSeconds ?? 4}
+            step={0.5}
+            suffix="s"
+            onChange={v => { state.updateProperty('intervalSeconds', Math.max(0.5, v)); onUpdate(); }}
+          />
+        )}
 
         <NumInput label="Duration" value={action.duration} step={0.1} suffix="s"
           onChange={v => { state.updateProperty('duration', Math.max(0.05, v)); onUpdate(); }} />
@@ -459,8 +739,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           </select>
         </div>
 
-        <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Source triggers</div>
+        <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8, opacity: action.mode === 'timer' ? 0.4 : 1 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+            Source triggers
+            {action.mode === 'timer' && <span style={{ color: '#666', marginLeft: 6 }}>(ignored in timer mode)</span>}
+          </div>
           {allTriggers.length === 0 ? (
             <p style={{ color: '#555', fontSize: 11 }}>No triggers in level yet</p>
           ) : (
@@ -486,25 +769,88 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         </div>
 
         <div style={{ marginTop: 10, fontSize: 11, color: '#888' }}>Targets</div>
-        <div style={{ maxHeight: 180, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
+        <div style={{ color: '#666', fontSize: 10, marginBottom: 4 }}>
+          Drag a target's dashed ghost on the canvas, or edit values below. Platforms can rotate too.
+        </div>
+        <div style={{ maxHeight: 220, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
           {action.targets.map((t, i) => (
-            <div key={i} style={{ marginBottom: 6, fontSize: 11, color: '#bbb' }}>
+            <div key={i} style={{ marginBottom: 8, fontSize: 11, color: '#bbb' }}>
               <div style={{ color: '#888' }}>
-                {t.kind === 'shapePoint'
-                  ? `${t.shapeId} · #${t.pointIndex}`
-                  : `${t.platformId} (platform)`}
+                {t.kind === 'shapePoint' && `${t.shapeId} · #${t.pointIndex}`}
+                {t.kind === 'platform' && `${t.platformId} (platform)`}
+                {t.kind === 'rotateShape' && `${t.shapeId} (rotate hull)`}
               </div>
-              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                <input type="number" value={Math.round(t.endX)} style={{ ...inputStyle, padding: '2px 4px' }}
-                  onChange={e => { state.setActionTargetEnd(action.id, i, parseFloat(e.target.value) || 0, t.endY); onUpdate(); }} />
-                <input type="number" value={Math.round(t.endY)} style={{ ...inputStyle, padding: '2px 4px' }}
-                  onChange={e => { state.setActionTargetEnd(action.id, i, t.endX, parseFloat(e.target.value) || 0); onUpdate(); }} />
-              </div>
+              {t.kind !== 'rotateShape' && (
+                <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                  <input type="number" value={Math.round(t.endX)} style={{ ...inputStyle, padding: '2px 4px' }}
+                    onChange={e => { state.setActionTargetEnd(action.id, i, parseFloat(e.target.value) || 0, t.endY); onUpdate(); }} />
+                  <input type="number" value={Math.round(t.endY)} style={{ ...inputStyle, padding: '2px 4px' }}
+                    onChange={e => { state.setActionTargetEnd(action.id, i, t.endX, parseFloat(e.target.value) || 0); onUpdate(); }} />
+                </div>
+              )}
+              {(t.kind === 'platform' || t.kind === 'rotateShape') && (() => {
+                // End rot is shown + stored as the DELTA from the entity's
+                // closed-pose rotation. Matches the canvas badge and the
+                // entity-side RotationActionsSection so the same number
+                // shows up in every place. (Previously this panel stored
+                // absolute, the other stored delta — they disagreed by
+                // exactly the platform's closed-pose rotation.)
+                const restRot = t.kind === 'platform'
+                  ? (state.level.platforms.find(p => p.id === t.platformId)?.rotation ?? 0)
+                  : 0;
+                const endRot = t.kind === 'platform' ? (t.endRotation ?? restRot) : t.endRotation;
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <label style={{ color: '#999', fontSize: 10, width: 60 }}>End rot</label>
+                    <input
+                      type="number"
+                      step={15}
+                      value={radToDeg(endRot - restRot)}
+                      style={{ ...inputStyle, padding: '2px 4px', flex: 1 }}
+                      onChange={e => {
+                        const newDeltaDeg = parseFloat(e.target.value) || 0;
+                        state.setActionTargetEndRotation(action.id, i, restRot + degToRad(newDeltaDeg));
+                        onUpdate();
+                      }}
+                    />
+                    <span style={{ color: '#666', fontSize: 10 }}>°</span>
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete Action</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (sel.type === 'chain') {
+    const chain = (state.level.chains ?? []).find(c => c.id === sel.id);
+    if (!chain) return null;
+    const describeAnchor = (ref: typeof chain.endpointA) => {
+      if (ref.kind === 'fixed') return `Fixed (${Math.round(ref.x)}, ${Math.round(ref.y)})`;
+      return `${ref.entity}: ${ref.id}`;
+    };
+    return (
+      <div style={panelStyle}>
+        <h3 style={titleStyle}>Chain</h3>
+        <div style={{ fontSize: 11, color: '#bbb', marginBottom: 4 }}>End A: {describeAnchor(chain.endpointA)}</div>
+        <div style={{ fontSize: 11, color: '#bbb', marginBottom: 8 }}>End B: {describeAnchor(chain.endpointB)}</div>
+        <NumInput label="Total length" value={chain.totalLength} step={10}
+          onChange={v => { state.updateProperty('totalLength', Math.max(50, v)); onUpdate(); }} />
+        <NumInput label="Max segment len" value={chain.maxSegmentLength ?? 25} step={1}
+          onChange={v => { state.updateProperty('maxSegmentLength', Math.max(5, v)); onUpdate(); }} />
+        <NumInput label="Segment mass" value={chain.segmentMass ?? 0.5} step={0.1}
+          onChange={v => { state.updateProperty('segmentMass', Math.max(0.01, v)); onUpdate(); }} />
+        <NumInput label="Segment radius" value={chain.segmentRadius ?? 10} step={1}
+          onChange={v => { state.updateProperty('segmentRadius', Math.max(1, v)); onUpdate(); }} />
+        <NumInput label="Iterations" value={chain.iterations ?? 12} step={1}
+          onChange={v => { state.updateProperty('iterations', Math.max(1, Math.round(v))); onUpdate(); }} />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete Chain</button>
         </div>
       </div>
     );
@@ -596,3 +942,55 @@ const duplicateStyle: React.CSSProperties = {
   color: '#fff',
   cursor: 'pointer',
 };
+
+/** Thumbnail grid of every sprite the registry has loaded. Click one to make
+ * it the active brush; the next canvas click drops it. Empty state nudges
+ * the user to run the asset generator. */
+function SpritePicker({ state, onUpdate }: { state: EditorState; onUpdate: () => void }) {
+  const sprites = allSprites();
+  if (sprites.length === 0) {
+    return (
+      <div style={{ color: '#888', fontSize: 12, lineHeight: 1.4 }}>
+        No sprites loaded yet.<br />
+        <span style={{ color: '#666' }}>
+          Run <code style={{ color: '#aaa' }}>./scripts/generate-all-art.sh</code> to generate them.
+        </span>
+      </div>
+    );
+  }
+  const activeId = state.placementSpriteId ?? sprites[0].def.id;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+      {sprites.map(s => {
+        const selected = s.def.id === activeId;
+        return (
+          <button
+            key={s.def.id}
+            onClick={() => { state.setPlacementSpriteId(s.def.id); onUpdate(); }}
+            title={s.def.id}
+            style={{
+              padding: 6,
+              background: selected ? '#2a4a8a' : '#1a2240',
+              border: selected ? '2px solid #5a8aff' : '1px solid #333',
+              borderRadius: 4,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <img
+              src={s.def.image}
+              alt={s.def.id}
+              style={{ width: '100%', maxHeight: 64, objectFit: 'contain', imageRendering: 'auto' }}
+            />
+            <span style={{ fontSize: 10, color: '#bbb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+              {s.def.id}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}

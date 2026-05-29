@@ -23,9 +23,6 @@ const MENU: MenuButtonConfig[] = [
   { label: 'Host',          to: '/game',    testId: 'host-button',   tape: '#c77dff' },
   { label: 'Browse Lobbies', to: '/lobbies', testId: 'browse-button', tape: '#5a189a' },
   { label: 'Sandbox',       to: '/sandbox', tape: '#2d6a4f' },
-  // Experimental: opens Sandbox running on the deterministic Rust+wasm
-  // physics engine. `?engine=rust` is read by physics/engineSelector.ts.
-  { label: 'Sandbox (Rust)', to: '/sandbox?engine=rust', testId: 'sandbox-rust-button', tape: '#d35400' },
   { label: 'Level Editor',  to: '/editor',  tape: '#e85d75' },
 ]
 

@@ -58,7 +58,7 @@ for id in "${ASSETS[@]}"; do
     continue
   fi
   echo "→ $id"
-  "$PYTHON" "$GEN_PY" "$id" "${FORCE_ARGS[@]}"
+  "$PYTHON" "$GEN_PY" "$id" ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"}
   generated=$((generated + 1))
 done
 

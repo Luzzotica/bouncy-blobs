@@ -3,8 +3,7 @@ import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Vec2, vec2 } from '../physics/vec2';
 import { SpikeDef, ZoneDef } from '../levels/types';
 import { PlayerManager } from './playerManager';
-import { getSprite, getSpriteWorldSize } from '../assets/spriteRegistry';
-import { drawSprite as drawSpriteImg } from '../renderer/spriteRenderer';
+import { drawHardCandy, SPIKE_CRYSTAL_PALETTE, SPIKE_BASE_PALETTE } from '../renderer/candySkin';
 
 const KILL_RADIUS = 50;
 const RESPAWN_INVULNERABILITY = 1.5; // seconds
@@ -111,27 +110,41 @@ export class SpikeManager {
       if (this.deadPlayers.has(player.playerId)) continue;
 
       const centroid = player.blob.getCentroid();
+      // Use the full hull polygon for spike + death-zone tests: any part
+      // of the blob touching a hazard counts. Centroid-only meant a fast
+      // blob could glide its edges through a spike without dying.
+      const hull = player.blob.getHullPolygon();
 
       let killed = false;
       for (const spike of this.spikes) {
-        if (this.isInsideSpikeZone(centroid, spike.def)) {
-          this.killPlayer(player.playerId);
-          killed = true;
-          break;
+        for (const p of hull) {
+          if (this.isInsideSpikeZone(p, spike.def)) {
+            this.killPlayer(player.playerId);
+            killed = true;
+            break;
+          }
         }
+        if (killed) break;
       }
       if (killed) continue;
 
       for (const z of this.deathZones) {
-        if (centroid.x >= z.x - z.width / 2 && centroid.x <= z.x + z.width / 2 &&
-            centroid.y >= z.y - z.height / 2 && centroid.y <= z.y + z.height / 2) {
-          this.killPlayer(player.playerId);
-          killed = true;
-          break;
+        const minX = z.x - z.width / 2, maxX = z.x + z.width / 2;
+        const minY = z.y - z.height / 2, maxY = z.y + z.height / 2;
+        for (const p of hull) {
+          if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) {
+            this.killPlayer(player.playerId);
+            killed = true;
+            break;
+          }
         }
+        if (killed) break;
       }
       if (killed) continue;
 
+      // Fall-off-the-map kill stays centroid-based: when the centroid is
+      // below the kill line the whole blob is past saving anyway, and we
+      // don't want a single trailing hull particle to falsely respawn.
       if (this.killBelowY !== null && centroid.y > this.killBelowY) {
         this.killPlayer(player.playerId);
       }
@@ -173,6 +186,20 @@ export class SpikeManager {
     if (isPlayerPlaced) {
       this.playerPlacedSpikeIds.add(def.id);
     }
+  }
+
+  /** Kill a player identified by their physics blob id. No-op if the
+   *  blob isn't owned by a player, or the player is already dead /
+   *  invulnerable. Used by the physics-engine crush detector — a blob
+   *  whose solver state exploded gets routed through the normal death
+   *  flow instead of teleporting lightyears away. */
+  killPlayerByBlobId(blobId: number): void {
+    if (!this.playerManager) return;
+    const player = this.playerManager.getPlayerByBlobId(blobId);
+    if (!player) return;
+    if (this.invulnerable.has(player.playerId)) return;
+    if (this.deadPlayers.has(player.playerId)) return;
+    this.killPlayer(player.playerId);
   }
 
   private killPlayer(playerId: string): void {
@@ -256,25 +283,6 @@ export class SpikeManager {
     for (const spike of this.spikes) {
       const { def } = spike;
 
-      // Sprite path — scale to the editor-configured footprint so authored
-      // levels behave the same way visually as they did pre-art-pass. The
-      // sprite has its tip pointing up and base anchored near the bottom
-      // (anchor.y ≈ 0.85 in the manifest), so translating to def.x/def.y
-      // keeps spike teeth poking above the base bar where physics expects.
-      const spriteSpike = getSprite('spike');
-      if (spriteSpike) {
-        const natural = getSpriteWorldSize(spriteSpike);
-        const sx = def.width / natural.width;
-        const sy = def.height / (natural.height * 0.7); // teeth ≈ 70% of image
-        ctx.save();
-        ctx.translate(def.x, def.y);
-        ctx.rotate(def.rotation);
-        ctx.scale(sx, sy);
-        drawSpriteImg(ctx, spriteSpike, 0, 0);
-        ctx.restore();
-        continue;
-      }
-
       ctx.save();
       ctx.translate(def.x, def.y);
       ctx.rotate(def.rotation);
@@ -283,32 +291,36 @@ export class SpikeManager {
       const numTeeth = Math.max(2, Math.floor(def.width / 30));
       const toothW = def.width / numTeeth;
 
-      // Base bar
-      ctx.fillStyle = '#555';
-      ctx.fillRect(-hw, -4, def.width, 8);
+      // Caramel base bar — drawn as a hard-candy rectangle so it picks up
+      // the gradient + highlight pass for free.
+      const baseBar: Vec2[] = [
+        { x: -hw, y: -4 },
+        { x:  hw, y: -4 },
+        { x:  hw, y:  4 },
+        { x: -hw, y:  4 },
+      ];
+      drawHardCandy(ctx, baseBar, SPIKE_BASE_PALETTE);
 
-      // Teeth
-      ctx.fillStyle = '#cc3333';
-      ctx.strokeStyle = '#991111';
-      ctx.lineWidth = 1.5;
-
+      // Rock-candy tooth crystals — each tooth is its own hard-candy
+      // polygon so the gloss + sugar grain reads per spike, not as one big
+      // smear across the bar.
       for (let i = 0; i < numTeeth; i++) {
         const tx = -hw + i * toothW;
-        ctx.beginPath();
-        ctx.moveTo(tx, 0);
-        ctx.lineTo(tx + toothW, 0);
-        ctx.lineTo(tx + toothW / 2, -def.height);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        const tooth: Vec2[] = [
+          { x: tx,             y: 0 },
+          { x: tx + toothW,    y: 0 },
+          { x: tx + toothW / 2, y: -def.height },
+        ];
+        drawHardCandy(ctx, tooth, SPIKE_CRYSTAL_PALETTE);
       }
 
-      // Highlight on tooth tips
-      ctx.fillStyle = '#ff6666';
+      // Tiny white sugar glint on each tip — the lit-sugar spec dot that
+      // sells the "sharp crystal" silhouette at a glance.
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
       for (let i = 0; i < numTeeth; i++) {
         const tipX = -hw + (i + 0.5) * toothW;
         ctx.beginPath();
-        ctx.arc(tipX, -def.height + 3, 2, 0, Math.PI * 2);
+        ctx.arc(tipX, -def.height + 3, 1.6, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -388,5 +400,40 @@ export class SpikeManager {
     this.playerManager = null;
     this.invulnerable.clear();
     this.deadPlayers.clear();
+  }
+
+  /** Rollback netcode snapshot. Captures invulnerability + dead-player
+   *  state. Configuration (deathMode, killBelowY, deathZones) is set at
+   *  match init and doesn't change per tick — not in the snapshot. */
+  dumpState(): {
+    invulnerable: Array<[string, number]>;
+    deadPlayers: Array<[string, { deathPosition: Vec2; respawnTimer: number }]>;
+  } {
+    // Sort entries by player id for cross-client determinism — the
+    // rollback replay needs identical map iteration order on every
+    // client, but JS Map iteration order is insertion-based and we
+    // can't guarantee insertion order matches across clients.
+    const invulnerable = [...this.invulnerable.entries()]
+      .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)
+      .map(([id, t]) => [id, t] as [string, number]);
+    const deadPlayers = [...this.deadPlayers.entries()]
+      .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)
+      .map(([id, dp]) => [id, {
+        deathPosition: { x: dp.deathPosition.x, y: dp.deathPosition.y },
+        respawnTimer: dp.respawnTimer,
+      }] as [string, { deathPosition: Vec2; respawnTimer: number }]);
+    return { invulnerable, deadPlayers };
+  }
+
+  restoreState(state: ReturnType<SpikeManager['dumpState']>): void {
+    this.invulnerable.clear();
+    for (const [id, t] of state.invulnerable) this.invulnerable.set(id, t);
+    this.deadPlayers.clear();
+    for (const [id, dp] of state.deadPlayers) {
+      this.deadPlayers.set(id, {
+        deathPosition: { x: dp.deathPosition.x, y: dp.deathPosition.y },
+        respawnTimer: dp.respawnTimer,
+      });
+    }
   }
 }

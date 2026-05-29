@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { EditorState, EditorTool } from './EditorState';
 import PublishDialog from './PublishDialog';
 import { writeLocalMap } from '../lib/mapsStore';
-import { exportLocalMap, importLocalMap } from '../lib/localMaps';
+import { exportLocalMap, importLocalMap, readLocalMap } from '../lib/localMaps';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { isTauri } from '../lib/runtime';
 
@@ -29,6 +29,8 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
   { id: 'softPlatform', label: 'Soft Platform', hotkey: 'R' },
   { id: 'deathZone', label: 'Death', hotkey: 'D' },
   { id: 'sprite', label: 'Sprite', hotkey: 'T' },
+  { id: 'chain', label: 'Chain', hotkey: 'C' },
+  { id: 'gravityZone', label: 'Gravity', hotkey: 'G' },
 ];
 
 export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvailable }: EditorToolbarProps) {
@@ -59,11 +61,16 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
       });
       if (!src || typeof src !== 'string') return;
       const result = await importLocalMap(src);
-      // Refresh editor state from imported map.
-      const json = await fetch(`file://${result.path}`).then(r => r.text()).catch(() => null);
-      if (json) state.loadJSON(JSON.parse(json).level ? JSON.stringify(JSON.parse(json).level) : json);
+      // Read the just-written map back through Tauri (the same path the
+      // rest of the app uses). `fetch('file://')` is blocked by default
+      // in Tauri 2.x and was silently returning null — when that
+      // happened, `loadJSON` never fired and the editor state stayed at
+      // whatever was in memory before import (e.g. no triggers),
+      // even though the file on disk had the triggers fine.
+      const mf = await readLocalMap(result.id);
+      state.loadJSON(JSON.stringify(mf.level));
       state.localId = result.id;
-      state.workshopId = null;
+      state.workshopId = mf.workshopId ?? null;
       onUpdate();
     } catch (err: any) {
       alert('Import failed: ' + (err?.message ?? err));
@@ -102,9 +109,11 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
             onClick={() => {
               if (state.draftPointShape && t.id !== 'pointShape') state.cancelDraftPointShape();
               if (state.draftAction && t.id !== 'action') state.cancelDraftAction();
+              if (state.draftChain && t.id !== 'chain') state.cancelDraftChain();
               state.selectedTool = t.id;
               if (t.id === 'pointShape' && !state.draftPointShape) state.beginDraftPointShape();
               if (t.id === 'action' && !state.draftAction) state.beginDraftAction();
+              if (t.id === 'chain' && !state.draftChain) state.beginDraftChain();
               onUpdate();
             }}
             title={`${t.label} (${t.hotkey})`}
@@ -146,6 +155,13 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
 
         <div style={{ flex: 1 }} />
 
+        <button
+          onClick={() => { state.showIds = !state.showIds; onUpdate(); }}
+          title="Toggle id labels on every entity (I)"
+          style={actionBtnStyle(state.showIds ? '#5a8aff' : '#333')}
+        >
+          {state.showIds ? 'Labels ON' : 'Labels OFF'}
+        </button>
         <button onClick={onTestPlay} style={actionBtnStyle('#c77dff')}>Test Play</button>
       </div>
 

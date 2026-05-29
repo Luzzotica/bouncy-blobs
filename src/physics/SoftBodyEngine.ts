@@ -41,6 +41,9 @@ export interface AddBlobFromHullParams {
   sortKey?: string;
   staticHullIndices?: number[];
   staticCenter?: boolean;
+  /** Lock the shape-match frame to (worldOrigin, identity). Whole blob
+   *  stays rooted without per-vertex anchors. */
+  pinFrame?: boolean;
 }
 
 export interface RopeChainOpts {
@@ -89,6 +92,9 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   // ---- core loop ----
   step(delta: number): void;
   readonly tick: number;
+  /** Cheap particle-count read. Doesn't allocate (unlike `.pos.length`
+   *  on the wasm wrapper, which materializes a fresh Vec2[] each call). */
+  particleCount(): number;
 
   // ---- read-only state snapshots (renderers / managers iterate these
   // each frame — TS sim exposes them directly; the Rust wrapper
@@ -173,6 +179,10 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void;
   /** Pull a particle toward a fixed world-position with k/damp. */
   addHomeAnchor(idx: number, home: Vec2, k: number, damp: number): void;
+  /** Hard max-distance constraint between two particles. Independent of
+   * the chain solver — use when you need a rigid leash regardless of
+   * mass ratios or segment count. */
+  addDistanceMax(i: number, j: number, max: number): void;
 
   // ---- snapshots for the renderer ----
   /** Snapshot of every static surface — safe to iterate per frame. */
@@ -191,9 +201,22 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   onTriggerEntered?: ((shapeIdx: number, blobId: number) => void) | undefined;
   onTriggerExited?:  ((shapeIdx: number, blobId: number) => void) | undefined;
 
+  /** Fired when the physics solver detects a blob has exploded — e.g.
+   *  a platform crushed it against static geometry until the position
+   *  solver lost control. Game-side handler converts this into a kill
+   *  through the normal `spikeManager.killPlayer` path. Only the Rust
+   *  engine emits these; the TS sim leaves this hook unimplemented. */
+  onBlobCrushed?: ((blobId: number) => void) | undefined;
+
   // ---- determinism aid (Rust engine: FNV-1a of state; TS engine:
   // returns a string hash for development comparison). ----
   stateHash(): string;
+
+  // ---- snapshot/restore (rollback netcode). The Rust engine returns
+  // a binary buffer; the TS sim's stubs return an empty buffer and
+  // accept-but-ignore restores (rollback is wasm-only). ----
+  serializeState(): Uint8Array;
+  restoreState(buf: Uint8Array): boolean;
 }
 
 /* Re-export types for callers that import everything from the engine module. */

@@ -614,4 +614,28 @@ export class DynamicItemManager {
     this.world = null;
     this.playerManager = null;
   }
+
+  /** Rollback snapshot — per-item timer + active flag + manager clock.
+   *  Item config (id, type, position, dimensions) is set at init and
+   *  doesn't change per tick. */
+  dumpState(): {
+    time: number;
+    items: Array<{ id: string; timer: number; active: boolean }>;
+  } {
+    return {
+      time: this.time,
+      items: this.items.map(it => ({ id: it.id, timer: it.timer, active: it.active })),
+    };
+  }
+
+  restoreState(state: ReturnType<DynamicItemManager['dumpState']>): void {
+    this.time = state.time;
+    const byId = new Map(this.items.map(it => [it.id, it] as const));
+    for (const entry of state.items) {
+      const it = byId.get(entry.id);
+      if (!it) continue;
+      it.timer = entry.timer;
+      it.active = entry.active;
+    }
+  }
 }

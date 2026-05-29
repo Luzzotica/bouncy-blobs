@@ -5,7 +5,7 @@ import EditorToolbar from '../editor/EditorToolbar';
 import EditorCanvas from '../editor/EditorCanvas';
 import EditorProperties from '../editor/EditorProperties';
 import MapPreview from '../components/MapPreview';
-import { LevelData, LevelType, getLevelTypes } from '../levels/types';
+import { LevelData, LevelType, getLevelTypes, validateLevelType } from '../levels/types';
 import { getBuiltinLevels, loadBuiltinLevel, LevelManifestEntry } from '../levels/levelRegistry';
 import {
   deleteLocalMap,
@@ -604,16 +604,54 @@ export default function Editor() {
         <button onClick={handleBackToList} style={{ padding: '6px 12px', fontSize: 13 }}>
           Back
         </button>
-        {getLevelTypes(editorState.level).map(lt => (
-          <span key={lt} style={{
-            fontSize: 11, padding: '3px 8px', borderRadius: 4,
-            background: LEVEL_TYPE_COLORS[lt] + '22',
-            color: LEVEL_TYPE_COLORS[lt],
-            fontWeight: 600,
-          }}>
-            {LEVEL_TYPE_LABELS[lt]}
-          </span>
-        ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
+          {(['solo_racing', 'team_racing', 'koth', 'party'] as LevelType[]).map(lt => {
+            const enabled = getLevelTypes(editorState.level).includes(lt);
+            const missing = validateLevelType(editorState.level, lt);
+            const disabled = !enabled && missing !== null;
+            const currentTypes = getLevelTypes(editorState.level);
+            const wouldRemoveLast = enabled && currentTypes.length === 1;
+            const title = enabled
+              ? (missing ? `WARNING: ${LEVEL_TYPE_LABELS[lt]} ${missing}. Add it or disable this mode.` : `${LEVEL_TYPE_LABELS[lt]} is enabled`)
+              : (missing ? `${LEVEL_TYPE_LABELS[lt]} ${missing} — add one to enable this mode` : `Click to enable ${LEVEL_TYPE_LABELS[lt]}`);
+            const onClick = () => {
+              if (disabled || wouldRemoveLast) return;
+              const next = enabled
+                ? currentTypes.filter(t => t !== lt)
+                : [...currentTypes, lt];
+              editorState.setLevelTypes(next);
+              forceUpdate();
+            };
+            const showWarn = enabled && missing !== null;
+            return (
+              <button
+                key={lt}
+                onClick={onClick}
+                disabled={disabled || wouldRemoveLast}
+                title={title + (wouldRemoveLast ? ' (cannot disable the last mode)' : '')}
+                data-no-sfx="true"
+                style={{
+                  fontSize: 10,
+                  padding: '1px 6px',
+                  borderRadius: 3,
+                  background: enabled ? LEVEL_TYPE_COLORS[lt] + '44' : 'transparent',
+                  color: enabled ? LEVEL_TYPE_COLORS[lt] : (disabled ? '#555' : '#888'),
+                  fontWeight: 600,
+                  border: enabled
+                    ? (showWarn ? '1px solid #ff5555' : `1px solid ${LEVEL_TYPE_COLORS[lt]}`)
+                    : (disabled ? '1px dashed #333' : '1px dashed #666'),
+                  cursor: (disabled || wouldRemoveLast) ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.55 : 1,
+                  textAlign: 'left',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.2,
+                }}
+              >
+                {showWarn && '⚠ '}{LEVEL_TYPE_LABELS[lt]}
+              </button>
+            );
+          })}
+        </div>
         <div style={{ flex: 1 }}>
           <EditorToolbar state={editorState} onUpdate={forceUpdate} onTestPlay={handleTestPlay} steamAvailable={steamReady} />
         </div>

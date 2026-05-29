@@ -130,6 +130,14 @@ export class KingOfTheHillMode implements GameMode {
     this.currentKingColor = null;
   }
 
+  dumpState(): { gameTime: number; currentKingColor: string | null } {
+    return { gameTime: this.gameTime, currentKingColor: this.currentKingColor };
+  }
+  restoreState(state: { gameTime: number; currentKingColor: string | null }): void {
+    this.gameTime = state.gameTime;
+    this.currentKingColor = state.currentKingColor;
+  }
+
   getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
     if (!this.hillZone) return null;
     return {

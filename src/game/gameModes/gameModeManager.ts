@@ -185,4 +185,39 @@ export class GameModeManager {
   cleanup(): void {
     this.mode.cleanup();
   }
+
+  /** Rollback snapshot — game-phase + scores. The mode-specific state
+   *  is captured by the mode's own dumpState if it has one (party mode
+   *  has rich sub-phase state; classic mode is simpler). */
+  dumpState(): {
+    phase: GamePhase;
+    phaseTimer: number;
+    scores: Array<[string, number]>;
+    winner: string | null;
+    winnerName: string | null;
+    timeRemaining: number | null;
+    mode?: unknown;
+  } {
+    return {
+      phase: this.state.phase,
+      phaseTimer: this.state.phaseTimer,
+      scores: [...this.state.scores.entries()]
+        .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+      winner: this.state.winner,
+      winnerName: this.state.winnerName,
+      timeRemaining: this.state.timeRemaining,
+      mode: (this.mode as unknown as { dumpState?: () => unknown }).dumpState?.(),
+    };
+  }
+
+  restoreState(snap: ReturnType<GameModeManager['dumpState']>): void {
+    this.state.phase = snap.phase;
+    this.state.phaseTimer = snap.phaseTimer;
+    this.state.scores = new Map(snap.scores);
+    this.state.winner = snap.winner;
+    this.state.winnerName = snap.winnerName;
+    this.state.timeRemaining = snap.timeRemaining;
+    const modeWithRestore = this.mode as unknown as { restoreState?: (s: unknown) => void };
+    if (snap.mode !== undefined) modeWithRestore.restoreState?.(snap.mode);
+  }
 }

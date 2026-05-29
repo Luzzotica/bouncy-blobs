@@ -6,6 +6,34 @@ import { getSprite } from '../assets/spriteRegistry';
 import { drawSprite } from '../renderer/spriteRenderer';
 import { BLOB_RADIUS, BLOB_EXPAND_MAX_SCALE, BLOB_SQUASH_X_AMOUNT, BLOB_SQUASH_Y_AMOUNT } from '../physics/slimeBlob';
 import type { SpringPadDef, ActionTarget } from '../levels/types';
+import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+
+/** Detect macOS for platform-appropriate modifier labels. On Mac the
+ *  physical key is labelled "Option" (or "⌥"), not "Alt". `e.altKey` IS
+ *  true when Option is held, but the UI hint needs to say "Option" or
+ *  Mac users won't know what to press. */
+const IS_MAC = typeof navigator !== 'undefined'
+  && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+const ALT_LABEL = IS_MAC ? 'Option' : 'Alt';
+/** True for either the Alt/Option key OR the Ctrl key — Ctrl as a fallback
+ *  in case the OS captures Option-click for a system shortcut. */
+function isModifierHeld(e: { altKey: boolean; ctrlKey: boolean }): boolean {
+  return e.altKey || e.ctrlKey;
+}
+
+/** Standard ray-cast point-in-polygon. Local helper so this file isn't
+ *  coupled to the EditorState's internal helper. */
+function pointInPolygonPts(x: number, y: number, pts: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y;
+    const xj = pts[j].x, yj = pts[j].y;
+    const intersect = (yi > y) !== (yj > y) &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi || 1e-9) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
 /** Local-space bounding box covering the full spring visual (coils + plate + back wall + arrow). */
 function springVisualBox(s: SpringPadDef): { x: number; y: number; w: number; h: number } {
@@ -138,6 +166,72 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.restore();
     }
 
+    // Gravity zones — uniform shows an arrow indicating direction; point
+    // shows a radial gradient hint with the centre marker.
+    for (const z of state.level.gravityZones ?? []) {
+      const selected = state.selectedElement?.type === 'gravityZone' && state.selectedElement.id === z.id;
+      const f = z.field;
+      ctx.save();
+      if (f.kind === 'uniform') {
+        const isZero = Math.abs(f.vector.x) + Math.abs(f.vector.y) < 1e-3;
+        ctx.fillStyle = isZero
+          ? (selected ? 'rgba(80, 220, 220, 0.30)' : 'rgba(80, 220, 220, 0.18)')
+          : (selected ? 'rgba(255, 160, 60, 0.28)' : 'rgba(255, 160, 60, 0.16)');
+        ctx.fillRect(z.x - z.width / 2, z.y - z.height / 2, z.width, z.height);
+        ctx.strokeStyle = isZero
+          ? (selected ? '#aaf0f0' : 'rgba(80, 220, 220, 0.7)')
+          : (selected ? '#ffd28a' : 'rgba(255, 160, 60, 0.7)');
+        ctx.lineWidth = selected ? 3 : 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(z.x - z.width / 2, z.y - z.height / 2, z.width, z.height);
+        ctx.setLineDash([]);
+        if (!isZero) {
+          const mag = Math.sqrt(f.vector.x * f.vector.x + f.vector.y * f.vector.y);
+          const dx = f.vector.x / mag, dy = f.vector.y / mag;
+          const arrowLen = Math.min(70, Math.min(z.width, z.height) * 0.4);
+          const ex = z.x + dx * arrowLen, ey = z.y + dy * arrowLen;
+          ctx.beginPath();
+          ctx.moveTo(z.x - dx * arrowLen, z.y - dy * arrowLen);
+          ctx.lineTo(ex, ey);
+          ctx.strokeStyle = 'rgba(255, 200, 100, 0.95)';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          // Arrowhead
+          const ah = 12;
+          const pX = -dy, pY = dx;
+          ctx.beginPath();
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex - dx * ah + pX * ah * 0.5, ey - dy * ah + pY * ah * 0.5);
+          ctx.lineTo(ex - dx * ah - pX * ah * 0.5, ey - dy * ah - pY * ah * 0.5);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(255, 200, 100, 0.95)';
+          ctx.fill();
+        }
+      } else {
+        // Point gravity: radial gradient hint plus centre marker.
+        const grad = ctx.createRadialGradient(f.center.x, f.center.y, 5, f.center.x, f.center.y, Math.max(z.width, z.height) * 0.5);
+        grad.addColorStop(0, selected ? 'rgba(200, 90, 240, 0.65)' : 'rgba(180, 60, 220, 0.50)');
+        grad.addColorStop(1, 'rgba(180, 60, 220, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(z.x - z.width / 2, z.y - z.height / 2, z.width, z.height);
+        ctx.strokeStyle = selected ? '#d6a0ff' : 'rgba(180, 60, 220, 0.7)';
+        ctx.lineWidth = selected ? 3 : 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(z.x - z.width / 2, z.y - z.height / 2, z.width, z.height);
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(f.center.x, f.center.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 230, 255, 0.9)';
+        ctx.fill();
+      }
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.kind === 'uniform' ? 'GRAVITY' : 'PULL', z.x, z.y - z.height / 2 - 12);
+      ctx.restore();
+    }
+
     // Soft platforms (drawn first so platforms render on top)
     for (const sp of state.level.softPlatforms ?? []) {
       const selected = state.selectedElement?.type === 'softPlatform' && state.selectedElement.id === sp.id;
@@ -162,14 +256,26 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      // Anchor dots — show 'corners' as a sensible visual default; this is a
-      // schematic preview, the actual anchors at runtime depend on def.anchors.
-      ctx.fillStyle = '#ffcc55';
+      // Hull preview — show every particle the loader will create from the
+      // current segW/segH/rotation, with anchored ones highlighted.
+      const segW = sp.segW ?? 8;
+      const segH = sp.segH ?? 1;
+      const hullPts = hullRect(sp.width, sp.height, segW, segH);
+      const anchorSet = new Set(
+        Array.isArray(sp.anchors) ? sp.anchors : rectAnchorIndices(segW, segH, sp.anchors ?? 'corners'),
+      );
+      const rot = sp.rotation ?? 0;
+      const rc = Math.cos(rot), rs = Math.sin(rot);
       ctx.strokeStyle = '#0f1629';
       ctx.lineWidth = 1.5;
-      for (const [cx, cy] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
+      for (let i = 0; i < hullPts.length; i++) {
+        const p = hullPts[i];
+        const wx = sp.x + p.x * rc - p.y * rs;
+        const wy = sp.y + p.x * rs + p.y * rc;
+        const isAnchor = anchorSet.has(i);
+        ctx.fillStyle = isAnchor ? '#ffcc55' : '#88c0ff';
         ctx.beginPath();
-        ctx.arc(sp.x + cx, sp.y + cy, 5, 0, Math.PI * 2);
+        ctx.arc(wx, wy, isAnchor ? 6 : 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
@@ -334,21 +440,17 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.lineWidth = selectedShape ? 3 : 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      for (const e of ps.edges) {
-        const pa = ps.points[e.a];
-        const pb = ps.points[e.b];
-        if (!pa || !pb) continue;
+      // Point shapes are closed soft-blob hulls; draw the full polygon
+      // outline directly from the point ring. (Legacy `ps.edges` is now
+      // always empty — the loader rebuilds springs from the closed hull
+      // via `addBlobFromHull`, so edges-as-data is vestigial.)
+      if (ps.points.length >= 2) {
         ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-        ctx.stroke();
-      }
-      if (ps.closed && ps.points.length > 2) {
-        const pa = ps.points[ps.points.length - 1];
-        const pb = ps.points[0];
-        ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
+        ctx.moveTo(ps.points[0].x, ps.points[0].y);
+        for (let i = 1; i < ps.points.length; i++) {
+          ctx.lineTo(ps.points[i].x, ps.points[i].y);
+        }
+        if (ps.points.length > 2) ctx.closePath();
         ctx.stroke();
       }
       for (let i = 0; i < ps.points.length; i++) {
@@ -359,7 +461,7 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         ctx.fillStyle = pt.anchored ? '#ffcc55' : '#88c0ff';
         ctx.strokeStyle = vertexSelected ? '#fff' : '#0f1629';
         ctx.lineWidth = vertexSelected ? 3 / state.zoom : 2 / state.zoom;
-        const r = (pt.anchored ? 8 : 6) + (vertexSelected ? 2 : 0);
+        const r = (pt.anchored ? 13 : 11) + (vertexSelected ? 3 : 0);
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
         ctx.fill();
@@ -382,6 +484,20 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
+      }
+      // Closing-edge hint: once the user has ≥3 points the shape is a valid
+      // soft-blob hull; show the implicit close so it reads as one.
+      if (draft.points.length >= 3) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(170, 255, 136, 0.4)';
+        ctx.setLineDash([4, 6]);
+        const first = draft.points[0];
+        const last = draft.points[draft.points.length - 1];
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(first.x, first.y);
+        ctx.stroke();
+        ctx.restore();
       }
       // Ghost line from last point to cursor (snapped to 15° if Shift held).
       if (draft.points.length > 0) {
@@ -408,45 +524,199 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         ctx.strokeStyle = '#0f1629';
         ctx.lineWidth = 2 / state.zoom;
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+        ctx.arc(pt.x, pt.y, 11, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
       ctx.restore();
     }
 
+    // Chains — straight line between resolved endpoints. Anchored ends draw
+    // a pinned dot, blob-anchored ends draw a hollow ring.
+    const drawAnchorMarker = (
+      ref: { kind: 'fixed' } | { kind: 'blob' },
+      x: number, y: number,
+    ) => {
+      ctx.save();
+      ctx.strokeStyle = '#0f1629';
+      ctx.lineWidth = 2 / state.zoom;
+      if (ref.kind === 'fixed') {
+        ctx.fillStyle = '#ffcc55';
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#88c0ff';
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    for (const chain of state.level.chains ?? []) {
+      const a = state.anchorPosition(chain.endpointA);
+      const b = state.anchorPosition(chain.endpointB);
+      if (!a || !b) continue;
+      const selected = state.selectedElement?.type === 'chain' && state.selectedElement.id === chain.id;
+      ctx.save();
+      ctx.strokeStyle = selected ? '#ffd84a' : '#c0a070';
+      ctx.lineWidth = selected ? 4 : 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+      drawAnchorMarker(chain.endpointA, a.x, a.y);
+      drawAnchorMarker(chain.endpointB, b.x, b.y);
+    }
+
+    // Chain draft preview: first endpoint placed → ghost line to cursor.
+    if (state.draftChain && state.draftChain.endpointA) {
+      const a = state.anchorPosition(state.draftChain.endpointA);
+      if (a) {
+        ctx.save();
+        ctx.strokeStyle = '#ffd84a';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(state.cursorX, state.cursorY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+        drawAnchorMarker(state.draftChain.endpointA, a.x, a.y);
+      }
+    }
+
     // Helpers to resolve a target's source (closed) position and draw the right end ghost.
+    const shapeCentroid = (shapeId: string): { x: number; y: number } | null => {
+      const shape = (state.level.pointShapes ?? []).find(s => s.id === shapeId);
+      if (!shape || shape.points.length === 0) return null;
+      let sx = 0, sy = 0;
+      for (const p of shape.points) { sx += p.x; sy += p.y; }
+      return { x: sx / shape.points.length, y: sy / shape.points.length };
+    };
     const sourcePos = (t: ActionTarget): { x: number; y: number } | null => {
       if (t.kind === 'shapePoint') {
         const shape = (state.level.pointShapes ?? []).find(s => s.id === t.shapeId);
         const pt = shape?.points[t.pointIndex];
         return pt ? { x: pt.x, y: pt.y } : null;
       }
+      if (t.kind === 'rotateShape') {
+        return shapeCentroid(t.shapeId);
+      }
       const plat = state.level.platforms.find(p => p.id === t.platformId);
       return plat ? { x: plat.x, y: plat.y } : null;
     };
+    /** Compact rotation badge ("↻ 90°") drawn near the ghost in world
+     *  coords so the user can read the rotation magnitude at a glance.
+     *  `deltaRad` is the rotation the action ADDS to the closed-pose
+     *  rotation (i.e. 0 means "no rotation animation"). */
+    const drawRotationBadge = (cx: number, cy: number, deltaRad: number) => {
+      if (Math.abs(deltaRad) < 0.001) return;
+      // Normalise to (-180°..180°] so the label reads naturally for both
+      // directions (-90° = quarter-turn CCW, 90° = quarter-turn CW).
+      let d = (deltaRad * 180 / Math.PI) % 360;
+      if (d > 180) d -= 360;
+      if (d <= -180) d += 360;
+      const text = `↻ ${Math.round(d)}°`;
+      ctx.save();
+      ctx.font = `${11 / state.zoom}px sans-serif`;
+      const padX = 4 / state.zoom;
+      const padY = 2 / state.zoom;
+      ctx.textBaseline = 'top';
+      const w = ctx.measureText(text).width;
+      const x = cx + 8 / state.zoom;
+      const y = cy + 8 / state.zoom;
+      ctx.fillStyle = 'rgba(20, 30, 50, 0.92)';
+      ctx.fillRect(x, y, w + padX * 2, 14 / state.zoom + padY);
+      ctx.strokeStyle = ctx.fillStyle as string;
+      ctx.lineWidth = 1 / state.zoom;
+      ctx.fillStyle = '#ffd6ff';
+      ctx.fillText(text, x + padX, y + padY);
+      ctx.restore();
+    };
+
     const drawEndGhost = (t: ActionTarget) => {
       if (t.kind === 'shapePoint') {
         ctx.beginPath();
         ctx.arc(t.endX, t.endY, 7, 0, Math.PI * 2);
         ctx.fill();
-      } else {
-        const plat = state.level.platforms.find(p => p.id === t.platformId);
-        if (!plat) return;
+        return;
+      }
+      if (t.kind === 'rotateShape') {
+        // Draw the soft body's REST hull rotated by endRotation around its
+        // centroid — visual preview of where the rotation will end up.
+        const shape = (state.level.pointShapes ?? []).find(s => s.id === t.shapeId);
+        const c = shapeCentroid(t.shapeId);
+        if (!shape || !c || shape.points.length < 2) return;
+        const cos = Math.cos(t.endRotation);
+        const sin = Math.sin(t.endRotation);
         ctx.save();
-        ctx.translate(t.endX, t.endY);
-        ctx.rotate(plat.rotation);
-        ctx.globalAlpha = 0.5;
-        ctx.fillRect(-plat.width / 2, -plat.height / 2, plat.width, plat.height);
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        for (let i = 0; i < shape.points.length; i++) {
+          const p = shape.points[i];
+          const ox = p.x - c.x, oy = p.y - c.y;
+          const wx = c.x + ox * cos - oy * sin;
+          const wy = c.y + ox * sin + oy * cos;
+          if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+        }
+        ctx.closePath();
+        ctx.stroke();
         ctx.globalAlpha = 1;
-        ctx.strokeRect(-plat.width / 2, -plat.height / 2, plat.width, plat.height);
         ctx.restore();
+        drawRotationBadge(c.x, c.y, t.endRotation);
+        return;
+      }
+      const plat = state.level.platforms.find(p => p.id === t.platformId);
+      if (!plat) return;
+      // Use the target's endRotation if set (animated rotation); otherwise
+      // the platform's closed-pose rotation.
+      const endRot = t.endRotation ?? plat.rotation;
+      ctx.save();
+      ctx.translate(t.endX, t.endY);
+      ctx.rotate(endRot);
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(-plat.width / 2, -plat.height / 2, plat.width, plat.height);
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(-plat.width / 2, -plat.height / 2, plat.width, plat.height);
+      ctx.restore();
+      // Show the DELTA from the platform's closed-pose rotation — that's
+      // what the action will animate. When endRotation is absent (pure
+      // translation), delta is 0 and the badge is suppressed.
+      if (t.endRotation !== undefined) {
+        drawRotationBadge(t.endX, t.endY, t.endRotation - plat.rotation);
       }
     };
+
+    // Compute the link-highlight set for the currently selected entity:
+    // - selected trigger → highlight all actions it fires
+    // - selected action  → highlight all triggers in sourceTriggerIds
+    // Used to draw a cyan ring around the linked counterparts so the user
+    // can see the trigger ↔ action wiring at a glance.
+    const linkedActions = new Set<string>();
+    const linkedTriggers = new Set<string>();
+    if (state.selectedElement?.type === 'trigger') {
+      const tid = state.selectedElement.id;
+      for (const a of state.level.actions ?? []) {
+        if (a.sourceTriggerIds.includes(tid)) linkedActions.add(a.id);
+      }
+    } else if (state.selectedElement?.type === 'action') {
+      const a = (state.level.actions ?? []).find(x => x.id === state.selectedElement!.id);
+      if (a) for (const tid of a.sourceTriggerIds) linkedTriggers.add(tid);
+    }
 
     // Actions — render arrows from each target's source to its endXY.
     for (const action of state.level.actions ?? []) {
       const selected = state.selectedElement?.type === 'action' && state.selectedElement.id === action.id;
+      const linkedFromTrigger = linkedActions.has(action.id);
       ctx.save();
       ctx.strokeStyle = selected ? '#ffaaff' : '#9966cc';
       ctx.fillStyle = selected ? '#ffaaff' : '#9966cc';
@@ -455,11 +725,65 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       for (const t of action.targets) {
         const src = sourcePos(t);
         if (!src) continue;
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(t.endX, t.endY);
-        ctx.stroke();
+        // rotateShape has no endX/endY — only draw the rotated ghost hull,
+        // skip the arrow. Other kinds (shapePoint, platform) draw the arrow.
+        if (t.kind !== 'rotateShape') {
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(t.endX, t.endY);
+          ctx.stroke();
+        }
         drawEndGhost(t);
+      }
+      ctx.setLineDash([]);
+      // Link-highlight: cyan ring around every target ghost when this
+      // action is wired to the currently-selected trigger.
+      if (linkedFromTrigger) {
+        ctx.strokeStyle = '#5ef0ff';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]);
+        for (const t of action.targets) {
+          if (t.kind === 'shapePoint') {
+            ctx.beginPath();
+            ctx.arc(t.endX, t.endY, 14, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (t.kind === 'platform') {
+            const plat = state.level.platforms.find(p => p.id === t.platformId);
+            if (!plat) continue;
+            const endRot = t.endRotation ?? plat.rotation;
+            ctx.save();
+            ctx.translate(t.endX, t.endY);
+            ctx.rotate(endRot);
+            ctx.strokeRect(-plat.width / 2 - 4, -plat.height / 2 - 4, plat.width + 8, plat.height + 8);
+            ctx.restore();
+          } else if (t.kind === 'rotateShape') {
+            const c = shapeCentroid(t.shapeId);
+            if (c) {
+              ctx.beginPath();
+              ctx.arc(c.x, c.y, 32, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+          }
+        }
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+    }
+
+    // Link-highlight pass for triggers: cyan ring around each trigger
+    // wired to the currently-selected action.
+    if (linkedTriggers.size > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#5ef0ff';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      for (const trig of state.level.triggers ?? []) {
+        if (!linkedTriggers.has(trig.id)) continue;
+        ctx.save();
+        ctx.translate(trig.x, trig.y);
+        ctx.rotate(trig.rotation);
+        ctx.strokeRect(-trig.width / 2 - 4, -trig.height / 2 - 4, trig.width + 8, trig.height + 8);
+        ctx.restore();
       }
       ctx.setLineDash([]);
       ctx.restore();
@@ -477,10 +801,12 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         const src = sourcePos(t);
         if (!src) continue;
         if (dt.phase === 'placeEnds') {
-          ctx.beginPath();
-          ctx.moveTo(src.x, src.y);
-          ctx.lineTo(t.endX, t.endY);
-          ctx.stroke();
+          if (t.kind !== 'rotateShape') {
+            ctx.beginPath();
+            ctx.moveTo(src.x, src.y);
+            ctx.lineTo(t.endX, t.endY);
+            ctx.stroke();
+          }
           drawEndGhost(t);
         }
         // Highlight selected source
@@ -666,6 +992,163 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.restore();
     }
 
+    // ── Rotation-target preview highlight ────────────────────────────────
+    // While in the Action tool with Option/Alt/Ctrl held, outline whatever
+    // the user's cursor is over IF it would be turned into a rotation
+    // target on click. Removes the guessing game ("click the platform or
+    // the pink ghost?"). Point-shape hulls take priority over platforms
+    // when they overlap, matching the modifier-click handler order.
+    if (state.selectedTool === 'action' && state.modifierHeld) {
+      let target: { kind: 'shape' | 'platform'; bounds: () => void; label: string } | null = null;
+      for (const ps of state.level.pointShapes ?? []) {
+        if (ps.points.length >= 3 && pointInPolygonPts(state.cursorX, state.cursorY, ps.points)) {
+          target = {
+            kind: 'shape',
+            label: 'Rotate this soft body',
+            bounds: () => {
+              ctx.beginPath();
+              ctx.moveTo(ps.points[0].x, ps.points[0].y);
+              for (let i = 1; i < ps.points.length; i++) ctx.lineTo(ps.points[i].x, ps.points[i].y);
+              ctx.closePath();
+            },
+          };
+          break;
+        }
+      }
+      if (!target) {
+        for (const plat of state.level.platforms) {
+          if (Math.abs(state.cursorX - plat.x) <= plat.width / 2
+              && Math.abs(state.cursorY - plat.y) <= plat.height / 2) {
+            target = {
+              kind: 'platform',
+              label: 'Rotate this platform',
+              bounds: () => {
+                ctx.save();
+                ctx.translate(plat.x, plat.y);
+                ctx.rotate(plat.rotation);
+                ctx.beginPath();
+                ctx.rect(-plat.width / 2, -plat.height / 2, plat.width, plat.height);
+                ctx.restore();
+              },
+            };
+            break;
+          }
+        }
+      }
+      if (target) {
+        ctx.save();
+        ctx.strokeStyle = '#5ef0ff';
+        ctx.lineWidth = 4 / state.zoom; // keep highlight ~constant pixel width at any zoom
+        ctx.setLineDash([10 / state.zoom, 6 / state.zoom]);
+        target.bounds();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+        // Small in-world label near the cursor explaining what'll happen.
+        ctx.save();
+        ctx.font = `${12 / state.zoom}px sans-serif`;
+        const padX = 6 / state.zoom;
+        const padY = 4 / state.zoom;
+        ctx.textBaseline = 'top';
+        const text = `↻ ${target.label}`;
+        const textW = ctx.measureText(text).width;
+        const bx = state.cursorX + 14 / state.zoom;
+        const by = state.cursorY + 14 / state.zoom;
+        ctx.fillStyle = 'rgba(20, 30, 50, 0.92)';
+        ctx.fillRect(bx, by, textW + padX * 2, 16 / state.zoom + padY);
+        ctx.strokeStyle = '#5ef0ff';
+        ctx.lineWidth = 1.5 / state.zoom;
+        ctx.strokeRect(bx, by, textW + padX * 2, 16 / state.zoom + padY);
+        ctx.fillStyle = '#5ef0ff';
+        ctx.fillText(text, bx + padX, by + padY);
+        ctx.restore();
+      }
+    }
+
+    // ── ID label pass ────────────────────────────────────────────────
+    // Single pass that draws each entity's id over the top of everything
+    // else in world space. Skipped when state.showIds is false. Font is
+    // deliberately LARGER than the existing trigger/action mini-labels so
+    // names are readable without zooming in; scaled inverse to the camera
+    // zoom so the displayed size is constant in pixels regardless of the
+    // user's zoom level.
+    if (state.showIds) {
+      const fontPx = 14; // screen-space size; scaled by 1/zoom to keep constant
+      ctx.font = `bold ${fontPx / state.zoom}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const drawIdLabel = (x: number, y: number, id: string, color = '#ffe88a') => {
+        const padX = 5 / state.zoom;
+        const padY = 2 / state.zoom;
+        const w = ctx.measureText(id).width;
+        const h = fontPx / state.zoom;
+        ctx.fillStyle = 'rgba(10, 10, 20, 0.88)';
+        ctx.fillRect(x - w / 2 - padX, y - h / 2 - padY, w + padX * 2, h + padY * 2);
+        ctx.fillStyle = color;
+        ctx.fillText(id, x, y);
+      };
+      for (const p of state.level.platforms) drawIdLabel(p.x, p.y, p.id);
+      for (const s of state.level.springPads ?? []) drawIdLabel(s.x, s.y, s.id, '#ffd066');
+      for (const s of state.level.spikes ?? []) drawIdLabel(s.x, s.y - s.height / 2 - 10 / state.zoom, s.id, '#ff8a8a');
+      for (const z of state.level.goalZones ?? []) drawIdLabel(z.x, z.y, z.id, '#9fffa0');
+      for (const z of state.level.hillZones ?? []) drawIdLabel(z.x, z.y, z.id, '#ffd84a');
+      for (const z of state.level.deathZones ?? []) drawIdLabel(z.x, z.y, z.id, '#ff8080');
+      for (const z of state.level.gravityZones ?? []) drawIdLabel(z.x, z.y + 22 / state.zoom, z.id, '#d6a0ff');
+      for (const z of state.level.triggers ?? []) drawIdLabel(z.x, z.y - z.height / 2 - 22 / state.zoom, z.id, '#bdf6c5');
+      for (const sp of state.level.spawnPoints) drawIdLabel(sp.x, sp.y + 26 / state.zoom, sp.id, '#aaccff');
+      for (const n of state.level.npcBlobs) drawIdLabel(n.x, n.y + 26 / state.zoom, n.id, '#c0e0ff');
+      for (const pu of state.level.powerupSpawns ?? []) drawIdLabel(pu.x, pu.y + 26 / state.zoom, pu.id, '#ffe066');
+      for (const sp of state.level.softPlatforms ?? []) drawIdLabel(sp.x, sp.y, sp.id, '#aaccdd');
+      for (const ps of state.level.pointShapes ?? []) {
+        // Centroid of the rest hull.
+        let cx = 0, cy = 0;
+        for (const pt of ps.points) { cx += pt.x; cy += pt.y; }
+        const n = Math.max(1, ps.points.length);
+        drawIdLabel(cx / n, cy / n, ps.id, '#aaddff');
+      }
+      for (const inst of state.level.sprites ?? []) drawIdLabel(inst.x, inst.y, inst.id, '#dbb6ff');
+      for (const c of state.level.chains ?? []) {
+        // Midpoint of the chain — average of the two endpoint anchor world
+        // positions (use blob centroid when endpoint is a blob ref).
+        const ep = (ref: { kind: 'fixed'; x: number; y: number } | { kind: 'blob'; entity: 'npc' | 'softPlatform' | 'pointShape'; id: string }): { x: number; y: number } | null => {
+          if (ref.kind === 'fixed') return { x: ref.x, y: ref.y };
+          if (ref.entity === 'npc') {
+            const npc = state.level.npcBlobs.find(n => n.id === ref.id);
+            return npc ? { x: npc.x, y: npc.y } : null;
+          }
+          if (ref.entity === 'softPlatform') {
+            const sp = (state.level.softPlatforms ?? []).find(s => s.id === ref.id);
+            return sp ? { x: sp.x, y: sp.y } : null;
+          }
+          const ps = (state.level.pointShapes ?? []).find(s => s.id === ref.id);
+          if (!ps) return null;
+          let cx = 0, cy = 0;
+          for (const pt of ps.points) { cx += pt.x; cy += pt.y; }
+          return { x: cx / Math.max(1, ps.points.length), y: cy / Math.max(1, ps.points.length) };
+        };
+        const a = ep(c.endpointA);
+        const b = ep(c.endpointB);
+        if (a && b) drawIdLabel((a.x + b.x) / 2, (a.y + b.y) / 2, c.id, '#ffd0a0');
+      }
+      // Actions — anchor at the first target's endpoint (or source for
+      // rotateShape) so the id sits near where the action visually starts.
+      for (const action of state.level.actions ?? []) {
+        const first = action.targets[0];
+        if (!first) continue;
+        let x = 0, y = 0;
+        if (first.kind === 'platform') { x = first.endX; y = first.endY; }
+        else if (first.kind === 'shapePoint') { x = first.endX; y = first.endY; }
+        else if (first.kind === 'rotateShape') {
+          const ps = (state.level.pointShapes ?? []).find(s => s.id === first.shapeId);
+          if (!ps) continue;
+          for (const pt of ps.points) { x += pt.x; y += pt.y; }
+          const n = Math.max(1, ps.points.length);
+          x /= n; y /= n;
+        }
+        drawIdLabel(x, y - 36 / state.zoom, `${action.id} (${action.mode})`, '#ffaaff');
+      }
+    }
+
     ctx.restore();
 
     // HUD: show current tool + hotkey hint
@@ -676,20 +1159,42 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     const hasPlatforms = state.level.platforms.length > 0;
     const actionHint = state.selectedTool === 'action' && !state.draftAction
       ? (hasShapes || hasPlatforms
-          ? ` | action: click a shape vertex or platform to add a move target`
+          ? ` | action: click a vertex/platform to add · ${ALT_LABEL}-click a soft body or platform to rotate it`
           : ` | action: needs a Shape or Platform first`)
       : '';
     const draftHint = state.draftPointShape
-      ? ` | shape: ${state.draftPointShape.points.length} pts · Shift=15° snap · Alt=anchor · Enter/C: commit · Esc: cancel`
+      ? ` | shape: ${state.draftPointShape.points.length} pts · Shift=15° snap · ${ALT_LABEL}=anchor · Enter/C: commit · Esc: cancel`
       : state.draftAction
         ? state.draftAction.phase === 'pickPoints'
-          ? ` | action: ${state.draftAction.targets.length} targets · Enter: set end positions · Esc: cancel`
-          : ` | action: drag ghost ends to destination · Enter: commit · Esc: cancel`
+          ? ` | action: ${state.draftAction.targets.length} targets · click vertex/platform to add · ${ALT_LABEL}-click soft body/platform to rotate · Enter: next · Esc: cancel`
+          : ` | action: ${state.draftAction.targets.length} targets · drag ghosts to position · ${ALT_LABEL}-click soft body/platform to add rotation · panel: tune endRotation · Enter: commit · Esc: cancel`
         : actionHint;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(8, h - 28, Math.min(800, 240 + draftHint.length * 6), 22);
+    ctx.fillRect(8, h - 28, Math.min(1100, 240 + draftHint.length * 6), 22);
     ctx.fillStyle = '#aaa';
     ctx.fillText(`Tool: ${state.selectedTool} | R: rotate | 1-9,Q,W,E: tools${draftHint}`, 14, h - 17);
+
+    // Top-of-canvas banner during action drafting — bigger, more obvious
+    // than the bottom-line status. Tells the user exactly what to do next.
+    if (state.draftAction) {
+      const banner = state.draftAction.phase === 'pickPoints'
+        ? `Drafting Action — click a platform or shape vertex to add it as a target. ${ALT_LABEL}-click a soft body or platform to rotate it. Esc to cancel.`
+        : `Drafting Action — drag a dashed ghost to set where each target moves to. Use the side panel to fine-tune position or rotation. Press Enter to commit.`;
+      ctx.font = 'bold 13px sans-serif';
+      const textW = ctx.measureText(banner).width;
+      const padX = 16, padY = 8;
+      const bx = (w - textW - padX * 2) / 2;
+      const by = 16;
+      ctx.fillStyle = 'rgba(60, 30, 90, 0.92)';
+      ctx.fillRect(bx, by, textW + padX * 2, 22 + padY);
+      ctx.strokeStyle = '#c77dff';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(bx, by, textW + padX * 2, 22 + padY);
+      ctx.fillStyle = '#fff5e6';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(banner, bx + padX, by + (22 + padY) / 2);
+    }
   }, [state]);
 
   useEffect(() => {
@@ -707,8 +1212,19 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     const sy = e.clientY - rect.top;
     const { x: wx, y: wy } = screenToWorld(sx, sy);
 
-    // Middle mouse, right click, or Space+left = pan (Godot-style)
+    // Middle mouse, right click, Space+left, or Shift+left = pan (Godot-style).
+    // Shift+left also doubles as multi-select on hits in the select tool, so
+    // that path is handled below; we only enter pan mode here when the user
+    // is on a non-select tool OR shift-clicked empty space.
     if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceHeldRef.current)) {
+      state.isPanning = true;
+      state.panStartX = sx;
+      state.panStartY = sy;
+      state.panStartCamX = state.panX;
+      state.panStartCamY = state.panY;
+      return;
+    }
+    if (e.button === 0 && e.shiftKey && state.selectedTool !== 'select') {
       state.isPanning = true;
       state.panStartX = sx;
       state.panStartY = sy;
@@ -736,9 +1252,18 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
 
       const hit = state.hitTest(wx, wy);
       if (e.shiftKey && hit) {
-        // Shift-click: add/remove from multi-select set without disturbing primary selection.
+        // Shift-click on an element: add/remove from multi-select.
         state.toggleMultiSelect(hit);
         onUpdate();
+        return;
+      }
+      if (e.shiftKey && !hit) {
+        // Shift-drag on empty space: pan. Same handler as Space+drag.
+        state.isPanning = true;
+        state.panStartX = sx;
+        state.panStartY = sy;
+        state.panStartCamX = state.panX;
+        state.panStartCamY = state.panY;
         return;
       }
       // Plain click: reset multi-select & set primary selection.
@@ -756,27 +1281,16 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         const snapped = snapToAngle(last.x, last.y, wx, wy);
         px = snapped.x; py = snapped.y;
       }
-      state.appendDraftPoint(px, py, e.altKey);
+      state.appendDraftPoint(px, py, isModifierHeld(e));
+      onUpdate();
+    } else if (state.selectedTool === 'chain') {
+      state.appendChainEndpoint(wx, wy);
       onUpdate();
     } else if (state.selectedTool === 'action') {
-      // Pick a shape vertex or a platform to add as a target.
-      const vhit = state.hitTestPointShapeVertex(wx, wy);
-      if (vhit) {
-        if (!state.draftAction) state.beginDraftAction();
-        state.appendActionTargetAtVertex(vhit.shapeId, vhit.pointIndex);
-        onUpdate();
-        return;
-      }
-      // Pre-empt platform hit-test before falling through.
-      for (const plat of state.level.platforms) {
-        if (Math.abs(wx - plat.x) <= plat.width / 2 && Math.abs(wy - plat.y) <= plat.height / 2) {
-          if (!state.draftAction) state.beginDraftAction();
-          state.appendActionTargetAtPlatform(plat.id);
-          onUpdate();
-          return;
-        }
-      }
-      // Click empty space while in placeEnds: drag an end ghost if hit.
+      // Ghost drag takes priority over re-adding a target. Without this, a
+      // click on a ghost rectangle that happens to overlap a platform
+      // would re-add the platform as a NEW target instead of dragging the
+      // existing one.
       if (state.draftAction?.phase === 'placeEnds') {
         const idx = state.hitTestDraftActionEnd(wx, wy);
         if (idx !== null) {
@@ -785,11 +1299,54 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
           return;
         }
       }
+      // Dragging a ghost of a selected, already-committed action.
+      const committedHit = state.hitTestSelectedActionEnd(wx, wy);
+      if (committedHit) {
+        state.draggingCommittedActionTarget = committedHit;
+        onUpdate();
+        return;
+      }
+      // Alt/Option/Ctrl-click on a soft body OR static platform → add a
+      // ROTATION target instead of the default behavior.
+      if (isModifierHeld(e)) {
+        for (const ps of state.level.pointShapes ?? []) {
+          if (ps.points.length >= 3 && pointInPolygonPts(wx, wy, ps.points)) {
+            if (!state.draftAction) state.beginDraftAction();
+            state.appendActionTargetRotateShape(ps.id);
+            onUpdate();
+            return;
+          }
+        }
+        for (const plat of state.level.platforms) {
+          if (Math.abs(wx - plat.x) <= plat.width / 2 && Math.abs(wy - plat.y) <= plat.height / 2) {
+            if (!state.draftAction) state.beginDraftAction();
+            state.appendActionTargetRotatePlatform(plat.id);
+            onUpdate();
+            return;
+          }
+        }
+      }
+      // Pick a shape vertex or a platform to add as a target.
+      const vhit = state.hitTestPointShapeVertex(wx, wy);
+      if (vhit) {
+        if (!state.draftAction) state.beginDraftAction();
+        state.appendActionTargetAtVertex(vhit.shapeId, vhit.pointIndex);
+        onUpdate();
+        return;
+      }
+      for (const plat of state.level.platforms) {
+        if (Math.abs(wx - plat.x) <= plat.width / 2 && Math.abs(wy - plat.y) <= plat.height / 2) {
+          if (!state.draftAction) state.beginDraftAction();
+          state.appendActionTargetAtPlatform(plat.id);
+          onUpdate();
+          return;
+        }
+      }
       onUpdate();
     } else {
       const tool = state.selectedTool;
       // Rect-based tools use drag-to-place
-      if (tool === 'platform' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone' || tool === 'deathZone' || tool === 'trigger' || tool === 'softPlatform') {
+      if (tool === 'platform' || tool === 'spike' || tool === 'goalZone' || tool === 'hillZone' || tool === 'deathZone' || tool === 'trigger' || tool === 'softPlatform' || tool === 'gravityZone') {
         state.startPlacement(tool, wx, wy);
       } else {
         switch (tool) {
@@ -813,9 +1370,16 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     state.cursorY = cwy;
     // Track Shift for shape-draft angle-snap preview.
     state.angleSnapHeld = e.shiftKey;
+    // Track Alt/Option/Ctrl for the action-tool rotation-target highlight.
+    state.modifierHeld = isModifierHeld(e);
 
     if (state.draggingActionTarget !== null) {
       state.setDraftActionTargetEnd(state.draggingActionTarget, cwx, cwy);
+      return;
+    }
+    if (state.draggingCommittedActionTarget !== null) {
+      const { actionId, index } = state.draggingCommittedActionTarget;
+      state.setActionTargetEnd(actionId, index, cwx, cwy);
       return;
     }
 
@@ -875,6 +1439,9 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     if (state.draggingActionTarget !== null) {
       state.draggingActionTarget = null;
     }
+    if (state.draggingCommittedActionTarget !== null) {
+      state.draggingCommittedActionTarget = null;
+    }
     state.stopDrag();
     state.isPanning = false;
   }, [state, onUpdate]);
@@ -910,6 +1477,12 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       }
       // Don't return — let other Shift+key combos through (Shift+R, etc.).
     }
+    if (e.key === 'Alt' || e.key === 'Control') {
+      if (!state.modifierHeld) {
+        state.modifierHeld = true;
+        onUpdate();
+      }
+    }
 
     // Space = pan modifier (Godot-style). Don't preventDefault for repeats — keydown fires once.
     if (e.key === ' ' || e.code === 'Space') {
@@ -936,6 +1509,13 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         onUpdate();
         return;
       }
+    }
+
+    // Toggle id labels with I.
+    if (e.key === 'i' || e.key === 'I') {
+      state.showIds = !state.showIds;
+      onUpdate();
+      return;
     }
 
     // Spring size cycle (S / Shift+S)
@@ -992,6 +1572,11 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         onUpdate();
         return;
       }
+      if (state.draftChain) {
+        state.cancelDraftChain();
+        onUpdate();
+        return;
+      }
       state.selectedElement = null;
       state.multiSelect = [];
       state.selectedTool = 'select';
@@ -1013,9 +1598,11 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       // Bail out of any in-progress draft when switching tools.
       if (state.draftPointShape && tool !== 'pointShape') state.cancelDraftPointShape();
       if (state.draftAction && tool !== 'action') state.cancelDraftAction();
+      if (state.draftChain && tool !== 'chain') state.cancelDraftChain();
       state.selectedTool = tool;
       if (tool === 'pointShape' && !state.draftPointShape) state.beginDraftPointShape();
       if (tool === 'action' && !state.draftAction) state.beginDraftAction();
+      if (tool === 'chain' && !state.draftChain) state.beginDraftChain();
       onUpdate();
     }
   }, [state, onUpdate]);
@@ -1033,11 +1620,17 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         onUpdate();
       }
     }
+    if (e.key === 'Alt' || e.key === 'Control') {
+      if (state.modifierHeld) {
+        state.modifierHeld = false;
+        onUpdate();
+      }
+    }
   }, [state, onUpdate]);
 
   const cursor = state.isPanning
     ? 'grabbing'
-    : spaceHeldRef.current
+    : (spaceHeldRef.current || state.angleSnapHeld)
       ? 'grab'
       : state.selectedTool === 'select' ? 'default' : 'crosshair';
 

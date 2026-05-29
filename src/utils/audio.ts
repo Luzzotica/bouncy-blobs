@@ -160,8 +160,8 @@ function playBuffer(buf: AudioBuffer, opts: PlaySfxOptions): void {
  * called once at game-start without enumerating the directory). Keep in sync
  * with bouncy-blobs/scripts/generate-all-sfx.sh. */
 export const SFX_NAMES = [
-  'land-squelch-1', 'land-squelch-2', 'land-squelch-3',
-  'puff-up',
+  'land-squelch',
+  'puff-up-1', 'puff-up-2', 'puff-up-3',
   'wall-stick', 'wall-jump',
   'spring-boing',
   'spike-splat',

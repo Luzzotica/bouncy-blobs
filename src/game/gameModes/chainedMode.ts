@@ -7,7 +7,7 @@ import { LevelData, ZoneDef } from '../../levels/types';
 import { chainedLevel } from '../../levels/chainedLevel';
 import { drawGoalZone } from '../../renderer/zoneRenderer';
 import { drawTimer } from '../../renderer/hudRenderer';
-import { Vec2, sub, length } from '../../physics/vec2';
+import { drawChain } from '../../renderer/chainRenderer';
 
 // Total length of the rope between any two chained players. The rope is
 // only this long — when the bots are this far apart in rope-path terms
@@ -31,8 +31,9 @@ const CHAIN_SOLVER_ITERS = 12;
 interface ChainPair {
   pidA: string;
   pidB: string;
-  /** Particle indices of the intermediate rope segments, in order from A to B. */
-  segmentIndices: number[];
+  /** Full particle index list including both player centroids:
+   *  [centerIdxA, ...inner segments, centerIdxB]. */
+  particleIndices: number[];
 }
 
 export class ChainedMode implements GameMode {
@@ -126,7 +127,7 @@ export class ChainedMode implements GameMode {
       this.chainPairs.push({
         pidA: a.playerId,
         pidB: b.playerId,
-        segmentIndices: rope.particleIndices,
+        particleIndices: [a.blob.centerIdx, ...rope.particleIndices, b.blob.centerIdx],
       });
     }
   }
@@ -159,64 +160,12 @@ export class ChainedMode implements GameMode {
     this.renderChains(ctx, playerManager);
   }
 
-  private renderChains(ctx: CanvasRenderingContext2D, playerManager: PlayerManager): void {
+  private renderChains(ctx: CanvasRenderingContext2D, _playerManager: PlayerManager): void {
     const world = this.world;
     if (!world) return;
-
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
     for (const pair of this.chainPairs) {
-      const a = playerManager.getPlayer(pair.pidA);
-      const b = playerManager.getPlayer(pair.pidB);
-      if (!a || !b) continue;
-
-      const posA = a.blob.getCentroid();
-      const posB = b.blob.getCentroid();
-
-      // Walk the physical rope: endpoint A -> each segment particle -> endpoint B.
-      const pts: Vec2[] = [posA];
-      for (const segIdx of pair.segmentIndices) {
-        const p = world.pos[segIdx];
-        if (p) pts.push(p);
-      }
-      pts.push(posB);
-
-      // Tension color: distance between endpoints vs the rope's full slack length.
-      const straightLine = length(sub(posB, posA));
-      const tension = Math.min(Math.max(0, (straightLine - CHAIN_TOTAL_LENGTH * 0.85) / (CHAIN_TOTAL_LENGTH * 0.15)), 1);
-      let r: number, g: number, bv: number;
-      if (tension < 0.5) {
-        const t = tension * 2;
-        r = Math.floor(110 * t + 60 * (1 - t));
-        g = Math.floor(180 * (1 - t) + 200 * t);
-        bv = Math.floor(60 * (1 - t) + 40 * t);
-      } else {
-        const t = (tension - 0.5) * 2;
-        r = Math.floor(255 * t + 200 * (1 - t));
-        g = Math.floor(180 * (1 - t) + 80 * t);
-        bv = 40;
-      }
-
-      // Dark outline + colored fill — two passes give the rope a comic-book chain
-      // look without needing per-link art.
-      ctx.lineWidth = 9;
-      ctx.strokeStyle = '#0a0612';
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
-
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = `rgb(${r}, ${g}, ${bv})`;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
+      drawChain(ctx, world, pair.particleIndices, CHAIN_TOTAL_LENGTH);
     }
-
-    ctx.restore();
   }
 
   renderHUD(ctx: CanvasRenderingContext2D, width: number, height: number, state: GameModeState, _playerManager: PlayerManager): void {

@@ -1,3 +1,210 @@
 {
-  "sprites": []
+  "sprites": [
+    {
+      "id": "goal_flag",
+      "image": "/sprites/goal_flag.png",
+      "pxPerWorldUnit": 5.0,
+      "anchor": {
+        "x": 0.5,
+        "y": 0.95
+      },
+      "shape": {
+        "kind": "polygon",
+        "points": [
+          [
+            -102.4,
+            -194.56
+          ],
+          [
+            102.4,
+            -194.56
+          ],
+          [
+            102.4,
+            10.24
+          ],
+          [
+            -102.4,
+            10.24
+          ]
+        ]
+      },
+      "layer": "foreground"
+    },
+    {
+      "id": "pencil",
+      "image": "/sprites/pencil.png",
+      "pxPerWorldUnit": 3.5,
+      "anchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "shape": {
+        "kind": "pointShape",
+        "points": [
+          {
+            "x": -110,
+            "y": 0,
+            "mass": 0.8
+          },
+          {
+            "x": -70,
+            "y": 0,
+            "mass": 1.0
+          },
+          {
+            "x": -30,
+            "y": 0,
+            "mass": 1.0
+          },
+          {
+            "x": 10,
+            "y": 0,
+            "mass": 1.0
+          },
+          {
+            "x": 50,
+            "y": 0,
+            "mass": 1.0
+          },
+          {
+            "x": 90,
+            "y": 0,
+            "mass": 1.0
+          },
+          {
+            "x": 120,
+            "y": 0,
+            "mass": 0.8
+          }
+        ],
+        "edges": [
+          {
+            "a": 0,
+            "b": 1,
+            "stiffness": 0.9
+          },
+          {
+            "a": 1,
+            "b": 2,
+            "stiffness": 0.9
+          },
+          {
+            "a": 2,
+            "b": 3,
+            "stiffness": 0.9
+          },
+          {
+            "a": 3,
+            "b": 4,
+            "stiffness": 0.9
+          },
+          {
+            "a": 4,
+            "b": 5,
+            "stiffness": 0.9
+          },
+          {
+            "a": 5,
+            "b": 6,
+            "stiffness": 0.9
+          }
+        ]
+      },
+      "layer": "prop"
+    },
+    {
+      "id": "powerup_orb",
+      "image": "/sprites/powerup_orb.png",
+      "pxPerWorldUnit": 18.0,
+      "anchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "shape": {
+        "kind": "polygon",
+        "points": [
+          [
+            -28.44,
+            -28.44
+          ],
+          [
+            28.44,
+            -28.44
+          ],
+          [
+            28.44,
+            28.44
+          ],
+          [
+            -28.44,
+            28.44
+          ]
+        ]
+      },
+      "layer": "prop"
+    },
+    {
+      "id": "spike",
+      "image": "/sprites/spike.png",
+      "pxPerWorldUnit": 6.0,
+      "anchor": {
+        "x": 0.5,
+        "y": 0.85
+      },
+      "shape": {
+        "kind": "polygon",
+        "points": [
+          [
+            -85.33,
+            -145.07
+          ],
+          [
+            85.33,
+            -145.07
+          ],
+          [
+            85.33,
+            25.6
+          ],
+          [
+            -85.33,
+            25.6
+          ]
+        ]
+      },
+      "layer": "prop"
+    },
+    {
+      "id": "spring_pad",
+      "image": "/sprites/spring_pad.png",
+      "pxPerWorldUnit": 4.0,
+      "anchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "shape": {
+        "kind": "polygon",
+        "points": [
+          [
+            -128.0,
+            -128.0
+          ],
+          [
+            128.0,
+            -128.0
+          ],
+          [
+            128.0,
+            128.0
+          ],
+          [
+            -128.0,
+            128.0
+          ]
+        ]
+      },
+      "layer": "prop"
+    }
+  ]
 }

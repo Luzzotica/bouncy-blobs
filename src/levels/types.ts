@@ -10,6 +10,28 @@ export function getLevelTypes(level: LevelData): LevelType[] {
   return ['solo_racing'];
 }
 
+/** Validate that a level has the entities a given game mode needs. Returns
+ *  `null` when the mode is playable, or a short human-readable reason
+ *  string when it isn't. Used by the editor to disable mode toggles whose
+ *  requirements aren't met, and to flag currently-enabled modes that have
+ *  lost their requirements (e.g. the user deleted the goal zone). */
+export function validateLevelType(level: LevelData, type: LevelType): string | null {
+  switch (type) {
+    case 'solo_racing':
+    case 'team_racing':
+      if ((level.goalZones?.length ?? 0) === 0) return 'needs a Goal zone';
+      if (level.spawnPoints.filter(sp => sp.type === 'player').length === 0) return 'needs a player Spawn';
+      return null;
+    case 'koth':
+      if ((level.hillZones?.length ?? 0) === 0) return 'needs a Hill zone';
+      if (level.spawnPoints.filter(sp => sp.type === 'player').length === 0) return 'needs a player Spawn';
+      return null;
+    case 'party':
+      if (level.spawnPoints.filter(sp => sp.type === 'player').length === 0) return 'needs a player Spawn';
+      return null;
+  }
+}
+
 export interface LevelData {
   name: string;
   version: 1;
@@ -35,6 +57,9 @@ export interface LevelData {
   triggers?: TriggerDef[];
   /** Movement effects (formerly triggers). Each action subscribes to one or more triggers. */
   actions?: ActionDef[];
+  /** Rope-chain primitives between two anchors. Anchors are either a fixed
+   * world point or a reference to a blob entity (centroid). */
+  chains?: ChainDef[];
   /** Placed sprite instances — props from public/sprites/manifest.json with
    * per-asset collision shapes. Physics integration is staged: visuals load
    * via the sprite registry, collision wiring is wired up per-asset as each
@@ -52,6 +77,9 @@ export interface SpriteInstanceDef {
   y: number;
   rotation: number;    // radians
   scale?: number;      // default 1
+  /** Surface material override for polygon/circle hulls. Ignored for
+   * point-shape props (they flex regardless). Defaults to 'default'. */
+  material?: SurfaceMaterial;
 }
 
 export type SoftAnchorPattern = 'corners' | 'ends' | 'left' | 'right' | 'top' | 'bottom';
@@ -76,6 +104,19 @@ export interface SoftPlatformDef {
   anchors?: SoftAnchorPattern | number[];
   /** Multiplier on spring stiffness (defaults to 1.0). Higher = more rigid. */
   stiffness?: number;
+  /** When true, every unanchored hull vertex gets an individual home-spring
+   *  pulling it toward its original rest world position. The platform stays
+   *  rooted in place without per-vertex anchors, but each vertex remains
+   *  fully dynamic and jellies locally. Composes with per-vertex anchors:
+   *  anchored verts stay fully fixed; unanchored verts get a home-spring.
+   *  Home-spring strength is scaled by `stiffness`. */
+  pinned?: boolean;
+  /** When true, the shape-match frame is locked to the platform's initial
+   *  placement transform — the whole blob behaves like a wobbly mass on a
+   *  global spring (no local jelly). Distinct from `pinned`: `pinned` gives
+   *  per-vertex restoring force, `frameLocked` gives whole-body restoring
+   *  force. They can be combined. */
+  frameLocked?: boolean;
 }
 
 export interface PointShapePoint {
@@ -95,9 +136,43 @@ export interface PointShapeEdge {
 export interface PointShapeDef {
   id: string;
   points: PointShapePoint[];
+  /** Vestigial under the soft-blob interpretation — kept for back-compat with
+   * old level files. Loader ignores this and treats the point ring as a
+   * closed hull. */
   edges: PointShapeEdge[];
-  /** When true, an implicit edge connects the last point to the first at load time. */
+  /** Always true now (a point shape is a closed soft-body blob). Kept
+   * optional in the schema so legacy files load. */
   closed?: boolean;
+  /** Multiplier on spring/shape-match stiffness. Default 1.0. */
+  stiffness?: number;
+  /** Per-vertex home-spring pull — see SoftPlatformDef.pinned. */
+  pinned?: boolean;
+  /** Global shape-match frame lock (wobbly platform) — see
+   *  SoftPlatformDef.frameLocked. */
+  frameLocked?: boolean;
+}
+
+/** Where a chain end attaches. */
+export type ChainAnchorRef =
+  /** A pinned world point — loader creates a static particle there. */
+  | { kind: 'fixed'; x: number; y: number }
+  /** Attaches to the centroid of an existing blob entity. */
+  | { kind: 'blob'; entity: 'npc' | 'softPlatform' | 'pointShape'; id: string };
+
+export interface ChainDef {
+  id: string;
+  endpointA: ChainAnchorRef;
+  endpointB: ChainAnchorRef;
+  /** Target total rope length in world units. */
+  totalLength: number;
+  /** Max distance between adjacent chain particles. Default ~25. */
+  maxSegmentLength?: number;
+  /** Per-segment mass. Default 0.5. */
+  segmentMass?: number;
+  /** Per-segment collision radius. Default 10. */
+  segmentRadius?: number;
+  /** Chain-solver iterations per substep. Default 12. */
+  iterations?: number;
 }
 
 /** An area that detects blobs. Wired to one or more Actions via the action's
@@ -120,15 +195,25 @@ export interface TriggerDef {
   /** Seconds of continuous occupancy required before `pressed` flips true.
    *  0 = instant. Charge resets to 0 the moment occupancy drops to zero. */
   chargeSeconds?: number;
+  /** When true, NPC blobs cannot press this trigger — only player blobs
+   *  count toward occupancy. Default false (NPCs can press). */
+  ignoreNpcs?: boolean;
 }
 
 export type ActionEasing = 'linear' | 'easeInOut' | 'easeOut';
-export type ActionMode = 'switch' | 'continuous' | 'oneShot';
+export type ActionMode = 'switch' | 'continuous' | 'oneShot' | 'timer';
 export type RequireMode = 'any' | 'all';
 
 export type ActionTarget =
   | { kind: 'shapePoint'; shapeId: string; pointIndex: number; endX: number; endY: number }
-  | { kind: 'platform'; platformId: string; endX: number; endY: number };
+  /** Platform animation. `endX/endY` give the open-pose centre; optional
+   *  `endRotation` (radians) gives the open-pose rotation — when absent
+   *  the platform keeps its closed-pose rotation (translation-only). */
+  | { kind: 'platform'; platformId: string; endX: number; endY: number; endRotation?: number }
+  /** Rotate a whole point-shape hull around its REST centroid by
+   *  `endRotation` radians. Lerped from 0 at closed pose. Anchored
+   *  particles are skipped. */
+  | { kind: 'rotateShape'; shapeId: string; endRotation: number };
 
 /** A movement effect. Subscribes to one or more Triggers via `sourceTriggerIds`
  *  and animates its targets between their closed (initial) and open (endX/endY)
@@ -148,6 +233,9 @@ export interface ActionDef {
   mode: ActionMode;
   /** Seconds to wait after activation rises before applying the move. */
   delaySeconds?: number;
+  /** For mode === 'timer' ONLY: seconds between cycle starts (open-then-close).
+   *  Triggers are ignored in timer mode. Defaults to 4s if omitted. */
+  intervalSeconds?: number;
 }
 
 export interface SpikeDef {

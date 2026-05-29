@@ -79,9 +79,11 @@ describe('showcase level — covers every element type', () => {
           expect(shape, `shape ${t.shapeId} missing`).toBeDefined();
           expect(t.pointIndex).toBeGreaterThanOrEqual(0);
           expect(t.pointIndex).toBeLessThan(shape!.points.length);
-        } else {
+        } else if (t.kind === 'platform') {
           expect(platformIds.has(t.platformId)).toBe(true);
         }
+        // rotateShape targets aren't asserted here — they're a soft-body
+        // animation; coverage lives in dedicated rotateShape tests.
       }
     }
   });

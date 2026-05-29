@@ -27,7 +27,7 @@ export function installUiSounds(): void {
     if (!btn) return
     if (btn === lastHoverEl) return
     lastHoverEl = btn
-    playSfx('ui-hover', { volume: 0.5 })
+    playSfx('ui-hover', { volume: 0.20 })
   }
 
   const onPointerOut = (e: PointerEvent) => {

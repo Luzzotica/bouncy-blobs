@@ -1,58 +1,62 @@
-// World-space impact event log used by the blob renderer to draw ripples
-// propagating from the contact point. Each impact has an age, a strength,
-// and a fixed lifetime; ripples expand outward and fade as age → maxAge.
+// Per-blob impact log used by the blob renderer to draw ripples emanating
+// from the contact point. Offsets are stored in blob-LOCAL coords (relative
+// to the centroid at impact time) so a ripple rides along with the blob
+// instead of staying parked at the world-space point where the hit happened.
 //
-// Ticked once per game-loop frame from EffectsBindings.update (next to
-// tickDecals), and sampled per-blob during render to find impacts whose
-// origin is close enough to the blob hull to contribute visible rings.
+// Translation only — no rotation. Blobs don't visually spin so anchoring
+// to a local frame fixed at impact time would slide rings around the
+// silhouette weirdly. Local = centroid offset.
 
 import { Vec2 } from '../physics/vec2'
 
 export interface BlobImpact {
-  x: number
-  y: number
-  /** 0..1: governs initial ring radius, ring count, and brightness. */
+  /** Offset from the blob's centroid at impact time. */
+  localX: number
+  localY: number
+  /** 0..1 — governs ring count, ring radius, brightness, and lifetime. */
   strength: number
   age: number
   maxAge: number
 }
 
-const MAX_IMPACTS = 96
-const impacts: BlobImpact[] = []
+const MAX_PER_BLOB = 12
+const EMPTY: readonly BlobImpact[] = Object.freeze([])
 
-/** Record a new impact. `strength` ~ normalised landing/wall hit intensity. */
-export function addBlobImpact(pos: Vec2, strength: number): void {
-  if (impacts.length >= MAX_IMPACTS) impacts.shift()
-  impacts.push({
-    x: pos.x,
-    y: pos.y,
-    strength: Math.max(0.1, Math.min(1, strength)),
+const impactsByBlob = new Map<number, BlobImpact[]>()
+
+/** Record a ripple on `blobId`. `localOffset` is the contact point minus
+ * the blob's current centroid. `strength` ∈ [0,1]. */
+export function addBlobImpact(blobId: number, localOffset: Vec2, strength: number): void {
+  let arr = impactsByBlob.get(blobId)
+  if (!arr) {
+    arr = []
+    impactsByBlob.set(blobId, arr)
+  }
+  if (arr.length >= MAX_PER_BLOB) arr.shift()
+  const s = Math.max(0.1, Math.min(1, strength))
+  arr.push({
+    localX: localOffset.x,
+    localY: localOffset.y,
+    strength: s,
     age: 0,
-    maxAge: 0.5 + strength * 0.45,
+    maxAge: 0.5 + s * 0.45,
   })
 }
 
-/** Age every impact; drop expired ones. */
 export function tickBlobImpacts(dt: number): void {
-  for (let i = impacts.length - 1; i >= 0; i--) {
-    impacts[i].age += dt
-    if (impacts[i].age >= impacts[i].maxAge) impacts.splice(i, 1)
+  for (const [id, arr] of impactsByBlob) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      arr[i].age += dt
+      if (arr[i].age >= arr[i].maxAge) arr.splice(i, 1)
+    }
+    if (arr.length === 0) impactsByBlob.delete(id)
   }
 }
 
-/** Impacts whose origin is within `searchRadius` world-units of `near`.
- * Allocates a small array — fine, we have at most a handful of blobs. */
-export function impactsNear(near: Vec2, searchRadius: number): BlobImpact[] {
-  const r2 = searchRadius * searchRadius
-  const out: BlobImpact[] = []
-  for (const im of impacts) {
-    const dx = im.x - near.x
-    const dy = im.y - near.y
-    if (dx * dx + dy * dy <= r2) out.push(im)
-  }
-  return out
+export function impactsFor(blobId: number): readonly BlobImpact[] {
+  return impactsByBlob.get(blobId) ?? EMPTY
 }
 
 export function clearBlobImpacts(): void {
-  impacts.length = 0
+  impactsByBlob.clear()
 }

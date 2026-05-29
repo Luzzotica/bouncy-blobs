@@ -109,6 +109,14 @@ export class ClassicMode implements GameMode {
     this.finishedPlayerId = null;
   }
 
+  dumpState(): { finishedPlayerId: string | null; gameTime: number } {
+    return { finishedPlayerId: this.finishedPlayerId, gameTime: this.gameTime };
+  }
+  restoreState(state: { finishedPlayerId: string | null; gameTime: number }): void {
+    this.finishedPlayerId = state.finishedPlayerId;
+    this.gameTime = state.gameTime;
+  }
+
   getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
     if (!this.goalZone) return null;
     return {

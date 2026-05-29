@@ -1,4 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RollbackController, type InputSet } from "../game/rollback/RollbackController";
+import { evaluateLockstepGate } from "./lockstepGate";
+import { DisplaySmoother } from "../game/rollback/displaySmoothing";
+import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { joinAsPeer, RoomService, PeerManager, SteamTransport, getSelfSteamId } from "../lib/party";
 import { roomConfig } from "../lib/partyConfig";
@@ -18,7 +22,7 @@ import {
   type SnapshotFrame,
 } from "../lib/wireProtocol";
 import { decodeAggregatedInputs, MAGIC_AGGREGATED_INPUTS } from "../lib/inputProtocol";
-import { installDebugBridge, setNetDiagAccessor, setSnapsAccessor } from "../lib/debugBridge";
+import { installDebugBridge, setNetDiagAccessor, setRollbackStatsAccessor, setSnapsAccessor } from "../lib/debugBridge";
 import GameCanvas from "../components/GameCanvas";
 import GuestLobbyPanel from "../components/GuestLobbyPanel";
 import { COLOR_PALETTE } from "../constants/customization";
@@ -71,6 +75,13 @@ export default function OnlineGuest() {
   const [lobbyCode, setLobbyCode] = useState<string>("");
   const [localPlayerJoined, setLocalPlayerJoined] = useState(false);
   const [hasLevel, setHasLevel] = useState(false);
+  /** If `joinAsLocalPlayer` fired before the canvas was ready (no game
+   *  context yet → game.onPlayerJoin would silently no-op), we record
+   *  the synthesized Player here. `onCanvasInit` drains it once the
+   *  game has been initialised so the local blob still gets spawned —
+   *  deferred by a render or two instead of waiting up to a full
+   *  second for a keyframe to synthesise it. */
+  const pendingLocalSpawnRef = useRef<Player | null>(null);
   const [statusLine, setStatusLine] = useState<string>("");
   const [lobbyState, setLobbyState] = useState<LobbyStateEvent | null>(null);
   const [localColor, setLocalColor] = useState<string>(COLOR_PALETTE[1] ?? "#ffd166");
@@ -88,7 +99,27 @@ export default function OnlineGuest() {
   const remoteInputRef = useRef<Map<string, { moveX: number; moveY: number; expanding: boolean; expandScale: number }>>(new Map());
 
   const localPlayerIdRef = useRef<string>("");
+  // Name the user typed in the LobbyBrowser prompt. Used as the
+  // player_join.name and as the synth fallback before the host's
+  // lobby_state roster lands.
+  const localNameRef = useRef<string>("Player");
   const [canvasKey, setCanvasKey] = useState(0);
+
+  // Rollback prediction (Phase 7D). Default off — keyboard-driven
+  // override via `?prediction=on`. When enabled, the guest applies
+  // local input INSTANTLY (no host echo wait) and reconciles against
+  // authoritative inputs via the RollbackController.
+  const usePrediction = useMemo(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('prediction') === 'on';
+  }, []);
+  /** Live keyboard state — shared between the keyboard interval and the
+   *  prediction gate so the gate can read "what's pressed RIGHT NOW". */
+  const liveKeysRef = useRef({ w: false, a: false, s: false, d: false, space: false });
+  /** RollbackController instance, only built when prediction is on. */
+  const rollbackControllerRef = useRef<import('../game/rollback/RollbackController').RollbackController | null>(null);
+  /** Display smoother for rollback corrections. Only built when prediction is on. */
+  const displaySmootherRef = useRef<DisplaySmoother | null>(null);
 
   // ─── Bootstrap: join the host's room as a 'screen' peer ────────────────────
   // Two sources for the bootstrap:
@@ -166,6 +197,7 @@ export default function OnlineGuest() {
         roomRef.current = room;
         managerRef.current = manager;
         localPlayerIdRef.current = `guest-${result.peer_id}-keyboard`;
+        localNameRef.current = pending.display_name || "Player";
 
         try {
           const detail = await room.getRoom();
@@ -383,10 +415,41 @@ export default function OnlineGuest() {
       buf.set(t.tick, t);
       if (t.tick > latestHostTickRef.current) latestHostTickRef.current = t.tick;
     }
-    // Cap buffer size so a misbehaving host doesn't leak memory.
     if (buf.size > 600) {
       const sortedKeys = [...buf.keys()].sort((a, b) => a - b);
       for (let i = 0; i < sortedKeys.length - 600; i++) buf.delete(sortedKeys[i]);
+    }
+    // In prediction mode, also feed authoritative inputs to the
+    // RollbackController so it can compare against predictions and
+    // restore+replay on mismatch. The engine and game references are
+    // pulled from the game instance lazily — they only become
+    // available after onCanvasInit runs.
+    const rc = rollbackControllerRef.current;
+    const game = gameRef.current;
+    if (rc && game) {
+      const engine = game.getWorld();
+      if (engine) {
+        const byTick = new Map<number, InputSet>();
+        for (const t of agg.ticks) {
+          const set: InputSet = {};
+          for (const inp of t.inputs) {
+            set[inp.playerId] = {
+              moveX: inp.moveX,
+              moveY: inp.moveY,
+              expanding: inp.expanding,
+            };
+          }
+          byTick.set(t.tick, set);
+        }
+        const smoother = displaySmootherRef.current;
+        // Capture pre-rollback positions so we can compute the visual
+        // offset for smoothing.
+        const pre = smoother?.capturePreRollback(game);
+        const rolled = rc.onAuthoritativeInputs(byTick, engine, game);
+        if (rolled > 0 && pre && smoother) {
+          smoother.applyPostRollback(game, pre);
+        }
+      }
     }
   }
 
@@ -450,6 +513,22 @@ export default function OnlineGuest() {
     gameRef.current = null;
     remoteInputRef.current.clear();
 
+    // Reset per-level state. Without this, transitioning from playground
+    // → real game leaves stale refs that block the new game's setup:
+    //   - localPlayerJoined sticks at true → auto-join effect skips →
+    //     local blob never spawns in the new game.
+    //   - lastTickRef holds the playground's high tick → applySnapshot
+    //     drops every tick-0 keyframe → host/other-guest blobs never
+    //     get synthesized either.
+    setLocalPlayerJoined(false);
+    lastTickRef.current = -1;
+    latestHostTickRef.current = -1;
+    inputBufferRef.current.clear();
+    pendingKeyframeRef.current = null;
+    pendingManagerStateRef.current = null;
+    pendingRngStateRef.current = null;
+    pendingLocalSpawnRef.current = null;
+
     const game = new BouncyBlobsGame();
     if (typeof rngSeed === 'number') game.setRngSeed(rngSeed);
     const mode = createMirrorMode(levelData, levelType, freeplay);
@@ -483,45 +562,102 @@ export default function OnlineGuest() {
     game.initialize(context);
     game.setCanvas(ctx.canvas, ctx, width, height);
 
-    // ── Lockstep gate ──────────────────────────────────────────────────
-    // The guest's sim advances ONLY when it has authoritative inputs for
-    // the next tick from the host. If the buffer hasn't received the next
-    // tick yet, return false → GameLoop pauses physics (render still runs).
-    // The accumulator stays full so we burst-step when inputs arrive.
-    //
-    // This is the heart of input-paced lockstep: the guest's effective
-    // tick rate is dictated by the host's broadcast cadence, NOT by the
-    // guest's own RAF. As long as both sides apply the SAME inputs at the
-    // SAME ticks, the deterministic sim keeps them bit-identical.
-    game.setLogicGate((world) => {
-      const nextTick = world.tick + 1;
-      const buf = inputBufferRef.current;
-      const tickInputs = buf.get(nextTick);
-      if (!tickInputs) {
-        // No authoritative inputs for the next tick yet — wait.
-        return false;
-      }
-      const pm = game.getPlayerManager();
-      if (pm) {
-        // Apply EVERY player's input, including our own. Lockstep means
-        // own input also comes from the host's echo (~50 ms round-trip
-        // later than the press), and the deterministic sim only stays
-        // aligned if every client applies identical inputs at identical
-        // ticks. The old "skip own player" pattern was for the predict-
-        // locally architecture that this round replaces.
-        for (const inp of tickInputs.inputs) {
-          const mp = pm.getPlayer(inp.playerId);
+    if (usePrediction) {
+      // ── Prediction gate ─────────────────────────────────────────────
+      // Local input is read NOW. Remote players' inputs are predicted
+      // from their last-known authoritative input. RollbackController
+      // snapshots before each tick; authoritative inputs arriving for
+      // a past tick trigger restore+replay if they differ from what
+      // we predicted. Local sim runs at the guest's RAF rate (60 Hz)
+      // regardless of network — no lockstep wait.
+      const applyInputsToPM = (inputs: InputSet) => {
+        const pm = game.getPlayerManager();
+        if (!pm) return;
+        for (const [pid, inp] of Object.entries(inputs)) {
+          const mp = pm.getPlayer(pid);
           if (!mp) continue;
           mp.moveX = inp.moveX;
           mp.moveY = inp.moveY;
           mp.expanding = inp.expanding;
         }
-      }
-      buf.delete(nextTick);
-      // Also prune older ticks we've already passed.
-      for (const k of buf.keys()) if (k <= world.tick) buf.delete(k);
-      return true;
-    });
+      };
+      const rc = new RollbackController({
+        localPlayerId: localPlayerIdRef.current,
+        readLocalInput: () => {
+          const k = liveKeysRef.current;
+          return {
+            moveX: (k.d ? 1 : 0) + (k.a ? -1 : 0),
+            moveY: (k.s ? 1 : 0) + (k.w ? -1 : 0),
+            expanding: k.space,
+          };
+        },
+        applyInputs: applyInputsToPM,
+        stepOne: () => {
+          // Used during replay — emulate one logic tick. The bouncyBlobsGame
+          // onLogic does playerManager.updateAll + world.step + manager
+          // updates; for replay we want the same effects. Calling world.step
+          // directly drives the engine; manager.update equivalents must run
+          // so spring pads/actions/etc evolve in sync.
+          const st = (game as unknown as { state: { world: SoftBodyEngine; playerManager: import('../game/playerManager').PlayerManager; springPadManager: import('../game/springPadManager').SpringPadManager | null; spikeManager: import('../game/spikeManager').SpikeManager | null; powerupManager: import('../game/powerups/powerupManager').PowerupManager | null; dynamicItemManager: import('../game/dynamicItemManager').DynamicItemManager | null; effects: import('../game/effectsBindings').EffectsBindings; gameTime: number } }).state;
+          if (!st) return;
+          const dt = 1 / 60;
+          st.playerManager.updateAll(dt, st.world);
+          st.world.step(dt);
+          st.powerupManager?.update(dt, st.playerManager);
+          st.springPadManager?.update(dt);
+          st.spikeManager?.update(dt);
+          st.dynamicItemManager?.update(dt);
+          st.effects.update(dt, st.playerManager);
+          st.gameTime += dt;
+        },
+      });
+      rollbackControllerRef.current = rc;
+      displaySmootherRef.current = new DisplaySmoother();
+      game.setLogicGate((world) => {
+        // Always advance — predict the input set for the upcoming tick
+        // and apply it before bouncyBlobsGame's onLogic calls world.step.
+        const inputs = rc.predictInputs();
+        applyInputsToPM(inputs);
+        rc.recordTick(world.tick, inputs, world, game);
+        return true;
+      });
+    } else {
+      // ── Lockstep gate ──────────────────────────────────────────────────
+      // The guest's sim advances ONLY when it has authoritative inputs for
+      // the next tick from the host. If the buffer hasn't received the next
+      // tick yet, return false → GameLoop pauses physics (render still runs).
+      // The accumulator stays full so we burst-step when inputs arrive.
+      //
+      // COUNTDOWN EXCEPTION: during the countdown phase the host's
+      // `world.step` doesn't run (modeManager.update returns
+      // shouldRunPhysics=false), so the host's `world.tick` is frozen
+      // and its postTickHook broadcasts the SAME tick number every RAF.
+      // The lockstep gate would then sit waiting for `world.tick + 1`
+      // forever and the guest's countdown timer would never decrement.
+      // We bypass the gate during countdown so the guest's local
+      // `modeManager.update` can tick the timer at its own RAF rate;
+      // physics still doesn't actually run (shouldRunPhysics=false on
+      // the guest too) so no input is needed. Once the phase transitions
+      // to 'playing' the gate resumes normal lockstep behaviour.
+      game.setLogicGate((world) => {
+        return evaluateLockstepGate({
+          worldTick: world.tick,
+          phase: game.getPhase(),
+          inputBuffer: inputBufferRef.current,
+          applyInputs: (tickInputs) => {
+            const pm = game.getPlayerManager();
+            if (!pm) return;
+            for (const inp of tickInputs.inputs) {
+              const mp = pm.getPlayer(inp.playerId);
+              if (!mp) continue;
+              mp.moveX = inp.moveX;
+              mp.moveY = inp.moveY;
+              mp.expanding = inp.expanding;
+            }
+          },
+        });
+      });
+    }
 
     // Log every player's centroid after each successful physics tick.
     // Used by the snap diagnostic to compare the guest's actual position
@@ -540,6 +676,23 @@ export default function OnlineGuest() {
       };
     });
     setSnapsAccessor(() => recentSnapsRef.current.slice());
+    setRollbackStatsAccessor(() => {
+      const rc = rollbackControllerRef.current;
+      const sm = displaySmootherRef.current;
+      if (!rc) return null;
+      sm?.tick();
+      const t = rc.getTimingStats();
+      return {
+        rollbacksApplied: rc.rollbacksApplied,
+        lastDepth: rc.lastRollbackDepth,
+        smoothingActive: sm?.activeCount() ?? 0,
+        ringInvalidations: rc.ringInvalidations,
+        failedRestores: rc.failedRestores,
+        avgSnapshotMs: t.avgSnapshotMs,
+        avgCheapTickMs: t.avgCheapTickMs,
+        avgReconcileMs: t.avgReconcileMs,
+      };
+    });
 
     // Drain anything that arrived before the world was ready. Order
     // matters: rng_state first (so any tick-aware logic uses the right
@@ -558,6 +711,16 @@ export default function OnlineGuest() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       applyManagerState(pendingManagerStateRef.current as any);
       pendingManagerStateRef.current = null;
+    }
+
+    // Drain a deferred local-player spawn — joinAsLocalPlayer fired
+    // before this canvas mount completed, sent player_join to the host,
+    // and queued the local addPlayer here. Now that game.initialize ran
+    // and gameContextRef.current is populated, finish the local spawn.
+    if (pendingLocalSpawnRef.current) {
+      const pending = pendingLocalSpawnRef.current;
+      pendingLocalSpawnRef.current = null;
+      game.onPlayerJoin(context, pending);
     }
 
     setTimeout(() => game.startRound(), 100);
@@ -669,7 +832,7 @@ export default function OnlineGuest() {
         const synth: Player = {
           player_id: rec.id,
           session_id: "",
-          name: roster?.name ?? (isOwnLocal ? "You (Guest)" : rec.id),
+          name: roster?.name ?? (isOwnLocal ? localNameRef.current : rec.id),
           slot: 0,
           status: "connected",
           controller_config: null,
@@ -743,13 +906,31 @@ export default function OnlineGuest() {
       // input also comes from the host's echo — the host's view of own
       // player IS authoritative. Skipping the snap would let local drift
       // accumulate indefinitely.
-      applyEntity(
-        [mp.blob.centerIdx, ...mp.blob.hullIndices],
-        rec.rootX, rec.rootY,
-        rec.rootVx, rec.rootVy,
-        rec.offsets,
-        isOwn,
-      );
+      //
+      // EXCEPTION — prediction mode: the guest predicts the local
+      // player's input INSTANTLY each tick, so the guest's blob is
+      // typically a few ticks AHEAD of the host's keyframe. Snapping
+      // the local blob back to keyframe positions every ~1s causes
+      // visible jitter (predict-forward-then-yank-back oscillation).
+      // The rollback controller's reconciliation handles divergence
+      // via the per-tick aggregated-input stream — keyframes are a
+      // safety net we can skip for own player.
+      const skipOwnSnap = usePrediction && isOwn;
+      if (!skipOwnSnap) {
+        applyEntity(
+          [mp.blob.centerIdx, ...mp.blob.hullIndices],
+          rec.rootX, rec.rootY,
+          rec.rootVx, rec.rootVy,
+          rec.offsets,
+          isOwn,
+        );
+      }
+    }
+    // Newly-added players from this keyframe may have grown the engine's
+    // blob count — invalidate the rollback ring so we don't try to
+    // restore from snapshots taken before they existed.
+    if (usePrediction) {
+      rollbackControllerRef.current?.invalidateRing('keyframe applied');
     }
 
     // Despawn players the host no longer reports.
@@ -818,41 +999,51 @@ export default function OnlineGuest() {
     const evt: ReliableEvent = {
       type: "player_join",
       playerId: localPlayerIdRef.current,
-      name: "You (Guest)",
+      name: localNameRef.current,
       color: localColor,
       faceId: localFaceId,
     };
     manager.send("host", "state", JSON.stringify(evt));
 
-    // Spawn our blob in the local sim immediately. Old code waited for the
-    // host's snapshot to synthesize the blob, but with the 1 Hz keyframe
-    // rate (the snapshot is no longer the primary sync) that lag would be
+    // Spawn our blob in the local sim. Old code waited for the host's
+    // snapshot to synthesize the blob, but with the 1 Hz keyframe rate
+    // (the snapshot is no longer the primary sync) that lag would be
     // up to a full second. Spawn is deterministic (derived from playerId
     // via hashStringSeed inside PlayerManager.addPlayer), so adding it
     // locally produces the exact same position the host will use.
+    //
+    // If the canvas hasn't initialised yet (no game context →
+    // game.onPlayerJoin would silently no-op because game.state is null),
+    // queue the spawn into pendingLocalSpawnRef. `onCanvasInit` drains it
+    // once `game.initialize(context)` has run.
+    const synth: Player = {
+      player_id: localPlayerIdRef.current,
+      session_id: "",
+      name: localNameRef.current,
+      slot: 0,
+      status: "connected",
+      controller_config: null,
+      joined_at: new Date().toISOString(),
+      color: localColor,
+      faceId: localFaceId,
+    } as Player;
     const game = gameRef.current;
     const ctx = gameContextRef.current;
     if (game && ctx) {
-      const synth: Player = {
-        player_id: localPlayerIdRef.current,
-        session_id: "",
-        name: "You (Guest)",
-        slot: 0,
-        status: "connected",
-        controller_config: null,
-        joined_at: new Date().toISOString(),
-        color: localColor,
-        faceId: localFaceId,
-      } as Player;
       game.onPlayerJoin(ctx, synth);
+    } else {
+      pendingLocalSpawnRef.current = synth;
     }
 
     setLocalPlayerJoined(true);
   }
 
   // Auto-join as a player once we're connected to the host AND the local sim
-  // has a level loaded. Joining a multiplayer game means playing it — no need
-  // to make the user click an extra button to spawn a blob.
+  // has a level loaded. We DON'T gate on canvasReady here — the lobby UI has
+  // no canvas yet but still needs the player_join to fire so the host (and
+  // other guests via lobby_state) see this player's name + color. If the
+  // canvas isn't ready, joinAsLocalPlayer queues the local-blob spawn into
+  // `pendingLocalSpawnRef` and `onCanvasInit` drains it.
   useEffect(() => {
     if (phase === "connected" && hasLevel && !localPlayerJoined) {
       joinAsLocalPlayer();
@@ -889,7 +1080,10 @@ export default function OnlineGuest() {
   // physics where bodies have inertia anyway.
   useEffect(() => {
     if (!localPlayerJoined) return;
-    const keys = { w: false, a: false, s: false, d: false, space: false };
+    // `keys` is the local view; `liveKeysRef.current` is the same view
+    // exposed to the prediction gate so it can read "what's pressed
+    // right now" each tick.
+    const keys = liveKeysRef.current;
 
     const onDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
@@ -1013,6 +1207,33 @@ export default function OnlineGuest() {
         ) : (
           <div style={{ position: "relative", flex: 1 }}>
             <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+            {/* Always-visible Leave Game button during the playing phase,
+                so guests can return to the lobby list without waiting for
+                the host to end the round. Hidden during the lobby phase
+                (the panel already has a leave button there). */}
+            {!showPanel && (
+              <button
+                data-testid="leave-game-button"
+                onClick={leaveAndExit}
+                title="Leave this game and return to the lobby list"
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  right: 12,
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: "#7a1f2e",
+                  color: "#fff",
+                  border: "2px solid #1a0a10",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  zIndex: 10,
+                }}
+              >
+                ← Leave Game
+              </button>
+            )}
           </div>
         )}
       </div>

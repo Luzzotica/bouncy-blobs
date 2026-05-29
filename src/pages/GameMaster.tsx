@@ -711,6 +711,14 @@ export default function GameMaster() {
 
   /** Start a game with a specific level (after voting resolves). */
   const startGameWithLevel = useCallback((sid: string, levelData: LevelData, overrideMode?: LevelType) => {
+    // Tear down the previous game (playground or otherwise). Without this,
+    // its GameLoop keeps ticking and its installed postTickHook keeps
+    // broadcasting aggregated inputs at the OLD tick numbers, polluting
+    // every guest's inputBuffer with a parallel stream that crowds out
+    // the new game's per-tick broadcasts.
+    gameRef.current?.destroy();
+    gameRef.current = null;
+
     const game = new BouncyBlobsGame();
     gameRef.current = game;
     game.setRngSeed(sessionSeedRef.current);
@@ -765,6 +773,27 @@ export default function GameMaster() {
   // Keep refs in sync
   createPlaygroundGameRef.current = createPlaygroundGame;
   startGameWithLevelRef.current = startGameWithLevel;
+
+  /**
+   * End the current game immediately and return the lobby to the
+   * playground state. Triggered by the host's "End Game" button.
+   *
+   * Mirrors the cleanup the normal `setPhaseChangeCallback('results')`
+   * path does after results-screen duration elapses, just without
+   * waiting. Broadcasts a fresh `level_loaded` with `freeplay: true`
+   * to every connected guest — they tear down their current game,
+   * load the playground arena, and rejoin the lobby UI. Bots are
+   * preserved through `spawnExistingPlayers` inside the new playground
+   * game.
+   */
+  const endGame = useCallback(() => {
+    if (!sessionId) return;
+    gameRef.current?.destroy();
+    gameRef.current = null;
+    partyModeRef.current = null;
+    setGamePhase(null);
+    createPlaygroundGameRef.current?.(sessionId);
+  }, [sessionId]);
 
   // ─── Session setup ────────────────────────────────────────────────────────
 
@@ -1880,6 +1909,20 @@ export default function GameMaster() {
         <Link to="/">
           <button style={{ padding: '6px 12px', fontSize: 13, width: '100%' }}>Home</button>
         </Link>
+        <button
+          data-testid="end-game-button"
+          onClick={endGame}
+          style={{
+            padding: '6px 12px',
+            fontSize: 13,
+            background: '#7a1f2e',
+            color: '#fff',
+            fontWeight: 600,
+          }}
+          title="End this round and return everyone to the lobby"
+        >
+          End Game
+        </button>
         <span style={{ color: '#888', fontSize: 13 }}>
           Players: {gameRef.current?.getPlayerManager()?.getPlayerCount() ?? 0}
         </span>

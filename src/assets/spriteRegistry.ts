@@ -83,6 +83,13 @@ export function hasSprite(id: string): boolean {
   return cache.has(id);
 }
 
+/** Every sprite the registry has fully loaded, in manifest order. Used by
+ * the editor's sprite picker. Returns a fresh array each call (caller may
+ * sort/filter freely). */
+export function allSprites(): LoadedSprite[] {
+  return Array.from(cache.values());
+}
+
 /** Sprite footprint in world units (image dimensions divided by ppwu). */
 export function getSpriteWorldSize(sprite: LoadedSprite): { width: number; height: number } {
   return {

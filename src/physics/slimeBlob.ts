@@ -102,8 +102,14 @@ export class SlimeBlob {
 
     const sk = Tuning.SPRING_K * (pk ? PLAYER_K_MULT : 1);
     const sd = Tuning.SPRING_DAMP;
-    const rk = Tuning.RADIAL_K * (pk ? PLAYER_K_MULT : 1);
-    const rd = Tuning.RADIAL_DAMP;
+    // Radial springs (center↔hull) disabled for SlimeBlobs. The center
+    // is virtual — pinned to the hull centroid each substep by the
+    // engine — so a center↔hull spring's reaction force on the center
+    // is dropped by the pin, leaving the hull with an unmatched net
+    // impulse. That manifested as the blob "flying away" on expand.
+    // Shape-match alone is responsible for blob cohesion now.
+    const rk = 0;
+    const rd = 0;
     const smk = Tuning.SHAPE_MATCH_K * (pk ? PLAYER_K_MULT : 1);
     const smd = Tuning.SHAPE_MATCH_DAMP;
     const cm = Tuning.CENTER_MASS * (pk ? PLAYER_MASS_MULT : 1);
@@ -269,32 +275,32 @@ export class SlimeBlob {
     const expandSpringMult = this.expandPressed ? EXPAND_SPRING_STIFFNESS_MULT : 1.0;
     this.world.setBlobSpringStiffnessScale(this.blobId, expandSpringMult);
 
-    // Build gravity-relative frame
-    // "down" = gravity direction, "right" = perpendicular (90° CW from down)
+    // Gravity-relative frame, still needed for the up/down stick axis +
+    // hull lean. Movement scheme:
+    //   - LATERAL (stickX) is WORLD-FIXED: A always = world left, D always
+    //     = world right, regardless of gravity orientation. Keeps muscle
+    //     memory stable inside gravity zones that flip / tilt gravity.
+    //   - DOWN/UP (stickY) stays gravity-relative: push "toward gravity"
+    //     to crouch / fall faster, push "against gravity" to float. This
+    //     is the "physical" axis — pushing harder into whatever the floor
+    //     IS, regardless of orientation.
+    //   - JUMP is the soft-body expand, which physically pushes off
+    //     whatever surface you're touching — gravity-agnostic by design.
     const down = this.getGravityDir();
-    const right = vec2(down.y, -down.x); // perpendicular, 90° CCW from down
+    const right = vec2(down.y, -down.x); // perpendicular, gravity-relative (for lean)
     const up = vec2(-down.x, -down.y);
 
-    // Map joystick into gravity-relative world directions
-    // stickX: left/right perpendicular to gravity
-    // stickY: positive = along gravity (down), negative = against gravity (up)
-    const moveDir = vec2(
-      right.x * this.stickX + down.x * this.stickY,
-      right.y * this.stickX + down.y * this.stickY,
-    );
-
-    // Lateral movement — reduced in air
+    // Lateral movement — world-fixed X. Reduced in air.
     const grounded = this.world.getBlobGroundContacts(this.blobId) > 0;
     const airMult = grounded ? 1.0 : AIR_MOVE_MULTIPLIER;
-    const lateralDir = vec2(right.x * this.stickX, right.y * this.stickX);
+    const lateralDir = vec2(this.stickX, 0);
     this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult, delta);
 
-    // Gravity-axis forces from joystick Y
+    // Gravity-axis forces from joystick Y — still gravity-relative so
+    // "push down" always means "press into whatever the floor is".
     if (this.stickY > 0.1) {
-      // Pulling "down" (along gravity) — fall faster / crouch
       this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier, delta);
     } else if (this.stickY < -0.1) {
-      // Pushing "up" (against gravity) — gentle float
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * -this.stickY * this.moveForceMultiplier, delta);
     }
 
@@ -504,6 +510,46 @@ export class SlimeBlob {
     this.expandPressed = pressed;
     this.expandShapeScale = Math.max(0.35, Math.min(3.5, scale));
     this.world.setBlobShapeMatchRestScale(this.blobId, this.expandShapeScale);
+  }
+
+  /** Rollback snapshot. Per-blob state that mutates each tick. */
+  dumpState(): {
+    expandPressed: boolean;
+    expandWasPressed: boolean;
+    stickX: number;
+    stickY: number;
+    expandShapeScale: number;
+    gravityOverride: Vec2 | null;
+    stuckTo: { normal: Vec2 } | null;
+    stickReleaseGrace: number;
+    moveForceMultiplier: number;
+    expandSpeedMultiplier: number;
+  } {
+    return {
+      expandPressed: this.expandPressed,
+      expandWasPressed: this.expandWasPressed,
+      stickX: this.stickX,
+      stickY: this.stickY,
+      expandShapeScale: this.expandShapeScale,
+      gravityOverride: this.gravityOverride ? { x: this.gravityOverride.x, y: this.gravityOverride.y } : null,
+      stuckTo: this.stuckTo ? { normal: { x: this.stuckTo.normal.x, y: this.stuckTo.normal.y } } : null,
+      stickReleaseGrace: this.stickReleaseGrace,
+      moveForceMultiplier: this.moveForceMultiplier,
+      expandSpeedMultiplier: this.expandSpeedMultiplier,
+    };
+  }
+
+  restoreState(state: ReturnType<SlimeBlob['dumpState']>): void {
+    this.expandPressed = state.expandPressed;
+    this.expandWasPressed = state.expandWasPressed;
+    this.stickX = state.stickX;
+    this.stickY = state.stickY;
+    this.expandShapeScale = state.expandShapeScale;
+    this.gravityOverride = state.gravityOverride ? { x: state.gravityOverride.x, y: state.gravityOverride.y } : null;
+    this.stuckTo = state.stuckTo ? { normal: { x: state.stuckTo.normal.x, y: state.stuckTo.normal.y } } : null;
+    this.stickReleaseGrace = state.stickReleaseGrace;
+    this.moveForceMultiplier = state.moveForceMultiplier;
+    this.expandSpeedMultiplier = state.expandSpeedMultiplier;
   }
 }
 

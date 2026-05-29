@@ -82,6 +82,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   // setter, which mirrors the TS sim's chained-callback model.
   public onTriggerEntered: ((shapeIdx: number, blobId: number) => void) | undefined = undefined;
   public onTriggerExited:  ((shapeIdx: number, blobId: number) => void) | undefined = undefined;
+  public onBlobCrushed:    ((blobId: number) => void) | undefined = undefined;
 
   // EngineRng implementation that proxies to the wasm RNG.
   public readonly rng: EngineRng = {
@@ -184,6 +185,14 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
         this.onTriggerExited(exit[i], exit[i + 1]);
       }
     }
+    // Drain crush events. Even without a listener attached, draining
+    // prevents the queue from growing unboundedly.
+    const crushed = this.h.takeCrushEvents();
+    if (crushed.length && this.onBlobCrushed) {
+      for (let i = 0; i < crushed.length; i++) {
+        this.onBlobCrushed(crushed[i]);
+      }
+    }
   }
 
   // ---- world setup ----
@@ -264,7 +273,11 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   addBlobFromHull(params: AddBlobFromHullParams): BlobResult {
     const centerLocal = params.centerLocal ?? { x: 0, y: 0 };
     const staticHull = new Uint32Array(params.staticHullIndices ?? []);
-    const handle = this.h.addBlobFromHull(
+    // The trailing `pinFrame` arg is added by the new wasm-bindings — run
+    // `npm run build:wasm` to regenerate the bindings after pulling. Until
+    // then this falls through `as any` so the TS side typechecks; the param
+    // is ignored by an older binding (extra args are dropped).
+    const handle = (this.h as any).addBlobFromHull(
       flatten(params.hullRestLocal),
       centerLocal.x, centerLocal.y,
       params.centerMass, params.hullMass,
@@ -276,6 +289,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
       params.sortKey ?? '',
       staticHull,
       params.staticCenter ?? false,
+      params.pinFrame ?? false,
     );
     return {
       blobId: handle.blob_id,
@@ -410,6 +424,8 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   getVelocities(): Vec2[] { return unflatten(this.h.getVelocities()); }
   getHullPolygon(blobId: number): Vec2[] { return unflatten(this.h.getHullPolygon(blobId)); }
   getBlobCount(): number { return this.h.blobCount(); }
+  /** Cheap particle-count read — single wasm call, no allocation. */
+  particleCount(): number { return this.h.particleCount(); }
 
   getBlobRange(blobId: number): { start: number; end: number; hull: readonly number[] } | null {
     const buf = this.h.getBlobRange(blobId);
@@ -455,6 +471,9 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   }
   addHomeAnchor(idx: number, home: Vec2, k: number, damp: number): void {
     this.h.addHomeAnchor(idx, home.x, home.y, k, damp);
+  }
+  addDistanceMax(i: number, j: number, max: number): void {
+    this.h.addDistanceMax(i, j, max);
   }
 
   // ---- snapshots for renderer ----
@@ -537,4 +556,10 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   setPositionsBulk(buf: Float64Array): void {
     this.h.setPositionsBulk(buf);
   }
+
+  /** Capture full mutable engine state for rollback netcode. */
+  serializeState(): Uint8Array { return this.h.serializeState(); }
+  /** Restore from a snapshot. Returns false if the buffer is malformed
+   *  or doesn't match this engine's layout (particle/blob/shape counts). */
+  restoreState(buf: Uint8Array): boolean { return this.h.restoreState(buf); }
 }

@@ -1,8 +1,6 @@
 import { SpringPadDef } from '../levels/types';
-import { getSprite, getSpriteWorldSize } from '../assets/spriteRegistry';
-import { drawSprite } from '../renderer/spriteRenderer';
 
-export const PLATE_THICKNESS = 36;
+export const PLATE_THICKNESS = 72;
 export const PLATE_WIDTH_SCALE = 8;
 
 export type SpringRenderState = 'idle' | 'loaded' | 'firing' | 'reloading';
@@ -20,28 +18,6 @@ export function drawSpring(
   state: SpringRenderState = 'idle',
 ): void {
   const compress = maxCompress > 0 ? offset / maxCompress : 0;
-
-  // Sprite path — preferred when the registry has art for this prop. Scale
-  // the sprite to match the editor-configured width so authored levels
-  // don't change shape just because art arrived.
-  const sprite = getSprite('spring_pad');
-  if (sprite) {
-    const natural = getSpriteWorldSize(sprite);
-    const scale = def.width / natural.width;
-    // Squash the plate in slightly as the spring compresses so it feels
-    // alive even with a static sprite.
-    const squashY = 1 - compress * 0.15;
-    ctx.save();
-    ctx.translate(def.x, def.y);
-    ctx.rotate(def.rotation);
-    // Pull the plate "back" along +x as the spring compresses (we're in the
-    // spring's local frame; +x is the launch direction).
-    ctx.translate(-offset * 0.5, 0);
-    ctx.scale(scale, scale * squashY);
-    drawSprite(ctx, sprite, 0, 0, 0, 1, state === 'firing' ? 0.95 : 1);
-    ctx.restore();
-    return;
-  }
 
   ctx.save();
   ctx.translate(def.x, def.y);
