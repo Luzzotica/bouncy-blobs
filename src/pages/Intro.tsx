@@ -36,9 +36,9 @@ interface Manifest {
 }
 
 const BASE = '/intro/'
-const PAGE_DURATION_MS = 24000
-const PANEL_STAGGER_MS = 250
+const PANEL_STAGGER_MS = 2000
 const CONTROLS_HIDE_MS = 4000
+const FADE_OUT_MS = 700
 // Toggle filename overlays in each panel for debugging / iteration.
 const SHOW_PANEL_LABELS = false
 
@@ -49,13 +49,15 @@ export default function Intro() {
   const [pageIdx, setPageIdx] = useState(0)
   const [controlsVisible, setControlsVisible] = useState(false)
   const [paused, setPaused] = useState(false)
+  const [fadingOut, setFadingOut] = useState(false)
+  const finishingRef = useRef(false)
   const sfxRef = useRef<HTMLAudioElement | null>(null)
   const advanceRef = useRef<number | null>(null)
   const hideControlsRef = useRef<number | null>(null)
   // Track how much of the current page's auto-advance has elapsed so we
   // can pause and resume without losing time.
   const pageStartRef = useRef<number>(0)
-  const remainingMsRef = useRef<number>(PAGE_DURATION_MS)
+  const remainingMsRef = useRef<number>(0)
 
   useEffect(() => {
     let cancelled = false
@@ -109,9 +111,10 @@ export default function Intro() {
     sfxRef.current = sfx
     sfx.play().catch(() => {})
 
+    const durationMs = page.panels.length * PANEL_STAGGER_MS
     pageStartRef.current = Date.now()
-    remainingMsRef.current = PAGE_DURATION_MS
-    scheduleAdvance(PAGE_DURATION_MS)
+    remainingMsRef.current = durationMs
+    scheduleAdvance(durationMs)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manifest, started, pageIdx])
 
@@ -173,11 +176,16 @@ export default function Intro() {
   }
 
   function finish() {
+    if (finishingRef.current) return
+    finishingRef.current = true
     if (advanceRef.current) window.clearTimeout(advanceRef.current)
     if (hideControlsRef.current) window.clearTimeout(hideControlsRef.current)
     sfxRef.current?.pause()
-    markIntroSeen()
-    navigate('/')
+    setFadingOut(true)
+    window.setTimeout(() => {
+      markIntroSeen()
+      navigate('/')
+    }, FADE_OUT_MS)
   }
 
   if (!manifest || !started) {
@@ -187,7 +195,14 @@ export default function Intro() {
   const page = manifest.pages[pageIdx]
 
   return (
-    <div style={shell} onClick={handleStageClick}>
+    <div
+      style={{
+        ...shell,
+        opacity: fadingOut ? 0 : 1,
+        transition: `opacity ${FADE_OUT_MS}ms ease-out`,
+      }}
+      onClick={handleStageClick}
+    >
       <ComicPage page={page} key={page.index} />
 
       <div

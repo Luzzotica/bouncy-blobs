@@ -77,7 +77,7 @@ export default function Home() {
   }
 
   return (
-    <div style={shell} onMouseMove={handleMouseMove}>
+    <div style={shell} onMouseMove={handleMouseMove} className="home-shell">
       <div ref={bgRef} style={bgLayer} className="menu-bg" />
       <div style={overlay} />
 
@@ -133,6 +133,11 @@ export default function Home() {
       />
 
       <style>{`
+        .home-shell { animation: homeFadeIn 0.7s ease-out both; }
+        @keyframes homeFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) {
+          .home-shell { animation: none; }
+        }
         .paper-btn {
           transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
                       box-shadow 0.2s ease-out;
@@ -216,10 +221,11 @@ const overlay: React.CSSProperties = {
 const title: React.CSSProperties = {
   position: 'absolute',
   top: '4vh',
-  left: '50%',
-  transform: 'translateX(-50%) rotate(-2deg)',
+  left: 32,
+  transform: 'rotate(-2deg)',
+  transformOrigin: 'left top',
   margin: 0,
-  fontSize: 'clamp(48px, 8vw, 96px)',
+  fontSize: 'clamp(43px, 7.2vw, 86px)',
   fontWeight: 900,
   color: '#fffae6',
   textShadow: '5px 5px 0 #c77dff, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612',
