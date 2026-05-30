@@ -45,18 +45,18 @@ const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 //
 // We flag a blob when:
 //   (a) max(distance from hull centroid) > sqrt(RATIO_SQ) × rest max
-//       radius (default RATIO_SQ = 4 → 2× rest extent). A healthy blob
+//       radius (default RATIO_SQ = 100 → 10× rest extent). A healthy blob
 //       under squish/stretch stays well under this; the repro test
 //       jumps from ~28 (rest = 28.28) to 62 the frame it explodes.
 //   (b) Any hull particle ends a step beyond ±CRUSH_MAX_COORD on either
 //       axis. Belt-and-suspenders for Fx saturation / NaN-style blowups
 //       that the ratio check might miss if both rest and current grow
 //       together.
-// 3² = 9 in Fx. Generous headroom for legitimate squish/stretch under
-// normal play; the repro-test catastrophic explosion blows past 3×
+// 10² = 100 in Fx. Generous headroom for legitimate squish/stretch under
+// normal play; the repro-test catastrophic explosion blows past 10×
 // within a handful of frames (frame 27 = 2.20×, then unbounded growth
-// to 12×+), so the detector still fires — just one frame later.
-pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(9i64 << 32);
+// to 12×+), so the detector still fires — just a few frames later.
+pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
 
 pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
 
