@@ -27,9 +27,8 @@ export interface MapOption {
 
 export const MODE_OPTIONS: { id: LevelType; label: string }[] = [
   { id: 'solo_racing', label: 'Racing' },
-  { id: 'team_racing', label: 'Chained Together' },
-  // Party mode hidden from UI until balance pass — code, level JSON, and
-  // partyMode.ts remain so re-enabling is a one-line change.
+  // Chained Together and Party hidden from UI — not working right now.
+  // Code, level JSON, and the mode files remain so re-enabling is easy.
   { id: 'koth',        label: 'King of the Hill' },
 ];
 

@@ -87,7 +87,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
       </div>
       <p style={{ color: '#888', fontSize: 14, margin: 0 }}>Select one or more modes this map supports</p>
       <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-        {(['solo_racing', 'team_racing', 'koth'] as LevelType[]).map(lt => {
+        {(['solo_racing', 'koth'] as LevelType[]).map(lt => {
           const active = selected.has(lt);
           return (
             <button
@@ -605,7 +605,7 @@ export default function Editor() {
           Back
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
-          {(['solo_racing', 'team_racing', 'koth', 'party'] as LevelType[]).map(lt => {
+          {(['solo_racing', 'koth'] as LevelType[]).map(lt => {
             const enabled = getLevelTypes(editorState.level).includes(lt);
             const missing = validateLevelType(editorState.level, lt);
             const disabled = !enabled && missing !== null;
