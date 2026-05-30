@@ -31,7 +31,7 @@ export interface GameModeState {
 export interface GameMode {
   readonly config: GameModeConfig;
   getLevel(): LevelData;
-  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void;
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager, triggerIndices?: Map<string, number>): void;
   onPhaseStart(phase: GamePhase, state: GameModeState): void;
   update(dt: number, state: GameModeState, playerManager: PlayerManager, world: SoftBodyEngine): void;
   /** Returns winner playerId or null. */

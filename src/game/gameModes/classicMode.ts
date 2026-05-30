@@ -35,15 +35,12 @@ export class ClassicMode implements GameMode {
     return this.levelData;
   }
 
-  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager, triggerIndices?: Map<string, number>): void {
     this.world = world;
     this.goalZone = this.levelData.goalZones?.[0] ?? null;
+    this.goalTriggerIdx = (this.goalZone && triggerIndices?.get(this.goalZone.id)) ?? -1;
 
-    // Find the goal trigger shape index
-    // The levelLoader registers triggers in order: goalZones first, then hillZones
-    // We need to find which shape index corresponds to our goal zone
     if (this.goalZone) {
-      // Hook trigger callbacks
       const prevEntered = world.onTriggerEntered;
       world.onTriggerEntered = (triggerShapeIdx, blobId) => {
         prevEntered?.(triggerShapeIdx, blobId);
@@ -54,6 +51,7 @@ export class ClassicMode implements GameMode {
 
   private onTriggerEntered(triggerShapeIdx: number, blobId: number, playerManager: PlayerManager): void {
     if (this.finishedPlayerId) return; // already have a winner
+    if (this.goalTriggerIdx >= 0 && triggerShapeIdx !== this.goalTriggerIdx) return; // not the goal zone
 
     const player = playerManager.getPlayerByBlobId(blobId);
     if (player) {

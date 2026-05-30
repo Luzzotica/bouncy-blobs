@@ -39,6 +39,7 @@ export class PartyMode implements GameMode {
 
   private levelData: LevelData;
   private goalZone: ZoneDef | null = null;
+  private goalTriggerIdx: number = -1;
   private world: SoftBodyEngine | null = null;
   private playerManager: PlayerManager | null = null;
 
@@ -93,16 +94,18 @@ export class PartyMode implements GameMode {
     return this.subPhase === 'run';
   }
 
-  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager, triggerIndices?: Map<string, number>): void {
     this.world = world;
     this.playerManager = playerManager;
     this.goalZone = this.levelData.goalZones?.[0] ?? null;
+    this.goalTriggerIdx = (this.goalZone && triggerIndices?.get(this.goalZone.id)) ?? -1;
 
     // Hook trigger for goal detection
     if (this.goalZone) {
       const prevEntered = world.onTriggerEntered;
       world.onTriggerEntered = (triggerShapeIdx, blobId) => {
         prevEntered?.(triggerShapeIdx, blobId);
+        if (this.goalTriggerIdx >= 0 && triggerShapeIdx !== this.goalTriggerIdx) return;
         this.onTriggerEntered(blobId, playerManager);
       };
     }

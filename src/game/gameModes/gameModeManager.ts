@@ -42,8 +42,8 @@ export class GameModeManager {
     return this.mode;
   }
 
-  initialize(world: SoftBodyEngine, playerManager: PlayerManager): void {
-    this.mode.initialize(world, playerManager);
+  initialize(world: SoftBodyEngine, playerManager: PlayerManager, triggerIndices?: Map<string, number>): void {
+    this.mode.initialize(world, playerManager, triggerIndices);
   }
 
   startRound(): void {

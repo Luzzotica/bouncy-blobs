@@ -1,5 +1,6 @@
 import type { LevelData, LevelType } from './types';
-import { listLocalMaps, readLocalMap } from '../lib/localMaps';
+import { getLevelTypes } from './types';
+import { listLocalMaps, readLocalMap } from '../lib/mapsStore';
 import { listSubscribedItems } from '../lib/workshopApi';
 
 export type LevelSource = 'builtin' | 'local' | 'workshop';
@@ -89,11 +90,18 @@ export async function listAllLevels(): Promise<MergedLevel[]> {
   try {
     const locals = await listLocalMaps();
     for (const m of locals) {
+      let levelTypes: LevelType[] = ['solo_racing'];
+      try {
+        const mf = await readLocalMap(m.id);
+        levelTypes = getLevelTypes(mf.level);
+      } catch (err) {
+        console.warn(`Failed to read local map ${m.id} for mode detection:`, err);
+      }
       out.push({
         id: `local:${m.id}`,
         name: m.name || 'Untitled',
         source: 'local',
-        levelTypes: ['solo_racing', 'team_racing', 'party', 'koth'],
+        levelTypes,
         localId: m.id,
         workshopId: m.workshopId ?? undefined,
       });

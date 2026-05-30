@@ -56,8 +56,10 @@ function createMirrorMode(level: LevelData, override?: LevelType, freeplay = fal
   // local sim runs a competitive mode's countdown / round timer over what's
   // supposed to be a free-for-all idle screen.
   if (freeplay) return new FreeplayMode(level);
-  if (level.hillZones && level.hillZones.length > 0) return new KingOfTheHillMode(level);
-  const mode = override ?? getLevelTypes(level)[0];
+  const fallback: LevelType = (level.hillZones && level.hillZones.length > 0 && !(level.goalZones && level.goalZones.length > 0))
+    ? 'koth'
+    : getLevelTypes(level)[0];
+  const mode = override ?? fallback;
   switch (mode) {
     case "team_racing": return new ChainedMode(level);
     case "party": return new PartyMode(level);

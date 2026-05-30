@@ -218,7 +218,7 @@ export class BouncyBlobsGame implements Game {
           this.onGameOver?.(winnerId, winnerName);
         },
       });
-      modeManager.initialize(world, playerManager);
+      modeManager.initialize(world, playerManager, triggerIndices);
     }
 
     // Create powerup manager if level has powerup spawns

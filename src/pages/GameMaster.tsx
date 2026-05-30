@@ -60,11 +60,12 @@ import { getAvailableLevels, loadBuiltinLevel, listAllLevels, loadLevelById } fr
 const LOCAL_LAN_IP = import.meta.env.VITE_LOCAL_LAN_IP ?? '127.0.0.1';
 
 function createModeForLevel(levelData: LevelData, broadcastFn?: (msg: any) => void, overrideMode?: LevelType): GameMode {
-  // KOTH levels with hillZones always use KingOfTheHillMode
-  if (levelData.hillZones && levelData.hillZones.length > 0) {
-    return new KingOfTheHillMode(levelData);
-  }
-  const mode = overrideMode ?? getLevelTypes(levelData)[0];
+  // Host's chosen mode wins. Only fall back to the level's declared type
+  // (or KOTH when the level only has hillZones) when no override is set.
+  const fallback: LevelType = (levelData.hillZones && levelData.hillZones.length > 0 && !(levelData.goalZones && levelData.goalZones.length > 0))
+    ? 'koth'
+    : getLevelTypes(levelData)[0];
+  const mode = overrideMode ?? fallback;
   switch (mode) {
     case 'team_racing': return new ChainedMode(levelData);
     case 'party': return new PartyMode(levelData, broadcastFn);
@@ -235,6 +236,28 @@ export default function GameMaster() {
   const LOCAL_PLAYER_ID = 'local-keyboard';
   const [localPlayerJoined, setLocalPlayerJoined] = useState(false);
 
+  // Player IDs the camera should follow on the host: every player whose
+  // INPUT originates on this machine — keyboard, gamepads, and phone
+  // controllers connected directly to this room. Online guests (screen
+  // peers) and AI bots are intentionally excluded so the host's view
+  // stays on the people physically playing here. Pushed to the game via
+  // setLocalPlayerIds each time the set changes.
+  const localPlayerIdsRef = useRef<Set<string>>(new Set());
+  const pushLocalPlayerIds = useCallback(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    const ids = [...localPlayerIdsRef.current];
+    game.setLocalPlayerIds(ids.length > 0 ? ids : null);
+  }, []);
+  const addLocalPlayerId = useCallback((id: string) => {
+    localPlayerIdsRef.current.add(id);
+    pushLocalPlayerIds();
+  }, [pushLocalPlayerIds]);
+  const removeLocalPlayerId = useCallback((id: string) => {
+    localPlayerIdsRef.current.delete(id);
+    pushLocalPlayerIds();
+  }, [pushLocalPlayerIds]);
+
   // Local AI bots spawned from the lobby UI or the ?ai= URL param.
   // Tracked separately from `connectedPlayers` (which mirrors the party API)
   // because bots have no party_player row.
@@ -276,10 +299,7 @@ export default function GameMaster() {
       faceId: localFaceId,
     } as Player;
     game.onPlayerJoin(ctx, player);
-    // Camera on the host follows ONLY the laptop player while joined —
-    // matches the guest behavior and keeps the view from getting yanked
-    // around by remote players / bots.
-    game.setLocalPlayerIds([LOCAL_PLAYER_ID]);
+    addLocalPlayerId(LOCAL_PLAYER_ID);
     // Mirror the local player's customization into the shared taken-list ref
     // so phone controllers and bot-color-avoidance see this slot as taken.
     playerCustomRef.current.set(LOCAL_PLAYER_ID, { color: localColor, faceId: localFaceId });
@@ -290,11 +310,8 @@ export default function GameMaster() {
     if (!localPlayerJoined) return;
     const game = gameRef.current;
     const ctx = contextRef.current;
-    if (game && ctx) {
-      game.onPlayerDisconnect(ctx, LOCAL_PLAYER_ID);
-      // No local player anymore — fall back to the legacy fit-everyone camera.
-      game.setLocalPlayerIds(null);
-    }
+    if (game && ctx) game.onPlayerDisconnect(ctx, LOCAL_PLAYER_ID);
+    removeLocalPlayerId(LOCAL_PLAYER_ID);
     playerCustomRef.current.delete(LOCAL_PLAYER_ID);
     setLocalPlayerJoined(false);
   }, [localPlayerJoined]);
@@ -400,6 +417,7 @@ export default function GameMaster() {
         faceId: face,
       } as Player;
       game.onPlayerJoin(ctx, player);
+      addLocalPlayerId(playerId);
       playerCustomRef.current.set(playerId, { color, faceId: face });
       joinedGamepads.add(playerId);
     };
@@ -409,6 +427,7 @@ export default function GameMaster() {
       const game = gameRef.current;
       const ctx = contextRef.current;
       if (game && ctx) game.onPlayerDisconnect(ctx, playerId);
+      removeLocalPlayerId(playerId);
       playerCustomRef.current.delete(playerId);
       joinedGamepads.delete(playerId);
     };
@@ -515,9 +534,12 @@ export default function GameMaster() {
           } as Player);
         }
       }
+      // The new game instance has empty localPlayerIds — replay our set
+      // so the camera keeps following the right blobs after rebuild.
+      pushLocalPlayerIds();
     }, 150);
     return () => clearTimeout(handle);
-  }, [canvasKey, bots, localPlayerJoined, sessionId]);
+  }, [canvasKey, bots, localPlayerJoined, sessionId, pushLocalPlayerIds]);
   const inputManagerRef = useRef<InputManager>(new InputManager());
   const contextRef = useRef<GameContext | null>(null);
   const knownPlayerIdsRef = useRef<Set<string>>(new Set());
@@ -590,9 +612,12 @@ export default function GameMaster() {
     if (gameRef.current && contextRef.current) {
       gameRef.current.onPlayerJoin(contextRef.current, player);
     }
+    // Phone controllers join over WebRTC directly to this host — they
+    // count as local for camera-follow purposes.
+    addLocalPlayerId(player.player_id);
     // Broadcast updated taken list to all controllers
     broadcastCustomizationUpdate();
-  }, [broadcastCustomizationUpdate]);
+  }, [broadcastCustomizationUpdate, addLocalPlayerId]);
 
   const handlePlayerDisconnect = useCallback((playerId: string) => {
     // Free their customizations
@@ -604,9 +629,10 @@ export default function GameMaster() {
     if (gameRef.current && contextRef.current) {
       gameRef.current.onPlayerDisconnect(contextRef.current, playerId);
     }
+    removeLocalPlayerId(playerId);
     // Broadcast updated taken list to all controllers
     broadcastCustomizationUpdate();
-  }, [broadcastCustomizationUpdate]);
+  }, [broadcastCustomizationUpdate, removeLocalPlayerId]);
 
   // Broadcast a message to all connected phone controllers (not screen peers).
   const broadcastToControllers = useCallback((message: any) => {
@@ -655,7 +681,10 @@ export default function GameMaster() {
     game.setStateChangeCallback(() => {
       setConnectedPlayers(prev => [...prev]);
     });
-  }, []);
+    // Fresh game instance — replay our local-player set so the camera
+    // follows the same blobs it did before the rebuild.
+    pushLocalPlayerIds();
+  }, [pushLocalPlayerIds]);
 
   const makeContext = useCallback((sid: string): GameContext => ({
     connection: null,

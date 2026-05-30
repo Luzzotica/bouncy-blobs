@@ -1,0 +1,5 @@
+src-tauri
+crates/target
+crates/**/target
+node_modules
+.git
