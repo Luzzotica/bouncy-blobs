@@ -22,20 +22,39 @@ export function trackErrors(page: Page): { errors: string[] } {
   return { errors };
 }
 
-/** Drive Home → Host and wait for the lobby UI to be live. */
-export async function startHosting(page: Page): Promise<{ joinCode: string; lobbyCode: string }> {
-  await page.goto("/game");
-  // The signaling baseline — phone-controller QR/code shows up.
+/** Drive Home → Host and wait for the lobby UI to be live.
+ *  `urlParams` lets a test tweak the host's pacing config without
+ *  hand-building the URL each call (e.g. `{ keyframe: '0' }` to
+ *  disable the periodic + post-rollback keyframe resyncs for
+ *  determinism-only tests). */
+export async function startHosting(
+  page: Page,
+  urlParams?: Record<string, string>,
+): Promise<{ joinCode: string; lobbyCode: string }> {
+  const qs = urlParams ? '?' + new URLSearchParams(urlParams).toString() : '';
+  await page.goto(`/game${qs}`);
+  // GameMaster gates the lobby behind a HostSetupModal — fill the minimum
+  // required fields (display name + room name) and submit. Without this
+  // the join-code testId never renders.
+  const setupModal = page.getByTestId("host-setup-modal");
+  if (await setupModal.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await page.getByTestId("host-setup-display-name").fill("TestHost");
+    await page.getByTestId("host-setup-room-name").fill("TestRoom");
+    const submit = page.getByTestId("host-setup-submit");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+  }
+  // The lobby panel's join code — used as the room ID for both
+  // phone-controller scanning and screen-peer joining. The old separate
+  // `lobby-code` testId has been merged into this one.
   await expect(page.getByTestId("join-code")).toBeVisible({ timeout: 30_000 });
-  // The mp_lobby created on top — proves the screen-layer is live.
-  await expect(page.getByTestId("lobby-code")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("toggle-public")).toBeVisible();
 
-  const joinCode = (await page.getByTestId("join-code").textContent()) ?? "";
-  const lobbyText = (await page.getByTestId("lobby-code").textContent()) ?? "";
-  // "ONLINE LOBBY · ABC123"
-  const lobbyCode = lobbyText.split("·").pop()?.trim() ?? "";
-  expect(joinCode).toMatch(/^[A-Z0-9]{4,}$/);
-  expect(lobbyCode).toMatch(/^[A-Z0-9]{4,}$/);
-  return { joinCode, lobbyCode };
+  // Wait for the code to actually populate (renders as "…" until the
+  // backend createLobby resolves).
+  await expect
+    .poll(async () => (await page.getByTestId("join-code").textContent())?.trim() ?? "")
+    .toMatch(/^[A-Z0-9]{4,}$/);
+  const joinCode = ((await page.getByTestId("join-code").textContent()) ?? "").trim();
+  return { joinCode, lobbyCode: joinCode };
 }

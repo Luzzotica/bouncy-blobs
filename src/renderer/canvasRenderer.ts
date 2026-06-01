@@ -33,6 +33,28 @@ const renderVel = new Map<number, {
   x: number; y: number; vx: number; vy: number; t: number;
   armTimer: number; armed: boolean;
 }>();
+/** Draw a player's name tag in world space, anchored just above
+ *  (worldX, topY). Called inside the camera transform — font size is
+ *  therefore in world units, which is fine because zoom is bounded by
+ *  the camera follower. A dark stroke under the fill keeps the text
+ *  readable over both pale and saturated blob colors. */
+function drawNameTag(ctx: CanvasRenderingContext2D, name: string, worldX: number, topY: number, color: string): void {
+  const fontPx = 18;
+  const padAbove = 12;
+  ctx.save();
+  ctx.font = `bold ${fontPx}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.fillStyle = color || '#ffffff';
+  const y = topY - padAbove;
+  ctx.strokeText(name, worldX, y);
+  ctx.fillText(name, worldX, y);
+  ctx.restore();
+}
+
 function sampleBlobVelocity(blob: SlimeBlob, c: Vec2, nowMs: number): { x: number; y: number } {
   const prev = renderVel.get(blob.blobId);
   let vx = 0, vy = 0;
@@ -85,6 +107,7 @@ export interface ModeOverlay {
 }
 
 export interface PlayerRenderData {
+  name: string;
   color: string;
   faceId: string;
   expanding: boolean;
@@ -294,6 +317,17 @@ export function render(
     if (pd) {
       const centroid = playerBlobs[i].getCentroid();
       drawBlobFace(ctx, centroid, pd.faceId, pd.expanding, pd.expandScale, pd.gaze);
+    }
+
+    // Name tag above the blob — anchored to the hull's topmost vertex
+    // so it tracks expansion (the hull already incorporates expandScale)
+    // and always sits just above the player's current silhouette.
+    if (pd?.name) {
+      let topY = Infinity;
+      for (let k = 0; k < hull.length; k++) {
+        if (hull[k].y < topY) topY = hull[k].y;
+      }
+      drawNameTag(ctx, pd.name, c.x, topY, pd.color);
     }
   }
 

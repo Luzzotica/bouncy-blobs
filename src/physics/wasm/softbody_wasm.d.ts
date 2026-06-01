@@ -26,6 +26,10 @@ export class SoftBodyWorldHandle {
      * Returns a BlobHandle with the blob id + key particle indices.
      */
     addBlobFromHull(hull_rest_local: Float64Array, center_local_x: number, center_local_y: number, center_mass: number, hull_mass: number, spring_k: number, spring_damp: number, radial_k: number, radial_damp: number, pressure_k: number, shape_match_k: number, shape_match_damp: number, world_origin_x: number, world_origin_y: number, sort_key: string, static_hull_indices: Uint32Array, static_center: boolean, pin_frame: boolean): BlobHandle;
+    addBumper(id: number, x: number, y: number, radius: number): number;
+    addCannon(id: number, x: number, y: number, w: number, h: number, rotation: number): number;
+    addCatapult(id: number, x: number, y: number, w: number, h: number): number;
+    addConveyor(id: number, x: number, y: number, w: number, h: number, direction: number): number;
     /**
      * Hard max-distance constraint between two particles. Solved in
      * step 7 alongside welds and anchors, repeated `constraint_iters`
@@ -34,6 +38,7 @@ export class SoftBodyWorldHandle {
      */
     addDistanceMax(idx_a: number, idx_b: number, max_dist: number): void;
     addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void;
+    addGravityFlipper(id: number, x: number, y: number, w: number, h: number): number;
     addHomeAnchor(idx: number, home_x: number, home_y: number, k: number, damp: number): void;
     /**
      * Add a free particle (level loader uses this for ropes / point shapes).
@@ -46,16 +51,59 @@ export class SoftBodyWorldHandle {
      * the core `add_rope_chain` for parameter semantics.
      */
     addRopeChain(idx_a: number, idx_b: number, total_length: number, max_segment_length: number, segment_mass: number, segment_radius: number, layer: number, mask: number, iterations: number): Uint32Array;
+    /**
+     * Register a spring pad. The engine creates a kinematic
+     * static_surface for the plate and runs the state machine each
+     * step(). `fire_speed_override` of <=0 uses the default.
+     */
+    addSpringPad(id: number, x: number, y: number, width: number, height: number, rotation: number, fire_speed_override: number): number;
+    addStickyGoo(id: number, x: number, y: number, w: number, h: number): number;
+    addWindZone(id: number, x: number, y: number, w: number, h: number, rotation: number): number;
+    addWreckingBall(id: number, x: number, y: number): number;
     applyBlobLinearVelocityDelta(blob_id: number, dvx: number, dvy: number): void;
     applyBlobMoveForce(blob_id: number, move_x: number, move_y: number, force: number, dt: number): void;
     applyExternalForcePoint(i: number, fx: number, fy: number): void;
+    /**
+     * Velocity damping for every hull particle of every blob in
+     * `polygon`: v *= (1 - coefficient * dt). Use for sticky goo,
+     * underwater drag.
+     */
+    applyForceInPolygonDrag(polygon: Float64Array, coefficient: number, dt: number): void;
+    /**
+     * Apply a radial force (outward if `strength` > 0, inward if < 0)
+     * from `(cx,cy)` to every blob in `polygon` within `radius`.
+     * `falloff`: 0 = Linear (mag * (1 - d/radius)), 1 = InverseSquare
+     * ((radius/d)^2). Use for bumpers, wrecking-ball blasts, magnets.
+     */
+    applyForceInPolygonRadial(polygon: Float64Array, cx: number, cy: number, strength: number, radius: number, falloff: number, dt: number): void;
+    /**
+     * Apply a constant `(fx, fy)` force to every blob whose centroid
+     * is inside `polygon`. Force scales by dt internally. Use for
+     * wind zones, conveyors.
+     */
+    applyForceInPolygonUniform(polygon: Float64Array, fx: number, fy: number, dt: number): void;
     blobCenterIdx(blob_id: number): number;
     /**
      * Number of registered blobs.
      */
     blobCount(): number;
     blobIdForParticle(idx: number): number;
+    /**
+     * Find every blob whose centroid is inside `polygon`. Returns
+     * blob_ids in ascending order. Polygon is a flat
+     * `[x0,y0,x1,y1,…]` Float64Array.
+     */
+    blobsOverlappingPolygon(polygon: Float64Array): Uint32Array;
+    clearDynamicItems(): void;
+    clearSpringPads(): void;
     clearStaticPolygons(): void;
+    /**
+     * Read the visual `active` flag for item index `idx` — used by
+     * JS-side renderers/SFX to fire VFX when an item is currently
+     * firing (cannon mid-blast, bumper just-fired, etc.).
+     */
+    dynamicItemActive(idx: number): boolean;
+    dynamicItemCount(): number;
     getBlobEffectiveGravity(blob_id: number): Float64Array;
     /**
      * Returns null if no contact this step, else a Float64Array [px,py,nx,ny].
@@ -63,6 +111,11 @@ export class SoftBodyWorldHandle {
     getBlobGroundContact(blob_id: number): Float64Array | undefined;
     getBlobGroundContacts(blob_id: number): number;
     getBlobImpactContact(blob_id: number): Float64Array | undefined;
+    /**
+     * Per-particle "touched solid this step" bitmap, indexed in hull order.
+     * Length equals the blob's hull length; each byte is 0 or 1.
+     */
+    getBlobParticleContacts(blob_id: number): Uint8Array;
     /**
      * Returns [start, end, hullLen, hull0, hull1, ...] as a Uint32Array.
      * Empty array if blob_id is out of bounds.
@@ -149,6 +202,14 @@ export class SoftBodyWorldHandle {
     setBlobRestLocal(blob_id: number, rest_local: Float64Array): void;
     setBlobShapeMatchRestScale(blob_id: number, s: number): void;
     setBlobSpringStiffnessScale(blob_id: number, stiffness: number, damp: number): void;
+    /**
+     * Engine-side hull squash + lean deformation. Replaces the JS
+     * `SlimeBlob.updateHullDeformation` (which called Math.atan2 +
+     * Math.cos/sin per tick — implementation-defined floats that drift
+     * between V8 instances). All trig now runs against deterministic
+     * integer LUTs inside the engine.
+     */
+    setBlobSquashLean(blob_id: number, squash: number, lean: number, gravity_x: number, gravity_y: number): void;
     setParticlePos(i: number, x: number, y: number): void;
     setParticleVel(i: number, x: number, y: number): void;
     /**
@@ -178,6 +239,15 @@ export class SoftBodyWorldHandle {
      * For point: gx_or_cx/gy_or_cy = center; strength = strength.
      */
     shapesSnapshot(include_triggers: boolean): Float64Array;
+    springPadCount(): number;
+    /**
+     * Current plate retraction offset in world units. 0 = fully extended.
+     */
+    springPadOffset(idx: number): number;
+    /**
+     * Returns the spring pad's state: 0 = Loaded, 1 = Firing, 2 = Reloading.
+     */
+    springPadState(idx: number): number;
     /**
      * FNV-1a 64-bit hash of every (pos.raw, vel.raw) i64 in the sim.
      * Two clients with the same state arrays produce the same hash.
@@ -202,6 +272,12 @@ export class SoftBodyWorldHandle {
      * geometry. The game wrapper turns each id into a player kill.
      */
     takeCrushEvents(): Uint32Array;
+    /**
+     * Drain pending fire events (gameplay IDs of pads that
+     * transitioned loaded→firing this step). JS uses these to spawn
+     * VFX/SFX.
+     */
+    takeSpringPadFireEvents(): Uint32Array;
     /**
      * Drain pending trigger-entered events. Returns flat (shape_idx, blob_id) pairs.
      */
@@ -234,22 +310,40 @@ export interface InitOutput {
     readonly __wbg_softbodyworldhandle_free: (a: number, b: number) => void;
     readonly blobhandle_hullIndices: (a: number) => number;
     readonly softbodyworldhandle_addBlobFromHull: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
+    readonly softbodyworldhandle_addBumper: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly softbodyworldhandle_addCannon: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly softbodyworldhandle_addCatapult: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly softbodyworldhandle_addConveyor: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly softbodyworldhandle_addDistanceMax: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_addExtraSpring: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly softbodyworldhandle_addGravityFlipper: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly softbodyworldhandle_addHomeAnchor: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_addParticle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly softbodyworldhandle_addRopeChain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly softbodyworldhandle_addSpringPad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly softbodyworldhandle_addStickyGoo: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly softbodyworldhandle_addWindZone: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly softbodyworldhandle_addWreckingBall: (a: number, b: number, c: number, d: number) => number;
     readonly softbodyworldhandle_applyBlobLinearVelocityDelta: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_applyBlobMoveForce: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_applyExternalForcePoint: (a: number, b: number, c: number, d: number) => void;
+    readonly softbodyworldhandle_applyForceInPolygonDrag: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly softbodyworldhandle_applyForceInPolygonRadial: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly softbodyworldhandle_applyForceInPolygonUniform: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_blobCenterIdx: (a: number, b: number) => number;
     readonly softbodyworldhandle_blobCount: (a: number) => number;
     readonly softbodyworldhandle_blobIdForParticle: (a: number, b: number) => number;
+    readonly softbodyworldhandle_blobsOverlappingPolygon: (a: number, b: number, c: number, d: number) => void;
+    readonly softbodyworldhandle_clearDynamicItems: (a: number) => void;
+    readonly softbodyworldhandle_clearSpringPads: (a: number) => void;
     readonly softbodyworldhandle_clearStaticPolygons: (a: number) => void;
+    readonly softbodyworldhandle_dynamicItemActive: (a: number, b: number) => number;
+    readonly softbodyworldhandle_dynamicItemCount: (a: number) => number;
     readonly softbodyworldhandle_getBlobEffectiveGravity: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobGroundContact: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobGroundContacts: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobImpactContact: (a: number, b: number) => number;
+    readonly softbodyworldhandle_getBlobParticleContacts: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobRange: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobShapeMatchTargetHull: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobStickyContact: (a: number, b: number) => number;
@@ -279,6 +373,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_setBlobRestLocal: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setBlobShapeMatchRestScale: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobSpringStiffnessScale: (a: number, b: number, c: number, d: number) => void;
+    readonly softbodyworldhandle_setBlobSquashLean: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_setParticlePos: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setParticleVel: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setPositionsBulk: (a: number, b: number, c: number) => void;
@@ -287,10 +382,14 @@ export interface InitOutput {
     readonly softbodyworldhandle_setTick: (a: number, b: number) => void;
     readonly softbodyworldhandle_setVelocitiesBulk: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_shapesSnapshot: (a: number, b: number) => number;
+    readonly softbodyworldhandle_springPadCount: (a: number) => number;
+    readonly softbodyworldhandle_springPadOffset: (a: number, b: number) => number;
+    readonly softbodyworldhandle_springPadState: (a: number, b: number) => number;
     readonly softbodyworldhandle_stateHash: (a: number) => bigint;
     readonly softbodyworldhandle_staticSurfacesSnapshot: (a: number) => number;
     readonly softbodyworldhandle_step: (a: number, b: number) => void;
     readonly softbodyworldhandle_takeCrushEvents: (a: number) => number;
+    readonly softbodyworldhandle_takeSpringPadFireEvents: (a: number, b: number) => void;
     readonly softbodyworldhandle_takeTriggerEntered: (a: number) => number;
     readonly softbodyworldhandle_takeTriggerExited: (a: number) => number;
     readonly softbodyworldhandle_teleportBlob: (a: number, b: number, c: number, d: number) => void;
@@ -300,6 +399,8 @@ export interface InitOutput {
     readonly softbodyworldhandle_zeroBlobVelocity: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
+    readonly __wbindgen_export3: (a: number, b: number, c: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;

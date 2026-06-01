@@ -312,6 +312,9 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   setBlobRestLocal(blobId: number, restLocal: Vec2[]): void {
     this.h.setBlobRestLocal(blobId, flatten(restLocal));
   }
+  setBlobSquashLean(blobId: number, squash: number, lean: number, gravityDir: Vec2): void {
+    this.h.setBlobSquashLean(blobId, squash, lean, gravityDir.x, gravityDir.y);
+  }
   setBlobMassScale(blobId: number, scale: number): void {
     this.h.setBlobMassScale(blobId, scale);
   }
@@ -339,6 +342,65 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   applyBlobLinearVelocityDelta(blobId: number, deltaV: Vec2): void {
     this.h.applyBlobLinearVelocityDelta(blobId, deltaV.x, deltaV.y);
   }
+
+  // ---- Phase 3 zone-force APIs ----
+  blobsOverlappingPolygon(polygon: Float64Array): Uint32Array {
+    return this.h.blobsOverlappingPolygon(polygon);
+  }
+  applyForceInPolygonUniform(polygon: Float64Array, fx: number, fy: number, dt: number): void {
+    this.h.applyForceInPolygonUniform(polygon, fx, fy, dt);
+  }
+  applyForceInPolygonRadial(
+    polygon: Float64Array,
+    cx: number, cy: number,
+    strength: number, radius: number,
+    falloff: 0 | 1,
+    dt: number,
+  ): void {
+    this.h.applyForceInPolygonRadial(polygon, cx, cy, strength, radius, falloff, dt);
+  }
+  applyForceInPolygonDrag(polygon: Float64Array, coefficient: number, dt: number): void {
+    this.h.applyForceInPolygonDrag(polygon, coefficient, dt);
+  }
+
+  // ---- Phase 4 dynamic-item wrappers ----
+  addCannon(id: number, x: number, y: number, w: number, h: number, rotation: number): number {
+    return this.h.addCannon(id, x, y, w, h, rotation);
+  }
+  addCatapult(id: number, x: number, y: number, w: number, h: number): number {
+    return this.h.addCatapult(id, x, y, w, h);
+  }
+  addBumper(id: number, x: number, y: number, radius: number): number {
+    return this.h.addBumper(id, x, y, radius);
+  }
+  addWindZone(id: number, x: number, y: number, w: number, h: number, rotation: number): number {
+    return this.h.addWindZone(id, x, y, w, h, rotation);
+  }
+  addGravityFlipper(id: number, x: number, y: number, w: number, h: number): number {
+    return this.h.addGravityFlipper(id, x, y, w, h);
+  }
+  addConveyor(id: number, x: number, y: number, w: number, h: number, direction: 1 | -1): number {
+    return this.h.addConveyor(id, x, y, w, h, direction);
+  }
+  addStickyGoo(id: number, x: number, y: number, w: number, h: number): number {
+    return this.h.addStickyGoo(id, x, y, w, h);
+  }
+  addWreckingBall(id: number, x: number, y: number): number {
+    return this.h.addWreckingBall(id, x, y);
+  }
+  clearDynamicItems(): void { this.h.clearDynamicItems(); }
+  dynamicItemCount(): number { return this.h.dynamicItemCount(); }
+  dynamicItemActive(idx: number): boolean { return this.h.dynamicItemActive(idx); }
+
+  // ---- Phase 5 spring-pad wrappers ----
+  addSpringPad(id: number, x: number, y: number, width: number, height: number, rotation: number, fireSpeedOverride: number): number {
+    return this.h.addSpringPad(id, x, y, width, height, rotation, fireSpeedOverride);
+  }
+  clearSpringPads(): void { this.h.clearSpringPads(); }
+  springPadCount(): number { return this.h.springPadCount(); }
+  springPadState(idx: number): number { return this.h.springPadState(idx); }
+  springPadOffset(idx: number): number { return this.h.springPadOffset(idx); }
+  takeSpringPadFireEvents(): Uint32Array { return this.h.takeSpringPadFireEvents(); }
 
   /**
    * Pump (expand) impulse on a blob's hull edges. Computed JS-side from
@@ -409,6 +471,9 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   getBlobStickyContact(blobId: number): StickyContact {
     const buf = this.h.getBlobStickyContact(blobId);
     return { count: buf[0], normal: { x: buf[1], y: buf[2] } };
+  }
+  getBlobParticleContacts(blobId: number): Uint8Array {
+    return this.h.getBlobParticleContacts(blobId);
   }
   getBlobEffectiveGravity(blobId: number): Vec2 {
     const buf = this.h.getBlobEffectiveGravity(blobId);

@@ -373,6 +373,7 @@ export default function Sandbox() {
       } : undefined;
 
       const playerData = [{
+        name: managed.name,
         color: managed.color,
         faceId: managed.faceId,
         expanding: playerBlob.isExpanding(),
@@ -383,6 +384,7 @@ export default function Sandbox() {
       if (playerBlob2 && managed2) {
         playerBlobs.push(playerBlob2);
         playerData.push({
+          name: managed2.name,
           color: managed2.color,
           faceId: managed2.faceId,
           expanding: playerBlob2.isExpanding(),

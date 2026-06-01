@@ -479,6 +479,24 @@ export class SoftBodyWorld {
     }
   }
 
+  /** JS-sim mirror of the Rust engine's `set_blob_squash_lean`. The TS
+   *  sim is only used in unit tests where determinism across browser
+   *  instances isn't a concern, so this can use `Math.cos/sin/atan2`
+   *  directly. Production runs through the Rust path. */
+  setBlobSquashLean(blobId: number, squash: number, lean: number, gravityDir: Vec2): void {
+    if (blobId < 0 || blobId >= this.blobRanges.length) return;
+    const si = this.blobRanges[blobId].shapeIdx;
+    if (si < 0 || si >= this.shapes.length) return;
+    const sh = this.shapes[si];
+    if (sh.isStatic || sh.isTrigger) return;
+    // The TS sim never stored a `baseRestLocal`. For test-only usage,
+    // approximate by reading the rest hull from the blob range's stored
+    // initial state — but the TS sim doesn't keep one, so this is a
+    // no-op. Tests that need squash/lean exercise should run against the
+    // Rust path. (This stub keeps the interface happy.)
+    void squash; void lean; void gravityDir;
+  }
+
   /** Scale all particle masses in a blob by a factor. Stores base masses for restore. */
   private baseMasses: Map<number, number[]> = new Map();
 
@@ -616,6 +634,13 @@ export class SoftBodyWorld {
     return { count, normal: normalize(sum) };
   }
 
+  /** Per-particle contact bitmap stub for the TS sim. The legacy TS path
+   * doesn't track per-particle contacts; ledge-hang assist is Rust-only.
+   * Returns an empty array so callers gracefully skip the boost. */
+  getBlobParticleContacts(_blobId: number): Uint8Array {
+    return new Uint8Array(0);
+  }
+
   /** Per-blob gravity override. Pass null to clear. Takes precedence over trigger gravity. */
   setBlobGravityOverride(blobId: number, gravity: Vec2 | null): void {
     if (blobId < 0 || blobId >= this.blobRanges.length) return;
@@ -665,6 +690,53 @@ export class SoftBodyWorld {
       this.vel[i] = add(this.vel[i], deltaV);
     }
   }
+
+  // ---- Phase 3 zone-force APIs (interface compliance only) ----
+  // The TS sim is non-deterministic by design (float math) and is
+  // only used in unit tests. Production runs through the Rust engine
+  // which has these implemented losslessly. These stubs satisfy the
+  // SoftBodyEngine interface so the interface can require these
+  // methods on all engines without breaking the TS sim's compile.
+  blobsOverlappingPolygon(_polygon: Float64Array): Uint32Array {
+    return new Uint32Array(0);
+  }
+  applyForceInPolygonUniform(_polygon: Float64Array, _fx: number, _fy: number, _dt: number): void {
+    // no-op
+  }
+  applyForceInPolygonRadial(
+    _polygon: Float64Array,
+    _cx: number, _cy: number,
+    _strength: number, _radius: number,
+    _falloff: 0 | 1,
+    _dt: number,
+  ): void {
+    // no-op
+  }
+  applyForceInPolygonDrag(_polygon: Float64Array, _coefficient: number, _dt: number): void {
+    // no-op
+  }
+
+  // ---- Phase 4 dynamic-item stubs (interface compliance only) ----
+  // TS sim doesn't run engine-side dynamic items — production uses Rust.
+  addCannon(_id: number, _x: number, _y: number, _w: number, _h: number, _rotation: number): number { return -1; }
+  addCatapult(_id: number, _x: number, _y: number, _w: number, _h: number): number { return -1; }
+  addBumper(_id: number, _x: number, _y: number, _radius: number): number { return -1; }
+  addWindZone(_id: number, _x: number, _y: number, _w: number, _h: number, _rotation: number): number { return -1; }
+  addGravityFlipper(_id: number, _x: number, _y: number, _w: number, _h: number): number { return -1; }
+  addConveyor(_id: number, _x: number, _y: number, _w: number, _h: number, _direction: 1 | -1): number { return -1; }
+  addStickyGoo(_id: number, _x: number, _y: number, _w: number, _h: number): number { return -1; }
+  addWreckingBall(_id: number, _x: number, _y: number): number { return -1; }
+  clearDynamicItems(): void { /* no-op */ }
+  dynamicItemCount(): number { return 0; }
+  dynamicItemActive(_idx: number): boolean { return false; }
+
+  // ---- Phase 5 spring-pad stubs ----
+  addSpringPad(_id: number, _x: number, _y: number, _w: number, _h: number, _rotation: number, _fireSpeedOverride: number): number { return -1; }
+  clearSpringPads(): void { /* no-op */ }
+  springPadCount(): number { return 0; }
+  springPadState(_idx: number): number { return 0; }
+  springPadOffset(_idx: number): number { return 0; }
+  takeSpringPadFireEvents(): Uint32Array { return new Uint32Array(0); }
 
   applyBlobExpand(blobId: number, expandForce: number): void {
     const edges = this.getBlobPumpEdgeImpulses(blobId, expandForce);

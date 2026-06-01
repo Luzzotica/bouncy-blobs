@@ -6,12 +6,14 @@
 
 pub mod collision;
 pub mod constraints;
+pub mod dynamic_items;
 pub mod fx;
 pub mod layers;
 pub mod math;
 pub mod rng;
 pub mod shape_matching;
 pub mod snapshot;
+pub mod spring_pads;
 pub mod tuning;
 pub mod types;
 pub mod world;

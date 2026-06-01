@@ -109,6 +109,18 @@ export async function getSelfSteamId(): Promise<string> {
   return await invoke<string>("steam_id_self");
 }
 
+/** Local Steam user's persona (display) name. Returns null if Steam isn't
+ *  available (running outside the Tauri shell or Steam isn't initialized).
+ *  Used to pre-fill the host's name picker. */
+export async function getSelfSteamPersonaName(): Promise<string | null> {
+  try {
+    const name = await invoke<string>("steam_persona_name");
+    return name && name.length > 0 ? name : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Pre-register a handler for an incoming connection from a known remote SteamID.
  * The host calls this once it expects a particular friend to dial in (e.g. via
  * a Steam Lobby chat that shares the host's SteamID). When the resulting

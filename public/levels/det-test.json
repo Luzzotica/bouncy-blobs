@@ -1,0 +1,78 @@
+{
+  "name": "Determinism Test Arena",
+  "version": 1,
+  "levelTypes": [],
+  "bounds": { "width": 1600, "height": 2400 },
+  "walls": [
+    { "id": "floor",       "points": [{ "x":   -100, "y": 2380 }, { "x": 1700, "y": 2380 }, { "x": 1700, "y": 2400 }, { "x":  -100, "y": 2400 }] },
+    { "id": "ceiling",     "points": [{ "x":   -100, "y": -100 }, { "x": 1700, "y": -100 }, { "x": 1700, "y":    0 }, { "x":  -100, "y":    0 }] },
+    { "id": "left-wall",   "points": [{ "x":   -100, "y": -100 }, { "x":    0, "y": -100 }, { "x":    0, "y": 2400 }, { "x":  -100, "y": 2400 }] },
+    { "id": "right-wall",  "points": [{ "x":   1600, "y": -100 }, { "x": 1700, "y": -100 }, { "x": 1700, "y": 2400 }, { "x":  1600, "y": 2400 }] }
+  ],
+
+  "platforms": [
+    { "id": "spring-base-1", "x":  400, "y": 2300, "width": 200, "height": 40, "rotation": 0 },
+    { "id": "spring-base-2", "x":  800, "y": 2300, "width": 200, "height": 40, "rotation": 0 },
+    { "id": "spike-base",    "x": 1200, "y": 2300, "width": 200, "height": 40, "rotation": 0 },
+    { "id": "trigger-floor", "x":  600, "y": 1800, "width": 800, "height": 40, "rotation": 0 }
+  ],
+
+  "spawnPoints": [
+    { "id": "sp-p1", "x": 400, "y": 200, "type": "player" },
+    { "id": "sp-p2", "x": 800, "y": 200, "type": "player" }
+  ],
+
+  "npcBlobs": [
+    { "id": "npc-witness-1", "x": 1200, "y": 1500, "hullPreset": "circle16", "hue": 0.1 },
+    { "id": "npc-witness-2", "x":  200, "y": 1500, "hullPreset": "hexagon",  "hue": 0.5 }
+  ],
+
+  "springPads": [
+    { "id": "spring-1", "x":  400, "y": 2240, "width": 140, "height": 30, "rotation": -1.5708, "fireSpeed": 1800 },
+    { "id": "spring-2", "x":  800, "y": 2240, "width": 140, "height": 30, "rotation": -1.5708, "fireSpeed": 1200 }
+  ],
+
+  "spikes": [
+    { "id": "spike-1", "x": 1200, "y": 2260, "width": 200, "height": 40, "rotation": 0 }
+  ],
+
+  "triggers": [
+    {
+      "id": "fall-trigger",
+      "polygon": [
+        { "x":  500, "y": 1200 },
+        { "x":  900, "y": 1200 },
+        { "x":  900, "y": 1400 },
+        { "x":  500, "y": 1400 }
+      ]
+    }
+  ],
+
+  "dynamicItems": [
+    { "id": "wind-1",     "type": "wind_zone",     "x":  300, "y": 1000, "width": 300, "height": 400, "rotation": 0 },
+    { "id": "conv-1",     "type": "conveyor_right","x":  700, "y": 1200, "width": 300, "height":  50, "rotation": 0 },
+    { "id": "bumper-1",   "type": "bumper",        "x": 1100, "y": 1700, "width": 120, "height": 120, "rotation": 0 },
+    { "id": "sticky-1",   "type": "sticky_goo",    "x":  500, "y": 1500, "width": 200, "height":  60, "rotation": 0 },
+    { "id": "cannon-1",   "type": "cannon",        "x":  100, "y": 1700, "width": 100, "height": 100, "rotation": 0 }
+  ],
+
+  "powerupSpawns": [
+    { "id": "pu-1", "x":  600, "y": 1700 },
+    { "id": "pu-2", "x":  900, "y": 1700 }
+  ],
+
+  "actions": [
+    {
+      "id": "move-floor",
+      "kind": "movePoints",
+      "duration": 1.0,
+      "easing": "easeInOut",
+      "sourceTriggerIds": ["fall-trigger"],
+      "requireMode": "any",
+      "mode": "oneShot",
+      "targets": [
+        { "kind": "platform", "platformId": "trigger-floor", "endX": 800, "endY": 1900 }
+      ]
+    }
+  ]
+}

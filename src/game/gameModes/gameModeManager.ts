@@ -210,6 +210,41 @@ export class GameModeManager {
     };
   }
 
+  /** Apply a narrow host-authoritative mode-state snapshot from a
+   *  `lobby_state` broadcast. Guests run their own GameModeManager
+   *  locally for the `countdown` → `playing` → `results` flow, but
+   *  their lockstep gate stalls them in `playing` when the host stops
+   *  emitting input ticks after a win — so without this override the
+   *  guest never transitions to `results` and never renders the
+   *  winner overlay. Unlike `restoreState`, this only carries the
+   *  fields the host actually broadcasts (no mode-specific dump). */
+  applyHostModeState(snap: {
+    phase: GamePhase;
+    phaseTimerSec?: number;
+    timeRemainingSec?: number | null;
+    winner?: string | null;
+    winnerName?: string | null;
+    scores?: Record<string, number>;
+  }): void {
+    const phaseChanged = this.state.phase !== snap.phase;
+    if (phaseChanged) {
+      // Reuse setPhase so mode.onPhaseStart() hooks fire — some modes
+      // (party, voting) rely on phase-entry side effects.
+      this.setPhase(snap.phase);
+    }
+    // setPhase resets these to defaults; overwrite with host's
+    // authoritative values afterwards.
+    if (typeof snap.phaseTimerSec === 'number') this.state.phaseTimer = snap.phaseTimerSec;
+    if (snap.timeRemainingSec !== undefined) this.state.timeRemaining = snap.timeRemainingSec;
+    if (snap.winner !== undefined) this.state.winner = snap.winner;
+    if (snap.winnerName !== undefined) this.state.winnerName = snap.winnerName;
+    if (snap.scores) {
+      for (const [id, score] of Object.entries(snap.scores)) {
+        this.state.scores.set(id, score);
+      }
+    }
+  }
+
   restoreState(snap: ReturnType<GameModeManager['dumpState']>): void {
     this.state.phase = snap.phase;
     this.state.phaseTimer = snap.phaseTimer;

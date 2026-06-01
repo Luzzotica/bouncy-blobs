@@ -3,6 +3,11 @@ import { useNavigate, Link } from "react-router-dom";
 import { RoomService } from "../lib/party";
 import type { RoomSummary } from "../lib/party";
 import { roomConfig, GAME_ID } from "../lib/partyConfig";
+import {
+  getStoredDisplayName,
+  setStoredDisplayName,
+  resolveDefaultDisplayName,
+} from "../lib/userProfile";
 
 const PENDING_JOIN_KEY = "pendingLobbyJoin";
 
@@ -33,6 +38,23 @@ export default function LobbyBrowser() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  // Single source of truth for the guest's display name. Pre-filled from
+  // localStorage (or Steam persona when running under Steam); persisted on
+  // every join so returning users don't have to retype it.
+  const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
+  // Per-row state for the "Join" pop-out so each row can independently
+  // show the password prompt without React tree churn.
+  const [joinTarget, setJoinTarget] = useState<RoomSummary | null>(null);
+  const [joinPassword, setJoinPassword] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (displayName) return;
+    void resolveDefaultDisplayName().then((n) => {
+      if (!cancelled && n) setDisplayName(n);
+    });
+    return () => { cancelled = true; };
+  }, [displayName]);
 
   useEffect(() => {
     const room = new RoomService(roomConfig);
@@ -53,18 +75,31 @@ export default function LobbyBrowser() {
     return () => { cancelled = true; clearInterval(i); };
   }, [refreshTick]);
 
-  async function join(lobby: RoomSummary) {
-    let password = "";
-    if (lobby.is_password_protected) {
-      password = window.prompt("This lobby is password-protected. Enter password:") ?? "";
-      if (!password) return;
+  /** Open the per-row password prompt (or commit immediately for
+   *  rooms that aren't password-protected). */
+  function beginJoin(lobby: RoomSummary) {
+    if (!displayName.trim()) {
+      setError("Enter a display name first");
+      return;
     }
-    const displayName = window.prompt("Display name for your screen:") ?? "Screen";
+    if (lobby.is_password_protected) {
+      setJoinTarget(lobby);
+      setJoinPassword("");
+      return;
+    }
+    void commitJoin(lobby, "");
+  }
+
+  /** Actually navigate to /online-guest with the chosen room + password. */
+  async function commitJoin(lobby: RoomSummary, password: string) {
+    const name = displayName.trim();
+    if (!name) return;
+    setStoredDisplayName(name);
     setBusy(true);
     try {
       sessionStorage.setItem(
         PENDING_JOIN_KEY,
-        JSON.stringify({ room_id: lobby.room_id, display_name: displayName, password } satisfies PendingJoin),
+        JSON.stringify({ room_id: lobby.room_id, display_name: name, password } satisfies PendingJoin),
       );
       navigate("/online-guest");
     } catch (err) {
@@ -82,6 +117,10 @@ export default function LobbyBrowser() {
    * display-name prompts behave identically.
    */
   async function joinByCode() {
+    if (!displayName.trim()) {
+      setError("Enter a display name first");
+      return;
+    }
     const raw = window.prompt("Enter the room code to join:")?.trim();
     if (!raw) return;
     setError(null);
@@ -89,7 +128,7 @@ export default function LobbyBrowser() {
     try {
       const room = new RoomService(roomConfig);
       const summary = await room.lookupByCode(raw);
-      await join(summary);
+      beginJoin(summary);
     } catch (err) {
       const msg = (err as Error).message ?? "";
       setError(
@@ -129,6 +168,29 @@ export default function LobbyBrowser() {
         </div>
       </div>
       {error && <div style={{ color: "#f66", flexShrink: 0 }}>{error}</div>}
+      <label style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+        <span style={{ fontSize: 13, color: "#bbb" }}>Your name</span>
+        <input
+          data-testid="lobby-display-name"
+          type="text"
+          value={displayName}
+          maxLength={32}
+          placeholder="Enter your display name"
+          onChange={(e) => {
+            const v = e.target.value;
+            setDisplayName(v);
+            setStoredDisplayName(v);
+          }}
+          style={{
+            padding: "8px 10px",
+            fontSize: 15,
+            borderRadius: 6,
+            border: "1px solid #444",
+            background: "#0f0a18",
+            color: "#fff",
+          }}
+        />
+      </label>
       <div data-testid="lobby-list" style={{ flex: 1, minHeight: 0, overflowY: "auto", borderRadius: 8, border: "1px solid #333" }}>
         {lobbies.length === 0 && (
           <div style={{ padding: 24, textAlign: "center", color: "#888" }}>
@@ -153,7 +215,7 @@ export default function LobbyBrowser() {
               </div>
             </div>
             <button
-              onClick={() => join(l)}
+              onClick={() => beginJoin(l)}
               disabled={busy || l.peer_count >= l.max_peers}
               style={{ padding: "10px 20px", background: "#c77dff" }}
             >
@@ -162,6 +224,62 @@ export default function LobbyBrowser() {
           </div>
         ))}
       </div>
+      {joinTarget && (
+        <div
+          data-testid="join-password-backdrop"
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+          onClick={() => setJoinTarget(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const tgt = joinTarget;
+              setJoinTarget(null);
+              void commitJoin(tgt, joinPassword);
+            }}
+            style={{
+              background: "#1a1525", color: "#fff", padding: 24, borderRadius: 12,
+              minWidth: 320, display: "flex", flexDirection: "column", gap: 14,
+            }}
+          >
+            <h3 style={{ margin: 0 }}>Password required</h3>
+            <div style={{ color: "#bbb", fontSize: 13 }}>
+              {joinTarget.display_name || "Untitled lobby"}
+            </div>
+            <input
+              data-testid="join-password-input"
+              type="text"
+              autoFocus
+              value={joinPassword}
+              onChange={(e) => setJoinPassword(e.target.value)}
+              placeholder="Enter password"
+              style={{ padding: "8px 10px", fontSize: 15, borderRadius: 6, border: "1px solid #444", background: "#0f0a18", color: "#fff" }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setJoinTarget(null)} style={{ padding: "8px 16px" }}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!joinPassword}
+                style={{
+                  padding: "8px 18px",
+                  background: joinPassword ? "#c77dff" : "#555",
+                  color: "#0a0612",
+                  fontWeight: 600,
+                  cursor: joinPassword ? "pointer" : "not-allowed",
+                }}
+              >
+                Join
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

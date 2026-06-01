@@ -48,3 +48,6 @@ crates/softbody-wasm/pkg/
 .gutconfig.json
 .vercel
 .env*.local
+
+# weekly-music-video / trailer pipeline (large local-only assets)
+.music-video/

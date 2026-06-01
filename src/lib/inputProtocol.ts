@@ -10,29 +10,63 @@
 //
 //   0x02  AggregatedInputs  — host → all guests
 //     The committed input set for one or more consecutive ticks. Each tick
-//     carries an explicit (playerId, moveX, moveY, flags) record per player
-//     that has input that tick. Guests apply at the tagged tick number.
+//     carries a (slot, moveX_q, moveY_q, flags) record per player with input
+//     this tick. Guests resolve slot→playerId via the slot table broadcast
+//     in lobby_state, and apply at the tagged tick number.
 //
 // The world snapshot keeps the existing 0x00 magic (`wireProtocol.ts`), so a
 // receiver can disambiguate any byte-channel message by inspecting byte 0:
 //   0x00 → world snapshot, 0x01 → client input, 0x02 → aggregated inputs,
 //   else (printable ASCII like '{') → JSON reliable event.
 //
-// Format:
-//   moveX, moveY: f64 (NOT quantized). JS numbers are natively f64; using
-//                 anything smaller (f32, i16, i8) introduces a precision
-//                 mismatch between host's applied value and the guest's
-//                 decoded value, which breaks the deterministic sim
-//                 instantly. ~16 bytes of wire per player per tick is
-//                 negligible compared to the correctness it preserves.
+// VERSION 2 (compact) — host→guest broadcast:
+//   Per-player-tick is 4 bytes: u8 slot, i8 moveX_q, i8 moveY_q, u8 flags.
+//   Down from ~38 bytes in v1 (variable-length playerId + 2× f64). Enables
+//   K=120-tick redundant broadcasts at ~3 KB/packet instead of ~24 KB,
+//   fitting in a single SCTP fragment on the unreliable channel.
+//
+// Determinism rule: moveX/moveY are quantized to i8 (1/127 quantum). The
+// HOST must apply the quantized value to its own sim BEFORE broadcasting,
+// otherwise host's sim uses raw f64 0.7071068 while guests get
+// dequantize(91)=0.7165354 — silent divergence within a few ticks.
+// `quantizeAxis(v)` returns the canonical precision value (round(v*127)/127)
+// and should be called wherever a moveX/moveY value enters ManagedPlayer.*.
+//
 //   tick:         uint32 — wraps at ~828 days of 60 Hz play.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const INPUT_VERSION = 1;
+export const INPUT_VERSION = 2;
 export const MAGIC_CLIENT_INPUT = 0x01;
 export const MAGIC_AGGREGATED_INPUTS = 0x02;
 
 const FLAG_EXPANDING = 0x01;
+
+/** Slot value reserved for "unassigned / unknown." A producer must never
+ *  emit this; a consumer that decodes it should drop the frame. */
+export const SLOT_UNASSIGNED = 255;
+/** Max usable slot index. Bumps if lobbies grow past 16 players. */
+export const MAX_SLOT = 15;
+
+/** Quantize an axis value [-1, 1] to the canonical i8 representation.
+ *  Returns an integer in [-127, 127]. */
+export function quantizeAxisToInt(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  const clamped = v < -1 ? -1 : v > 1 ? 1 : v;
+  return Math.round(clamped * 127);
+}
+
+/** Inverse of `quantizeAxisToInt`. Returns a value in [-1, 1]. */
+export function dequantizeAxis(q: number): number {
+  return q / 127;
+}
+
+/** Round-trip a raw axis value through quantize→dequantize so callers can
+ *  store the canonical precision value into ManagedPlayer.moveX/Y. This is
+ *  what enforces determinism: every consumer of moveX/Y applies the same
+ *  bit-exact value the wire carries. */
+export function quantizeAxis(v: number): number {
+  return dequantizeAxis(quantizeAxisToInt(v));
+}
 
 export interface InputFrame {
   /** Logical tick this input applies at. */
@@ -49,7 +83,15 @@ export interface ClientInputBatch {
 }
 
 export interface PerPlayerInput {
-  playerId: string;
+  /** Wire-level slot index (0..MAX_SLOT). Host assigns at player-join time;
+   *  guests learn the slot↔playerId map from `lobby_state`. Producers must
+   *  set this; consumers receive it directly from the wire. */
+  slot: number;
+  /** Resolved by the decoder when a slot→id resolver is provided. Undefined
+   *  when the resolver doesn't know the slot (e.g. lobby_state not yet
+   *  received). Callers should drop frames where this is undefined. */
+  playerId?: string;
+  /** Dequantized axis value in [-1, 1], precision = 1/127. */
   moveX: number;
   moveY: number;
   expanding: boolean;
@@ -75,6 +117,11 @@ function idBytes(id: string): Uint8Array {
 }
 
 // ── Client input batch (client → host) ───────────────────────────────────────
+// Kept on the v1 format. ClientInputBatch is only used by tests in practice
+// (GameMaster + OnlineGuest send/receive ClientInputBatch as JSON, not
+// binary). Leaving it alone keeps the existing test suite passing.
+
+const CLIENT_INPUT_VERSION = 1;
 
 export function encodeClientInputBatch(batch: ClientInputBatch): ArrayBuffer {
   const count = Math.min(batch.frames.length, 255);
@@ -84,7 +131,7 @@ export function encodeClientInputBatch(batch: ClientInputBatch): ArrayBuffer {
   const dv = new DataView(buf);
   let p = 0;
   dv.setUint8(p, MAGIC_CLIENT_INPUT); p += 1;
-  dv.setUint8(p, INPUT_VERSION); p += 1;
+  dv.setUint8(p, CLIENT_INPUT_VERSION); p += 1;
   dv.setUint8(p, count); p += 1;
   for (let i = 0; i < count; i++) {
     const f = batch.frames[i];
@@ -105,7 +152,7 @@ export function decodeClientInputBatch(data: ArrayBuffer | Uint8Array): ClientIn
   let p = 0;
   if (dv.getUint8(p) !== MAGIC_CLIENT_INPUT) return null;
   p += 1;
-  if (dv.getUint8(p) !== INPUT_VERSION) return null;
+  if (dv.getUint8(p) !== CLIENT_INPUT_VERSION) return null;
   p += 1;
   const count = dv.getUint8(p); p += 1;
   if (buf.byteLength < 3 + count * 21) return null;
@@ -121,23 +168,23 @@ export function decodeClientInputBatch(data: ArrayBuffer | Uint8Array): ClientIn
   return { frames };
 }
 
-// ── Aggregated inputs (host → guests) ────────────────────────────────────────
+// Stash for backward-compat exports / silence unused TextDecoder warning.
+export function _unusedIdBytes(id: string): Uint8Array { return idBytes(id); }
+void TD;
+
+// ── Aggregated inputs (host → guests, compact v2 format) ─────────────────────
 
 export function encodeAggregatedInputs(agg: AggregatedInputs): ArrayBuffer {
   const tickCount = Math.min(agg.ticks.length, 255);
-  let total = 3; // magic + ver + tickCount
+  // 1 magic + 1 ver + 1 tickCount + per-tick (4 tick + 1 playerCount + N*4 players)
+  let total = 3;
   for (let t = 0; t < tickCount; t++) {
     const ti = agg.ticks[t];
-    total += 4 + 1; // tick + playerCount
-    for (const inp of ti.inputs) {
-      const idLen = idBytes(inp.playerId).length;
-      total += 1 + idLen + 8 + 8 + 1; // idLen + bytes + f64 mx + f64 my + flags
-    }
+    total += 4 + 1 + Math.min(ti.inputs.length, 255) * 4;
   }
 
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
-  const u8 = new Uint8Array(buf);
   let p = 0;
   dv.setUint8(p, MAGIC_AGGREGATED_INPUTS); p += 1;
   dv.setUint8(p, INPUT_VERSION); p += 1;
@@ -150,24 +197,32 @@ export function encodeAggregatedInputs(agg: AggregatedInputs): ArrayBuffer {
     dv.setUint8(p, playerCount); p += 1;
     for (let i = 0; i < playerCount; i++) {
       const inp = ti.inputs[i];
-      const ib = idBytes(inp.playerId);
-      dv.setUint8(p, ib.length); p += 1;
-      u8.set(ib, p); p += ib.length;
-      dv.setFloat64(p, inp.moveX, true); p += 8;
-      dv.setFloat64(p, inp.moveY, true); p += 8;
+      // Slot defaults to SLOT_UNASSIGNED if producer forgot to set it —
+      // decoders will drop those frames cleanly.
+      const slot = (inp.slot >= 0 && inp.slot <= MAX_SLOT) ? inp.slot : SLOT_UNASSIGNED;
+      dv.setUint8(p, slot); p += 1;
+      dv.setInt8(p, quantizeAxisToInt(inp.moveX)); p += 1;
+      dv.setInt8(p, quantizeAxisToInt(inp.moveY)); p += 1;
       dv.setUint8(p, inp.expanding ? FLAG_EXPANDING : 0); p += 1;
     }
   }
   return buf;
 }
 
-export function decodeAggregatedInputs(data: ArrayBuffer | Uint8Array): AggregatedInputs | null {
+/** Optional resolver mapping slot → playerId. If not provided (or returns
+ *  undefined for a slot), the decoded `PerPlayerInput.playerId` is left
+ *  undefined and the caller is expected to drop that frame. */
+export type SlotResolver = (slot: number) => string | undefined;
+
+export function decodeAggregatedInputs(
+  data: ArrayBuffer | Uint8Array,
+  resolveSlot?: SlotResolver,
+): AggregatedInputs | null {
   const buf = data instanceof Uint8Array
     ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
     : data;
   if (buf.byteLength < 3) return null;
   const dv = new DataView(buf);
-  const u8 = new Uint8Array(buf);
   let p = 0;
   if (dv.getUint8(p) !== MAGIC_AGGREGATED_INPUTS) return null;
   p += 1;
@@ -182,12 +237,17 @@ export function decodeAggregatedInputs(data: ArrayBuffer | Uint8Array): Aggregat
       const playerCount = dv.getUint8(p); p += 1;
       const inputs: PerPlayerInput[] = new Array(playerCount);
       for (let i = 0; i < playerCount; i++) {
-        const idLen = dv.getUint8(p); p += 1;
-        const id = TD.decode(u8.subarray(p, p + idLen)); p += idLen;
-        const moveX = dv.getFloat64(p, true); p += 8;
-        const moveY = dv.getFloat64(p, true); p += 8;
+        const slot = dv.getUint8(p); p += 1;
+        const mxq = dv.getInt8(p); p += 1;
+        const myq = dv.getInt8(p); p += 1;
         const flags = dv.getUint8(p); p += 1;
-        inputs[i] = { playerId: id, moveX, moveY, expanding: !!(flags & FLAG_EXPANDING) };
+        inputs[i] = {
+          slot,
+          playerId: resolveSlot?.(slot),
+          moveX: dequantizeAxis(mxq),
+          moveY: dequantizeAxis(myq),
+          expanding: !!(flags & FLAG_EXPANDING),
+        };
       }
       ticks[t] = { tick, inputs };
     }

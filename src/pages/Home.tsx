@@ -126,6 +126,8 @@ export default function Home() {
         ⚙  Settings
       </button>
 
+      <div style={versionLabel} aria-hidden="true">v{__APP_VERSION__}</div>
+
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -272,6 +274,19 @@ const tapeStrip: React.CSSProperties = {
   opacity: 0.85,
   pointerEvents: 'none',
   boxShadow: '0 2px 3px rgba(0,0,0,0.2)',
+}
+
+const versionLabel: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 12,
+  right: 16,
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'rgba(255, 250, 230, 0.55)',
+  letterSpacing: 1,
+  textShadow: '1px 1px 0 rgba(10, 6, 18, 0.7)',
+  userSelect: 'none',
+  pointerEvents: 'none',
 }
 
 // Sticky-note settings button: same paper+tape style as the main column,

@@ -62,30 +62,50 @@ export class DynamicItemManager {
     this.playerManager = playerManager;
     this.items = [];
     this.time = 0;
+    // Engine owns the canonical dynamic-item state (Phase 4 migration).
+    // Re-add any items via addItem() after initialize().
+    world.clearDynamicItems();
   }
 
   addItem(id: string, type: PartyItemType, x: number, y: number, width: number, height: number, rotation: number): void {
     this.items.push({ id, type, x, y, width, height, rotation, timer: 0, active: false });
+    // Phase 4: register the item with the deterministic Rust engine.
+    // The engine's `step()` advances per-item timers and applies
+    // forces via the Phase 3 zone-force APIs — no per-tick JS work
+    // needed beyond rendering. The JS-side `items` array is kept ONLY
+    // for renderer access to per-item geometry (x/y/w/h/rotation).
+    const w = this.world;
+    if (!w) return;
+    const idx = this.items.length - 1;
+    // Numeric id for the engine is the JS array index (the string id
+    // is gameplay-facing only). Engine assigns its own sequential
+    // index too; we ignore the return value.
+    const numericId = idx;
+    switch (type) {
+      case 'cannon':         w.addCannon(numericId, x, y, width, height, rotation); break;
+      case 'catapult':       w.addCatapult(numericId, x, y, width, height); break;
+      case 'bumper':         w.addBumper(numericId, x, y, width / 2); break;
+      case 'wind_zone':      w.addWindZone(numericId, x, y, width, height, rotation); break;
+      case 'gravity_flipper':w.addGravityFlipper(numericId, x, y, width, height); break;
+      case 'conveyor_left':  w.addConveyor(numericId, x, y, width, height, -1); break;
+      case 'conveyor_right': w.addConveyor(numericId, x, y, width, height, 1); break;
+      case 'sticky_goo':     w.addStickyGoo(numericId, x, y, width, height); break;
+      case 'wrecking_ball':  w.addWreckingBall(numericId, x, y); break;
+    }
   }
 
   update(dt: number): void {
     if (!this.world || !this.playerManager) return;
     this.time += dt;
-
-    for (const item of this.items) {
+    // Phase 4: state machines + force application live in the Rust
+    // engine now (called from world.step). JS only advances local
+    // `timer` for renderer charge-bar animation and mirrors the
+    // engine's `active` flag for VFX.
+    const w = this.world;
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
       item.timer += dt;
-
-      switch (item.type) {
-        case 'cannon': this.updateCannon(item, dt); break;
-        case 'catapult': this.updateCatapult(item, dt); break;
-        case 'bumper': this.updateBumper(item, dt); break;
-        case 'wind_zone': this.updateWindZone(item, dt); break;
-        case 'gravity_flipper': this.updateGravityFlipper(item, dt); break;
-        case 'conveyor_left': this.updateConveyor(item, dt, -1); break;
-        case 'conveyor_right': this.updateConveyor(item, dt, 1); break;
-        case 'sticky_goo': this.updateStickyGoo(item, dt); break;
-        case 'wrecking_ball': this.updateWreckingBall(item, dt); break;
-      }
+      item.active = w.dynamicItemActive(i);
     }
   }
 

@@ -54,6 +54,14 @@ export interface RoomSummary {
   expires_at: string;
 }
 
+/** Mirrors hexii's `lib/api/turn.ts` IceServer shape. The values flow
+ * directly into `RTCConfiguration.iceServers` on both host and joiner. */
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
 export interface CreateRoomResult {
   room_id: string;
   join_code: string;
@@ -61,6 +69,9 @@ export interface CreateRoomResult {
   host_peer_id: string;
   host_peer_secret: string;
   expires_at: string;
+  /** Short-lived TURN credentials minted by the API. Omitted on backends
+   * that don't support TURN; SDK falls back to a public STUN-only config. */
+  ice_servers?: IceServerConfig[];
 }
 
 export interface JoinRoomResult {
@@ -69,6 +80,8 @@ export interface JoinRoomResult {
   slot: number;
   kind: string;
   display_name: string;
+  /** Short-lived TURN credentials minted by the API. See CreateRoomResult. */
+  ice_servers?: IceServerConfig[];
 }
 
 export interface Signal {
@@ -107,4 +120,9 @@ export interface PeerCallbacks {
   onPeerDisconnected?: (peerId: string) => void;
   onMessage?: (peerId: string, channel: string, data: string | ArrayBuffer) => void;
   onError?: (err: Error) => void;
+  /** Lifecycle events from the underlying transport. Used to surface a
+   * visible "what step are we on" log to the user during connect — the
+   * payload is intentionally free-form so transports can include whatever
+   * detail is useful (candidate type, state name, channel label, etc.). */
+  onPhase?: (peerId: string, phase: string, detail?: Record<string, unknown>) => void;
 }

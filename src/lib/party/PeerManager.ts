@@ -98,6 +98,7 @@ export class PeerManager {
       },
       onMessage: (id, channel, data) => this.callbacks.onMessage?.(id, channel, data),
       onError: (err) => this.callbacks.onError?.(err),
+      onPhase: (id, phase, detail) => this.callbacks.onPhase?.(id, phase, detail),
     };
   }
 
@@ -139,6 +140,12 @@ export class PeerManager {
     return [...this.peers.values()]
       .filter((p) => p.isOpen())
       .map((p) => ({ peerId: p.remoteId, kind: p.remoteKind }));
+  }
+
+  /** Returns every transport for diagnostics (e.g. dumping candidate pairs).
+   * Don't use this to drive game logic — `getConnectedPeers` is the live set. */
+  getAllTransports(): Transport[] {
+    return [...this.peers.values()];
   }
 
   /** Dispose a single peer connection (e.g. when a remote peer's room row

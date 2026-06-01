@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useUser } from '../contexts/UserContext';
 import { createHostRoom, RoomService, PeerManager, SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from '../lib/party';
+import { installRtcDebug } from '../lib/rtcDebug';
 import { isSteamAvailable } from '../lib/workshopApi';
 import {
   createLobby,
@@ -23,8 +24,18 @@ import {
   type WorldRecord,
   type EntityOffset,
 } from '../lib/wireProtocol';
-import { encodeAggregatedInputs } from '../lib/inputProtocol';
-import { installDebugBridge } from '../lib/debugBridge';
+import { encodeAggregatedInputs, MAX_SLOT, quantizeAxis } from '../lib/inputProtocol';
+import { RollbackController, type InputSet } from '../game/rollback/RollbackController';
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
+import { setRollbackStatsAccessor } from '../lib/debugBridge';
+
+// Module-level constants used both inside the component (LOCAL_PLAYER_ID
+// references) and by the slot-table refs created at the top of the component.
+const LOCAL_PLAYER_ID_CONST = 'local-keyboard';
+const MAX_SLOT_CONST = MAX_SLOT;
+import { initPacingFromUrl, getPacingConfig, setPacingConfig, REDUNDANCY_TICKS } from '../lib/pacingConfig';
+import { getHashHistory, recordHash, resetHashHistory } from '../lib/hashHistory';
+import { installDebugBridge, setCompareHashesAccessor, setTogglePauseAccessor, type CompareHashesResult } from '../lib/debugBridge';
 import {
   DEFAULT_PERSONALITY,
   GOAL_SEEKER_PALETTE,
@@ -45,6 +56,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_CONTROLLER_CONFIG } from '../types/controllerConfig';
 import { WebRTCMessage } from '../types/webrtc';
 import GameCanvas from '../components/GameCanvas';
+import HostSetupModal, { type HostSetupResult } from '../components/HostSetupModal';
+import NetDebugOverlay from '../components/NetDebugOverlay';
 import type { Player } from '../types/database';
 import { GameMode, GamePhase } from '../game/gameModes/types';
 // Game mode registry
@@ -132,6 +145,53 @@ export default function GameMaster() {
   // both from that effect and from the onPeerConnected handler (for late
   // joiners getting their first lobby_state right after level_loaded).
   const lobbyStateRef = useRef<LobbyStateEvent | null>(null);
+  // Slot management for the compact v2 input wire format. Each player in a
+  // lobby gets a stable u8 slot index that's tagged on every broadcast input.
+  // Guests resolve slot→playerId from lobby_state. Slot 0 is reserved for
+  // the host's local keyboard player so it stays predictable across sessions.
+  const slotByPlayerIdRef = useRef<Map<string, number>>(new Map([[LOCAL_PLAYER_ID_CONST, 0]]));
+  // Tick-tagged guest inputs. Each guest's keyboard event sends a message
+  // tagged with the guest's `world.tick + 1` (the tick at which the
+  // guest's local sim will apply that input). The host buffers them here
+  // and drains the entry for `world.tick` at the start of each
+  // preTickHook, so the host's sim applies the SAME input value at the
+  // SAME logical tick the guest did — eliminating the desync that
+  // happens when host applies a guest's input at "whenever it arrives"
+  // vs. "when the guest pressed the key."
+  //
+  // When a guest's message arrives AFTER the host's sim already passed
+  // the tagged tick, the host rolls back via `hostRollbackRef` (see
+  // installHostBroadcastHook) so the late input still gets applied at
+  // its claimed tick.
+  const pendingGuestInputsRef = useRef<Map<string, Map<number, { moveX: number; moveY: number; expanding: boolean }>>>(new Map());
+  const hostRollbackRef = useRef<RollbackController | null>(null);
+  // Compare-hashes diagnostic: bucket of guest replies received in
+  // response to a request_hashes broadcast. The debug overlay's
+  // `triggerCompare()` button broadcasts a request, waits ~500ms, then
+  // reads this bucket. Pruned to last 5 requests to keep memory bounded.
+  const hashesResponsesRef = useRef<Array<{ requestId: number; peerId: string; entries: Array<{ tick: number; hash: string; summary?: import('../lib/hashHistory').TickSummary }> }>>([]);
+  const hashRequestIdRef = useRef<number>(0);
+  const ensureSlot = useCallback((playerId: string): number => {
+    const m = slotByPlayerIdRef.current;
+    const existing = m.get(playerId);
+    if (existing !== undefined) return existing;
+    // Lowest free slot, scanning 0..MAX_SLOT_CONST. Skip 0 (reserved for host).
+    const used = new Set(m.values());
+    for (let s = 1; s <= MAX_SLOT_CONST; s++) {
+      if (!used.has(s)) {
+        m.set(playerId, s);
+        return s;
+      }
+    }
+    // Lobby is full at the wire level — slot table can only address 16
+    // players. Fall back to the unassigned sentinel; broadcast frames for
+    // this player will be dropped by guests.
+    return 255;
+  }, []);
+  const releaseSlot = useCallback((playerId: string): void => {
+    if (playerId === LOCAL_PLAYER_ID_CONST) return; // never free the host's slot
+    slotByPlayerIdRef.current.delete(playerId);
+  }, []);
 
   // Session RNG seed. Generated once at mount and reused across both the
   // lobby playground and any actual match. Every `level_loaded` event
@@ -176,8 +236,19 @@ export default function GameMaster() {
     positions: Float32Array;
     stillTicks: number;
   }>>(new Map());
-  const ticksSinceKeyframeRef = useRef<number>(0);
+  // World.tick of the last broadcast keyframe. Used to gate the next
+  // periodic keyframe by ACTUAL ticks elapsed (not by broadcast-call
+  // count, which is the bug we just fixed). -Infinity ensures the
+  // first eligible broadcast emits one.
+  const lastKeyframeTickRef = useRef<number>(Number.NEGATIVE_INFINITY);
   const forceKeyframeRef = useRef<boolean>(true);
+  /** Synchronously run one host→guests broadcast iteration. Populated
+   *  by installHostBroadcastHook's setInterval setup. The host
+   *  rollback handler calls this when a late guest input triggers a
+   *  reconcile, so a fresh keyframe carrying the post-rollback engine
+   *  state goes out the same tick — guests don't drift on stale deltas
+   *  for up to 250ms waiting for the next periodic interval fire. */
+  const broadcastOnceRef = useRef<(() => void) | null>(null);
 
   // Late-joiner replay support. The host caches the most recent keyframe
   // payload + a ring buffer of recent aggregated-input ticks. When a new
@@ -192,11 +263,29 @@ export default function GameMaster() {
   const latestManagerStateRef = useRef<{ tick: number; json: string } | null>(null);
   /** Aggregated input ticks since the most recent keyframe. Ring-buffered
    * to ~10 s @ 30 Hz worth of frames. */
-  const inputHistoryRef = useRef<Array<{ tick: number; inputs: { playerId: string; moveX: number; moveY: number; expanding: boolean }[] }>>([]);
+  const inputHistoryRef = useRef<Array<{ tick: number; inputs: { playerId: string; slot: number; moveX: number; moveY: number; expanding: boolean }[] }>>([]);
   const INPUT_HISTORY_MAX = 300;
   const [connectedPlayers, setConnectedPlayers] = useState<Player[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [gamePhase, setGamePhase] = useState<GamePhase | null>(null);
+  // Net-debug overlay visibility. Seeded from `?net=debug`, toggleable
+  // live via the backtick (`) hotkey — host needs no-reload toggling
+  // for the same reason guests do (in-progress lobby/match would be
+  // disconnected by a page reload).
+  const [showNetDebug, setShowNetDebug] = useState<boolean>(() => {
+    return new URLSearchParams(window.location.search).get('net') === 'debug';
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '`') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      setShowNetDebug((v) => !v);
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   /** Counter to force GameCanvas remount on phase transitions */
   const [canvasKey, setCanvasKey] = useState(0);
 
@@ -206,10 +295,20 @@ export default function GameMaster() {
   // signaling and screen-signaling were separate systems.
   const managerRef = useRef<PeerManager | null>(null);
   const roomRef = useRef<RoomService | null>(null);
+  // Expose `window.__rtcDebug()` for ICE-pair diagnostics. Idempotent.
+  installRtcDebug(() => managerRef.current);
   const [roomReady, setRoomReady] = useState(false);
   // playerId → { screenId, name, color, faceId } for every player joined from a guest
   // screen. Used to clean up on disconnect and re-spawn after canvasKey rebuilds.
   const guestPlayersRef = useRef<Map<string, { screenId: string; name: string; color: string; faceId: string }>>(new Map());
+  // Ready handshake: host waits for every connected screen-peer to confirm
+  // it has applied the bootstrap keyframe at game start before kicking off
+  // the countdown. Without this, the guest can be mid-restore when the
+  // host's first physics tick fires, leading to a guest local sim that
+  // ran a few ticks against initial (pre-restore) state — bit-divergent
+  // from the host even though the wire kept replaying identical input.
+  // Keyed by levelId so two back-to-back game starts can't cross-confirm.
+  const pendingReadyConfirmsRef = useRef<{ levelId: string; expected: Set<string>; received: Set<string>; onComplete: (() => void) | null } | null>(null);
   // Latest level the host's authoritative game is running. Broadcast to every
   // newly connected guest, and re-broadcast on every level transition so guests
   // rebuild their local sim with identical LevelData.
@@ -217,13 +316,23 @@ export default function GameMaster() {
   const [isPublic, setIsPublic] = useState(false);
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [maxPlayers, setMaxPlayers] = useState(8);
+  // Set once the user submits the HostSetupModal. The room-creation
+  // effect blocks until this is non-null (except for ?offline=1, which
+  // auto-fills it). Holds display name, room name, password, etc — the
+  // values that get baked into createHostRoom opts.
+  const [hostConfig, setHostConfig] = useState<HostSetupResult | null>(null);
   // Host's local-player customization. Picker UI lives in the LobbyPanel.
   // Defaults are reconciled against the live taken-color set in an effect
   // below so a host opening the page after others have joined doesn't collide.
   const [localColor, setLocalColor] = useState<string>(COLOR_PALETTE[0]);
   const [localFaceId, setLocalFaceId] = useState<string>('default');
-  // Lobby selections — drive the Start button.
-  const [selectedMapId, setSelectedMapId] = useState<string>('builtin:default');
+  // Lobby selections — drive the Start button. Honour `?level=<id>` so
+  // playwright tests can pick a feature-rich map (showcase, classic,
+  // koth) without driving the map-picker modal click flow.
+  const [selectedMapId, setSelectedMapId] = useState<string>(() => {
+    const lvl = searchParams.get('level')?.trim();
+    return lvl ? `builtin:${lvl}` : 'builtin:default';
+  });
   const [selectedModeId, setSelectedModeId] = useState<LevelType>('solo_racing');
   const [mapOptions, setMapOptions] = useState<MapOption[]>([
     { id: 'builtin:default', name: 'Default Arena', source: 'builtin', levelTypes: ['solo_racing'] },
@@ -233,7 +342,7 @@ export default function GameMaster() {
   const hadHumanRef = useRef(false);
   const autoEndingRef = useRef(false);
   // Stable id used by both onPlayerJoin and InputManager for the keyboard player.
-  const LOCAL_PLAYER_ID = 'local-keyboard';
+  const LOCAL_PLAYER_ID = LOCAL_PLAYER_ID_CONST;
   const [localPlayerJoined, setLocalPlayerJoined] = useState(false);
 
   // Player IDs the camera should follow on the host: every player whose
@@ -262,6 +371,10 @@ export default function GameMaster() {
   // Tracked separately from `connectedPlayers` (which mirrors the party API)
   // because bots have no party_player row.
   const [bots, setBots] = useState<Array<{ playerId: string; name: string; personality: PersonalityName; color: string }>>([]);
+  // Mirror of `bots` for synchronous reads in callbacks like
+  // spawnExistingPlayers (which can't wait for a re-render after setBots).
+  const botsRef = useRef<typeof bots>([]);
+  useEffect(() => { botsRef.current = bots; }, [bots]);
 
   const addBot = useCallback((personality?: PersonalityName) => {
     const game = gameRef.current;
@@ -290,7 +403,10 @@ export default function GameMaster() {
     const player: Player = {
       player_id: LOCAL_PLAYER_ID,
       session_id: sessionId ?? '',
-      name: 'You',
+      // Host's display name comes from the HostSetupModal (which itself
+      // pre-fills from localStorage / Steam persona). 'You' is just a
+      // last-resort fallback for offline/test paths.
+      name: hostConfig?.displayName || 'You',
       slot: 0,
       status: 'connected',
       controller_config: null,
@@ -304,7 +420,7 @@ export default function GameMaster() {
     // so phone controllers and bot-color-avoidance see this slot as taken.
     playerCustomRef.current.set(LOCAL_PLAYER_ID, { color: localColor, faceId: localFaceId });
     setLocalPlayerJoined(true);
-  }, [localPlayerJoined, sessionId, localColor, localFaceId]);
+  }, [localPlayerJoined, sessionId, localColor, localFaceId, hostConfig]);
 
   const leaveAsLocalPlayer = useCallback(() => {
     if (!localPlayerJoined) return;
@@ -491,58 +607,22 @@ export default function GameMaster() {
     for (const p of personalities) addBot(p);
   }, [phase, addBot, searchParams]);
 
-  // After the game is rebuilt (canvasKey bumps on phase transitions), re-attach
-  // every existing bot so they survive voting → playing → voting cycles.
-  const lastCanvasKeyRef = useRef(canvasKey);
-  useEffect(() => {
-    if (canvasKey === lastCanvasKeyRef.current) return;
-    lastCanvasKeyRef.current = canvasKey;
-    if (bots.length === 0 && !localPlayerJoined) return;
-    // Defer one tick so the new BouncyBlobsGame has finished initialize().
-    const handle = setTimeout(() => {
-      const game = gameRef.current;
-      const ctx = contextRef.current;
-      if (!game) return;
-      for (const b of bots) {
-        game.addAIPlayer(b.personality, { id: b.playerId, name: b.name, color: b.color });
-      }
-      if (localPlayerJoined && ctx) {
-        game.onPlayerJoin(ctx, {
-          player_id: LOCAL_PLAYER_ID,
-          session_id: sessionId ?? '',
-          name: 'You',
-          slot: 0,
-          status: 'connected',
-          controller_config: null,
-          joined_at: new Date().toISOString(),
-          color: '#5dd6ff',
-          faceId: 'default',
-        } as Player);
-      }
-      if (ctx) {
-        for (const [pid, info] of guestPlayersRef.current.entries()) {
-          game.onPlayerJoin(ctx, {
-            player_id: pid,
-            session_id: '',
-            name: info.name,
-            slot: 0,
-            status: 'connected',
-            controller_config: null,
-            joined_at: new Date().toISOString(),
-            color: info.color,
-            faceId: info.faceId,
-          } as Player);
-        }
-      }
-      // The new game instance has empty localPlayerIds — replay our set
-      // so the camera keeps following the right blobs after rebuild.
-      pushLocalPlayerIds();
-    }, 150);
-    return () => clearTimeout(handle);
-  }, [canvasKey, bots, localPlayerJoined, sessionId, pushLocalPlayerIds]);
+  // (Removed) Post-canvasKey 150ms deferred player re-add: the entire
+  // payload — bots, host's local player, screen-peer guests — is now
+  // re-added synchronously inside `spawnExistingPlayers` before the
+  // bootstrap keyframe ships. Keeping the deferred path meant the
+  // host emitted TWO keyframes at tick=0 (one from the synchronous
+  // path, one from the deferred forceKeyframeRef), the guest's
+  // `lastTickRef <= frame.tick` guard dropped the second, and any
+  // blobs only present in the second keyframe ended up missing from
+  // the guest's engine. Result: persistent post-bootstrap divergence.
   const inputManagerRef = useRef<InputManager>(new InputManager());
   const contextRef = useRef<GameContext | null>(null);
   const knownPlayerIdsRef = useRef<Set<string>>(new Set());
+  /** Per-peer connect-state tracking so the poll loop can bounded-retry a
+   * stuck WebRTC handshake. Survives `knownPlayerIdsRef` getting cleared on
+   * disconnect — that's the retry signal. */
+  const connectAttemptsRef = useRef<Map<string, { attempts: number; lastAttemptMs: number; status: 'connecting' | 'open' | 'failed' }>>(new Map());
   /** Stores color/faceId from player_join messages so they persist across game restarts. */
   const playerCustomRef = useRef<Map<string, { color?: string; faceId?: string }>>(new Map());
   /** Track connected players via ref for use in callbacks without stale closures */
@@ -617,6 +697,13 @@ export default function GameMaster() {
     addLocalPlayerId(player.player_id);
     // Broadcast updated taken list to all controllers
     broadcastCustomizationUpdate();
+    // Player set just changed — force the next broadcastOnce to emit a
+    // keyframe so every guest's playerManager learns about the new
+    // blob. Without this, with ?keyframe=0 guests never see new
+    // players (periodic keyframes are disabled, deltas don't carry
+    // membership) — symptom: joined player is registered in the lobby
+    // panel but no blob is ever synthesized into their sim.
+    forceKeyframeRef.current = true;
   }, [broadcastCustomizationUpdate, addLocalPlayerId]);
 
   const handlePlayerDisconnect = useCallback((playerId: string) => {
@@ -632,6 +719,9 @@ export default function GameMaster() {
     removeLocalPlayerId(playerId);
     // Broadcast updated taken list to all controllers
     broadcastCustomizationUpdate();
+    // Same rationale as handlePlayerJoin: player set just changed,
+    // need a fresh keyframe so guests prune the departed blob.
+    forceKeyframeRef.current = true;
   }, [broadcastCustomizationUpdate, removeLocalPlayerId]);
 
   // Broadcast a message to all connected phone controllers (not screen peers).
@@ -671,6 +761,8 @@ export default function GameMaster() {
 
   /** Helper to spawn players into a freshly-created game */
   const spawnExistingPlayers = useCallback((game: BouncyBlobsGame, context: GameContext) => {
+    // Phone-controller players (live in connectedPlayers, sourced from
+    // the party API).
     for (const player of connectedPlayersRef.current) {
       const custom = playerCustomRef.current.get(player.player_id);
       const enriched = custom
@@ -678,13 +770,57 @@ export default function GameMaster() {
         : player;
       game.onPlayerJoin(context, enriched);
     }
+    // Screen-peer guests (live in guestPlayersRef, sourced from the
+    // screen-peer `player_join` message handler at line ~1066). Without
+    // re-spawning these, every game transition (playground → playing,
+    // playing → results → playground) drops every WebRTC-screen guest's
+    // blob — host's playerManager goes empty for those players and the
+    // host's broadcastOnce builds keyframes with an incomplete roster
+    // (screen guests never see their own blob in the new game).
+    for (const [playerId, info] of guestPlayersRef.current.entries()) {
+      game.onPlayerJoin(context, {
+        player_id: playerId,
+        session_id: '',
+        name: info.name,
+        slot: 0,
+        status: 'connected',
+        controller_config: null,
+        joined_at: new Date().toISOString(),
+        color: info.color,
+        faceId: info.faceId,
+      } as Player);
+    }
+    // Host's own keyboard player (if they've clicked "Play from laptop").
+    if (localPlayerJoined) {
+      const custom = playerCustomRef.current.get(LOCAL_PLAYER_ID);
+      game.onPlayerJoin(context, {
+        player_id: LOCAL_PLAYER_ID,
+        session_id: context.sessionId,
+        name: hostConfig?.displayName || 'You',
+        slot: 0,
+        status: 'connected',
+        controller_config: null,
+        joined_at: new Date().toISOString(),
+        color: custom?.color ?? localColor,
+        faceId: custom?.faceId ?? localFaceId,
+      } as Player);
+    }
+    // AI bots — added LAST so player slots stay packed before bots.
+    // Previously this lived in a 150ms-deferred canvasKey useEffect,
+    // which caused the bootstrap keyframe at tick=0 to ship WITHOUT
+    // these blobs (different player set vs. the host's eventual one
+    // → engine state divergence). Re-adding bots synchronously here
+    // means the bootstrap keyframe captures the full roster.
+    for (const b of botsRef.current) {
+      game.addAIPlayer(b.personality, { id: b.playerId, name: b.name, color: b.color });
+    }
     game.setStateChangeCallback(() => {
       setConnectedPlayers(prev => [...prev]);
     });
     // Fresh game instance — replay our local-player set so the camera
     // follows the same blobs it did before the rebuild.
     pushLocalPlayerIds();
-  }, [pushLocalPlayerIds]);
+  }, [pushLocalPlayerIds, localPlayerJoined, localColor, localFaceId, hostConfig]);
 
   const makeContext = useCallback((sid: string): GameContext => ({
     connection: null,
@@ -702,7 +838,11 @@ export default function GameMaster() {
   const createPlaygroundGame = useCallback(async (sid: string) => {
     let arena: LevelData;
     try {
-      arena = await loadBuiltinLevel('default');
+      // Honour `?level=<id>` for tests/local play that want a richer
+      // playground (spring pads, spikes, dynamic items) than the bare
+      // default arena. Falls back to 'default' on any load error.
+      const lvlOverride = searchParams.get('level')?.trim();
+      arena = await loadBuiltinLevel(lvlOverride || 'default');
     } catch (err) {
       console.error('Failed to load default arena:', err);
       setErrorMsg('Failed to load playground arena');
@@ -712,6 +852,7 @@ export default function GameMaster() {
 
     gameRef.current?.destroy();
     gameRef.current = null;
+    resetHashHistory();
 
     const game = new BouncyBlobsGame();
     gameRef.current = game;
@@ -732,6 +873,9 @@ export default function GameMaster() {
     currentLevelRef.current = { levelId, levelData: arena, levelType: 'solo_racing' };
     // freeplay:true tells guests this is the pre-round playground — they
     // should use FreeplayMode (no countdown, no round timer) just like the host.
+    // Bootstrap the same way as startGameWithLevel: send level_loaded then
+    // immediately trigger a synchronous keyframe so already-connected guests
+    // are race-free populated with players (see comment in startGameWithLevel).
     managerRef.current?.broadcast('state', JSON.stringify({
       type: 'level_loaded',
       levelId,
@@ -740,6 +884,8 @@ export default function GameMaster() {
       freeplay: true,
       rngSeed: sessionSeedRef.current,
     }), 'screen');
+    forceKeyframeRef.current = true;
+    broadcastOnceRef.current?.();
 
     setPhase('lobby');
     setCanvasKey((k) => k + 1);
@@ -755,6 +901,12 @@ export default function GameMaster() {
     // the new game's per-tick broadcasts.
     gameRef.current?.destroy();
     gameRef.current = null;
+    // Clear the per-tick hash ring on game start. Stale entries from
+    // the previous game (playground tick=0 in particular) survive into
+    // the new game's ring and pollute cross-tab determinism comparisons
+    // with apparent "tick=0 desync" entries that don't reflect the new
+    // game's state.
+    resetHashHistory();
 
     const game = new BouncyBlobsGame();
     gameRef.current = game;
@@ -764,18 +916,10 @@ export default function GameMaster() {
     const mode = createModeForLevel(levelData, broadcastToControllers, overrideMode);
     game.setGameMode(mode);
 
-    // Remember the level for late-joining guests + broadcast it now so any
-    // already-connected guest rebuilds its local sim with the new data.
+    // Remember the level for late-joining guests.
     const resolvedType: LevelType = (overrideMode ?? mode.config.id ?? 'solo_racing') as LevelType;
     const levelId = `level-${Date.now()}`;
     currentLevelRef.current = { levelId, levelData, levelType: resolvedType };
-    managerRef.current?.broadcast('state', JSON.stringify({
-      type: 'level_loaded',
-      levelId,
-      levelData,
-      levelType: resolvedType,
-      rngSeed: sessionSeedRef.current,
-    }), 'screen');
     game.setBroadcastToControllers(broadcastToControllers);
     partyModeRef.current = mode instanceof PartyMode ? mode : null;
 
@@ -801,10 +945,72 @@ export default function GameMaster() {
     game.initialize(context);
     spawnExistingPlayers(game, context);
 
+    // Broadcast level_loaded now that the host's game is fully set up
+    // (initialized + players spawned). Order matters: we send
+    // level_loaded FIRST, then immediately fire a synchronous
+    // broadcastOnce with forceKeyframeRef set so the guest receives, in
+    // wire order on the reliable+ordered 'state' channel:
+    //   1. level_loaded → installLevel (clears stash, schedules canvas remount)
+    //   2. keyframe     → applySnapshot (stashes; game not ready yet)
+    //   3. rng_state / manager_state — companion events from broadcastOnce
+    // The guest's onCanvasInit then drains the stash and synthesizes
+    // player blobs atomically as part of bootstrap. Without the
+    // explicit keyframe trigger, the guest waits up to
+    // `keyframeIntervalTicks` ticks (~1s at default, NEVER at
+    // ?keyframe=0) for the next periodic keyframe — symptom: guest
+    // sees the new level but has no blobs in it.
+    managerRef.current?.broadcast('state', JSON.stringify({
+      type: 'level_loaded',
+      levelId,
+      levelData,
+      levelType: resolvedType,
+      rngSeed: sessionSeedRef.current,
+      // Tells the guest "send state_ready after applying the keyframe
+      // for this levelId so the host can gate the countdown on all
+      // guests being synced."
+      requireReadyConfirm: true,
+    }), 'screen');
+    forceKeyframeRef.current = true;
+    broadcastOnceRef.current?.();
+
     setPhase('playing');
     setCanvasKey(k => k + 1);
 
-    setTimeout(() => { game.startRound(); }, 100);
+    // Ready handshake: defer game.startRound() until every currently-
+    // connected guest has confirmed they've applied the bootstrap
+    // keyframe. Without this, the guest can still be mid-canvas-mount
+    // when the host fires its first physics tick — guest's local sim
+    // would run a few ticks against pre-restore state, accumulating a
+    // bit-divergence the rest of lockstep can't recover from.
+    // Cap the wait at 3s so a dropped/disconnected guest can't soft-
+    // hang the host forever; if the wait times out the round starts
+    // anyway and the laggard re-syncs on the next periodic keyframe.
+    const expected = new Set(guestPlayersRef.current.keys());
+    if (expected.size > 0) {
+      console.info(`[netDiag] host gating startRound on ready_confirm from ${expected.size} guest(s)`);
+      let started = false;
+      const start = () => {
+        if (started) return;
+        started = true;
+        pendingReadyConfirmsRef.current = null;
+        setTimeout(() => { game.startRound(); }, 100);
+      };
+      pendingReadyConfirmsRef.current = {
+        levelId,
+        expected,
+        received: new Set(),
+        onComplete: start,
+      };
+      setTimeout(() => {
+        if (!started) {
+          console.warn(`[netDiag] host ready_confirm timed out; starting anyway. expected=${expected.size}, received=${pendingReadyConfirmsRef.current?.received.size ?? 0}`);
+          start();
+        }
+      }, 3000);
+    } else {
+      // No screen guests — proceed immediately.
+      setTimeout(() => { game.startRound(); }, 100);
+    }
   }, [broadcastToControllers, makeContext, spawnExistingPlayers]);
 
   // Keep refs in sync
@@ -835,10 +1041,49 @@ export default function GameMaster() {
   // ─── Session setup ────────────────────────────────────────────────────────
 
   // Create session on mount, then immediately launch voting
+  // Auto-fill host config in offline mode so the modal doesn't gate
+  // Playwright / AI-only sessions. Real users go through the modal.
   useEffect(() => {
+    if (hostConfig) return;
+    if (searchParams.get('offline') === '1') {
+      setHostConfig({
+        displayName: 'Host',
+        roomName: 'Offline Lobby',
+        isPublic: false,
+        password: '',
+        maxPlayers: 8,
+      });
+    }
+  }, [hostConfig, searchParams]);
+
+  // Apply chosen visibility + max-players to the live state once the
+  // host submits the modal. Done in an effect (not the submit handler)
+  // so the room-creation effect — which reads these via closures —
+  // sees consistent values after the next render.
+  useEffect(() => {
+    if (!hostConfig) return;
+    setIsPublic(hostConfig.isPublic);
+    setMaxPlayers(hostConfig.maxPlayers);
+  }, [hostConfig]);
+
+  useEffect(() => {
+    // Block room creation until the host has submitted their setup modal.
+    if (!hostConfig) return;
     let cancelled = false;
 
+    // React 18 StrictMode double-mounts effects in dev. If we called
+    // `createHostRoom` synchronously here we'd allocate TWO rooms per
+    // page load and orphan the first until TTL. Deferring with
+    // setTimeout(0) lets StrictMode's intervening cleanup flip
+    // `cancelled = true` first; only the surviving mount actually hits
+    // the server. Same one-tick delay in prod, no double-mount there.
+    const initTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      void init();
+    }, 0);
+
     async function init() {
+      if (!hostConfig) return;
       try {
         const inputManager = inputManagerRef.current;
 
@@ -900,9 +1145,45 @@ export default function GameMaster() {
                   faceId: info.faceId,
                 } as Player);
                 guestPlayersRef.current.set(evt.playerId, info);
+                // Player set just changed — force a fresh keyframe so the
+                // newly-joined guest (and every other peer) receives a
+                // synth-eligible player record for this blob. Without
+                // this, with ?keyframe=0 the blob exists in the engine
+                // but no peer's playerManager ever learns about it.
+                forceKeyframeRef.current = true;
               } else if (evt.type === 'player_leave' && typeof evt.playerId === 'string') {
                 game.onPlayerDisconnect(ctx, evt.playerId);
                 guestPlayersRef.current.delete(evt.playerId);
+                forceKeyframeRef.current = true;
+              } else if (evt.type === 'state_ready' && typeof evt.levelId === 'string' && typeof evt.playerId === 'string') {
+                // Ready handshake from guest — they've applied the
+                // bootstrap keyframe for this level and are sitting at
+                // tick=0 waiting for us. Mark them confirmed; if all
+                // expected guests have confirmed, fire onComplete which
+                // starts the round.
+                const pending = pendingReadyConfirmsRef.current;
+                if (pending && pending.levelId === evt.levelId && pending.expected.has(evt.playerId)) {
+                  pending.received.add(evt.playerId);
+                  console.info(`[netDiag] host received state_ready from ${evt.playerId} (${pending.received.size}/${pending.expected.size})`);
+                  if (pending.received.size >= pending.expected.size) {
+                    console.info('[netDiag] host all guests ready; starting round');
+                    pending.onComplete?.();
+                  }
+                } else if (pending) {
+                  console.warn(`[netDiag] host ignored state_ready: levelId=${evt.levelId} (expected ${pending.levelId}), playerId=${evt.playerId} (expected? ${pending.expected.has(evt.playerId)})`);
+                }
+              } else if (evt.type === 'hashes_response' && typeof evt.requestId === 'number') {
+                // Guest replied to our request_hashes. Store into the
+                // pending compare bucket so the overlay's modal can
+                // pick it up via the debug bridge.
+                const peerKey = typeof evt.peerId === 'string' && evt.peerId.length > 0 ? evt.peerId : peerId;
+                const entries = Array.isArray(evt.entries) ? evt.entries : [];
+                console.info(
+                  `[netDiag] host received hashes_response(req=${evt.requestId}) from peer="${peerKey}"`,
+                  `entries=${entries.length}`,
+                );
+                hashesResponsesRef.current.push({ requestId: evt.requestId, peerId: peerKey, entries });
+                return;
               } else if (evt.type === 'customization' && typeof evt.playerId === 'string') {
                 // Guest pushed a color/face change for one of their players.
                 // Apply it to the live blob and update our tracking so the
@@ -922,14 +1203,89 @@ export default function GameMaster() {
             try {
               const batch = JSON.parse(text);
               if (batch?.type !== 'input' || !Array.isArray(batch.frames)) return;
-              const im = inputManagerRef.current;
-              const ts = Date.now();
+              // Each guest input frame is tagged with the guest's
+              // `world.tick + 1` — the tick at which the guest's local
+              // sim will (or did) apply the input. Queue it for the
+              // host's preTickHook to drain at the same tick. If the
+              // host already passed that tick, trigger a rollback so
+              // the input still gets applied at its claimed tick.
+              const game = gameRef.current;
+              const world = game?.getWorld();
+              const hostTick = world?.tick ?? 0;
               for (const f of batch.frames) {
                 if (typeof f?.playerId !== 'string') continue;
-                im.processInput(f.playerId, 'joystick_left',
-                  { x: Number(f.moveX) || 0, y: Number(f.moveY) || 0 }, ts);
-                im.processInput(f.playerId, 'button_right',
-                  { pressed: !!f.expanding }, ts);
+                const claimedTick = Number(f.tick) >>> 0;
+                const mx = quantizeAxis(Number(f.moveX) || 0);
+                const my = quantizeAxis(Number(f.moveY) || 0);
+                const exp = !!f.expanding;
+                // Stash for preTickHook drain.
+                let perTick = pendingGuestInputsRef.current.get(f.playerId);
+                if (!perTick) {
+                  perTick = new Map();
+                  pendingGuestInputsRef.current.set(f.playerId, perTick);
+                }
+                perTick.set(claimedTick, { moveX: mx, moveY: my, expanding: exp });
+                // Prune anything older than rollback window (~maxTicks).
+                const cutoff = hostTick - 60;
+                for (const t of perTick.keys()) if (t < cutoff) perTick.delete(t);
+                // Late input → host rollback. world.tick === N means
+                // "N steps completed" — next step produces N+1. So
+                // claimedTick <= world.tick means the host already
+                // produced state for that tick → rewind to claimedTick,
+                // swap this player's input at that tick, replay forward.
+                // The Rust+wasm engine snapshot + game.snapshotGameState()
+                // are lossless together (proven by 8/8 in
+                // src/lib/rollbackExactness.test.ts); rc.onAuthoritativeInputs
+                // restores both via the rc.recordTick stack.
+                // Host rollback is gated on PacingConfig.enableRollback.
+                // Default OFF — see pacingConfig.ts for rationale. With
+                // the engine proven cross-tab deterministic and the
+                // bootstrap keyframe doing the only sync we need,
+                // strict-lockstep play (no late-input rollback) gives
+                // bit-identical sims on every client. Re-enable via
+                // ?rollback=1 once the manager migrations land and the
+                // rollback-vs-hash-ring interaction is fully audited.
+                if (getPacingConfig().enableRollback && game && world && hostRollbackRef.current && claimedTick <= hostTick) {
+                  const rc = hostRollbackRef.current;
+                  const recorded = rc.getRecordedInputs(claimedTick);
+                  if (recorded) {
+                    const auth: InputSet = { ...recorded, [f.playerId]: { moveX: mx, moveY: my, expanding: exp } };
+                    const rolled = rc.onAuthoritativeInputs(new Map([[claimedTick, auth]]), world, game);
+                    // ──────────────────────────────────────────────
+                    // CRITICAL FIX — keyframe-after-rollback ordering.
+                    // A host rollback retroactively rewrites every
+                    // tick from claimedTick forward. Any keyframe we
+                    // already broadcast (which guests have already
+                    // committed to by calling world.restoreState) is
+                    // now based on a HISTORY THAT NEVER HAPPENED on
+                    // the host. The guest is sitting at the
+                    // pre-rollback state; the host is at the
+                    // post-rollback state; the next per-tick deltas
+                    // arrive but applying them to mismatched
+                    // starting states drifts further every tick —
+                    // exactly the "first overlapping tick after KF
+                    // diverges, all subsequent ticks red" symptom
+                    // the cross-tab determinism playwright test
+                    // reproduced.
+                    //
+                    // Force the next broadcast to be a keyframe so
+                    // the guest re-restores to the new authoritative
+                    // post-rollback state. Cost: one extra ~5 KB
+                    // engineState blob on the next 250ms tick; happens
+                    // only when a late guest input actually fires a
+                    // rollback (rare in steady-state lockstep).
+                    // Rollback fired → next periodic broadcast must
+                    // be a keyframe (to resync the guest to the new
+                    // post-rollback state). When rollback is OFF
+                    // (default) this branch is unreachable.
+                    if (rolled > 0) {
+                      forceKeyframeRef.current = true;
+                    }
+                  }
+                  // If no recorded snapshot exists for that tick (too
+                  // old — beyond rc's rolling window), silently drop —
+                  // guest will resync via the next keyframe.
+                }
               }
             } catch (err) {
               console.warn('[room] bad input batch from screen:', err);
@@ -942,14 +1298,31 @@ export default function GameMaster() {
         // peers go through the snapshot/event path.
         const callbacks: PeerCallbacks = {
           onPeerConnected: (peerId, kind) => {
+            const rec = connectAttemptsRef.current.get(peerId);
+            if (rec) rec.status = 'open';
             if (kind === 'phone') {
               setTimeout(() => sendCustomizationTo(peerId), 100);
             } else if (kind === 'screen') {
-              // New screen peer — force the next binary snapshot to be a
-              // full keyframe so they can sync without waiting for the
-              // periodic keyframe interval.
+              // New screen peer — request a fresh keyframe on the next
+              // broadcastOnce. The cached keyframe sent a few lines down is
+              // the "immediate" snapshot from before this peer joined; it
+              // bootstraps geometry/NPCs but does NOT contain the new
+              // peer's own player (their player_join message arrives
+              // moments after this onPeerConnected fires, processed by
+              // handlePlayerJoin which also sets forceKeyframeRef). The
+              // first periodic broadcastOnce after handlePlayerJoin runs
+              // produces the keyframe that includes the new player blob,
+              // which the broadcast carries to ALL peers including the
+              // new one. With ?keyframe=0 this is the ONLY way the new
+              // player ever reaches the guest's playerManager.
               forceKeyframeRef.current = true;
               // Late joiner — push current level so its local sim catches up.
+              // level_loaded goes on the same reliable+ordered 'state' channel
+              // as the cached keyframe sent a few lines down, so the wire
+              // delivers them in order. The guest's installLevel clears the
+              // pendingKeyframeRef stash synchronously, then the keyframe
+              // arrives, stashes, and onCanvasInit drains it after the React
+              // re-mount completes.
               const lvl = currentLevelRef.current;
               if (lvl) {
                 managerRef.current?.send(peerId, 'state', JSON.stringify({
@@ -1018,6 +1391,14 @@ export default function GameMaster() {
               if (game && ctx) game.onPlayerDisconnect(ctx, pid);
               guestPlayersRef.current.delete(pid);
             }
+            // Mark failed and tear down the underlying transport so a retry
+            // (driven by the room poll loop) gets a fresh RTCPeerConnection.
+            // handlePlayerDisconnect already removed this id from
+            // knownPlayerIdsRef, so the next poll tick will pick the peer
+            // back up if their room row is still there.
+            const rec = connectAttemptsRef.current.get(peerId);
+            if (rec) rec.status = 'failed';
+            managerRef.current?.disposePeer(peerId);
           },
           onMessage: (peerId, channel, data) => {
             // Screen peers use named channels ('state', 'input'); route to the
@@ -1063,19 +1444,22 @@ export default function GameMaster() {
           roomConfig,
           {
             game_id: GAME_ID,
-            display_name: 'Bouncy Lobby',
+            display_name: hostConfig.roomName,
+            host_display_name: hostConfig.displayName,
             host_kind: 'screen',
-            // Use the current `maxPlayers` (defaults to 8) instead of a
-            // hardcoded 4. Live slider changes hit the server via
-            // changeMaxPlayers → setMaxPeers; this just keeps the initial
-            // room creation in sync with the UI default.
-            max_peers: maxPlayers,
-            visibility: 'private',
+            max_peers: hostConfig.maxPlayers,
+            visibility: hostConfig.isPublic ? 'public' : 'private',
+            password: hostConfig.password || undefined,
           },
           callbacks,
         );
 
         if (cancelled) {
+          // The room was already allocated on the server before we got
+          // cancelled (e.g. very fast remount / nav-away mid-create).
+          // End it explicitly so it doesn't sit orphaned in the lobby
+          // browser until TTL sweeps it.
+          void room.endRoom().catch(() => {});
           manager.dispose();
           return;
         }
@@ -1087,7 +1471,8 @@ export default function GameMaster() {
         setSessionId(sid);
         setJoinCode(result.join_code);
         setRoomReady(true);
-        setIsPublic(false);
+        // Visibility was set at room-creation time from hostConfig — no
+        // post-creation reset needed (it was hardcoded to false here).
 
         // Opportunistically stand up a Steam Lobby + Networking listener so
         // PC friends can be invited via the Steam overlay. Failures here are
@@ -1159,9 +1544,9 @@ export default function GameMaster() {
       }
     }
 
-    init();
     return () => {
       cancelled = true;
+      window.clearTimeout(initTimer);
       gameRef.current?.destroy();
       managerRef.current?.dispose();
       // End the room on unmount — same semantics as the old dual endSession +
@@ -1179,7 +1564,7 @@ export default function GameMaster() {
       roomRef.current = null;
       inputManagerRef.current.clear();
     };
-  }, []);
+  }, [hostConfig]);
 
   // Broadcast binary world-snapshot frames to remote screens at 20 Hz when an
   // online match is active. Wire format defined in src/lib/wireProtocol.ts:
@@ -1190,9 +1575,12 @@ export default function GameMaster() {
     if (!roomReady) return;
     let tick = 0;
 
-    // Keyframe every 60 ticks (~3 seconds at 20 Hz). Receivers recover from
-    // missed deltas at each keyframe even without an ACK channel.
-    const KEYFRAME_INTERVAL = 60;
+    // Keyframe interval, live-tunable via the overlay (see pacingConfig
+    // `keyframeIntervalTicks`). 0 disables periodic keyframes entirely —
+    // sims stay synchronized through deterministic input replay alone,
+    // and on-connect keyframes still fire via forceKeyframeRef so late
+    // joiners can bootstrap. Trades the periodic encode/decode hitch
+    // for no auto-recovery if a desync ever sneaks in.
     // Per-node delta threshold in px. Anything smaller is ignored in delta
     // frames (the receiver keeps its last value). MAX_OFFSET/32767 ≈ 0.006 px
     // is the encoder's quantum, so 0.5 px ≈ 80 quanta — comfortably above
@@ -1328,7 +1716,7 @@ export default function GameMaster() {
       return { rootX: cx, rootY: cy, nodes, settled };
     };
 
-    const interval = setInterval(() => {
+    const broadcastOnce = () => {
       const manager = managerRef.current;
       const game = gameRef.current;
       if (!manager || !game) return;
@@ -1343,10 +1731,32 @@ export default function GameMaster() {
         for (const [k, v] of modeState.scores) scores[k] = v as number;
       }
 
-      // Determine keyframe vs delta for this tick.
-      const isKeyframe = forceKeyframeRef.current || ticksSinceKeyframeRef.current >= KEYFRAME_INTERVAL;
+      // Determine keyframe vs delta for this tick. When interval is 0,
+      // the periodic check is short-circuited and only forceKeyframeRef
+      // (set on peer connect for late-joiner bootstrap) can trigger one.
+      // BUG FIX (determinism): previously this counter was `++` per
+      // broadcast call. With the broadcast interval at 250ms that meant
+      // a keyframe fired every kfInterval × 250ms — at the default
+      // kfInterval=60 that's 15 SECONDS between resyncs, not 1 second.
+      // Use the engine's actual tick to measure elapsed ticks so the
+      // pacing-config "ticks" units mean what they say.
+      const kfInterval = getPacingConfig().keyframeIntervalTicks;
+      const periodicDue =
+        kfInterval > 0 && world.tick - lastKeyframeTickRef.current >= kfInterval;
+      const isKeyframe = forceKeyframeRef.current || periodicDue;
       forceKeyframeRef.current = false;
-      ticksSinceKeyframeRef.current = isKeyframe ? 0 : ticksSinceKeyframeRef.current + 1;
+      if (isKeyframe) lastKeyframeTickRef.current = world.tick;
+
+      // Wire-protocol simplification: the wire carries ONLY inputs
+      // (per-tick UDP redundant stream, broadcast from postTickHook)
+      // and KEYFRAMES (full engine + manager + rng state, sent here on
+      // keyframe ticks). The deterministic engine running the same
+      // inputs on every client produces bit-identical state, so
+      // per-tick particle deltas serve no purpose and have a habit of
+      // CORRUPTING the guest's canonical state when they cross the
+      // wasm boundary with f32-quantized values. Early-return on
+      // non-keyframe broadcasts.
+      if (!isKeyframe) return;
 
       const players: PlayerRecord[] = [];
       for (const p of pm.getAllPlayers()) {
@@ -1437,12 +1847,29 @@ export default function GameMaster() {
       // matching ticks and the sim froze.
       tick++; // unused now, kept to avoid touching outer-scope deps
       const keyframeTick = world.tick;
+      // Capture FULL engine state alongside the snapshot. Receivers
+      // with v2+ ingest this via world.restoreState() for a lossless
+      // sync of every mutable field — fixes the "100% diverged after
+      // keyframe" bug the user observed. ONLY emitted on keyframes
+      // (per-tick delta snapshots stay particle-only to keep
+      // bandwidth low; the next keyframe re-syncs everything).
+      const engineState = isKeyframe ? world.serializeState() : undefined;
+      if (isKeyframe) {
+        // Determinism bisect partner: guest logs its post-restore
+        // hash at the same tick. If they match, restore is lossless;
+        // if they don't, restore is dropping a field.
+        const hostHashAtKeyframe = world.stateHash();
+        console.info(
+          `[netDiag] host keyframe tick=${world.tick} hash=${hostHashAtKeyframe} blobs=${world.getBlobCount()} players=${players.length} world=${worldRecords.length}`,
+        );
+      }
       const buf = encodeSnapshot({
-        version: 1,
+        version: 2,
         isKeyframe,
         tick: keyframeTick,
         players,
         world: worldRecords,
+        engineState,
       });
       // Cache for late-joiner replay — peers that connect after this tick
       // need this keyframe + the input history that follows it. Reset the
@@ -1452,16 +1879,22 @@ export default function GameMaster() {
       inputHistoryRef.current = [];
       // Broadcast to screen peers. Phones don't need physics state.
       manager.broadcast('state', buf, 'screen');
-      // Re-align every guest's PRNG to ours alongside the keyframe. Host
-      // and guest PRNG streams drift over time if either consumes a value
-      // the other didn't (an AI decision firing one tick earlier, etc.).
-      // 1 Hz re-align bounds that drift to ≤ 1 s of decisions. Cheap.
-      const rngEvt: ReliableEvent = {
-        type: 'rng_state',
-        tick: world.tick,
-        state: world.rng.getState(),
-      };
-      manager.broadcast('state', JSON.stringify(rngEvt), 'screen');
+      // FIX (determinism): only re-align RNG on keyframes. Broadcasting
+      // host.rng.getState() every 50ms while the guest is 1-3 ticks
+      // BEHIND host means the guest's RNG gets jammed to a state that
+      // host has already advanced past. The guest then steps with a
+      // future-tick RNG value, consumes random draws differently than
+      // it would have, and engines diverge. Gating to keyframes only
+      // means RNG re-align happens alongside the engine-state restore
+      // at exactly the same tick — same as the manager_state gate.
+      if (isKeyframe) {
+        const rngEvt: ReliableEvent = {
+          type: 'rng_state',
+          tick: world.tick,
+          state: world.rng.getState(),
+        };
+        manager.broadcast('state', JSON.stringify(rngEvt), 'screen');
+      }
 
       // Sync stateful-manager state alongside the keyframe. The keyframe
       // already covers particle positions/velocities and the world's RNG,
@@ -1473,46 +1906,51 @@ export default function GameMaster() {
       // says "reloading" and the player just lands. The two sims then
       // diverge until the next keyframe yanks positions back, producing
       // the visible "snap" the user is reporting.
-      const gameRef2 = gameRef.current;
-      if (gameRef2) {
-        // Per-blob ground-contact tally per player. This is populated
-        // inside `world.step`'s collision pass and read by the NEXT tick's
-        // `SlimeBlob.update` (for the `grounded` air-move multiplier). A
-        // freshly-keyframed guest reads a stale (or zero) value for one
-        // tick, applies the wrong force, and drifts by a small fraction
-        // of a pixel — which the next keyframe yanks back as a snap.
-        // Determinism test (`determinism.test.ts:replicateState` step 4)
-        // proved this is the missing field needed for bit-identical
-        // late-joiner replication.
-        const blobGroundContacts: Record<string, number> = {};
-        const pm2 = gameRef2.getPlayerManager();
-        if (pm2) {
-          for (const p of pm2.getAllPlayers()) {
-            blobGroundContacts[p.playerId] = world.getBlobGroundContacts(p.blob.blobId);
-          }
+      // FIX (determinism): manager_state was previously broadcast every
+      // 50-250ms regardless of isKeyframe, which corrupted guest sync:
+      // the guest's lockstep gate runs ~1-3 ticks behind the host, so
+      // a manager_state event tagged "host tick K" arrives while the
+      // guest's engine is still at tick K-3. The guest restores e.g.
+      // a spring pad's 'firing' state on top of an engine where the
+      // blob hasn't touched the plate yet. The pad fires anyway
+      // (because the JS state machine says firing) and engines diverge.
+      // Gating to keyframes only means the manager state arrives
+      // ALONGSIDE the full engine state restore at the same tick — the
+      // pair is atomic, no asymmetric "your spring fired but my blob
+      // hasn't touched it" window.
+      if (isKeyframe) {
+        const gameRef2 = gameRef.current;
+        if (gameRef2) {
+          const managerStateEvt = {
+            type: 'manager_state',
+            tick: world.tick,
+            state: gameRef2.snapshotGameState(),
+          };
+          const managerStateJson = JSON.stringify(managerStateEvt);
+          manager.broadcast('state', managerStateJson, 'screen');
+          latestManagerStateRef.current = { tick: world.tick, json: managerStateJson };
         }
-        const managerStateEvt = {
-          type: 'manager_state',
-          tick: world.tick,
-          state: {
-            springPads: gameRef2.getSpringPadManager()?.dumpState() ?? null,
-            blobGroundContacts,
-          },
-        };
-        const managerStateJson = JSON.stringify(managerStateEvt);
-        manager.broadcast('state', managerStateJson, 'screen');
-        latestManagerStateRef.current = { tick: world.tick, json: managerStateJson };
       }
-    }, 250); // 4 Hz keyframe — the local sim runs deterministically on each
-             // client, so the keyframe is mostly a drift-recovery safety
-             // net; but in practice tiny per-tick float-math noise OR
-             // any-state-we-haven't-found-yet accumulates over enough
-             // ticks to become visible as a snap. 1 Hz left ~60 ticks of
-             // accumulation. 4 Hz bounds it to ~15 ticks, making any
-             // residual snap small enough to read as smooth correction
-             // rather than teleport. Bandwidth at 4 Hz is still tiny
-             // (~5 KB × 4 = 20 KB/s outbound + 4 KB/s input echo).
-    return () => clearInterval(interval);
+    };
+    // Stash so the host's rollback handler can fire an immediate
+    // off-schedule broadcast (with `forceKeyframeRef` set, this sends
+    // a keyframe carrying the new post-rollback engine state, so
+    // guests don't spend up to 250ms applying deltas to a now-stale
+    // pre-rollback snapshot).
+    broadcastOnceRef.current = broadcastOnce;
+    // ~60 Hz broadcast (one per sim tick). Aggregated-input echo is the
+    // critical-path payload for guest lockstep — at 20Hz (50ms) the host's
+    // echo of a guest's own input could sit in the outbox for up to 3
+    // ticks, compounding perceived input latency. At 60Hz the echo
+    // reaches the guest within one sim tick of the host applying it.
+    // Snapshot broadcasts are gated to keyframe ticks by broadcastOnce
+    // itself, so the bandwidth cost of the bump is just the compact
+    // input batch (~1–2 KB/player) at 3× the rate — still well within
+    // WebRTC reliable-channel headroom. The bootstrap keyframe race that
+    // a fast interval would expose is handled at the source by deferring
+    // forceKeyframeRef in onPeerConnected.
+    const interval = setInterval(broadcastOnce, 17);
+    return () => { clearInterval(interval); broadcastOnceRef.current = null; };
   }, [roomReady]);
 
   // 30 Hz aggregated-input broadcast — host → all screen peers. Each tick
@@ -1521,52 +1959,254 @@ export default function GameMaster() {
   // them as the canonical input set for the current sim tick. Guests apply
   // these to drive their own local sim's remote players, keeping every
   // client in deterministic lockstep with the host.
-  // Helper: install the host's per-tick broadcast hook on a freshly
-  // created BouncyBlobsGame. Fires AFTER each logic tick with the world's
-  // current tick. Broadcasts the inputs that were applied this tick so
-  // every connected guest can apply them at exactly the matching tick on
-  // its side — true input-paced lockstep instead of "apply at current
-  // wall-clock time," which was the source of the visible desync.
+  // Helper: install the host's per-tick input pipeline on a freshly
+  // created BouncyBlobsGame. Runs in `preTickHook`, which fires AFTER
+  // playerManager.tickAIInputs (so AI decisions are visible) and BEFORE
+  // blob.setInput (so we still own ManagedPlayer.* when we rewrite it
+  // with the delayed value).
   //
-  // Bandwidth: 4 players × ~16 bytes × 60 Hz ≈ 4 KB/s. Tiny.
+  // Fixed-input-delay lockstep: each tick T the host snapshots every
+  // player's INTENDED input (post-AI-tick, post-async-event), schedules
+  // it for application at tick T + INPUT_DELAY_TICKS, and broadcasts the
+  // snapshot tagged with T + INPUT_DELAY_TICKS so the message reaches
+  // guests N ticks before they need it. The host then overwrites
+  // ManagedPlayer.* with the value previously scheduled for tick T, so
+  // the host's own sim feels the same delay as everyone else — no
+  // asymmetry between host's local-player feel and guest's view of
+  // remote players.
+  //
+  // Why this kills the periodic jitter: the previous postTickHook
+  // broadcast left the host AT tick T tagged T, so the message had to
+  // reach the guest before the guest's lockstep gate wanted to advance
+  // past T. Any network jitter ate directly into that budget and
+  // produced "gate pause, then burst-catch-up" — the dominant visible
+  // hitch. Broadcasting N ticks early gives the guest a jitter buffer
+  // to absorb that variance.
+  //
+  // INPUT_DELAY_TICKS defaults to 2 (~33ms at 60Hz) — small enough to
+  // be imperceptible in a soft-body game where bodies have inertia,
+  // large enough to cover typical LAN jitter. Tunable per session via
+  // `?inputDelay=N` for the host's URL.
+  // Bandwidth: 4 players × ~30 bytes × 60 Hz ≈ 7 KB/s. Tiny.
+  // Helper: install the host's per-tick input pipeline on a freshly
+  // created BouncyBlobsGame. Tick-tagged input model:
+  //
+  // 1. Guests send each input with `tick = guest.world.tick + 1` (the
+  //    sim tick at which the guest's local prediction will apply it).
+  //    The handleScreenMessage 'input' branch above buffers these into
+  //    `pendingGuestInputsRef[playerId][tick]`. If the host has already
+  //    passed the claimed tick, it ALSO triggers a rollback via
+  //    `hostRollbackRef.onAuthoritativeInputs` so the late input still
+  //    gets applied at its claimed tick.
+  // 2. preTickHook at host.tick H drains `pendingGuestInputsRef[*][H]`
+  //    into ManagedPlayer for each guest player BEFORE intent capture —
+  //    so the host's sim applies the SAME input value at the SAME
+  //    logical tick the guest's local sim did. Sims agree.
+  // 3. Host's own local player and AI players continue to use the
+  //    natural MP write path (InputManager events / tickAIInputs).
+  // 4. Broadcast K=REDUNDANCY_TICKS ticks of recent inputs on the
+  //    unreliable channel — drops invisible within the redundancy window.
+  // 5. `hostRollbackRef.recordTick` snapshots the engine every N ticks
+  //    so the rollback path has somewhere to restore from.
+  //
+  // The previous `inputDelay` scheduling has been removed — inputs apply
+  // at the exact tick the source claimed (guest's predicted tick for
+  // guests, host's tick for host's local). The `inputDelayTicks` pacing
+  // slider is preserved in PacingConfig but no longer affects host
+  // behaviour. Rollback covers the late-arrival case that inputDelay
+  // used to mask.
   const installHostBroadcastHook = useCallback((game: BouncyBlobsGame) => {
-    game.setPostTickHook((world) => {
+    type Intent = { moveX: number; moveY: number; expanding: boolean };
+    initPacingFromUrl();
+    // Rolling history of recently-applied per-player intents (one entry
+    // per tick), for redundant broadcast. RC's own inputHistory is the
+    // source of truth for replay; this map is the wire-format snapshot
+    // we hand to the encoder.
+    const recentSchedule = new Map<string, Map<number, Intent>>();
+    const RECENT_KEEP = REDUNDANCY_TICKS * 4;
+
+    // Install the host's RollbackController. Used for two things:
+    //   - Snapshots: every N ticks via recordTick (cheap; the ring
+    //     buffer lets us restore engine state on late input).
+    //   - Late-input recovery: when a guest input arrives tagged for a
+    //     tick the host already passed, onAuthoritativeInputs rewinds
+    //     to that tick, swaps the late input in, and replays forward
+    //     to the host's current tick — so the host's sim matches what
+    //     it WOULD have been if the input arrived on time.
+    const hostId = LOCAL_PLAYER_ID_CONST;
+    const applyInputsToPM = (inputs: InputSet) => {
+      const pm = game.getPlayerManager();
+      if (!pm) return;
+      for (const [pid, inp] of Object.entries(inputs)) {
+        const mp = pm.getPlayer(pid);
+        if (!mp) continue;
+        mp.moveX = inp.moveX;
+        mp.moveY = inp.moveY;
+        mp.expanding = inp.expanding;
+      }
+    };
+    const rc = new RollbackController({
+      localPlayerId: hostId,
+      // Host knows its own input directly; readLocalInput is used by
+      // predictInputs which we never call on the host. Return zero.
+      readLocalInput: () => ({ moveX: 0, moveY: 0, expanding: false }),
+      applyInputs: applyInputsToPM,
+      stepOne: () => {
+        // Mirror bouncyBlobsGame's onLogic sequence for replay.
+        const st = (game as unknown as { state: { world: SoftBodyEngine; playerManager: import('../game/playerManager').PlayerManager; springPadManager: import('../game/springPadManager').SpringPadManager | null; spikeManager: import('../game/spikeManager').SpikeManager | null; powerupManager: import('../game/powerups/powerupManager').PowerupManager | null; dynamicItemManager: import('../game/dynamicItemManager').DynamicItemManager | null; effects: import('../game/effectsBindings').EffectsBindings; gameTime: number } }).state;
+        if (!st) return;
+        const dt = 1 / 60;
+        st.playerManager.updateAll(dt, st.world);
+        st.world.step(dt);
+        st.powerupManager?.update(dt, st.playerManager);
+        st.springPadManager?.update(dt);
+        st.spikeManager?.update(dt);
+        st.dynamicItemManager?.update(dt);
+        st.effects.update(dt, st.playerManager);
+        st.gameTime += dt;
+        // CRITICAL: update the per-tick hash ring during rollback
+        // replay so the recorded hash for this tick reflects the
+        // POST-rollback state. Without this, the host's ring keeps
+        // the stale pre-rollback hash for replayed ticks while the
+        // guest's ring has its own forward-sim hash — the engines
+        // agree on the CURRENT state but the compare-hashes diagnostic
+        // (and any per-tick determinism check) sees a recorded
+        // mismatch. recordHash is normally called from
+        // bouncyBlobsGame.onLogic after step+managers; mirroring it
+        // here keeps the ring consistent across rollback replays.
+        recordHash(st.world.tick, st.world.stateHash());
+      },
+    });
+    hostRollbackRef.current = rc;
+    // Surface host-side rollback metrics via the debug bridge so the
+    // host overlay shows the same rollbacks/depth/failedRestores rows
+    // the guest overlay shows. Critical for diagnosing whether the
+    // late-input rollback path is (a) firing at all and (b) restoring
+    // cleanly — `failedRestores > 0` means engine.restoreState returned
+    // false (engine layout changed since snapshot or serializeState
+    // missed required state).
+    setRollbackStatsAccessor(() => {
+      const t = rc.getTimingStats();
+      return {
+        rollbacksApplied: rc.rollbacksApplied,
+        lastDepth: rc.lastRollbackDepth,
+        smoothingActive: 0, // no display smoother on host
+        ringInvalidations: rc.ringInvalidations,
+        failedRestores: rc.failedRestores,
+        avgSnapshotMs: t.avgSnapshotMs,
+        avgCheapTickMs: t.avgCheapTickMs,
+        avgReconcileMs: t.avgReconcileMs,
+      };
+    });
+
+    game.setPreTickHook((world) => {
       const manager = managerRef.current;
       const pm = game.getPlayerManager();
-      if (!manager || !pm) return;
-      // CRITICAL: read the input values the BLOB used this tick, not the
-      // ManagedPlayer's current values. `ManagedPlayer.moveX/Y/expanding`
-      // can be overwritten by an async input event arriving via
-      // `BouncyBlobsGame.onPlayerInput` BETWEEN `updateAll` (which read
-      // them into `blob.setInput`) and `postTickHook` (which fires after
-      // `world.step`). The blob's `stickX/Y/expandPressed` fields are
-      // captured by `setInput` at the start of the tick and are
-      // immutable for the rest of the tick — so they always reflect what
-      // physics actually computed with. Broadcasting `ManagedPlayer.*`
-      // would tell the guest to apply the NEW value at this tick, but
-      // the host's physics for this tick used the OLD value — guest
-      // diverges by one tick of input every async event. With WebRTC
-      // input batches arriving at 30 Hz and physics ticking at 60 Hz,
-      // this happens constantly during any input change.
-      const inputs = pm.getAllPlayers().map((p) => ({
-        playerId: p.playerId,
-        moveX: p.blob.getStickX(),
-        moveY: p.blob.getStickY(),
-        expanding: p.blob.isExpanding(),
-      }));
-      const buf = encodeAggregatedInputs({
-        ticks: [{ tick: world.tick, inputs }],
-      });
-      manager.broadcast('state', buf, 'screen');
+      if (!pm) return;
+      // CRITICAL TICK SEMANTIC: world.tick === "number of completed
+      // steps." preTickHook fires BEFORE world.step, so the step about
+      // to run produces state for tick world.tick + 1. EVERY tick
+      // number we use here — for the drain, broadcast tag, rc.recordTick,
+      // and late-joiner replay — refers to the tick this step produces,
+      // i.e. world.tick + 1. Mismatching this with the guest's
+      // `applyTick = guest.world.tick + 1` causes immediate desync.
+      const T = world.tick + 1;
+      const players = pm.getAllPlayers();
 
-      // Append to the late-joiner replay buffer. The keyframe broadcast
-      // clears this whenever a new keyframe is cached, so the buffer
-      // contents are always "what happened since the latest keyframe."
-      inputHistoryRef.current.push({ tick: world.tick, inputs });
+      // 1. Drain pendingGuestInputsRef[*][T] → ManagedPlayer for each
+      //    guest player. This sets MP to exactly what the guest's local
+      //    sim used at tick T, so the host's sim applies the same value.
+      //    Sticky behaviour: if no entry for this tick, MP retains its
+      //    previous value (= last drained or last InputManager write).
+      for (const [pid, perTick] of pendingGuestInputsRef.current) {
+        const v = perTick.get(T);
+        if (!v) continue;
+        const mp = pm.getPlayer(pid);
+        if (mp) {
+          mp.moveX = v.moveX;
+          mp.moveY = v.moveY;
+          mp.expanding = v.expanding;
+        }
+        perTick.delete(T);
+      }
+
+      // 2. Quantize ManagedPlayer values for ALL players (host local +
+      //    drained guests + AI) so the value applied to physics is the
+      //    canonical i8-precision value. Guests apply the same quantized
+      //    value (the wire format quantizes on both sides), so sims
+      //    agree bit-for-bit.
+      for (const p of players) {
+        p.moveX = quantizeAxis(p.moveX);
+        p.moveY = quantizeAxis(p.moveY);
+      }
+
+      // 3. Build the intent list (post-drain, post-quantize). This is
+      //    what physics will apply this tick.
+      const intentList: Array<{ playerId: string; slot: number } & Intent> = players.map((p) => ({
+        playerId: p.playerId,
+        slot: ensureSlot(p.playerId),
+        moveX: p.moveX,
+        moveY: p.moveY,
+        expanding: p.expanding,
+      }));
+
+      // 4. Record into the redundant-broadcast window AND the RC's
+      //    snapshot ring. The RC uses inputs to snapshot engine state
+      //    so future rollbacks have somewhere to restore from.
+      const fullInputSet: InputSet = {};
+      for (const it of intentList) {
+        fullInputSet[it.playerId] = { moveX: it.moveX, moveY: it.moveY, expanding: it.expanding };
+        let rs = recentSchedule.get(it.playerId);
+        if (!rs) { rs = new Map(); recentSchedule.set(it.playerId, rs); }
+        rs.set(T, { moveX: it.moveX, moveY: it.moveY, expanding: it.expanding });
+        const cutoff = T - RECENT_KEEP;
+        for (const k of rs.keys()) if (k < cutoff) rs.delete(k);
+      }
+      rc.recordTick(T, fullInputSet, world, game);
+
+      // 5. Broadcast K=REDUNDANCY_TICKS ticks of recent inputs over the
+      //    unreliable 'input' channel. Each tick t in [T-K+1 .. T] gets
+      //    its recorded value per player (or current intent if missing).
+      if (manager) {
+        const ticksOut: Array<{ tick: number; inputs: Array<{ slot: number; moveX: number; moveY: number; expanding: boolean }> }> = [];
+        const start = T - REDUNDANCY_TICKS + 1;
+        for (let t = start; t <= T; t++) {
+          if (t < 0) continue;
+          const tickInputs = intentList.map((it) => {
+            const past = recentSchedule.get(it.playerId)?.get(t);
+            return past
+              ? { slot: it.slot, moveX: past.moveX, moveY: past.moveY, expanding: past.expanding }
+              : { slot: it.slot, moveX: it.moveX, moveY: it.moveY, expanding: it.expanding };
+          });
+          ticksOut.push({ tick: t, inputs: tickInputs });
+        }
+        const buf = encodeAggregatedInputs({ ticks: ticksOut });
+        manager.broadcast('input', buf, 'screen');
+      }
+
+      // 6. Late-joiner replay: same single-tick record as before, just
+      //    tagged with the actual application tick T (no +inputDelay).
+      inputHistoryRef.current.push({
+        tick: T,
+        inputs: intentList.map((it) => ({
+          playerId: it.playerId,
+          slot: it.slot,
+          moveX: it.moveX,
+          moveY: it.moveY,
+          expanding: it.expanding,
+        })),
+      });
       if (inputHistoryRef.current.length > INPUT_HISTORY_MAX) {
         inputHistoryRef.current.shift();
       }
     });
+
+    // postTickHook intent restore is no longer needed — the tick-tagged
+    // model writes ManagedPlayer in preTickHook from a fresh queue
+    // each tick, so there's no "stale slot value" to mask. Host's local
+    // ManagedPlayer is owned by InputManager events between ticks (same
+    // as before).
+    game.setPostTickHook(null);
   }, []);
 
   // lobby_state broadcast loop. Rebuilds the LobbyStateEvent at ~2 Hz so that
@@ -1584,7 +2224,17 @@ export default function GameMaster() {
 
       const botIds = new Set(bots.map((b) => b.playerId));
       const guestIds = new Set(guestPlayersRef.current.keys());
-      const players = pm.getAllPlayers().map((p) => {
+      const allPlayers = pm.getAllPlayers();
+      // Ensure every current player has a slot before we serialize the
+      // lobby. Slots are stable for the player's lifetime; ensureSlot is
+      // a no-op when the slot already exists.
+      for (const p of allPlayers) ensureSlot(p.playerId);
+      // Free slots for players who left between the last broadcast and now.
+      const currentIds = new Set(allPlayers.map((p) => p.playerId));
+      for (const id of Array.from(slotByPlayerIdRef.current.keys())) {
+        if (id !== LOCAL_PLAYER_ID_CONST && !currentIds.has(id)) releaseSlot(id);
+      }
+      const players = allPlayers.map((p) => {
         let kind: 'host' | 'guest' | 'bot' = 'guest';
         if (p.playerId === LOCAL_PLAYER_ID) kind = 'host';
         else if (botIds.has(p.playerId)) kind = 'bot';
@@ -1594,6 +2244,7 @@ export default function GameMaster() {
           color: p.color,
           faceId: p.faceId,
           kind,
+          slot: ensureSlot(p.playerId),
         };
       });
 
@@ -1619,8 +2270,9 @@ export default function GameMaster() {
         modeState: ms ? {
           phase: ms.phase ?? 'playing',
           timeRemainingMs: typeof ms.timeRemaining === 'number' ? ms.timeRemaining * 1000 : undefined,
+          phaseTimerMs: typeof ms.phaseTimer === 'number' ? ms.phaseTimer * 1000 : undefined,
           scores,
-          winner: ms.winner ?? null,
+          winner: ms.winner ? { playerId: ms.winner, name: ms.winnerName ?? null } : null,
         } : undefined,
       };
       lobbyStateRef.current = evt;
@@ -1637,6 +2289,11 @@ export default function GameMaster() {
   useEffect(() => {
     if (!roomReady) return;
 
+    const MAX_CONNECT_ATTEMPTS = 3;
+    // Short backoff so a failed attempt rolls into a fresh one quickly —
+    // the per-attempt timeout (8s) already absorbs Chrome's ICE pacing
+    // window, so the backoff just needs to let signaling churn settle.
+    const RETRY_BACKOFF_MS = 1000;
     const interval = setInterval(async () => {
       try {
         const room = roomRef.current;
@@ -1644,13 +2301,75 @@ export default function GameMaster() {
         if (!room || !manager) return;
         const detail = await room.getRoom();
         const remotePeers = detail.peers.filter((p) => !p.is_host);
+        const remotePeerIds = new Set(remotePeers.map((p) => p.peer_id));
+        const now = Date.now();
 
-        // Open WebRTC connections to new peers, regardless of kind.
+        // Open WebRTC connections to new peers, regardless of kind. If a peer
+        // previously failed but is still in the room, bounded-retry — the
+        // onPeerDisconnected handler clears knownPlayerIdsRef so we re-enter
+        // here.
         for (const peer of remotePeers) {
           if (!knownPlayerIdsRef.current.has(peer.peer_id)) {
+            const rec = connectAttemptsRef.current.get(peer.peer_id);
+            if (rec) {
+              if (rec.status === 'failed' && rec.attempts >= MAX_CONNECT_ATTEMPTS) {
+                continue; // Gave up; let server TTL clean up.
+              }
+              if (rec.status === 'failed' && now - rec.lastAttemptMs < RETRY_BACKOFF_MS) {
+                continue; // Honor backoff before retrying.
+              }
+              rec.attempts += 1;
+              rec.lastAttemptMs = now;
+              rec.status = 'connecting';
+              console.info('[webrtc] retry', { peerId: peer.peer_id, attempt: rec.attempts });
+            } else {
+              connectAttemptsRef.current.set(peer.peer_id, {
+                attempts: 1,
+                lastAttemptMs: now,
+                status: 'connecting',
+              });
+            }
             knownPlayerIdsRef.current.add(peer.peer_id);
             await manager.connectTo(peer.peer_id, peer.kind);
           }
+        }
+
+        // Cross-check: any player in our game whose underlying peer row has
+        // vanished from the room (server TTL'd them, they left without a
+        // clean disconnect, partially-connected screen that gave up) should
+        // be removed from game state too. Without this the lobby player
+        // count stays inflated — a guest who failed mid-handshake leaves a
+        // phantom blob behind because we never saw a proper disconnect.
+        const pm = gameRef.current?.getPlayerManager();
+        const game = gameRef.current;
+        const ctx = contextRef.current;
+        if (pm) {
+          const botIds = new Set(bots.map((b) => b.playerId));
+          for (const p of pm.getAllPlayers()) {
+            if (p.playerId === LOCAL_PLAYER_ID_CONST) continue;
+            if (botIds.has(p.playerId)) continue;
+            const guestInfo = guestPlayersRef.current.get(p.playerId);
+            if (guestInfo) {
+              // Guest-screen-owned player: prune if the owning screen peer
+              // has left the room.
+              if (!remotePeerIds.has(guestInfo.screenId)) {
+                console.info('[webrtc] cleanup-stale-guest-player', { playerId: p.playerId, screenId: guestInfo.screenId });
+                if (game && ctx) game.onPlayerDisconnect(ctx, p.playerId);
+                guestPlayersRef.current.delete(p.playerId);
+              }
+              continue;
+            }
+            // Phone-controller path: playerId IS the peer_id.
+            if (!remotePeerIds.has(p.playerId)) {
+              console.info('[webrtc] cleanup-stale-player', { playerId: p.playerId });
+              handlePlayerDisconnect(p.playerId);
+            }
+          }
+        }
+
+        // Drop attempt records for peers that have fully left the room.
+        for (const id of Array.from(connectAttemptsRef.current.keys())) {
+          if (!remotePeerIds.has(id)) connectAttemptsRef.current.delete(id);
         }
 
         // Derive the "connected phone players" list off active data channels.
@@ -1665,7 +2384,7 @@ export default function GameMaster() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [roomReady, sessionId]);
+  }, [roomReady, sessionId, bots, handlePlayerDisconnect]);
 
   // ── Feature: auto-end lobby when only AIs remain ─────────────────────────
   // Counts non-bot players (phones on this screen + local keyboard + guest
@@ -1785,6 +2504,70 @@ export default function GameMaster() {
     game.setCanvas(ctx.canvas, ctx, width, height);
     game.start();
     installDebugBridge(game);
+    // Module-level pacingConfig.paused persists across game instances
+    // (it's set by the compare-hashes "pause both" button). When the
+    // user leaves a paused game and starts a new one, the new game
+    // boots with paused=true and never ticks — symptom: "host's new
+    // game is frozen." Reset on every fresh canvas init.
+    setPacingConfig({ paused: false });
+
+    // Host-only debug bridge wiring for the compare-hashes diagnostic.
+    setTogglePauseAccessor((paused) => {
+      setPacingConfig({ paused });
+      // Mirror to every guest so both sides freeze together.
+      const evt = { type: 'set_paused' as const, paused };
+      managerRef.current?.broadcast('state', JSON.stringify(evt), 'screen');
+    });
+    setCompareHashesAccessor(async (): Promise<CompareHashesResult> => {
+      const requestId = ++hashRequestIdRef.current;
+      // Snapshot host's own ring NOW so we compare apples-to-apples
+      // with what's about to be sent by guests.
+      const HOST_CAP = 60;
+      const _hostAll = getHashHistory();
+      const hostEntries = _hostAll.slice(Math.max(0, _hostAll.length - HOST_CAP));
+      // Broadcast the request and wait for replies.
+      const evt = { type: 'request_hashes' as const, requestId };
+      managerRef.current?.broadcast('state', JSON.stringify(evt), 'screen');
+      // 5s window — each guest response can be 240 ticks × per-tick
+      // summary (5+ blobs × scalars + RNG/mode) ≈ tens of KB of JSON.
+      // On the reliable WebRTC channel that's a couple of fragments,
+      // but if a keyframe is in flight on the same channel the reply
+      // can queue behind it. 5s is generous; the host's modal is gated
+      // on this, so it's fine to wait.
+      const WAIT_MS = 5000;
+      console.info(`[netDiag] host broadcast request_hashes(req=${requestId}); awaiting ${WAIT_MS}ms`);
+      await new Promise((r) => setTimeout(r, WAIT_MS));
+      // Pick up only responses tagged with our requestId.
+      const responses = hashesResponsesRef.current.filter((r) => r.requestId === requestId);
+      console.info(
+        `[netDiag] host wait window expired for req=${requestId}; got ${responses.length} response(s)`,
+        responses.map((r) => `${r.peerId}:${r.entries.length}`).join(', ') || '(none)',
+      );
+      // Trim the bucket to keep memory bounded.
+      hashesResponsesRef.current = hashesResponsesRef.current.slice(-20);
+      // Merge: union of all tick numbers from host + every guest.
+      // Each peer's per-tick value is { hash, summary? } so the modal
+      // can expand rows to diff structured per-blob fields.
+      type PeerEntry = { hash: string | null; summary?: import('../lib/hashHistory').TickSummary };
+      const byPeer: Record<string, Map<number, PeerEntry>> = {
+        host: new Map(hostEntries.map((e) => [e.tick, { hash: e.hash, summary: e.summary }])),
+      };
+      for (const r of responses) {
+        byPeer[r.peerId] = new Map(r.entries.map((e) => [e.tick, { hash: e.hash, summary: e.summary }]));
+      }
+      const allTicks = new Set<number>();
+      for (const m of Object.values(byPeer)) for (const t of m.keys()) allTicks.add(t);
+      const sortedTicks = Array.from(allTicks).sort((a, b) => a - b);
+      const peerIds = Object.keys(byPeer);
+      return {
+        peerIds,
+        byTick: sortedTicks.map((tick) => {
+          const hashes: Record<string, PeerEntry> = {};
+          for (const pid of peerIds) hashes[pid] = byPeer[pid].get(tick) ?? { hash: null };
+          return { tick, hashes };
+        }),
+      };
+    });
   }, []);
 
   const onCanvasResize = useCallback((width: number, height: number) => {
@@ -1809,6 +2592,17 @@ export default function GameMaster() {
   }
 
   if (phase === 'creating') {
+    // Modal blocks room creation until the user submits. Once submitted,
+    // hostConfig is non-null, the room-creation effect fires, and we
+    // fall through to the "Creating session..." spinner.
+    if (!hostConfig) {
+      return (
+        <HostSetupModal
+          onSubmit={setHostConfig}
+          onCancel={() => navigate('/')}
+        />
+      );
+    }
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p data-testid="creating-session" style={{ color: '#aaa', fontSize: 16 }}>Creating session...</p>
@@ -1850,6 +2644,7 @@ export default function GameMaster() {
         />
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
           <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+          {showNetDebug && <NetDebugOverlay role="host" />}
 
           {/* Invite Friends on Steam — bottom-right, above QR. Paper+tape
               styling matches the Home menu sticky notes. */}
@@ -1933,6 +2728,7 @@ export default function GameMaster() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+      {showNetDebug && <NetDebugOverlay role="host" />}
       <div style={{
         position: 'absolute',
         top: 12,

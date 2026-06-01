@@ -28,13 +28,13 @@ impl SnapWriter {
     pub fn new() -> Self { SnapWriter { buf: Vec::with_capacity(4096) } }
     pub fn finish(self) -> Vec<u8> { self.buf }
 
-    #[inline] fn u8(&mut self, v: u8)   { self.buf.push(v); }
-    #[inline] fn u32(&mut self, v: u32) { self.buf.extend_from_slice(&v.to_le_bytes()); }
-    #[inline] fn i32(&mut self, v: i32) { self.buf.extend_from_slice(&v.to_le_bytes()); }
-    #[inline] fn u64(&mut self, v: u64) { self.buf.extend_from_slice(&v.to_le_bytes()); }
-    #[inline] fn i64(&mut self, v: i64) { self.buf.extend_from_slice(&v.to_le_bytes()); }
-    #[inline] fn bool(&mut self, v: bool) { self.u8(if v { 1 } else { 0 }); }
-    #[inline] fn fx(&mut self, v: Fx) { self.i64(v.raw()); }
+    #[inline] pub(crate) fn u8(&mut self, v: u8)   { self.buf.push(v); }
+    #[inline] pub(crate) fn u32(&mut self, v: u32) { self.buf.extend_from_slice(&v.to_le_bytes()); }
+    #[inline] pub(crate) fn i32(&mut self, v: i32) { self.buf.extend_from_slice(&v.to_le_bytes()); }
+    #[inline] pub(crate) fn u64(&mut self, v: u64) { self.buf.extend_from_slice(&v.to_le_bytes()); }
+    #[inline] pub(crate) fn i64(&mut self, v: i64) { self.buf.extend_from_slice(&v.to_le_bytes()); }
+    #[inline] pub(crate) fn bool(&mut self, v: bool) { self.u8(if v { 1 } else { 0 }); }
+    #[inline] pub(crate) fn fx(&mut self, v: Fx) { self.i64(v.raw()); }
     #[inline] fn vec2(&mut self, v: FxVec2) { self.fx(v.x); self.fx(v.y); }
     fn str(&mut self, s: &str) {
         let bytes = s.as_bytes();
@@ -62,21 +62,21 @@ impl<'a> SnapReader<'a> {
         self.off += n;
         Ok(s)
     }
-    fn u8(&mut self) -> Result<u8, &'static str> { Ok(self.take(1)?[0]) }
-    fn u32(&mut self) -> Result<u32, &'static str> {
+    pub(crate) fn u8(&mut self) -> Result<u8, &'static str> { Ok(self.take(1)?[0]) }
+    pub(crate) fn u32(&mut self) -> Result<u32, &'static str> {
         let b = self.take(4)?; Ok(u32::from_le_bytes([b[0],b[1],b[2],b[3]]))
     }
-    fn i32(&mut self) -> Result<i32, &'static str> {
+    pub(crate) fn i32(&mut self) -> Result<i32, &'static str> {
         let b = self.take(4)?; Ok(i32::from_le_bytes([b[0],b[1],b[2],b[3]]))
     }
-    fn u64(&mut self) -> Result<u64, &'static str> {
+    pub(crate) fn u64(&mut self) -> Result<u64, &'static str> {
         let b = self.take(8)?; Ok(u64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]]))
     }
-    fn i64(&mut self) -> Result<i64, &'static str> {
+    pub(crate) fn i64(&mut self) -> Result<i64, &'static str> {
         let b = self.take(8)?; Ok(i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]]))
     }
-    fn bool(&mut self) -> Result<bool, &'static str> { Ok(self.u8()? != 0) }
-    fn fx(&mut self) -> Result<Fx, &'static str> { Ok(Fx::from_raw(self.i64()?)) }
+    pub(crate) fn bool(&mut self) -> Result<bool, &'static str> { Ok(self.u8()? != 0) }
+    pub(crate) fn fx(&mut self) -> Result<Fx, &'static str> { Ok(Fx::from_raw(self.i64()?)) }
     fn vec2(&mut self) -> Result<FxVec2, &'static str> {
         let x = self.fx()?; let y = self.fx()?; Ok(FxVec2::new(x, y))
     }
@@ -198,6 +198,16 @@ impl SoftBodyWorld {
         for (s, b) in &self.pending_trigger_entered { w.u32(*s); w.u32(*b); }
         w.u32(self.pending_trigger_exited.len() as u32);
         for (s, b) in &self.pending_trigger_exited { w.u32(*s); w.u32(*b); }
+
+        // Phase 4: dynamic-item mutable state (timer + active + bumper
+        // cooldown). Kind, polygon, center, radius, direction are all
+        // immutable post-init so they're not snapshotted (rebuilt by
+        // the caller via add_* methods at level-load time).
+        crate::dynamic_items::serialize_dynamic_items(&self.dynamic_items, &mut w);
+
+        // Phase 5: spring-pad mutable state (state machine + offset +
+        // cooldown). Geometry / kinematic surface immutable.
+        crate::spring_pads::serialize_spring_pads(&self.spring_pads, &mut w);
 
         w.finish()
     }
@@ -335,6 +345,14 @@ impl SoftBodyWorld {
             self.pending_trigger_exited.push((s as ShapeIdx, b as BlobId));
         }
 
+        // Phase 4: restore dynamic-item mutable state. Item count is
+        // expected to match (caller adds them at level-load time, both
+        // sides apply the same level data deterministically).
+        crate::dynamic_items::restore_dynamic_items(&mut self.dynamic_items, &mut r)?;
+
+        // Phase 5: restore spring-pad mutable state.
+        crate::spring_pads::restore_spring_pads(&mut self.spring_pads, &mut r)?;
+
         Ok(())
     }
 }
@@ -376,3 +394,586 @@ fn read_opt_vec2_vec(r: &mut SnapReader, out: &mut Vec<Option<FxVec2>>) -> Resul
 // Unused imports (kept for clarity even when field types are stable).
 #[allow(dead_code)]
 fn _shut_unused(_: Spring, _: StaticSurface, _: SurfaceMaterial, _: ParticleIdx) {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Round-trip exactness tests.
+//
+// These are the canonical guard: prove that serialize_state() captures
+// ENOUGH state that a snap→garbage-step→restore→step cycle produces the
+// same physics as a no-rollback baseline. If they diverge, serialize is
+// silently lossy — some mutable field that influences the next step
+// isn't being captured. The TS-side equivalent
+// `src/lib/rollbackExactness.test.ts` runs the same property at higher
+// level (full Rust+wasm engine via loadLevel). When that test fails
+// across game scenarios but the snapshot only differs in a handful of
+// fields, this Rust-side test isolates the bug to the specific field.
+//
+// Run with: `cd crates && cargo test --release -p softbody -- snapshot::tests`
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fx::{Fx, FxVec2};
+    use crate::types::{SurfaceMaterial, WorldConfig};
+    use crate::world::{AddBlobParams, SoftBodyWorld};
+
+    const FIXED_DT: Fx = Fx::from_raw((1i64 << 32) / 60);
+
+    /// Two falling blobs above a floor — enough physics activity to
+    /// exercise gravity, springs, collision, shape matching, and contact
+    /// tracking in a few dozen ticks.
+    fn build_world(seed: u32) -> SoftBodyWorld {
+        let mut w = SoftBodyWorld::new(WorldConfig::default(), seed);
+
+        // Floor: long horizontal static polygon.
+        w.register_static_polygon(
+            vec![
+                FxVec2::new(Fx::from_int(-1000i32), Fx::from_int(1000i32)),
+                FxVec2::new(Fx::from_int( 1000i32), Fx::from_int(1000i32)),
+                FxVec2::new(Fx::from_int( 1000i32), Fx::from_int(1100i32)),
+                FxVec2::new(Fx::from_int(-1000i32), Fx::from_int(1100i32)),
+            ],
+            SurfaceMaterial::Default,
+            Some("floor".to_string()),
+            None,
+            None,
+        );
+
+        // Two simple hexagonal blobs above the floor.
+        let hex = |cx: i32, cy: i32, sort: &str| AddBlobParams {
+            hull_rest_local: (0..6).map(|i| {
+                let a = (i as f64) * (core::f64::consts::TAU / 6.0);
+                FxVec2::new(Fx::from_f64(a.cos() * 40.0), Fx::from_f64(a.sin() * 40.0))
+            }).collect(),
+            center_local: FxVec2::new(Fx::ZERO, Fx::ZERO),
+            center_mass: Fx::from_int(1),
+            hull_mass: Fx::from_int(1),
+            spring_k: Fx::from_int(800),
+            spring_damp: Fx::from_int(20),
+            radial_k: Fx::from_int(400),
+            radial_damp: Fx::from_int(10),
+            pressure_k: Fx::from_int(50),
+            shape_match_k: Fx::from_int(400),
+            shape_match_damp: Fx::from_int(10),
+            world_origin: FxVec2::new(Fx::from_int(cx), Fx::from_int(cy)),
+            sort_key: Some(sort.to_string()),
+            static_hull_indices: Vec::new(),
+            static_center: false,
+            pin_frame: false,
+        };
+        w.add_blob_from_hull(hex(-100, 0, "a"));
+        w.add_blob_from_hull(hex( 100, 50, "b"));
+        w
+    }
+
+    fn step_n(w: &mut SoftBodyWorld, n: usize) {
+        for _ in 0..n { w.step(FIXED_DT); }
+    }
+
+    #[test]
+    fn snapshot_round_trip_is_lossless_under_step() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+
+        // Run both for a while to build up real physics state (settling,
+        // contacts, shape match integration).
+        step_n(&mut a, 30);
+        step_n(&mut b, 30);
+
+        // Sanity: deterministic.
+        let sa = a.serialize_state();
+        let sb = b.serialize_state();
+        assert_eq!(sa, sb, "two sims diverged BEFORE rollback test — non-deterministic sim?");
+
+        // B: snapshot, take a destructive step (to mutate state that
+        // wouldn't otherwise change in a no-op), then restore.
+        let snap = b.serialize_state();
+        b.step(FIXED_DT);
+        b.step(FIXED_DT);
+        b.restore_state(&snap).expect("restore_state returned Err");
+
+        // After restore, B's serialized state should match what it was
+        // at snapshot time. If it doesn't, the deserialization itself
+        // is incomplete (some captured-but-not-restored field).
+        let sb_after_restore = b.serialize_state();
+        assert_eq!(snap, sb_after_restore, "serialized state differs after restore — restore is broken even within captured fields");
+
+        // Both sims step one more tick. If the captured state is COMPLETE,
+        // they'll produce the same state. If a mutable field that affects
+        // step() isn't captured, B's state will differ from A's.
+        a.step(FIXED_DT);
+        b.step(FIXED_DT);
+        let sa2 = a.serialize_state();
+        let sb2 = b.serialize_state();
+        if sa2 != sb2 {
+            // Find first byte that differs for diagnostic.
+            let n = sa2.len().min(sb2.len());
+            let mut first = None;
+            for i in 0..n {
+                if sa2[i] != sb2[i] { first = Some(i); break; }
+            }
+            panic!(
+                "LOSSY SNAPSHOT: after restore+step, B's state differs from A's. lenA={} lenB={} firstByteDiff={:?}",
+                sa2.len(), sb2.len(), first,
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_round_trip_immediate_restore_is_identity() {
+        // Even simpler property: snap → immediately restore → snap should
+        // produce IDENTICAL bytes. Catches restore-side bugs that don't
+        // need a destructive step in between.
+        let mut a = build_world(42);
+        step_n(&mut a, 30);
+
+        let snap1 = a.serialize_state();
+        a.restore_state(&snap1).expect("restore_state returned Err");
+        let snap2 = a.serialize_state();
+        assert_eq!(snap1, snap2, "immediate snap→restore→snap is not an identity");
+    }
+
+    /// Mirrors what the TS-side rollbackExactness test does: blob inputs
+    /// drive move-force AND toggle the shape-match-rest-scale integrator
+    /// (the "expand" feature). This is the path that ACTUALLY fails in
+    /// production — the simpler 2-blob fall test passes because it
+    /// doesn't exercise per-tick mutable shape state.
+    #[test]
+    fn snapshot_round_trip_with_player_like_input() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+
+        // Drive both sims with the same scripted player inputs for 30
+        // ticks. Inputs include the shape_match_rest_scale toggle that
+        // simulates the "expand" button — this is the integrator the
+        // TS-side rollback tests trip on.
+        let drive = |w: &mut SoftBodyWorld, t: usize| {
+            let force = Fx::from_int(2000);
+            let dir_a = if (t / 7) % 2 == 0 {
+                FxVec2::new(Fx::from_int(1), Fx::ZERO)
+            } else {
+                FxVec2::new(Fx::from_int(-1), Fx::ZERO)
+            };
+            let dir_b = FxVec2::new(Fx::ZERO, Fx::from_int(-1));
+            w.apply_blob_move_force(0, dir_a, force, FIXED_DT);
+            w.apply_blob_move_force(1, dir_b, force, FIXED_DT);
+            // Toggle expand on/off in a pattern.
+            let scale_a = if (t % 5) < 2 { Fx::from_f64(1.5) } else { Fx::ONE };
+            let scale_b = if (t % 7) < 3 { Fx::from_f64(0.7) } else { Fx::ONE };
+            w.set_blob_shape_match_rest_scale(0, scale_a);
+            w.set_blob_shape_match_rest_scale(1, scale_b);
+        };
+
+        for t in 0..30 {
+            drive(&mut a, t);
+            drive(&mut b, t);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(), "non-deterministic pre-snapshot");
+
+        // B: snapshot, destructive step, restore.
+        let snap = b.serialize_state();
+        // The destructive step deliberately twists shape_match_rest_scale
+        // and applies wrong force, to ensure the captured state would
+        // need to actively overwrite both.
+        b.set_blob_shape_match_rest_scale(0, Fx::from_f64(2.0));
+        b.set_blob_shape_match_rest_scale(1, Fx::from_f64(0.3));
+        b.apply_blob_move_force(0, FxVec2::new(Fx::from_int(1), Fx::from_int(1)), Fx::from_int(5000), FIXED_DT);
+        b.step(FIXED_DT);
+        b.step(FIXED_DT);
+        b.restore_state(&snap).expect("restore returned Err");
+
+        // Both sims step forward identically with the same scripted
+        // inputs. If snapshot+restore is lossless, they match.
+        for t in 30..60 {
+            drive(&mut a, t);
+            drive(&mut b, t);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+
+        let sa = a.serialize_state();
+        let sb = b.serialize_state();
+        if sa != sb {
+            let n = sa.len().min(sb.len());
+            let mut first = None;
+            for i in 0..n {
+                if sa[i] != sb[i] { first = Some(i); break; }
+            }
+            panic!(
+                "LOSSY: player-like-input round-trip diverged. lenA={} lenB={} firstByteDiff={:?}",
+                sa.len(), sb.len(), first,
+            );
+        }
+    }
+
+    /// Two fresh sims, identical squash/lean inputs per tick, must
+    /// produce identical state. Catches cross-instance non-determinism
+    /// in the per-tick `set_blob_squash_lean` path that motivated
+    /// moving the JS `updateHullDeformation` into Rust. Within a single
+    /// wasm instance two `SoftBodyWorld` values driven the same way
+    /// must end at the same byte-for-byte state.
+    #[test]
+    fn squash_lean_per_tick_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let down = FxVec2::new(Fx::ZERO, Fx::ONE);
+        // Drive squash/lean inputs that vary per tick — exactly the
+        // pattern SlimeBlob.update would feed in.
+        for t in 0..60 {
+            let squash = Fx::from_f64(((t % 7) as f64) / 10.0);
+            let lean   = Fx::from_f64((((t as i32) % 11) - 5) as f64 / 5.0);
+            a.set_blob_squash_lean(0, squash, lean, down);
+            a.set_blob_squash_lean(1, squash, lean, down);
+            b.set_blob_squash_lean(0, squash, lean, down);
+            b.set_blob_squash_lean(1, squash, lean, down);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        let sa = a.serialize_state();
+        let sb = b.serialize_state();
+        assert_eq!(sa, sb, "set_blob_squash_lean is not deterministic across fresh sims");
+    }
+
+    /// Snapshot → destructive squash/lean → restore → run forward with
+    /// same inputs as a baseline. Engine state must match. Catches
+    /// rollback-replay bugs in the new per-tick path.
+    #[test]
+    fn squash_lean_survives_rollback_replay() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let down = FxVec2::new(Fx::ZERO, Fx::ONE);
+        let drive = |w: &mut SoftBodyWorld, t: usize| {
+            let squash = Fx::from_f64(((t % 7) as f64) / 10.0);
+            let lean   = Fx::from_f64((((t as i32) % 11) - 5) as f64 / 5.0);
+            w.set_blob_squash_lean(0, squash, lean, down);
+            w.set_blob_squash_lean(1, squash, lean, down);
+        };
+        for t in 0..30 {
+            drive(&mut a, t); drive(&mut b, t);
+            a.step(FIXED_DT); b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(), "non-deterministic pre-snapshot");
+
+        let snap = b.serialize_state();
+        // Destructive: wrong squash/lean for 2 ticks.
+        b.set_blob_squash_lean(0, Fx::from_f64(0.9), Fx::from_f64(0.9), down);
+        b.set_blob_squash_lean(1, Fx::from_f64(0.9), Fx::from_f64(-0.9), down);
+        b.step(FIXED_DT); b.step(FIXED_DT);
+        b.restore_state(&snap).expect("restore returned Err");
+
+        for t in 30..60 {
+            drive(&mut a, t); drive(&mut b, t);
+            a.step(FIXED_DT); b.step(FIXED_DT);
+        }
+        assert_eq!(
+            a.serialize_state(), b.serialize_state(),
+            "squash/lean round-trip diverged after rollback+replay",
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Phase 3 zone-force API tests.
+    //
+    // These verify the foundation that Phases 4-6 (dynamicItemManager
+    // / spike-zone / powerup-pickup migrations) will build on:
+    //  - `blobs_overlapping_polygon` finds every blob centroid in
+    //    a region, in deterministic blob_id order.
+    //  - `apply_force_in_polygon` with each ForceField variant
+    //    produces bit-identical results across two fresh sims
+    //    (so JS-side managers can pass JS-computed force vectors
+    //    in and trust the engine to do the per-blob math).
+    // ─────────────────────────────────────────────────────────────────
+
+    use crate::types::{ForceField, PointGravityFalloff};
+
+    /// Build a wide rectangle polygon covering most of the test scene.
+    fn rect_poly(min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> Vec<FxVec2> {
+        vec![
+            FxVec2::new(Fx::from_int(min_x), Fx::from_int(min_y)),
+            FxVec2::new(Fx::from_int(max_x), Fx::from_int(min_y)),
+            FxVec2::new(Fx::from_int(max_x), Fx::from_int(max_y)),
+            FxVec2::new(Fx::from_int(min_x), Fx::from_int(max_y)),
+        ]
+    }
+
+    #[test]
+    fn blobs_overlapping_polygon_finds_all_inside_in_id_order() {
+        let mut w = build_world(42);
+        // build_world places two hex blobs at (-100, 0) and (100, 50).
+        // A wide rectangle covers both.
+        let wide = rect_poly(-500, -500, 500, 500);
+        let hits = w.blobs_overlapping_polygon(&wide);
+        assert_eq!(hits, vec![0, 1], "expected blobs 0 and 1");
+        // Tight rectangle covering only blob 0.
+        let left_only = rect_poly(-200, -200, 0, 200);
+        let hits = w.blobs_overlapping_polygon(&left_only);
+        assert_eq!(hits, vec![0]);
+        // Tight rectangle covering only blob 1.
+        let right_only = rect_poly(50, -200, 200, 200);
+        let hits = w.blobs_overlapping_polygon(&right_only);
+        assert_eq!(hits, vec![1]);
+        // Empty zone.
+        let empty = rect_poly(2000, 2000, 3000, 3000);
+        assert_eq!(w.blobs_overlapping_polygon(&empty), Vec::<BlobId>::new());
+        // Degenerate polygon (< 3 points) → empty result.
+        let two_pt = vec![FxVec2::ZERO, FxVec2::new(Fx::from_int(10), Fx::ZERO)];
+        assert_eq!(w.blobs_overlapping_polygon(&two_pt), Vec::<BlobId>::new());
+    }
+
+    #[test]
+    fn apply_force_in_polygon_uniform_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let zone = rect_poly(-500, -500, 500, 500);
+        let force = FxVec2::new(Fx::from_int(1000), Fx::from_int(-200));
+        for _ in 0..30 {
+            a.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            b.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "Uniform ForceField is non-deterministic across fresh sims");
+    }
+
+    #[test]
+    fn apply_force_in_polygon_radial_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let zone = rect_poly(-500, -500, 500, 500);
+        let center = FxVec2::new(Fx::ZERO, Fx::ZERO);
+        let strength = Fx::from_int(2000);
+        let radius = Fx::from_int(400);
+        for _ in 0..30 {
+            a.apply_force_in_polygon(&zone, ForceField::Radial {
+                center, strength, radius, falloff: PointGravityFalloff::Linear,
+            }, FIXED_DT);
+            b.apply_force_in_polygon(&zone, ForceField::Radial {
+                center, strength, radius, falloff: PointGravityFalloff::Linear,
+            }, FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "Radial ForceField (Linear falloff) is non-deterministic across fresh sims");
+    }
+
+    #[test]
+    fn apply_force_in_polygon_drag_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let zone = rect_poly(-500, -500, 500, 500);
+        // Get the blobs moving first.
+        for _ in 0..20 {
+            a.apply_blob_move_force(0, FxVec2::new(Fx::from_int(1), Fx::ZERO), Fx::from_int(3000), FIXED_DT);
+            b.apply_blob_move_force(0, FxVec2::new(Fx::from_int(1), Fx::ZERO), Fx::from_int(3000), FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        // Now apply drag in the zone and verify damping is bit-equal.
+        let coefficient = Fx::from_f64(2.0); // 2.0 / sec
+        for _ in 0..30 {
+            a.apply_force_in_polygon(&zone, ForceField::Drag { coefficient }, FIXED_DT);
+            b.apply_force_in_polygon(&zone, ForceField::Drag { coefficient }, FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "Drag ForceField is non-deterministic across fresh sims");
+    }
+
+    #[test]
+    fn apply_force_in_polygon_survives_rollback() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        let zone = rect_poly(-500, -500, 500, 500);
+        let force = FxVec2::new(Fx::from_int(500), Fx::from_int(-100));
+        for _ in 0..20 {
+            a.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            b.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        let snap = b.serialize_state();
+        // Destructive: apply wrong force for 2 ticks.
+        b.apply_force_in_polygon(&zone, ForceField::Uniform {
+            force: FxVec2::new(Fx::from_int(9999), Fx::from_int(9999)),
+        }, FIXED_DT);
+        b.step(FIXED_DT);
+        b.step(FIXED_DT);
+        b.restore_state(&snap).expect("restore returned Err");
+
+        for _ in 20..50 {
+            a.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            b.apply_force_in_polygon(&zone, ForceField::Uniform { force }, FIXED_DT);
+            a.step(FIXED_DT);
+            b.step(FIXED_DT);
+        }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "zone-force round-trip diverged after rollback+replay");
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Phase 4 dynamic-item tests.
+    //
+    // For each item kind, verify that two fresh sims with identical
+    // setup produce bit-identical serialized state after 60 ticks of
+    // engine stepping (which calls update_dynamic_items every step).
+    // Catches per-tick non-determinism in the engine's item state
+    // machines + the force application paths they call into.
+    //
+    // Also verifies snapshot round-trip for items (timer + active +
+    // bumper cooldown all captured + restored).
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn cannon_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_cannon(0, Fx::from_int(-100), Fx::from_int(-50), Fx::from_int(80), Fx::from_int(80), Fx::from_f64(0.5));
+        b.add_cannon(0, Fx::from_int(-100), Fx::from_int(-50), Fx::from_int(80), Fx::from_int(80), Fx::from_f64(0.5));
+        for _ in 0..60 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "cannon is non-deterministic across fresh sims");
+    }
+
+    #[test]
+    fn bumper_is_deterministic_including_cooldown() {
+        // Bumper has the most state (cooldown ticks + active flag).
+        // Position it at one blob's spawn so it fires on tick 1.
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_bumper(0, Fx::from_int(-100), Fx::ZERO, Fx::from_int(80));
+        b.add_bumper(0, Fx::from_int(-100), Fx::ZERO, Fx::from_int(80));
+        for _ in 0..60 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "bumper is non-deterministic (cooldown timer or trigger detection)");
+    }
+
+    #[test]
+    fn wind_zone_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_wind_zone(0, Fx::ZERO, Fx::ZERO, Fx::from_int(500), Fx::from_int(500), Fx::ZERO);
+        b.add_wind_zone(0, Fx::ZERO, Fx::ZERO, Fx::from_int(500), Fx::from_int(500), Fx::ZERO);
+        for _ in 0..60 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "wind zone is non-deterministic");
+    }
+
+    #[test]
+    fn conveyor_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_conveyor(0, Fx::ZERO, Fx::from_int(80), Fx::from_int(400), Fx::from_int(40), 1);
+        b.add_conveyor(0, Fx::ZERO, Fx::from_int(80), Fx::from_int(400), Fx::from_int(40), 1);
+        for _ in 0..60 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "conveyor is non-deterministic");
+    }
+
+    #[test]
+    fn sticky_goo_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_sticky_goo(0, Fx::ZERO, Fx::ZERO, Fx::from_int(500), Fx::from_int(500));
+        b.add_sticky_goo(0, Fx::ZERO, Fx::ZERO, Fx::from_int(500), Fx::from_int(500));
+        for _ in 0..60 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "sticky goo (drag field) is non-deterministic");
+    }
+
+    #[test]
+    fn wrecking_ball_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_wrecking_ball(0, Fx::from_int(-100), Fx::ZERO);
+        b.add_wrecking_ball(0, Fx::from_int(-100), Fx::ZERO);
+        for _ in 0..120 { a.step(FIXED_DT); b.step(FIXED_DT); } // 2s — covers a full period
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "wrecking ball is non-deterministic");
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Phase 5 spring-pad tests.
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn spring_pad_is_deterministic() {
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        // Pad just below blob A (which spawns at -100, 0 with hex radius 40).
+        // Position so the blob falls onto it within ~30 ticks.
+        a.add_spring_pad(0, Fx::from_int(-100), Fx::from_int(150), Fx::from_int(140), Fx::from_int(30), Fx::from_f64(-1.5708), None);
+        b.add_spring_pad(0, Fx::from_int(-100), Fx::from_int(150), Fx::from_int(140), Fx::from_int(30), Fx::from_f64(-1.5708), None);
+        for _ in 0..120 { a.step(FIXED_DT); b.step(FIXED_DT); } // 2s — blob lands on pad, pad fires + reloads
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "spring pad is non-deterministic across fresh sims");
+    }
+
+    #[test]
+    fn spring_pad_state_machine_round_trip() {
+        // Snapshot during firing, restore, replay — should converge with
+        // the no-rollback baseline.
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        a.add_spring_pad(0, Fx::from_int(-100), Fx::from_int(150), Fx::from_int(140), Fx::from_int(30), Fx::from_f64(-1.5708), None);
+        b.add_spring_pad(0, Fx::from_int(-100), Fx::from_int(150), Fx::from_int(140), Fx::from_int(30), Fx::from_f64(-1.5708), None);
+        for _ in 0..40 { a.step(FIXED_DT); b.step(FIXED_DT); } // blob lands, pad fires
+        assert_eq!(a.serialize_state(), b.serialize_state(), "pre-rollback divergence");
+
+        let snap = b.serialize_state();
+        for _ in 0..5 { b.step(FIXED_DT); }
+        b.restore_state(&snap).expect("restore returned Err");
+
+        for _ in 40..120 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "spring-pad rollback round-trip diverged");
+    }
+
+    #[test]
+    fn spring_pad_fire_events_emitted_on_state_transition() {
+        let mut a = build_world(42);
+        a.add_spring_pad(42, Fx::from_int(-100), Fx::from_int(150), Fx::from_int(140), Fx::from_int(30), Fx::from_f64(-1.5708), None);
+        let mut fire_events = Vec::new();
+        for _ in 0..120 {
+            a.step(FIXED_DT);
+            fire_events.extend(a.take_spring_pad_fire_events());
+        }
+        assert!(!fire_events.is_empty(), "expected spring pad to fire at least once");
+        assert!(fire_events.iter().all(|&id| id == 42), "fire event has wrong id");
+    }
+
+    #[test]
+    fn all_item_kinds_survive_rollback() {
+        // Big stress test: add one of each kind, run for a while, then
+        // snapshot+destructive-tick+restore+replay and confirm we end
+        // exactly where the no-rollback baseline does.
+        let mut a = build_world(42);
+        let mut b = build_world(42);
+        for w in [&mut a, &mut b] {
+            w.add_cannon(0, Fx::from_int(300), Fx::from_int(300), Fx::from_int(80), Fx::from_int(80), Fx::from_f64(1.5));
+            w.add_catapult(1, Fx::from_int(-300), Fx::from_int(-300), Fx::from_int(80), Fx::from_int(80));
+            w.add_bumper(2, Fx::from_int(150), Fx::from_int(-200), Fx::from_int(80));
+            w.add_wind_zone(3, Fx::from_int(-200), Fx::from_int(200), Fx::from_int(400), Fx::from_int(200), Fx::from_f64(0.3));
+            w.add_gravity_flipper(4, Fx::from_int(-400), Fx::ZERO, Fx::from_int(200), Fx::from_int(200));
+            w.add_conveyor(5, Fx::from_int(400), Fx::from_int(80), Fx::from_int(300), Fx::from_int(40), -1);
+            w.add_sticky_goo(6, Fx::from_int(200), Fx::from_int(-300), Fx::from_int(200), Fx::from_int(100));
+            w.add_wrecking_ball(7, Fx::from_int(-150), Fx::from_int(-150));
+        }
+        for _ in 0..30 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(), "pre-rollback divergence");
+
+        let snap = b.serialize_state();
+        // Destructive: step 5 extra times.
+        for _ in 0..5 { b.step(FIXED_DT); }
+        b.restore_state(&snap).expect("restore returned Err");
+
+        for _ in 30..90 { a.step(FIXED_DT); b.step(FIXED_DT); }
+        assert_eq!(a.serialize_state(), b.serialize_state(),
+            "all-kinds rollback round-trip diverged");
+    }
+}

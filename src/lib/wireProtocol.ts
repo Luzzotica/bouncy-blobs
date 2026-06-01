@@ -35,7 +35,14 @@
  * (which always start with a printable ASCII char like `{` or `[`). 0x00 is
  * not a valid first byte of any UTF-8 JSON document. */
 export const BINARY_MAGIC = 0x00;
-export const WIRE_VERSION = 1;
+// VERSION 2: appended `engineState` blob (full engine.serializeState()
+// bytes) at the end of every snapshot frame. Guests with v2 ingest
+// it and call world.restoreState(engineState) to get a LOSSLESS sync
+// — fixes the 100%-divergence-after-keyframe bug the user observed
+// (only particle pos/vel + a couple of SlimeBlob fields were being
+// shipped before, leaving everything else in the engine's mutable
+// state stuck at whatever the guest's local sim happened to have).
+export const WIRE_VERSION = 2;
 export const MAX_OFFSET = 200; // px — covers hull deformation with headroom
 // `expandShapeScale` can ramp all the way to `expandShapeScaleMax` (default 3.0,
 // clamped to [0.35, 3.5] in `setExpandStateExternal`). Anything below this
@@ -108,6 +115,13 @@ export interface SnapshotFrame {
   tick: number;
   players: PlayerRecord[];
   world: WorldRecord[];
+  /** v2+: full engine snapshot bytes from `engine.serializeState()`.
+   * When present (and non-empty), the guest should APPLY THIS FIRST
+   * via `engine.restoreState()` to get a lossless sync, then the
+   * existing per-entity particle records can be skipped (or used as a
+   * cross-check). Optional so v1 receivers can ignore it; encoder
+   * always emits when given. */
+  engineState?: Uint8Array;
 }
 
 // ── Quantization helpers ────────────────────────────────────────────────────
@@ -171,7 +185,9 @@ function sizeWorldRecord(w: WorldRecord): number {
 // ── Encoder ─────────────────────────────────────────────────────────────────
 
 export function encodeSnapshot(frame: SnapshotFrame): ArrayBuffer {
-  let total = 9; // 1 magic + 8 header
+  const engineLen = frame.engineState ? frame.engineState.byteLength : 0;
+  // 1 magic + 8 header + bodies + 4 engineLen + engineBytes
+  let total = 9 + 4 + engineLen;
   for (const p of frame.players) total += sizePlayerRecord(p);
   for (const w of frame.world) total += sizeWorldRecord(w);
 
@@ -238,6 +254,14 @@ export function encodeSnapshot(frame: SnapshotFrame): ArrayBuffer {
       dv.setFloat32(p, n.vx, true); p += 4;
       dv.setFloat32(p, n.vy, true); p += 4;
     }
+  }
+
+  // v2+: trailing engine snapshot bytes (lossless full-state sync).
+  // Length prefix (u32) so a future v3 receiver can robustly find or
+  // skip this section.
+  dv.setUint32(p, engineLen >>> 0, true); p += 4;
+  if (engineLen > 0) {
+    u8.set(frame.engineState!, p); p += engineLen;
   }
 
   return buf;
@@ -317,7 +341,19 @@ export function decodeSnapshot(data: ArrayBuffer | Uint8Array): SnapshotFrame | 
       world.push({ kind, id, rootX, rootY, settled: !!(wflags & FLAG_SETTLED), nodes });
     }
 
-    return { version, isKeyframe, tick, players, world };
+    // v2+: trailing engine snapshot blob. Defensive read — if the
+    // sender was v1 (no trailing block) the cursor is past the end
+    // and we return engineState=undefined.
+    let engineState: Uint8Array | undefined;
+    if (version >= 2 && p + 4 <= buf.byteLength) {
+      const engineLen = dv.getUint32(p, true); p += 4;
+      if (engineLen > 0 && p + engineLen <= buf.byteLength) {
+        engineState = new Uint8Array(buf, p, engineLen).slice();
+        p += engineLen;
+      }
+    }
+
+    return { version, isKeyframe, tick, players, world, engineState };
   } catch {
     return null;
   }

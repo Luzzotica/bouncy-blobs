@@ -37,6 +37,69 @@ import { EffectsBindings } from './effectsBindings';
 import { updateParticles, clearParticles } from '../renderer/particles';
 import { clearDecals } from '../renderer/decals';
 import { preloadAll, SFX_NAMES, resumeAudio } from '../utils/audio';
+import { getPacingConfig } from '../lib/pacingConfig';
+import { recordHash, type TickSummary } from '../lib/hashHistory';
+
+/** Per-tick PRE/POST hash trace logging. Spammy (every tick on host AND
+ *  guest), only enable via `?detTrace=1` URL flag when bisecting a
+ *  cross-tab determinism mismatch. Disabled by default — without this
+ *  gate the console floods with thousands of `[detTrace]` lines per
+ *  game which makes ANY other warning/error impossible to spot. */
+const detTraceEnabled = (() => {
+  if (typeof window === 'undefined' || !window.location) return false;
+  try {
+    return new URLSearchParams(window.location.search).get('detTrace') === '1';
+  } catch { return false; }
+})();
+
+// Tiny indirection so the closure captured by the GameLoop callbacks
+// reads the current pacing config every tick (overlay can toggle it
+// live). Lives outside the class because both onLogic + the helper
+// below need it.
+function pausedFlagRef(): boolean {
+  return getPacingConfig().paused;
+}
+
+/** Snapshot per-tick state for the compare-hashes diagnostic. Captures
+ *  the per-blob fields most likely to surface a desync (centroid +
+ *  velocity + JS-side expand integrator + engine-side shape scale)
+ *  plus the global RNG state and mode phase. Cheap enough to call
+ *  every tick. */
+function buildTickSummary(state: BouncyBlobsGameState): TickSummary {
+  const blobs: TickSummary["blobs"] = [];
+  for (const p of state.playerManager.getAllPlayers()) {
+    const c = p.blob.getCentroid();
+    const cIdx = p.blob.centerIdx;
+    const vel = state.world.vel[cIdx] ?? { x: 0, y: 0 };
+    blobs.push({
+      blobId: p.blob.blobId,
+      label: p.playerId,
+      cx: c.x, cy: c.y,
+      vx: vel.x, vy: vel.y,
+      expandScale: (p.blob.dumpState() as { expandShapeScale: number }).expandShapeScale,
+    });
+  }
+  for (let i = 0; i < state.npcBlobs.length; i++) {
+    const b = state.npcBlobs[i];
+    const c = b.getCentroid();
+    const cIdx = b.centerIdx;
+    const vel = state.world.vel[cIdx] ?? { x: 0, y: 0 };
+    blobs.push({
+      blobId: b.blobId,
+      label: `npc-${i}`,
+      cx: c.x, cy: c.y,
+      vx: vel.x, vy: vel.y,
+      expandScale: (b.dumpState() as { expandShapeScale: number }).expandShapeScale,
+    });
+  }
+  const mode = state.modeManager?.getState?.();
+  return {
+    rng: state.world.rng.getState(),
+    modePhase: mode?.phase ?? '-',
+    modePhaseTimer: mode?.phaseTimer ?? 0,
+    blobs,
+  };
+}
 
 export interface BouncyBlobsGameState {
   world: SoftBodyEngine;
@@ -124,6 +187,18 @@ export class BouncyBlobsGame implements Game {
    * AFTER physics has advanced. Use case: host broadcasts the inputs
    * that were just applied, tagged with the exact tick they applied at. */
   private postTickHook: ((world: SoftBodyEngine) => void) | null = null;
+  /** Pre-tick hook. Called once per logic tick, AFTER AI controllers have
+   * filled ManagedPlayer.moveX/Y/expanding with their intent for this tick,
+   * BUT BEFORE the blob.setInput call that pushes those values into physics.
+   * Use case: the host's input-delay layer snapshots intents, schedules
+   * them for tick T+N, broadcasts the scheduled set tagged T+N (so the
+   * message reaches guests N ticks before they need it), then overwrites
+   * ManagedPlayer.* with the delayed value previously scheduled for T. */
+  private preTickHook: ((world: SoftBodyEngine) => void) | null = null;
+  /** Dynamic cap on logic steps per RAF. Lockstep guests set this to keep
+   * the sim from burst-fast-forwarding when an input-buffer arrival was
+   * jittery. */
+  private maxStepsGetter: (() => number) | null = null;
   /** Player IDs the camera should follow. If null, follows ALL players
    * (legacy behavior). When set, the camera tracks only these blobs and
    * uses a fixed-zoom view targeted at ~10% blob-on-screen. Used by the
@@ -141,6 +216,14 @@ export class BouncyBlobsGame implements Game {
 
   setPostTickHook(fn: ((world: SoftBodyEngine) => void) | null): void {
     this.postTickHook = fn;
+  }
+
+  setPreTickHook(fn: ((world: SoftBodyEngine) => void) | null): void {
+    this.preTickHook = fn;
+  }
+
+  setMaxStepsPerFrame(fn: (() => number) | null): void {
+    this.maxStepsGetter = fn;
   }
 
   setGameMode(mode: GameMode): void {
@@ -254,11 +337,25 @@ export class BouncyBlobsGame implements Game {
       }
     }
 
-    // Create dynamic item manager for party mode
+    // Create dynamic item manager. Originally party-mode-only, but
+    // levels with a `dynamicItems` field (e.g. det-test, custom maps)
+    // need it regardless of game mode. Create whenever the level
+    // declares items OR party mode is active.
     let dynamicItemManager: DynamicItemManager | null = null;
-    if (isPartyMode) {
+    const levelDynamicItems = (level as unknown as { dynamicItems?: Array<{ id: string; type: string; x: number; y: number; width: number; height: number; rotation: number }> }).dynamicItems ?? [];
+    if (isPartyMode || levelDynamicItems.length > 0) {
       dynamicItemManager = new DynamicItemManager();
       dynamicItemManager.initialize(world, playerManager);
+      // Auto-register items from level data. Party mode adds items
+      // dynamically at runtime via partyMode.placeItem, so it has its
+      // own flow — but level-defined items always get loaded here.
+      for (const item of levelDynamicItems) {
+        dynamicItemManager.addItem(
+          item.id,
+          item.type as Parameters<DynamicItemManager['addItem']>[1],
+          item.x, item.y, item.width, item.height, item.rotation,
+        );
+      }
     }
 
     // Trigger / action / platform-mover wiring. Previously these were
@@ -320,8 +417,15 @@ export class BouncyBlobsGame implements Game {
     };
 
     const loop = new GameLoop({
+      getMaxSteps: () => this.maxStepsGetter?.() ?? 5,
       onLogic: (dt) => {
       if (!this.state) return false;
+
+      // Global pause — both host and guest stop ticking. Used by the
+      // compare-hashes diagnostic so we can freeze both sides and
+      // inspect per-tick state without the sim moving under us. Reads
+      // pacingConfig.paused live; toggleable from the debug overlay.
+      if (pausedFlagRef()) return false;
 
       // Pre-tick gate: a lockstep guest pauses its sim here while
       // waiting for the host's authoritative inputs for the next tick.
@@ -336,10 +440,36 @@ export class BouncyBlobsGame implements Game {
         const shouldRunPhysics = modeManager.update(dt, playerManager, world);
         if (shouldRunPhysics) {
           let t0 = performance.now();
-          playerManager.updateAll(dt, world);
+          playerManager.tickAIInputs(dt, world);
+          this.preTickHook?.(world);
+          playerManager.applyInputsAndStep(dt);
+          // DETERMINISM DIAGNOSTIC. Three observations per tick:
+          //   PRE = engine hash + per-player input AFTER applyInputsAndStep
+          //         but BEFORE world.step. If host's PRE ≠ guest's PRE at
+          //         the same tick, the JS calls between the previous step
+          //         and this step wrote different values into the engine.
+          //   POST = engine hash AFTER world.step. If PRE matches across
+          //          tabs but POST diverges, the wasm step itself is the
+          //          source — and that'd be a cross-instance wasm bug.
+          // The next tick's PRE compared with this tick's POST then tells
+          // us whether the post-step managers (powerup/spring/spike/etc.)
+          // wrote different values.
+          if (detTraceEnabled) {
+            const nextTick = world.tick + 1;
+            const parts: string[] = [];
+            for (const p of playerManager.getAllPlayers()) {
+              parts.push(`${p.playerId}:${p.moveX.toFixed(3)},${p.moveY.toFixed(3)},${p.expanding ? 1 : 0}`);
+            }
+            const preHash = world.stateHash();
+            console.info(`[detTrace] PRE tick=${nextTick} hash=${preHash} inputs=[${parts.join(' | ')}]`);
+          }
           recordPhaseTime('playerMgr', performance.now() - t0);
           t0 = performance.now();
           world.step(dt);
+          if (detTraceEnabled) {
+            const tick = world.tick;
+            console.info(`[detTrace] POST tick=${tick} hash=${world.stateHash()}`);
+          }
           recordPhaseTime('worldStep', performance.now() - t0);
           t0 = performance.now();
           powerupManager?.update(dt, playerManager);
@@ -365,7 +495,9 @@ export class BouncyBlobsGame implements Game {
         // Per-phase timing — folded into the frame profile so we can
         // see which inner sub-system dominates a slow tick.
         let t0 = performance.now();
-        playerManager.updateAll(dt, world);
+        playerManager.tickAIInputs(dt, world);
+        this.preTickHook?.(world);
+        playerManager.applyInputsAndStep(dt);
         recordPhaseTime('playerMgr', performance.now() - t0);
         t0 = performance.now();
         world.step(dt);
@@ -454,6 +586,16 @@ export class BouncyBlobsGame implements Game {
       // applied at. Inside the game loop guarantees per-tick precision.
       this.postTickHook?.(this.state.world);
 
+      // Record the post-step stateHash for the compare-hashes
+      // diagnostic. Both host and guest record into the same ring;
+      // the overlay's compare button pulls both sides' rings and
+      // displays them side-by-side per tick.
+      recordHash(
+        this.state.world.tick,
+        this.state.world.stateHash(),
+        buildTickSummary(this.state),
+      );
+
       return true;
       },
       onRender: () => {
@@ -462,6 +604,7 @@ export class BouncyBlobsGame implements Game {
         const allPlayers = playerManager.getAllPlayers();
         // Build player render data for faces and custom colors
         const playerRenderData: PlayerRenderData[] = allPlayers.map(p => ({
+          name: p.name,
           color: p.color,
           faceId: p.faceId,
           expanding: p.blob.isExpanding(),
@@ -541,6 +684,10 @@ export class BouncyBlobsGame implements Game {
 
   getPhase(): GamePhase | null {
     return this.state?.modeManager?.getPhase() ?? null;
+  }
+
+  getModeManager(): GameModeManager | null {
+    return this.state?.modeManager ?? null;
   }
 
   setLevel(level: LevelData): void {
@@ -636,9 +783,9 @@ export class BouncyBlobsGame implements Game {
     this.allowCountdownInput = allow;
   }
 
-  onPlayerCustomizationUpdate(_context: GameContext, playerId: string, color?: string, faceId?: string): void {
+  onPlayerCustomizationUpdate(_context: GameContext, playerId: string, color?: string, faceId?: string, name?: string): void {
     if (!this.state) return;
-    this.state.playerManager.updateCustomization(playerId, color, faceId);
+    this.state.playerManager.updateCustomization(playerId, color, faceId, name);
   }
 
   onPlayerInput(_context: GameContext, playerId: string, inputEvent: InputEvent): void {

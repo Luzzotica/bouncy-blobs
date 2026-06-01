@@ -11,6 +11,32 @@
 
 import type { BouncyBlobsGame } from "../game/bouncyBlobsGame";
 import { getFrameProfile, resetFrameProfile, type FrameSample } from "../game/gameLoop";
+import { getHashHistory, type HashHistoryEntry } from "./hashHistory";
+
+/** Result of the compare-hashes diagnostic. Returned to the host's
+ *  overlay; null while a request is in flight, populated once all
+ *  guests have responded (or the wait timeout elapses). */
+export interface CompareHashesResult {
+  /** All side IDs we got responses from, plus 'host' for the local
+   *  side. Used as column headers in the overlay table. */
+  peerIds: string[];
+  /** Per-tick map: tick → { peerId → { hash, summary? } }. The
+   *  summary is the structured per-tick breakdown (per-blob centroid
+   *  + velocity + expand scale, RNG state, mode phase) — when a hash
+   *  mismatches, the overlay expands the row to diff these fields
+   *  side-by-side so you can SEE which subsystem is drifting.
+   *  Sorted ascending. */
+  byTick: Array<{
+    tick: number;
+    hashes: Record<string, { hash: string | null; summary?: import("./hashHistory").TickSummary }>;
+  }>;
+}
+
+/** Functions the host overlay calls to drive the compare-hashes flow.
+ *  Wired by GameMaster.tsx via `setCompareHashesAccessor`. Null on
+ *  guest tabs (button doesn't render). */
+export type CompareHashesFn = () => Promise<CompareHashesResult>;
+export type TogglePauseFn = (paused: boolean) => void;
 
 interface DebugBridge {
   /** Returns the latest installed game (host or guest) or null if none. */
@@ -58,6 +84,26 @@ interface DebugBridge {
     avgCheapTickMs: number;
     avgReconcileMs: number;
   } | null;
+  /** Local per-tick hash history (the same ring the compare-hashes
+   *  diagnostic ships across the wire). Useful for console
+   *  inspection (`__bbDebug.getHashHistory()`) when the modal table
+   *  isn't enough. */
+  getHashHistory: () => HashHistoryEntry[];
+  /** Trigger the cross-side compare. Resolves to a side-by-side table
+   *  ready to render, or null if the host hasn't wired up an
+   *  accessor yet (guest tab, or pre-canvas-init). Resolves via the
+   *  module-level accessor at CALL time (not bridge-install time) so
+   *  the host can set up accessors after the bridge installs. */
+  compareHashes: () => Promise<CompareHashesResult | null>;
+  /** Toggle sim-paused on both sides. Host's invocation also
+   *  broadcasts to guests so they pause together. No-op on guests
+   *  (their pause comes from the host's `set_paused` event). */
+  togglePause: (paused: boolean) => void;
+  /** Test-only: directly script the local player's input. Bypasses
+   *  Playwright's keyboard-event-to-canvas-focus flakiness so e2e
+   *  determinism tests can deterministically drive blob motion and
+   *  interaction with spring pads / spikes / trigger zones. */
+  setPlayerInput: (playerId: string, moveX: number, moveY: number, expanding: boolean) => void;
 }
 
 let netDiagAccessor: (() => { bufferSize: number; latestHostTick: number; gap: number } | null) | null = null;
@@ -101,6 +147,15 @@ export function setRollbackStatsAccessor(
 }
 
 let installedGame: BouncyBlobsGame | null = null;
+let compareHashesAccessor: CompareHashesFn | null = null;
+let togglePauseAccessor: TogglePauseFn | null = null;
+
+export function setCompareHashesAccessor(fn: CompareHashesFn | null): void {
+  compareHashesAccessor = fn;
+}
+export function setTogglePauseAccessor(fn: TogglePauseFn | null): void {
+  togglePauseAccessor = fn;
+}
 
 export function installDebugBridge(game: BouncyBlobsGame | null): void {
   installedGame = game;
@@ -136,6 +191,27 @@ export function installDebugBridge(game: BouncyBlobsGame | null): void {
     getRollbackStats: () => rollbackStatsAccessor ? rollbackStatsAccessor() : null,
     getFrameProfile: () => getFrameProfile(),
     resetFrameProfile: () => resetFrameProfile(),
+    getHashHistory: () => getHashHistory(),
+    // Resolve through the module-level accessors at call time so
+    // installDebugBridge order vs setCompareHashesAccessor doesn't
+    // matter. Without this indirection, the bridge captures whatever
+    // value the accessor had at install time (typically null) and
+    // late-wiring never reaches it.
+    compareHashes: async () => {
+      if (!compareHashesAccessor) return null;
+      return await compareHashesAccessor();
+    },
+    togglePause: (paused: boolean) => {
+      togglePauseAccessor?.(paused);
+    },
+    setPlayerInput: (playerId, moveX, moveY, expanding) => {
+      const pm = installedGame?.getPlayerManager();
+      const p = pm?.getPlayer(playerId);
+      if (!p) return;
+      p.moveX = moveX;
+      p.moveY = moveY;
+      p.expanding = expanding;
+    },
   };
   (window as unknown as { __bbDebug: DebugBridge }).__bbDebug = bridge;
 }

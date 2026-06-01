@@ -32,6 +32,18 @@ const TRIGGER_SIDE_PAD = 4;
 
 type PlateState = 'loaded' | 'firing' | 'reloading';
 
+/** Deterministic FNV-1a hash of a string → u32. Used to derive a
+ *  stable numeric id for the engine from the gameplay string id, so
+ *  both host and guest map the same def.id → same engine slot. */
+function hashStringId(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
 interface RegisteredSpring {
   def: SpringPadDef;
   launchDir: Vec2;
@@ -60,6 +72,7 @@ export class SpringPadManager {
   initialize(world: SoftBodyEngine, defs: SpringPadDef[]): void {
     this.world = world;
     this.springs = [];
+    world.clearSpringPads();
     for (const def of defs) this.springs.push(this.registerPlate(world, def));
   }
 
@@ -70,12 +83,13 @@ export class SpringPadManager {
   }
 
   private registerPlate(world: SoftBodyEngine, def: SpringPadDef): RegisteredSpring {
+    // Phase 5 migration: state machine + kinematic plate pose now live
+    // in the Rust engine. JS keeps a shadow record for renderer access
+    // to def + offset, but doesn't run the state machine itself.
     const cos = Math.cos(def.rotation);
     const sin = Math.sin(def.rotation);
     const launchDir = vec2(cos, sin);
     const perpDir = vec2(-sin, cos);
-
-    // Plate-local rectangle (extended pose): x ∈ [w/2 - thickness, w/2], y ∈ [-h/2, h/2]
     const hw = def.width / 2;
     const hh = (def.height * PLATE_WIDTH_SCALE) / 2;
     const frontX = hw;
@@ -90,23 +104,34 @@ export class SpringPadManager {
       def.x + cos * c.x - sin * c.y,
       def.y + sin * c.x + cos * c.y,
     ));
-
     const maxCompress = def.width * MAX_COMPRESS_FRAC;
     const initialOffset = maxCompress;
-    const surface = world.registerStaticPolygon(basePoly, 'default', `spring:${def.id}`);
-    // Shift to initial (cocked) position.
-    for (let i = 0; i < surface.poly.length; i++) {
-      surface.poly[i].x = basePoly[i].x - launchDir.x * initialOffset;
-      surface.poly[i].y = basePoly[i].y - launchDir.y * initialOffset;
-    }
-    surface.velocity = vec2(0, 0);
-    world.commitStaticSurface(surface);
-
     const rawFire = def.fireSpeed ?? DEFAULT_FIRE_SPEED;
     const fireSpeed = Math.min(MAX_FIRE_SPEED, Math.max(MIN_FIRE_SPEED, rawFire));
 
+    // Numeric id for engine — use a hash of the string id for stable
+    // cross-side mapping (both host + guest derive the same number from
+    // the same def.id).
+    const numericId = hashStringId(def.id);
+    world.addSpringPad(numericId, def.x, def.y, def.width, def.height, def.rotation, fireSpeed);
+
+    // The engine creates its own static surface; we don't have a
+    // handle to it for the legacy `s.surface` field, so we leave that
+    // as a placeholder. JS callers that reach into s.surface (only the
+    // renderer + the old update path) get the now-unused initial
+    // cocked-pose poly. The engine writes the live poly via
+    // update_spring_pads internally.
+    const placeholderSurface = {
+      poly: basePoly.map((p) => vec2(p.x - launchDir.x * initialOffset, p.y - launchDir.y * initialOffset)),
+      material: 'default' as const,
+      id: `spring:${def.id}`,
+      velocity: vec2(0, 0),
+      layer: 0xFFFFFFFF,
+      mask: 0xFFFFFFFF,
+    } as unknown as StaticSurface;
+
     return {
-      def, launchDir, perpDir, basePoly, surface,
+      def, launchDir, perpDir, basePoly, surface: placeholderSurface,
       state: 'loaded',
       offset: initialOffset,
       maxCompress,
@@ -116,49 +141,29 @@ export class SpringPadManager {
     };
   }
 
-  update(dt: number): void {
+  update(_dt: number): void {
     if (!this.world) return;
     const world = this.world;
-
-    for (const s of this.springs) {
-      if (s.cooldown > 0) s.cooldown = Math.max(0, s.cooldown - dt);
-
-      // --- State transitions ---
-      if (s.state === 'loaded' && s.cooldown <= 0 && this.frontFaceTouched(s)) {
-        s.state = 'firing';
-        this.onFire?.(vec2(s.def.x, s.def.y), s.launchDir);
-      }
-
-      // --- Drive offset & set surface velocity ---
-      let velAlongLaunch = 0; // signed: + = extending outward along launchDir
-      if (s.state === 'firing') {
-        s.offset -= s.fireSpeed * dt;
-        velAlongLaunch = s.fireSpeed;
-        if (s.offset <= 0) {
-          s.offset = 0;
-          s.state = 'reloading';
-          s.cooldown = COOLDOWN_TIME;
-          velAlongLaunch = 0;
-        }
-      } else if (s.state === 'reloading') {
-        s.offset += s.reloadSpeed * dt;
-        velAlongLaunch = -s.reloadSpeed;
-        if (s.offset >= s.maxCompress) {
-          s.offset = s.maxCompress;
-          s.state = 'loaded';
-          velAlongLaunch = 0;
+    // Phase 5: state machines + plate kinematics live in the Rust
+    // engine (called from world.step). JS reads engine state for
+    // rendering + drains fire events for VFX/SFX.
+    const stateMap = ['loaded', 'firing', 'reloading'] as const;
+    for (let i = 0; i < this.springs.length; i++) {
+      const s = this.springs[i];
+      s.state = stateMap[world.springPadState(i)] ?? 'loaded';
+      s.offset = world.springPadOffset(i);
+    }
+    // Drain fire events for VFX/SFX. Engine returns the gameplay
+    // numeric IDs (FNV-1a of the def.id string).
+    const fired = world.takeSpringPadFireEvents();
+    if (this.onFire && fired.length > 0) {
+      for (const fid of fired) {
+        const idx = this.springs.findIndex((s) => hashStringId(s.def.id) === fid);
+        if (idx >= 0) {
+          const s = this.springs[idx];
+          this.onFire(vec2(s.def.x, s.def.y), s.launchDir);
         }
       }
-
-      // --- Write live poly + surface velocity ---
-      for (let i = 0; i < s.surface.poly.length; i++) {
-        s.surface.poly[i].x = s.basePoly[i].x - s.launchDir.x * s.offset;
-        s.surface.poly[i].y = s.basePoly[i].y - s.launchDir.y * s.offset;
-      }
-      s.surface.velocity!.x = s.launchDir.x * velAlongLaunch;
-      s.surface.velocity!.y = s.launchDir.y * velAlongLaunch;
-      // Push the mutation into the engine (no-op on TS sim).
-      world.commitStaticSurface(s.surface);
     }
   }
 

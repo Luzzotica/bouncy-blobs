@@ -64,6 +64,38 @@ pub enum PointGravityFalloff {
     InverseSquare,
 }
 
+/// A force pattern that can be applied to every blob whose centroid
+/// lies inside a polygon. Phase 3 of the JS→Rust manager migration:
+/// dynamicItemManager's per-tick force computation (cannon, wind zone,
+/// conveyor, bumper, wrecking ball, sticky goo) all reduce to one of
+/// these patterns plus a region polygon, with the *force value itself*
+/// computed by the engine in fixed point — no JS-side `Math.cos/sin`
+/// per tick.
+#[derive(Copy, Clone, Debug)]
+pub enum ForceField {
+    /// Constant force vector applied to each blob's center particle.
+    /// Use for wind zones, conveyors, antigravity zones. Treat as
+    /// "force per blob per dt" — the engine multiplies by dt internally.
+    Uniform { force: FxVec2 },
+    /// Radial blast outward (or inward, if `strength` is negative) from
+    /// `center`. `falloff` controls how strength scales with distance:
+    /// Linear shrinks linearly to `radius`, InverseSquare goes as
+    /// `(radius/dist)^2`. Use for bumpers + wrecking ball blasts +
+    /// magnet zones.
+    Radial {
+        center: FxVec2,
+        strength: Fx,
+        radius: Fx,
+        falloff: PointGravityFalloff,
+    },
+    /// Per-particle velocity damping: `v_new = v_old * (1 - coefficient * dt)`.
+    /// Coefficient in [0, 1] per second. Use for sticky-goo zones,
+    /// underwater drag, snow patches. Applied to EVERY hull particle of
+    /// each matching blob (not just the center) so the body slows
+    /// uniformly without spinning.
+    Drag { coefficient: Fx },
+}
+
 /// Layout-only counterpart to BlobRange in TS. `sort_key` is kept as a
 /// String so iteration order matches the JS-side sort (ASCII / UTF-16
 /// code-point order — kept identical by using only ASCII sort keys in
@@ -102,6 +134,13 @@ pub struct Shape {
     pub shape_match_k: Fx,
     pub shape_match_damp: Fx,
     pub rest_local: Vec<FxVec2>,
+    /// Pristine rest hull captured at `add_blob_from_hull` time, never mutated.
+    /// `set_blob_squash_lean` reads from this and writes the deformed result
+    /// to `rest_local`, so each tick deforms from the same base rather than
+    /// stacking on the previous tick's deformation. Empty for non-blob shapes
+    /// (triggers, static polys). Immutable post-init — NOT snapshotted (the
+    /// caller already controls the world's setup deterministically).
+    pub base_rest_local: Vec<FxVec2>,
     pub shape_match_rest_scale: Fx,
     pub use_frame_override: bool,
     pub frame_override: Transform2D,

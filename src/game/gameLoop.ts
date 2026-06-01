@@ -41,7 +41,13 @@ export interface FrameSample {
   frameMs: number;  // wall-clock since last RAF
   logicMs: number;  // sum of onLogic invocations this RAF
   renderMs: number; // onRender duration
-  logicSteps: number; // count of onLogic calls this RAF (0 if gated)
+  logicSteps: number; // count of onLogic calls this RAF (0 if gated or accumulator-empty)
+  /** True if `onLogic` was called and it returned `false` (lockstep gate
+   * refused because authoritative inputs hadn't arrived yet). Distinguishes
+   * "real jitter stall" from "accumulator hadn't reached FIXED_DT yet" —
+   * the latter is normal on high-refresh-rate displays and is NOT a jitter
+   * signal. */
+  gated: boolean;
   /** Optional per-phase timings populated by callers via
    *  `recordPhaseTime`. Keyed by phase name (e.g. 'worldStep',
    *  'managers', 'camera'). Captures sum across all logic steps in the
@@ -94,6 +100,11 @@ export interface GameLoopCallbacks {
   /** Runs once per RAF, after the logic steps. `alpha` is the fraction of
    * a logic step remaining in the accumulator — use to interpolate visuals. */
   onRender?: (alpha: number) => void;
+  /** Optional dynamic cap on logic steps per RAF. Defaults to MAX_STEPS_PER_FRAME.
+   * Guests in lockstep set this to 1 in steady state (and 2 when the input
+   * buffer is over-deep) so a stalled RAF doesn't trigger a multi-step
+   * burst that visibly fast-forwards the sim. */
+  getMaxSteps?: () => number;
 }
 
 export class GameLoop {
@@ -103,6 +114,7 @@ export class GameLoop {
   private accumulator = 0;
   private readonly onLogic: (dt: number) => boolean | void;
   private readonly onRender?: (alpha: number) => void;
+  private readonly getMaxSteps?: () => number;
 
   constructor(callbacks: GameLoopCallbacks | ((dt: number) => void)) {
     if (typeof callbacks === 'function') {
@@ -111,6 +123,7 @@ export class GameLoop {
     } else {
       this.onLogic = callbacks.onLogic;
       this.onRender = callbacks.onRender;
+      this.getMaxSteps = callbacks.getMaxSteps;
     }
   }
 
@@ -142,7 +155,8 @@ export class GameLoop {
     const logicStart = performance.now();
     let steps = 0;
     let gated = false;
-    while (this.accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+    const maxSteps = Math.max(1, Math.min(MAX_STEPS_PER_FRAME, this.getMaxSteps?.() ?? MAX_STEPS_PER_FRAME));
+    while (this.accumulator >= FIXED_DT && steps < maxSteps) {
       const ran = this.onLogic(FIXED_DT);
       if (ran === false) {
         gated = true;
@@ -151,7 +165,11 @@ export class GameLoop {
       this.accumulator -= FIXED_DT;
       steps += 1;
     }
-    if (!gated && steps === MAX_STEPS_PER_FRAME && this.accumulator >= FIXED_DT) {
+    // Drop excess accumulator when we hit the soft cap mid-RAF. Without this,
+    // the next RAF would still see a "full" accumulator and try to drain
+    // again — defeating the cap and producing exactly the burst-pause cycle
+    // we use it to prevent.
+    if (!gated && steps === maxSteps && this.accumulator >= FIXED_DT) {
       this.accumulator = 0;
     }
     const logicMs = performance.now() - logicStart;
@@ -160,7 +178,7 @@ export class GameLoop {
     this.onRender?.(this.accumulator / FIXED_DT);
     const renderMs = performance.now() - renderStart;
 
-    frameProfileRing.push({ ts: now, frameMs, logicMs, renderMs, logicSteps: steps, phases: takePhaseAccum() });
+    frameProfileRing.push({ ts: now, frameMs, logicMs, renderMs, logicSteps: steps, gated, phases: takePhaseAccum() });
     if (frameProfileRing.length > PROFILE_RING_SIZE) frameProfileRing.shift();
 
     this.rafId = requestAnimationFrame(this.tick);

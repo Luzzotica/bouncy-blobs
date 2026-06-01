@@ -7,6 +7,7 @@
     { "id": "blob-hill", "name": "Blob Hill", "file": "blob-hill.json", "levelTypes": ["koth"] },
     { "id": "default", "name": "Default Arena", "file": "default.json", "levelTypes": ["solo_racing"] },
     { "id": "showcase", "name": "Showcase Arena", "file": "showcase.json", "levelTypes": [], "hidden": true },
-    { "id": "playground", "name": "Physics Playground", "file": "playground.json", "levelTypes": [], "hidden": true }
+    { "id": "playground", "name": "Physics Playground", "file": "playground.json", "levelTypes": [], "hidden": true },
+    { "id": "det-test", "name": "Determinism Test Arena", "file": "det-test.json", "levelTypes": [], "hidden": true }
   ]
 }

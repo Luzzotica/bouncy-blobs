@@ -25,8 +25,12 @@ import { FIXED_DT } from "../game/gameLoop";
 import {
   encodeAggregatedInputs,
   decodeAggregatedInputs,
+  quantizeAxis,
   type AggregatedTick,
 } from "./inputProtocol";
+
+const SLOT_TO_ID: Record<number, string> = { 0: "alice", 1: "bob" };
+const RESOLVE = (slot: number) => SLOT_TO_ID[slot];
 
 interface Sim {
   world: SoftBodyWorld;
@@ -47,19 +51,23 @@ function buildSim(seed: number): Sim {
 
 /** Scripted input — same recipe used by the determinism harness, so two
  * sims fed this in the same order should produce the same world state. */
+// Pre-quantize so both host and guest apply the bit-exact canonical value
+// — same as the production preTickHook flow on the host.
 function inputAtTick(tick: number): AggregatedTick {
   return {
     tick,
     inputs: [
       {
+        slot: 0,
         playerId: "alice",
-        moveX: Math.sin(tick * 0.05),
+        moveX: quantizeAxis(Math.sin(tick * 0.05)),
         moveY: 0,
         expanding: tick % 30 < 15,
       },
       {
+        slot: 1,
         playerId: "bob",
-        moveX: -Math.cos(tick * 0.04),
+        moveX: quantizeAxis(-Math.cos(tick * 0.04)),
         moveY: 0,
         expanding: tick % 40 < 10,
       },
@@ -69,6 +77,7 @@ function inputAtTick(tick: number): AggregatedTick {
 
 function applyTickInputs(sim: Sim, tick: AggregatedTick): void {
   for (const inp of tick.inputs) {
+    if (!inp.playerId) continue;
     const mp = sim.players.getPlayer(inp.playerId);
     if (!mp) continue;
     mp.moveX = inp.moveX;
@@ -105,7 +114,7 @@ describe("late-joiner replay", () => {
 
     const guest = buildSim(SEED);
     for (const buf of recorded) {
-      const agg = decodeAggregatedInputs(buf);
+      const agg = decodeAggregatedInputs(buf, RESOLVE);
       expect(agg).not.toBeNull();
       if (!agg) return;
       for (const t of agg.ticks) {
@@ -134,7 +143,7 @@ describe("late-joiner replay", () => {
     // Single packet with all N ticks — the shape the host sends in the
     // late-joiner bundle.
     const bundle = encodeAggregatedInputs({ ticks: batch });
-    const decoded = decodeAggregatedInputs(bundle);
+    const decoded = decodeAggregatedInputs(bundle, RESOLVE);
     expect(decoded).not.toBeNull();
     if (!decoded) return;
 

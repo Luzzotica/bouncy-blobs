@@ -13,7 +13,7 @@
 export { RoomService } from "./RoomService";
 export type { CreateRoomOpts, JoinRoomOpts, PatchRoomOpts } from "./RoomService";
 export { PeerManager } from "./PeerManager";
-export { SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from "./steamTransport";
+export { SteamTransport, steamNetStartListening, getSelfSteamId, getSelfSteamPersonaName, steamNetCloseAll } from "./steamTransport";
 export type { Transport, ChannelName } from "./transport";
 export type {
   Room,
@@ -48,7 +48,8 @@ export async function createHostRoom(
 ): Promise<{ result: CreateRoomResult; room: RoomService; manager: PeerManager }> {
   const room = new RoomService(config);
   const result = await room.createRoom(opts);
-  const manager = new PeerManager(room, "host", callbacks ?? {});
+  const rtcConfig = rtcConfigFromIceServers(result.ice_servers);
+  const manager = new PeerManager(room, "host", callbacks ?? {}, rtcConfig);
   // Host listens on "host" — both senders address it as either the literal
   // string "host" or the host_peer_id, but the server stores incoming
   // signals with recipient_peer_id="host" by convention.
@@ -72,8 +73,54 @@ export async function joinAsPeer(
 ): Promise<{ result: JoinRoomResult; room: RoomService; manager: PeerManager }> {
   const room = new RoomService(config);
   const result = await room.joinRoom(roomId, opts);
-  const manager = new PeerManager(room, "joiner", callbacks ?? {});
+  const rtcConfig = rtcConfigFromIceServers(result.ice_servers);
+  // Surface the iceServers shape (sans credential) in the phase log so the
+  // user can see whether TURN actually got wired up — when the API can't
+  // mint creds it returns STUN-only, which silently degrades connectivity.
+  callbacks?.onPhase?.("host", "ice-servers", iceServerSummary(result.ice_servers));
+  const manager = new PeerManager(room, "joiner", callbacks ?? {}, rtcConfig);
   await manager.prepareForHost(opts.kind);
   room.startPolling(result.peer_id, (signal) => manager.handleSignal(signal));
   return { result, room, manager };
+}
+
+/** Build an `RTCConfiguration` for the SDK's WebRtcTransport. Falls back
+ * to the transport's built-in public-STUN config when the backend didn't
+ * supply servers (e.g. local dev without TURN_SHARED_SECRET in env).
+ *
+ * Default policy is `"all"` — ICE tries host, srflx, and relay pairs in
+ * priority order. Setting `?relay=1` in the URL forces relay-only, which
+ * we found gets pruned to zero pairs when both ends allocate relays on
+ * the SAME coturn server (same public IP triggers Chrome's same-machine
+ * self-loop pruning). Relay-only is still useful for cross-network
+ * testing when the operator wants to confirm TURN-relay works at all.
+ */
+function rtcConfigFromIceServers(servers?: import("./types").IceServerConfig[]): RTCConfiguration | undefined {
+  if (!servers || servers.length === 0) return undefined;
+  let forceRelay = false;
+  try {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("relay") === "1") {
+      forceRelay = true;
+    }
+  } catch { /* non-browser context */ }
+  const cfg: RTCConfiguration = { iceServers: servers as RTCIceServer[] };
+  if (forceRelay) cfg.iceTransportPolicy = "relay";
+  return cfg;
+}
+
+/** Strip credentials before logging — usernames are HMAC strings and
+ * credentials are base64 hashes; safe to show urls + whether a credential
+ * was attached so we can tell STUN-only from STUN+TURN at a glance. */
+function iceServerSummary(servers?: import("./types").IceServerConfig[]): Record<string, unknown> {
+  if (!servers || servers.length === 0) return { servers: 0, note: "stun-only-fallback" };
+  const stun = servers.filter((s) => {
+    const u = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+    return typeof u === "string" && u.startsWith("stun:");
+  }).length;
+  const turn = servers.filter((s) => {
+    const u = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+    return typeof u === "string" && (u.startsWith("turn:") || u.startsWith("turns:"));
+  }).length;
+  const cfg = rtcConfigFromIceServers(servers);
+  return { stun, turn, policy: cfg?.iceTransportPolicy ?? "all" };
 }

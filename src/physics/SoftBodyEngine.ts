@@ -137,6 +137,15 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   setBlobSpringStiffnessScale(blobId: number, stiffnessScale: number, dampScale?: number): void;
   setBlobShapeMatchRestScale(blobId: number, s: number): void;
   setBlobRestLocal(blobId: number, restLocal: Vec2[]): void;
+  /** Apply a squash + lean deformation to the blob's rest hull in
+   *  engine-native fixed point. Replaces the JS-side
+   *  `SlimeBlob.updateHullDeformation`: the engine derives the blob's
+   *  rotation angle from shape-matching, rotates `gravityDir` into the
+   *  blob-local frame, and writes the deformed rest pose all in i64
+   *  Fx. Determinism guaranteed across wasm instances; the JS version
+   *  used `Math.atan2/cos/sin` which are implementation-defined per
+   *  ECMA and were the proven cause of cross-tab drift. */
+  setBlobSquashLean(blobId: number, squash: number, lean: number, gravityDir: Vec2): void;
   setBlobMassScale(blobId: number, massScale: number): void;
   resetBlobMassScale(blobId: number): void;
   setBlobGravityOverride(blobId: number, gravity: Vec2 | null): void;
@@ -154,12 +163,77 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   applyBlobExpand(blobId: number, expandForce: number): void;
   applyExternalForcePoint(i: number, f: Vec2): void;
 
+  // ---- Phase 3 zone-force APIs ----
+  // Foundation for engine-side dynamicItems / spike-zones / powerup
+  // pickup detection (Phases 4-6 of the manager migration). All zone
+  // queries + force application happen in i64 fixed point, so JS
+  // doesn't need to read blob positions, do Math.* trig, and write
+  // forces back in — eliminates a class of cross-instance drift risk.
+  /** Find every blob whose centroid lies inside `polygon`. Returns
+   *  blob IDs in ascending order. Polygon is flat `[x0,y0,x1,y1,…]`. */
+  blobsOverlappingPolygon(polygon: Float64Array): Uint32Array;
+  /** Apply a constant force vector to every blob inside `polygon`.
+   *  Scales by `dt` internally. Use for wind zones, conveyors. */
+  applyForceInPolygonUniform(polygon: Float64Array, fx: number, fy: number, dt: number): void;
+  /** Apply a radial force (outward if strength > 0) from (cx,cy) to
+   *  every blob inside `polygon` within `radius`. `falloff`: 0 =
+   *  Linear, 1 = InverseSquare. Use for bumpers, wrecking-ball blasts. */
+  applyForceInPolygonRadial(
+    polygon: Float64Array,
+    cx: number, cy: number,
+    strength: number, radius: number,
+    falloff: 0 | 1,
+    dt: number,
+  ): void;
+  /** Velocity damping per hull particle for every blob in `polygon`:
+   *  v *= (1 - coefficient*dt). Use for sticky goo, underwater drag. */
+  applyForceInPolygonDrag(polygon: Float64Array, coefficient: number, dt: number): void;
+
+  // ---- Phase 4 dynamic-item APIs ----
+  // Register dynamic-item zones at level-load time. The engine's `step`
+  // advances per-item timers + applies forces internally — no per-tick
+  // JS work needed beyond rendering. Each add_* returns the item's
+  // sequential index in the engine's list. The JS DynamicItemManager
+  // is reduced to a thin loader (these calls) + visual state queries
+  // (dynamicItemActive).
+  addCannon(id: number, x: number, y: number, w: number, h: number, rotation: number): number;
+  addCatapult(id: number, x: number, y: number, w: number, h: number): number;
+  addBumper(id: number, x: number, y: number, radius: number): number;
+  addWindZone(id: number, x: number, y: number, w: number, h: number, rotation: number): number;
+  addGravityFlipper(id: number, x: number, y: number, w: number, h: number): number;
+  addConveyor(id: number, x: number, y: number, w: number, h: number, direction: 1 | -1): number;
+  addStickyGoo(id: number, x: number, y: number, w: number, h: number): number;
+  addWreckingBall(id: number, x: number, y: number): number;
+  clearDynamicItems(): void;
+  dynamicItemCount(): number;
+  /** Read the engine's visual `active` flag for an item. Returns true
+   *  when the item is currently firing (cannon mid-blast, bumper
+   *  just-fired, etc.). JS uses this to drive VFX/SFX. */
+  dynamicItemActive(idx: number): boolean;
+
+  // ---- Phase 5 spring-pad APIs ----
+  /** Register a spring pad. The engine creates a kinematic
+   *  static_surface for the plate and runs the loaded/firing/reloading
+   *  state machine each step. `fireSpeedOverride <= 0` uses default. */
+  addSpringPad(id: number, x: number, y: number, width: number, height: number, rotation: number, fireSpeedOverride: number): number;
+  clearSpringPads(): void;
+  springPadCount(): number;
+  /** Pad state: 0 = Loaded, 1 = Firing, 2 = Reloading. */
+  springPadState(idx: number): number;
+  /** Plate retraction offset in world units. 0 = fully extended. */
+  springPadOffset(idx: number): number;
+  /** Drain pending fire events (gameplay IDs of pads that just
+   *  transitioned loaded→firing). Use for VFX/SFX. */
+  takeSpringPadFireEvents(): Uint32Array;
+
   // ---- network sync ----
   setBlobGroundContacts(blobId: number, count: number): void;
   getBlobGroundContacts(blobId: number): number;
   getBlobGroundContact(blobId: number): GroundContact | null;
   getBlobImpactContact(blobId: number): GroundContact | null;
   getBlobStickyContact(blobId: number): StickyContact;
+  /** Per-hull-particle "touched a solid this step" bitmap, length = hull length, each entry 0|1. */
+  getBlobParticleContacts(blobId: number): Uint8Array;
   getBlobEffectiveGravity(blobId: number): Vec2;
   getBlobShapeMatchTargetHull(blobId: number): Vec2[];
 

@@ -98,6 +98,55 @@ export class SoftBodyWorldHandle {
         return BlobHandle.__wrap(ret);
     }
     /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius
+     * @returns {number}
+     */
+    addBumper(id, x, y, radius) {
+        const ret = wasm.softbodyworldhandle_addBumper(this.__wbg_ptr, id, x, y, radius);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @param {number} rotation
+     * @returns {number}
+     */
+    addCannon(id, x, y, w, h, rotation) {
+        const ret = wasm.softbodyworldhandle_addCannon(this.__wbg_ptr, id, x, y, w, h, rotation);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @returns {number}
+     */
+    addCatapult(id, x, y, w, h) {
+        const ret = wasm.softbodyworldhandle_addCatapult(this.__wbg_ptr, id, x, y, w, h);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @param {number} direction
+     * @returns {number}
+     */
+    addConveyor(id, x, y, w, h, direction) {
+        const ret = wasm.softbodyworldhandle_addConveyor(this.__wbg_ptr, id, x, y, w, h, direction);
+        return ret >>> 0;
+    }
+    /**
      * Hard max-distance constraint between two particles. Solved in
      * step 7 alongside welds and anchors, repeated `constraint_iters`
      * times. Use this for a real "rope length" cap that doesn't depend
@@ -118,6 +167,18 @@ export class SoftBodyWorldHandle {
      */
     addExtraSpring(i, j, rest, k, damp) {
         wasm.softbodyworldhandle_addExtraSpring(this.__wbg_ptr, i, j, rest, k, damp);
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @returns {number}
+     */
+    addGravityFlipper(id, x, y, w, h) {
+        const ret = wasm.softbodyworldhandle_addGravityFlipper(this.__wbg_ptr, id, x, y, w, h);
+        return ret >>> 0;
     }
     /**
      * @param {number} idx
@@ -164,6 +225,58 @@ export class SoftBodyWorldHandle {
         return takeObject(ret);
     }
     /**
+     * Register a spring pad. The engine creates a kinematic
+     * static_surface for the plate and runs the state machine each
+     * step(). `fire_speed_override` of <=0 uses the default.
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {number} rotation
+     * @param {number} fire_speed_override
+     * @returns {number}
+     */
+    addSpringPad(id, x, y, width, height, rotation, fire_speed_override) {
+        const ret = wasm.softbodyworldhandle_addSpringPad(this.__wbg_ptr, id, x, y, width, height, rotation, fire_speed_override);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @returns {number}
+     */
+    addStickyGoo(id, x, y, w, h) {
+        const ret = wasm.softbodyworldhandle_addStickyGoo(this.__wbg_ptr, id, x, y, w, h);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @param {number} rotation
+     * @returns {number}
+     */
+    addWindZone(id, x, y, w, h, rotation) {
+        const ret = wasm.softbodyworldhandle_addWindZone(this.__wbg_ptr, id, x, y, w, h, rotation);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @returns {number}
+     */
+    addWreckingBall(id, x, y) {
+        const ret = wasm.softbodyworldhandle_addWreckingBall(this.__wbg_ptr, id, x, y);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} blob_id
      * @param {number} dvx
      * @param {number} dvy
@@ -190,6 +303,51 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_applyExternalForcePoint(this.__wbg_ptr, i, fx, fy);
     }
     /**
+     * Velocity damping for every hull particle of every blob in
+     * `polygon`: v *= (1 - coefficient * dt). Use for sticky goo,
+     * underwater drag.
+     * @param {Float64Array} polygon
+     * @param {number} coefficient
+     * @param {number} dt
+     */
+    applyForceInPolygonDrag(polygon, coefficient, dt) {
+        const ptr0 = passArrayF64ToWasm0(polygon, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_applyForceInPolygonDrag(this.__wbg_ptr, ptr0, len0, coefficient, dt);
+    }
+    /**
+     * Apply a radial force (outward if `strength` > 0, inward if < 0)
+     * from `(cx,cy)` to every blob in `polygon` within `radius`.
+     * `falloff`: 0 = Linear (mag * (1 - d/radius)), 1 = InverseSquare
+     * ((radius/d)^2). Use for bumpers, wrecking-ball blasts, magnets.
+     * @param {Float64Array} polygon
+     * @param {number} cx
+     * @param {number} cy
+     * @param {number} strength
+     * @param {number} radius
+     * @param {number} falloff
+     * @param {number} dt
+     */
+    applyForceInPolygonRadial(polygon, cx, cy, strength, radius, falloff, dt) {
+        const ptr0 = passArrayF64ToWasm0(polygon, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_applyForceInPolygonRadial(this.__wbg_ptr, ptr0, len0, cx, cy, strength, radius, falloff, dt);
+    }
+    /**
+     * Apply a constant `(fx, fy)` force to every blob whose centroid
+     * is inside `polygon`. Force scales by dt internally. Use for
+     * wind zones, conveyors.
+     * @param {Float64Array} polygon
+     * @param {number} fx
+     * @param {number} fy
+     * @param {number} dt
+     */
+    applyForceInPolygonUniform(polygon, fx, fy, dt) {
+        const ptr0 = passArrayF64ToWasm0(polygon, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_applyForceInPolygonUniform(this.__wbg_ptr, ptr0, len0, fx, fy, dt);
+    }
+    /**
      * @param {number} blob_id
      * @returns {number}
      */
@@ -213,8 +371,54 @@ export class SoftBodyWorldHandle {
         const ret = wasm.softbodyworldhandle_blobIdForParticle(this.__wbg_ptr, idx);
         return ret;
     }
+    /**
+     * Find every blob whose centroid is inside `polygon`. Returns
+     * blob_ids in ascending order. Polygon is a flat
+     * `[x0,y0,x1,y1,…]` Float64Array.
+     * @param {Float64Array} polygon
+     * @returns {Uint32Array}
+     */
+    blobsOverlappingPolygon(polygon) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArrayF64ToWasm0(polygon, wasm.__wbindgen_export);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.softbodyworldhandle_blobsOverlappingPolygon(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v2 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            return v2;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    clearDynamicItems() {
+        wasm.softbodyworldhandle_clearDynamicItems(this.__wbg_ptr);
+    }
+    clearSpringPads() {
+        wasm.softbodyworldhandle_clearSpringPads(this.__wbg_ptr);
+    }
     clearStaticPolygons() {
         wasm.softbodyworldhandle_clearStaticPolygons(this.__wbg_ptr);
+    }
+    /**
+     * Read the visual `active` flag for item index `idx` — used by
+     * JS-side renderers/SFX to fire VFX when an item is currently
+     * firing (cannon mid-blast, bumper just-fired, etc.).
+     * @param {number} idx
+     * @returns {boolean}
+     */
+    dynamicItemActive(idx) {
+        const ret = wasm.softbodyworldhandle_dynamicItemActive(this.__wbg_ptr, idx);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    dynamicItemCount() {
+        const ret = wasm.softbodyworldhandle_dynamicItemCount(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @param {number} blob_id
@@ -247,6 +451,16 @@ export class SoftBodyWorldHandle {
      */
     getBlobImpactContact(blob_id) {
         const ret = wasm.softbodyworldhandle_getBlobImpactContact(this.__wbg_ptr, blob_id);
+        return takeObject(ret);
+    }
+    /**
+     * Per-particle "touched solid this step" bitmap, indexed in hull order.
+     * Length equals the blob's hull length; each byte is 0 or 1.
+     * @param {number} blob_id
+     * @returns {Uint8Array}
+     */
+    getBlobParticleContacts(blob_id) {
+        const ret = wasm.softbodyworldhandle_getBlobParticleContacts(this.__wbg_ptr, blob_id);
         return takeObject(ret);
     }
     /**
@@ -512,6 +726,21 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_setBlobSpringStiffnessScale(this.__wbg_ptr, blob_id, stiffness, damp);
     }
     /**
+     * Engine-side hull squash + lean deformation. Replaces the JS
+     * `SlimeBlob.updateHullDeformation` (which called Math.atan2 +
+     * Math.cos/sin per tick — implementation-defined floats that drift
+     * between V8 instances). All trig now runs against deterministic
+     * integer LUTs inside the engine.
+     * @param {number} blob_id
+     * @param {number} squash
+     * @param {number} lean
+     * @param {number} gravity_x
+     * @param {number} gravity_y
+     */
+    setBlobSquashLean(blob_id, squash, lean, gravity_x, gravity_y) {
+        wasm.softbodyworldhandle_setBlobSquashLean(this.__wbg_ptr, blob_id, squash, lean, gravity_x, gravity_y);
+    }
+    /**
      * @param {number} i
      * @param {number} x
      * @param {number} y
@@ -583,6 +812,31 @@ export class SoftBodyWorldHandle {
         return takeObject(ret);
     }
     /**
+     * @returns {number}
+     */
+    springPadCount() {
+        const ret = wasm.softbodyworldhandle_springPadCount(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Current plate retraction offset in world units. 0 = fully extended.
+     * @param {number} idx
+     * @returns {number}
+     */
+    springPadOffset(idx) {
+        const ret = wasm.softbodyworldhandle_springPadOffset(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * Returns the spring pad's state: 0 = Loaded, 1 = Firing, 2 = Reloading.
+     * @param {number} idx
+     * @returns {number}
+     */
+    springPadState(idx) {
+        const ret = wasm.softbodyworldhandle_springPadState(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
      * FNV-1a 64-bit hash of every (pos.raw, vel.raw) i64 in the sim.
      * Two clients with the same state arrays produce the same hash.
      * Useful for cheap divergence checks in netplay.
@@ -620,6 +874,25 @@ export class SoftBodyWorldHandle {
     takeCrushEvents() {
         const ret = wasm.softbodyworldhandle_takeCrushEvents(this.__wbg_ptr);
         return takeObject(ret);
+    }
+    /**
+     * Drain pending fire events (gameplay IDs of pads that
+     * transitioned loaded→firing this step). JS uses these to spawn
+     * VFX/SFX.
+     * @returns {Uint32Array}
+     */
+    takeSpringPadFireEvents() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_takeSpringPadFireEvents(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Drain pending trigger-entered events. Returns flat (shape_idx, blob_id) pairs.
@@ -742,6 +1015,14 @@ function getArrayU32FromWasm0(ptr, len) {
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
 }
 
 let cachedFloat64ArrayMemory0 = null;
@@ -877,6 +1158,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedDataViewMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;

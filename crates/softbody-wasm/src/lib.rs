@@ -229,6 +229,164 @@ impl SoftBodyWorldHandle {
         self.inner.apply_blob_linear_velocity_delta(blob_id, fv(dvx, dvy));
     }
 
+    // ---- Phase 3 zone-force APIs (foundation for Phases 4-6) ----
+
+    /// Find every blob whose centroid is inside `polygon`. Returns
+    /// blob_ids in ascending order. Polygon is a flat
+    /// `[x0,y0,x1,y1,…]` Float64Array.
+    #[wasm_bindgen(js_name = blobsOverlappingPolygon)]
+    pub fn blobs_overlapping_polygon(&self, polygon: &[f64]) -> Vec<u32> {
+        let poly = poly_from_f64_pairs(polygon);
+        self.inner.blobs_overlapping_polygon(&poly)
+    }
+
+    /// Apply a constant `(fx, fy)` force to every blob whose centroid
+    /// is inside `polygon`. Force scales by dt internally. Use for
+    /// wind zones, conveyors.
+    #[wasm_bindgen(js_name = applyForceInPolygonUniform)]
+    pub fn apply_force_in_polygon_uniform(
+        &mut self, polygon: &[f64], fx: f64, fy: f64, dt: f64,
+    ) {
+        let poly = poly_from_f64_pairs(polygon);
+        self.inner.apply_force_in_polygon(
+            &poly,
+            softbody::types::ForceField::Uniform { force: fv(fx, fy) },
+            Fx::from_f64(dt),
+        );
+    }
+
+    /// Apply a radial force (outward if `strength` > 0, inward if < 0)
+    /// from `(cx,cy)` to every blob in `polygon` within `radius`.
+    /// `falloff`: 0 = Linear (mag * (1 - d/radius)), 1 = InverseSquare
+    /// ((radius/d)^2). Use for bumpers, wrecking-ball blasts, magnets.
+    #[wasm_bindgen(js_name = applyForceInPolygonRadial)]
+    pub fn apply_force_in_polygon_radial(
+        &mut self,
+        polygon: &[f64],
+        cx: f64, cy: f64,
+        strength: f64,
+        radius: f64,
+        falloff: u32,
+        dt: f64,
+    ) {
+        let poly = poly_from_f64_pairs(polygon);
+        let f = match falloff {
+            0 => softbody::types::PointGravityFalloff::Linear,
+            _ => softbody::types::PointGravityFalloff::InverseSquare,
+        };
+        self.inner.apply_force_in_polygon(
+            &poly,
+            softbody::types::ForceField::Radial {
+                center: fv(cx, cy),
+                strength: Fx::from_f64(strength),
+                radius: Fx::from_f64(radius),
+                falloff: f,
+            },
+            Fx::from_f64(dt),
+        );
+    }
+
+    /// Velocity damping for every hull particle of every blob in
+    /// `polygon`: v *= (1 - coefficient * dt). Use for sticky goo,
+    /// underwater drag.
+    #[wasm_bindgen(js_name = applyForceInPolygonDrag)]
+    pub fn apply_force_in_polygon_drag(
+        &mut self, polygon: &[f64], coefficient: f64, dt: f64,
+    ) {
+        let poly = poly_from_f64_pairs(polygon);
+        self.inner.apply_force_in_polygon(
+            &poly,
+            softbody::types::ForceField::Drag { coefficient: Fx::from_f64(coefficient) },
+            Fx::from_f64(dt),
+        );
+    }
+
+    // ---- Phase 4 dynamic-item APIs ----
+    // Register a dynamic-item zone at level-load time. Each call returns
+    // the item's index in the engine's `dynamic_items` vec (sequential).
+    // `update_dynamic_items` runs internally each step() to advance
+    // timers + apply forces. JS-side dynamicItemManager is reduced to a
+    // thin loader (calls these add_* methods at level start) + event
+    // drainer (queries dynamicItemActive for VFX).
+
+    #[wasm_bindgen(js_name = addCannon)]
+    pub fn add_cannon(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64, rotation: f64) -> u32 {
+        self.inner.add_cannon(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h), Fx::from_f64(rotation))
+    }
+    #[wasm_bindgen(js_name = addCatapult)]
+    pub fn add_catapult(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64) -> u32 {
+        self.inner.add_catapult(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h))
+    }
+    #[wasm_bindgen(js_name = addBumper)]
+    pub fn add_bumper(&mut self, id: u32, x: f64, y: f64, radius: f64) -> u32 {
+        self.inner.add_bumper(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(radius))
+    }
+    #[wasm_bindgen(js_name = addWindZone)]
+    pub fn add_wind_zone(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64, rotation: f64) -> u32 {
+        self.inner.add_wind_zone(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h), Fx::from_f64(rotation))
+    }
+    #[wasm_bindgen(js_name = addGravityFlipper)]
+    pub fn add_gravity_flipper(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64) -> u32 {
+        self.inner.add_gravity_flipper(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h))
+    }
+    #[wasm_bindgen(js_name = addConveyor)]
+    pub fn add_conveyor(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64, direction: i32) -> u32 {
+        self.inner.add_conveyor(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h), direction)
+    }
+    #[wasm_bindgen(js_name = addStickyGoo)]
+    pub fn add_sticky_goo(&mut self, id: u32, x: f64, y: f64, w: f64, h: f64) -> u32 {
+        self.inner.add_sticky_goo(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h))
+    }
+    #[wasm_bindgen(js_name = addWreckingBall)]
+    pub fn add_wrecking_ball(&mut self, id: u32, x: f64, y: f64) -> u32 {
+        self.inner.add_wrecking_ball(id, Fx::from_f64(x), Fx::from_f64(y))
+    }
+    #[wasm_bindgen(js_name = clearDynamicItems)]
+    pub fn clear_dynamic_items(&mut self) { self.inner.clear_dynamic_items(); }
+    #[wasm_bindgen(js_name = dynamicItemCount)]
+    pub fn dynamic_item_count(&self) -> usize { self.inner.dynamic_item_count() }
+    /// Read the visual `active` flag for item index `idx` — used by
+    /// JS-side renderers/SFX to fire VFX when an item is currently
+    /// firing (cannon mid-blast, bumper just-fired, etc.).
+    #[wasm_bindgen(js_name = dynamicItemActive)]
+    pub fn dynamic_item_active(&self, idx: usize) -> bool {
+        self.inner.dynamic_item_active(idx)
+    }
+
+    // ---- Phase 5 spring-pad APIs ----
+    /// Register a spring pad. The engine creates a kinematic
+    /// static_surface for the plate and runs the state machine each
+    /// step(). `fire_speed_override` of <=0 uses the default.
+    #[wasm_bindgen(js_name = addSpringPad)]
+    pub fn add_spring_pad(
+        &mut self,
+        id: u32,
+        x: f64, y: f64,
+        width: f64, height: f64,
+        rotation: f64,
+        fire_speed_override: f64,
+    ) -> u32 {
+        let fs = if fire_speed_override > 0.0 { Some(Fx::from_f64(fire_speed_override)) } else { None };
+        self.inner.add_spring_pad(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(width), Fx::from_f64(height), Fx::from_f64(rotation), fs)
+    }
+    #[wasm_bindgen(js_name = clearSpringPads)]
+    pub fn clear_spring_pads(&mut self) { self.inner.clear_spring_pads(); }
+    #[wasm_bindgen(js_name = springPadCount)]
+    pub fn spring_pad_count(&self) -> usize { self.inner.spring_pad_count() }
+    /// Returns the spring pad's state: 0 = Loaded, 1 = Firing, 2 = Reloading.
+    #[wasm_bindgen(js_name = springPadState)]
+    pub fn spring_pad_state(&self, idx: usize) -> u32 { self.inner.spring_pad_state(idx) }
+    /// Current plate retraction offset in world units. 0 = fully extended.
+    #[wasm_bindgen(js_name = springPadOffset)]
+    pub fn spring_pad_offset(&self, idx: usize) -> f64 { self.inner.spring_pad_offset(idx) }
+    /// Drain pending fire events (gameplay IDs of pads that
+    /// transitioned loaded→firing this step). JS uses these to spawn
+    /// VFX/SFX.
+    #[wasm_bindgen(js_name = takeSpringPadFireEvents)]
+    pub fn take_spring_pad_fire_events(&mut self) -> Vec<u32> {
+        self.inner.take_spring_pad_fire_events()
+    }
+
     // ---- state readout (Float64Array — converted on demand from Fx) ----
 
     /// Flat (x0,y0,x1,y1,...) buffer of all particle positions.
@@ -427,6 +585,29 @@ impl SoftBodyWorldHandle {
         self.inner.set_blob_rest_local(blob_id, &pts);
     }
 
+    /// Engine-side hull squash + lean deformation. Replaces the JS
+    /// `SlimeBlob.updateHullDeformation` (which called Math.atan2 +
+    /// Math.cos/sin per tick — implementation-defined floats that drift
+    /// between V8 instances). All trig now runs against deterministic
+    /// integer LUTs inside the engine.
+    #[wasm_bindgen(js_name = setBlobSquashLean)]
+    pub fn set_blob_squash_lean(
+        &mut self,
+        blob_id: u32,
+        squash: f64,
+        lean: f64,
+        gravity_x: f64,
+        gravity_y: f64,
+    ) {
+        let g = FxVec2::new(Fx::from_f64(gravity_x), Fx::from_f64(gravity_y));
+        self.inner.set_blob_squash_lean(
+            blob_id,
+            Fx::from_f64(squash),
+            Fx::from_f64(lean),
+            g,
+        );
+    }
+
     #[wasm_bindgen(js_name = setBlobMassScale)]
     pub fn set_blob_mass_scale(&mut self, blob_id: u32, scale: f64) {
         self.inner.set_blob_mass_scale(blob_id, Fx::from_f64(scale));
@@ -496,6 +677,14 @@ impl SoftBodyWorldHandle {
         self.inner.get_blob_impact_contact(blob_id).map(|(p, n)| {
             Float64Array::from(&[p.x.to_f64(), p.y.to_f64(), n.x.to_f64(), n.y.to_f64()][..])
         })
+    }
+
+    /// Per-particle "touched solid this step" bitmap, indexed in hull order.
+    /// Length equals the blob's hull length; each byte is 0 or 1.
+    #[wasm_bindgen(js_name = getBlobParticleContacts)]
+    pub fn get_blob_particle_contacts(&self, blob_id: u32) -> js_sys::Uint8Array {
+        let buf = self.inner.get_blob_particle_contacts(blob_id);
+        js_sys::Uint8Array::from(&buf[..])
     }
 
     /// Returns [count, normalX, normalY].

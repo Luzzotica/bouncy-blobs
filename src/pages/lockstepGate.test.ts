@@ -56,7 +56,7 @@ describe('evaluateLockstepGate', () => {
 
   it('PASSES during playing once the next tick is in the buffer', () => {
     const buf = emptyBuffer();
-    buf.set(101, { tick: 101, inputs: [{ playerId: 'p', moveX: 0.5, moveY: 0, expanding: false }] });
+    buf.set(101, { tick: 101, inputs: [{ slot: 0, playerId: 'p', moveX: 0.5, moveY: 0, expanding: false }] });
     let appliedTick = -1;
     const ok = evaluateLockstepGate({
       worldTick: 100,
@@ -75,7 +75,7 @@ describe('evaluateLockstepGate', () => {
     buf.set(98, { tick: 98, inputs: [] });
     buf.set(99, { tick: 99, inputs: [] });
     buf.set(100, { tick: 100, inputs: [] });
-    buf.set(101, { tick: 101, inputs: [{ playerId: 'p', moveX: 0, moveY: 0, expanding: false }] });
+    buf.set(101, { tick: 101, inputs: [{ slot: 0, playerId: 'p', moveX: 0, moveY: 0, expanding: false }] });
     evaluateLockstepGate({
       worldTick: 100,
       phase: 'playing',

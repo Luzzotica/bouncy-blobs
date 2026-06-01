@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { LevelData, LevelType } from "../levels/types";
+import type { GameStateSnapshot } from "../game/bouncyBlobsGame";
 
 export interface SnapshotPlayer {
   id: string;
@@ -42,6 +43,11 @@ export interface ModeStateSnapshot {
   /** GamePhase from the host's GameModeManager. */
   phase: "voting" | "countdown" | "playing" | "results" | string;
   timeRemainingMs?: number;
+  /** Seconds-on-the-wall left in the current non-`playing` phase (countdown
+   * or results). Guests use this to drive the same overlay/timer the host
+   * shows, since without it they have no way to render the "Next round…"
+   * countdown after the host ends a round. */
+  phaseTimerMs?: number;
   scores?: Record<string, number>;
   winner?: { playerId: string | null; name: string | null } | null;
   /** KOTH: id/color of the current king. */
@@ -135,6 +141,12 @@ export interface LobbyStateEvent {
     color: string;
     faceId: string;
     kind: "host" | "guest" | "bot";
+    /** Wire-protocol slot assigned by the host (0..15). The compact
+     *  v2 input format encodes inputs by slot rather than by playerId
+     *  to keep packets small enough for K=120-tick redundancy on the
+     *  unreliable channel. Guests build a slot→playerId map from this
+     *  field and consult it in decodeAggregatedInputs. */
+    slot: number;
   }>;
   /** Mode state (formerly inside WorldSnapshot.modeState). Stage 2 moved
    * scores/winner/phase out of the per-tick binary frame and into this
@@ -180,4 +192,56 @@ export type ReliableEvent =
       state: number;
     }
   | LobbyStateEvent
-  | { type: "match_ended"; reason: string };
+  | { type: "match_ended"; reason: string }
+  | {
+      /**
+       * Host → all guests. Pause/resume the sim on both sides at the
+       * same wall-clock instant (the guest receives this and sets its
+       * local pacingConfig.paused). Used by the compare-hashes
+       * diagnostic so both sides freeze and stop drifting while we
+       * inspect per-tick state. Not for any gameplay purpose.
+       */
+      type: "set_paused";
+      paused: boolean;
+    }
+  | {
+      /**
+       * Host → all guests. "Send me your last N (tick, hash) entries
+       * so I can compare them to mine side-by-side." Reply is the
+       * matching `hashes_response` reliable event with the same
+       * requestId, sent guest → host.
+       */
+      type: "request_hashes";
+      requestId: number;
+    }
+  | {
+      /**
+       * Guest → host. Reply to `request_hashes` carrying the guest's
+       * own per-tick (tick, hash) ring. The host's overlay merges
+       * these into a side-by-side table.
+       */
+      type: "hashes_response";
+      requestId: number;
+      peerId: string;
+      entries: Array<{ tick: number; hash: string; summary?: import("./hashHistory").TickSummary }>;
+    }
+  | {
+      /**
+       * Host → all guests. Full game-state snapshot — every JS-side
+       * field that affects sim continuity (per-blob SlimeBlob state +
+       * every manager's dumpState). Broadcast alongside the binary
+       * keyframe at ~1Hz; together they form a lossless sync of
+       * engine state (keyframe carries `engine.serializeState()`) +
+       * everything outside the engine (this event).
+       *
+       * Sent on the reliable 'state' channel so apply order is
+       * deterministic: keyframe binary arrives first, restoring
+       * engine state; then this event arrives, restoring JS state
+       * via `game.restoreGameState(state)`. Without BOTH, the next
+       * `blob.update()` on the guest reads un-synced JS state and
+       * writes different forces into the engine — sims diverge.
+       */
+      type: "manager_state";
+      tick: number;
+      state: GameStateSnapshot;
+    };

@@ -268,6 +268,15 @@ pub fn steam_id_self(state: State<'_, SteamState>) -> Result<String, SteamCmdErr
     Ok(client.user().steam_id().raw().to_string())
 }
 
+/// Local Steam user's persona (display) name — what other Steam users see.
+/// Used to pre-fill the host name picker when the game is running under
+/// Steam, so the user doesn't have to retype it.
+#[tauri::command]
+pub fn steam_persona_name(state: State<'_, SteamState>) -> Result<String, SteamCmdError> {
+    let client = state.client()?;
+    Ok(client.friends().name())
+}
+
 /// Open a listen socket so other peers can `connect_p2p` to us by SteamID.
 /// Idempotent: safe to call multiple times; subsequent calls are no-ops.
 #[tauri::command]

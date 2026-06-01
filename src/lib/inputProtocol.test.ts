@@ -4,14 +4,18 @@ import {
   decodeClientInputBatch,
   encodeAggregatedInputs,
   decodeAggregatedInputs,
+  quantizeAxis,
+  quantizeAxisToInt,
+  dequantizeAxis,
   MAGIC_CLIENT_INPUT,
   MAGIC_AGGREGATED_INPUTS,
+  SLOT_UNASSIGNED,
   type ClientInputBatch,
   type AggregatedInputs,
 } from "./inputProtocol";
 
 describe("inputProtocol", () => {
-  it("round-trips a client input batch", () => {
+  it("round-trips a client input batch (v1, f64)", () => {
     const batch: ClientInputBatch = {
       frames: [
         { tick: 100, moveX: 0.5, moveY: 0, expanding: false },
@@ -29,11 +33,11 @@ describe("inputProtocol", () => {
     expect(out.frames).toHaveLength(3);
     expect(out.frames[0].tick).toBe(100);
     expect(out.frames[1].expanding).toBe(true);
-    // Quantization tolerance ~1/127 ≈ 0.008
-    expect(Math.abs(out.frames[0].moveX - 0.5)).toBeLessThan(0.01);
-    expect(Math.abs(out.frames[1].moveY - -0.25)).toBeLessThan(0.01);
-    expect(out.frames[2].moveX).toBeCloseTo(-1, 2);
-    expect(out.frames[2].moveY).toBeCloseTo(1, 2);
+    // ClientInputBatch is still f64 — exact match.
+    expect(out.frames[0].moveX).toBe(0.5);
+    expect(out.frames[1].moveY).toBe(-0.25);
+    expect(out.frames[2].moveX).toBe(-1);
+    expect(out.frames[2].moveY).toBe(1);
   });
 
   it("round-trips an empty client batch", () => {
@@ -43,22 +47,22 @@ describe("inputProtocol", () => {
     expect(out!.frames).toHaveLength(0);
   });
 
-  it("round-trips aggregated inputs with multiple ticks + players", () => {
+  it("round-trips aggregated inputs with multiple ticks + players (v2, slot-based)", () => {
     const agg: AggregatedInputs = {
       ticks: [
         {
           tick: 200,
           inputs: [
-            { playerId: "host-local", moveX: 1, moveY: 0, expanding: false },
-            { playerId: "guest-p1", moveX: -0.5, moveY: 0.5, expanding: true },
+            { slot: 0, moveX: quantizeAxis(1), moveY: 0, expanding: false },
+            { slot: 1, moveX: quantizeAxis(-0.5), moveY: quantizeAxis(0.5), expanding: true },
           ],
         },
         {
           tick: 201,
           inputs: [
-            { playerId: "host-local", moveX: 1, moveY: 0, expanding: false },
-            { playerId: "guest-p1", moveX: -0.5, moveY: 0.5, expanding: true },
-            { playerId: "bot-aggressive-3-1234", moveX: 0, moveY: -1, expanding: true },
+            { slot: 0, moveX: quantizeAxis(1), moveY: 0, expanding: false },
+            { slot: 1, moveX: quantizeAxis(-0.5), moveY: quantizeAxis(0.5), expanding: true },
+            { slot: 2, moveX: 0, moveY: quantizeAxis(-1), expanding: true },
           ],
         },
       ],
@@ -67,16 +71,41 @@ describe("inputProtocol", () => {
     const u8 = new Uint8Array(buf);
     expect(u8[0]).toBe(MAGIC_AGGREGATED_INPUTS);
 
-    const out = decodeAggregatedInputs(buf);
+    const idBySlot: Record<number, string> = {
+      0: "host-local",
+      1: "guest-p1",
+      2: "bot-aggressive-3",
+    };
+    const out = decodeAggregatedInputs(buf, (slot) => idBySlot[slot]);
     expect(out).not.toBeNull();
     if (!out) return;
     expect(out.ticks).toHaveLength(2);
     expect(out.ticks[0].tick).toBe(200);
     expect(out.ticks[0].inputs).toHaveLength(2);
-    expect(out.ticks[1].inputs).toHaveLength(3);
-    expect(out.ticks[1].inputs[2].playerId).toBe("bot-aggressive-3-1234");
+    expect(out.ticks[0].inputs[0].slot).toBe(0);
+    expect(out.ticks[0].inputs[0].playerId).toBe("host-local");
+    expect(out.ticks[1].inputs[2].playerId).toBe("bot-aggressive-3");
+    // Quantization round-trips within 1/127.
     expect(Math.abs(out.ticks[1].inputs[2].moveY - -1)).toBeLessThan(0.01);
     expect(out.ticks[1].inputs[2].expanding).toBe(true);
+  });
+
+  it("decoder returns slot even when no resolver is supplied; playerId undefined", () => {
+    const agg: AggregatedInputs = {
+      ticks: [{ tick: 1, inputs: [{ slot: 5, moveX: 0, moveY: 0, expanding: false }] }],
+    };
+    const out = decodeAggregatedInputs(encodeAggregatedInputs(agg));
+    expect(out).not.toBeNull();
+    expect(out!.ticks[0].inputs[0].slot).toBe(5);
+    expect(out!.ticks[0].inputs[0].playerId).toBeUndefined();
+  });
+
+  it("encoder substitutes SLOT_UNASSIGNED for out-of-range slot values", () => {
+    const agg: AggregatedInputs = {
+      ticks: [{ tick: 1, inputs: [{ slot: 999, moveX: 0, moveY: 0, expanding: false }] }],
+    };
+    const out = decodeAggregatedInputs(encodeAggregatedInputs(agg));
+    expect(out!.ticks[0].inputs[0].slot).toBe(SLOT_UNASSIGNED);
   });
 
   it("rejects packets with the wrong magic byte", () => {
@@ -95,30 +124,43 @@ describe("inputProtocol", () => {
     expect(decodeClientInputBatch(truncated)).toBeNull();
   });
 
-  it("bandwidth sanity: 4 players × 30 frames stays under 2 KB", () => {
-    // Worst case: host's aggregated broadcast carries 1 tick with 4 players.
-    // At 30 Hz that's 30 packets per second. We size budget per-second.
-    const oneTick: AggregatedInputs = {
-      ticks: [
-        {
-          tick: 1,
-          inputs: [
-            { playerId: "local-keyboard", moveX: 1, moveY: 0, expanding: true },
-            { playerId: "guest-abc-keyboard", moveX: -1, moveY: 0, expanding: false },
-            { playerId: "bot-aggressive-1-5555", moveX: 0, moveY: 1, expanding: false },
-            { playerId: "bot-defender-2-9999", moveX: 0, moveY: -1, expanding: true },
-          ],
-        },
-      ],
-    };
-    const oneTickBytes = encodeAggregatedInputs(oneTick).byteLength;
-    // Per-second steady-state estimate: 30 packets/sec of ~oneTickBytes each.
-    // Per-tick is dominated by playerId strings — long human-readable bot
-    // ids (~20 chars) push this up. Real deployments can use short u8 slot
-    // ids when bandwidth matters; this test just sanity-checks the order of
-    // magnitude. Original world-snapshot wire was ~30 KB/s — anything under
-    // 5 KB/s is a massive win regardless.
-    const perSecond = oneTickBytes * 30;
-    expect(perSecond).toBeLessThan(5 * 1024);
+  it("quantize axis: round-trip preserves canonical precision", () => {
+    // Quantize-then-dequantize is idempotent on the canonical value.
+    for (const v of [-1, -0.7071068, -0.5, -0.1, 0, 0.1, 0.5, 0.7071068, 1]) {
+      const q1 = quantizeAxis(v);
+      const q2 = quantizeAxis(q1);
+      expect(q2).toBe(q1);
+    }
+    // Out-of-range clamps.
+    expect(quantizeAxisToInt(1.5)).toBe(127);
+    expect(quantizeAxisToInt(-1.5)).toBe(-127);
+    expect(quantizeAxisToInt(NaN)).toBe(0);
+    // Dequantize edges.
+    expect(dequantizeAxis(127)).toBe(1);
+    expect(dequantizeAxis(-127)).toBe(-1);
+    expect(dequantizeAxis(0)).toBe(0);
+  });
+
+  it("bandwidth sanity v2: K=60 redundancy × 5 players fits in ~1.5 KB per packet", () => {
+    // Build a worst-case packet: 60 ticks, 5 players each tick.
+    const ticks = [];
+    for (let t = 0; t < 60; t++) {
+      ticks.push({
+        tick: t,
+        inputs: [
+          { slot: 0, moveX: 1, moveY: 0, expanding: true },
+          { slot: 1, moveX: -1, moveY: 0, expanding: false },
+          { slot: 2, moveX: 0, moveY: 1, expanding: false },
+          { slot: 3, moveX: 0, moveY: -1, expanding: true },
+          { slot: 4, moveX: quantizeAxis(0.7071068), moveY: quantizeAxis(0.7071068), expanding: false },
+        ],
+      });
+    }
+    const bytes = encodeAggregatedInputs({ ticks }).byteLength;
+    // Expected: 3 + 60 * (4 + 1 + 5*4) = 3 + 60*25 = 1503 bytes.
+    expect(bytes).toBe(1503);
+    // At 60Hz broadcast, that's ~90 KB/s outbound — half of K=120.
+    // Splits into ~2 SCTP fragments at typical WebRTC MTU.
+    expect(bytes * 60).toBeLessThan(100 * 1024);
   });
 });

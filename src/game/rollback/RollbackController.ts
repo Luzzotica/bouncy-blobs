@@ -145,6 +145,16 @@ export class RollbackController {
 
   isRewinding(): boolean { return this.rewinding; }
 
+  /** Return the InputSet recorded at `tick` (the input the sim used at
+   *  that tick) or undefined if not in the rolling window. Used by the
+   *  host's late-input handler to build a full auth InputSet (just the
+   *  late player's input alone wouldn't compare equal to the recorded
+   *  full set — we need to override one key and keep the rest). */
+  getRecordedInputs(tick: number): InputSet | undefined {
+    const inp = this.inputHistory.get(tick);
+    return inp ? cloneInputs(inp) : undefined;
+  }
+
   /** Predict the input set for the upcoming tick. Returns the input
    *  set that the caller should APPLY before stepping. */
   predictInputs(): InputSet {

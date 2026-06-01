@@ -20,12 +20,21 @@ const PLAYER_MASS_MULT = 0.5;
 const EXPAND_SPRING_STIFFNESS_MULT = 1.45;
 
 // Joystick shape deformation
-const LEAN_AMOUNT = 0.4;       // 40% of radius — exaggerated tilt at max speed
+// `LEAN_AMOUNT`, `SQUASH_X_AMOUNT`, `SQUASH_Y_AMOUNT` moved into the
+// Rust engine (see `set_blob_squash_lean` in `crates/softbody/src/
+// world.rs`). They were JS gameplay-tuning constants that fed into
+// implementation-defined `Math.cos/sin/atan2` per tick; now the engine
+// owns them so the per-tick deformation is deterministic across wasm
+// instances. If gameplay wants per-blob tuning later, lift them onto
+// the engine's `Shape` and thread through `add_blob_from_hull`.
 const LEAN_MAX_SPEED = 3500;   // lateral speed (px/s) at which lean maxes out
-const SQUASH_X_AMOUNT = 0.35;  // widen 35% at full crouch
-const SQUASH_Y_AMOUNT = 0.3;   // shorten 30% at full crouch
 const DOWN_FORCE = 180.0;      // downward force (per-second)
 const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
+// Ledge-hang assist: when an upper-half hull particle is touching geometry
+// but no lower-half particle is, the blob is hooked on a ledge. Multiply
+// UP_FORCE so it beats gravity (~980/s²) and lets the player clamber up.
+const LEDGE_UP_FORCE_MULT = 12.0;
+const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 
 // Sticky wall stick
 const STICK_MIN_CONTACTS = 2;    // hull points touching sticky surface to engage
@@ -71,8 +80,6 @@ export class SlimeBlob {
   private stickX = 0;  // raw joystick input (world-space)
   private stickY = 0;
   private expandShapeScale = 1.0;
-  private baseHullLocal: Vec2[];
-  private deformedHullLocal: Vec2[];
   /** Per-blob gravity override. null = use world gravity. */
   private gravityOverride: Vec2 | null = null;
 
@@ -93,7 +100,7 @@ export class SlimeBlob {
     this.world = world;
     this.playerControlled = config.playerControlled ?? true;
     this.expandShapeScaleMax = config.expandShapeScaleMax ?? 3.0;
-    this.expandShapeScaleSpeed = config.expandShapeScaleSpeed ?? 6.75;
+    this.expandShapeScaleSpeed = config.expandShapeScaleSpeed ?? 18.0;
     this.expandShapeScaleSpeedPress = config.expandShapeScaleSpeedPress ?? 36.0;
 
     const hullPreset = config.hullPreset ?? 'circle16';
@@ -135,8 +142,6 @@ export class SlimeBlob {
     this.hullIndices = result.hullIndices;
     this.centerIdx = result.centerIdx;
     this.shapeIdx = result.shapeIdx;
-    this.baseHullLocal = hullLocal.map(v => ({ ...v }));
-    this.deformedHullLocal = hullLocal.map(v => ({ ...v }));
   }
 
   setMoveForceMultiplier(m: number): void {
@@ -186,6 +191,33 @@ export class SlimeBlob {
 
   setGravityOverride(g: Vec2 | null): void {
     this.gravityOverride = g;
+  }
+
+  /** True when the upper half of the hull (relative to gravity) has at
+   * least LEDGE_HANG_MIN_UPPER_CONTACTS particles touching geometry while
+   * the lower half has none — the blob is hooked on an edge with its
+   * body dangling. Used to amplify UP_FORCE so the player can climb up. */
+  private isLedgeHanging(): boolean {
+    const contacts = this.world.getBlobParticleContacts(this.blobId);
+    if (contacts.length === 0) return false;
+    const hull = this.world.getHullPolygon(this.blobId);
+    if (hull.length !== contacts.length) return false;
+    // Up axis = negated gravity direction.
+    const g = this.getGravityDir();
+    const upX = -g.x, upY = -g.y;
+    // Centroid of the hull polygon — same projection origin used in
+    // getCentroid(), recomputed here so we don't pay an extra positions fetch.
+    let cx = 0, cy = 0;
+    for (let i = 0; i < hull.length; i++) { cx += hull[i].x; cy += hull[i].y; }
+    cx /= hull.length; cy /= hull.length;
+    let upper = 0, lower = 0;
+    for (let i = 0; i < hull.length; i++) {
+      if (!contacts[i]) continue;
+      const dot = (hull[i].x - cx) * upX + (hull[i].y - cy) * upY;
+      if (dot > 0) upper++;
+      else if (dot < 0) lower++;
+    }
+    return upper >= LEDGE_HANG_MIN_UPPER_CONTACTS && lower === 0;
   }
 
   /** Get the effective gravity direction (normalized). */
@@ -301,7 +333,8 @@ export class SlimeBlob {
     if (this.stickY > 0.1) {
       this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier, delta);
     } else if (this.stickY < -0.1) {
-      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * -this.stickY * this.moveForceMultiplier, delta);
+      const upMult = this.isLedgeHanging() ? LEDGE_UP_FORCE_MULT : 1.0;
+      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
@@ -338,109 +371,27 @@ export class SlimeBlob {
   }
 
   private updateHullDeformation(down: Vec2, right: Vec2): void {
-    const n = this.baseHullLocal.length;
-
-    // Lean: based on velocity along the "right" axis (perpendicular to gravity)
+    // ── Scalar inputs computed in JS ───────────────────────────────
+    // These are pure arithmetic (max/min/divide) on velocity & input —
+    // bit-deterministic in IEEE 754, so we can compute them on the JS
+    // side and let the engine quantize them once at the wasm boundary.
     const vLateral = this.getHullVelocityAlong(right);
-    const leanFactor = Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED));
-
-    // Squash: when pushing joystick "down" (along gravity)
+    const lean = Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED));
     const squash = Math.max(0, this.stickY);
 
-    // The base hull is defined in local space where Y points down, X points right.
-    // We need to apply deformations along the gravity-relative axes.
-    // Project each base hull point onto the gravity frame:
-    //   localRight = base dot right_local, localDown = base dot down_local
-    // For default gravity (0,1): down_local=(0,1), right_local=(1,0) — matches base coords.
-    // For rotated gravity we need to rotate the base points into the gravity frame,
-    // apply deformation, then rotate back.
-
-    // Gravity frame axes in local space (local space has no rotation yet —
-    // shape matching handles world rotation). Since base hull is defined with
-    // Y=down, X=right, and gravity may not align with that, we compute the
-    // gravity direction in local space. But rest positions are in local space
-    // which is unrotated — the shape matching frame handles rotation.
-    // So we need the gravity direction relative to the blob's current orientation.
-    //
-    // For now: the gravity frame in local space is just the world gravity direction
-    // projected through the blob's inverse rotation. But since shape matching
-    // computes rotation from rest→current, and rest positions are in a fixed frame,
-    // we should apply deformation in the world-gravity frame projected into local space.
-    //
-    // Simpler approach: since the base hull is axis-aligned (Y=down by default),
-    // and gravity is expressed in world space, we rotate the gravity frame into
-    // the hull's local space. The hull's local space is unrotated, so down_local = down_world
-    // when the blob hasn't rotated. But the blob DOES rotate in world space via shape matching.
-    // The rest positions are always in the same local frame though.
-    //
-    // Actually — rest positions are in a fixed local frame. Shape matching rotates them
-    // to match the blob's world orientation. So deformations to restLocal should be in
-    // that fixed local frame. The "gravity down" in local frame = world gravity rotated
-    // by the NEGATIVE of the blob's current rotation angle.
-
-    // Get blob's current rotation angle (from shape matching)
-    const blobAngle = this.getBlobAngle();
-    // Rotate world gravity into local frame
-    const cosA = Math.cos(-blobAngle);
-    const sinA = Math.sin(-blobAngle);
-    const localDown = vec2(
-      down.x * cosA - down.y * sinA,
-      down.x * sinA + down.y * cosA,
-    );
-    const localRight = vec2(-localDown.y, localDown.x);
-
-    // Squash scales: widen along localRight, shorten along localDown
-    const scaleRight = 1 + squash * SQUASH_X_AMOUNT;
-    const scaleDown = 1 - squash * SQUASH_Y_AMOUNT;
-
-    for (let i = 0; i < n; i++) {
-      const base = this.baseHullLocal[i];
-
-      // Project base point onto gravity-local axes
-      const projRight = base.x * localRight.x + base.y * localRight.y;
-      const projDown = base.x * localDown.x + base.y * localDown.y;
-
-      // Apply squash scaling in gravity frame
-      const scaledRight = projRight * scaleRight;
-      const scaledDown = projDown * scaleDown;
-
-      // Lean: offset along gravity axis based on lateral position
-      // Points further in the "right" direction get pushed "down" when moving right
-      const leanOffset = (projRight / BLOB_RADIUS) * -leanFactor * LEAN_AMOUNT * BLOB_RADIUS;
-
-      // Reconstruct in local space
-      this.deformedHullLocal[i].x = localRight.x * scaledRight + localDown.x * (scaledDown + leanOffset);
-      this.deformedHullLocal[i].y = localRight.y * scaledRight + localDown.y * (scaledDown + leanOffset);
-    }
-
-    this.world.setBlobRestLocal(this.blobId, this.deformedHullLocal);
+    // ── The trig + per-particle deformation lives in Rust now ──────
+    // The JS version of this used `Math.atan2/cos/sin` to compute the
+    // blob's rotation and rotate `down` into the blob-local frame.
+    // Those transcendentals are implementation-defined per ECMA and
+    // could return last-bit-different f64 values across two V8
+    // instances on the same machine, which then quantized into
+    // different `Fx` rest-hull poses and made the shape-match
+    // constraint pull differently each tick. The engine now does the
+    // whole thing in i64 fixed-point via `sin_fx/cos_fx/atan2_fx`
+    // (LUT-based, bit-identical across every wasm instance).
+    this.world.setBlobSquashLean(this.blobId, squash, lean, down);
   }
 
-  private getBlobAngle(): number {
-    // Compute average rotation angle same way shape matching does
-    const positions = this.world.getPositions();
-    let cx = 0, cy = 0;
-    for (const idx of this.hullIndices) {
-      cx += positions[idx].x;
-      cy += positions[idx].y;
-    }
-    const n = this.hullIndices.length;
-    cx /= n;
-    cy /= n;
-
-    // Average angle between rest positions and current positions relative to centroid
-    let sinSum = 0, cosSum = 0;
-    for (let i = 0; i < n; i++) {
-      const rest = this.baseHullLocal[i];
-      const idx = this.hullIndices[i];
-      const dx = positions[idx].x - cx;
-      const dy = positions[idx].y - cy;
-      // Cross product and dot product give sin/cos of rotation
-      cosSum += rest.x * dx + rest.y * dy;
-      sinSum += rest.x * dy - rest.y * dx;
-    }
-    return Math.atan2(sinSum, cosSum);
-  }
 
   getCenterPosition(): Vec2 {
     const positions = this.world.getPositions();

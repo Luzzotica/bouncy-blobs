@@ -156,11 +156,44 @@ export class PlayerManager {
     }
   }
 
-  updateAll(dt: number, world?: SoftBodyEngine): void {
+  /** Re-decide AI inputs for this tick. Writes to ManagedPlayer.moveX/Y/expanding.
+   * Host-only effect (guests have no AI controllers). Split out of updateAll so
+   * the host's lockstep input-delay layer can interpose between AI decisions
+   * and blob.setInput. */
+  tickAIInputs(dt: number, world?: SoftBodyEngine): void {
     for (const player of this.players.values()) {
-      // Let AI controllers re-decide their input each tick. AI needs the
-      // world to read tick/RNG — `world` is optional here only because some
-      // older callers (tests / scripted scenes) drove the loop without one.
+      if (player.inputSource === 'ai' && player.aiController) {
+        const out = player.aiController.tick(player, this, dt, world);
+        player.moveX = out.moveX;
+        player.moveY = out.moveY;
+        player.expanding = out.expanding;
+      }
+    }
+  }
+
+  /** Push ManagedPlayer's current inputs into the blob and tick its update +
+   * gaze. Call this AFTER any input-delay layer has rewritten ManagedPlayer.* */
+  applyInputsAndStep(dt: number): void {
+    for (const player of this.players.values()) {
+      player.blob.setInput(player.moveX, player.moveY, player.expanding);
+      player.blob.update(dt);
+
+      const mag = Math.hypot(player.moveX, player.moveY);
+      const tx = mag > 0.01 ? player.moveX / mag : 0;
+      const ty = mag > 0.01 ? player.moveY / mag : 0;
+      const a = 1 - Math.exp(-12 * dt);
+      player.gazeX += (tx - player.gazeX) * a;
+      player.gazeY += (ty - player.gazeY) * a;
+    }
+  }
+
+  updateAll(dt: number, world?: SoftBodyEngine): void {
+    // Kept as a single-pass loop (not tickAIInputs + applyInputsAndStep) to
+    // preserve bit-identical behavior for callers like the determinism tests
+    // and the rollback replay path that depend on the legacy semantics.
+    // The host's input-delay layer drives the split methods directly via
+    // bouncyBlobsGame's onLogic instead.
+    for (const player of this.players.values()) {
       if (player.inputSource === 'ai' && player.aiController) {
         const out = player.aiController.tick(player, this, dt, world);
         player.moveX = out.moveX;
@@ -170,8 +203,6 @@ export class PlayerManager {
       player.blob.setInput(player.moveX, player.moveY, player.expanding);
       player.blob.update(dt);
 
-      // Smoothly ease the gaze vector toward normalized input. When input is
-      // zero, the target is (0,0) and pupils naturally drift back to center.
       const mag = Math.hypot(player.moveX, player.moveY);
       const tx = mag > 0.01 ? player.moveX / mag : 0;
       const ty = mag > 0.01 ? player.moveY / mag : 0;
@@ -189,11 +220,16 @@ export class PlayerManager {
     return this.getAllPlayers().map(p => p.blob.getCentroid());
   }
 
-  updateCustomization(playerId: string, color?: string, faceId?: string): void {
+  updateCustomization(playerId: string, color?: string, faceId?: string, name?: string): void {
     const player = this.players.get(playerId);
     if (!player) return;
     if (color !== undefined) player.color = color;
     if (faceId !== undefined) player.faceId = faceId;
+    // Name is included here (rather than its own setter) because the
+    // guest applies host roster refreshes via the same `lobby_state`
+    // path that delivers color/faceId — keeping them on one update
+    // surface avoids drift between the two.
+    if (name !== undefined && name.length > 0) player.name = name;
   }
 
   clear(): void {

@@ -40,6 +40,7 @@ pub fn run() {
             steam::workshop_read_level,
             steam::steam_available,
             steam_net::steam_id_self,
+            steam_net::steam_persona_name,
             steam_net::steam_net_listen,
             steam_net::steam_net_connect,
             steam_net::steam_net_send,

@@ -168,6 +168,12 @@ pub struct SoftBodyWorld {
     pub(crate) blob_sticky_contact_count: Vec<i32>,
     pub(crate) blob_sticky_contact_normal_sum: Vec<FxVec2>,
 
+    // Per-particle "touched something solid this step" flag — set whenever
+    // a hull particle is pushed off a static surface or a softbody platform
+    // edge during collision resolution. Reset each step alongside the other
+    // contact trackers. Consumed by ledge-hang detection (slimeBlob.ts).
+    pub(crate) particle_touched_this_step: Vec<bool>,
+
     pub(crate) blob_gravity_override: Vec<Option<FxVec2>>,
     pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
@@ -177,6 +183,22 @@ pub struct SoftBodyWorld {
     pub tick: u64,
     pub rng: Mulberry32,
     time_accum: Fx,
+
+    /// Engine-side dynamic-item state (Phase 4 of the JS→Rust manager
+    /// migration). Items are registered at level-load via `add_cannon`,
+    /// `add_bumper`, etc. Each `step()` calls `update_dynamic_items`
+    /// which advances per-item timers and applies forces via the
+    /// Phase 3 zone-force APIs.
+    pub dynamic_items: Vec<crate::dynamic_items::DynamicItem>,
+
+    /// Engine-side spring-pad state (Phase 5 of the JS→Rust manager
+    /// migration). Each pad owns a kinematic static_surface (the
+    /// plate) + a state machine (loaded/firing/reloading). `step()`
+    /// calls `update_spring_pads` to advance state + write the live
+    /// plate pose into the surface. Fire events drain via
+    /// `take_spring_pad_fire_events` for VFX/SFX.
+    pub spring_pads: Vec<crate::spring_pads::SpringPad>,
+    pub(crate) pending_spring_pad_fires: Vec<u32>,
 
     // Pending trigger events. Drained by `take_trigger_entered/exited`
     // each frame. (TS uses callbacks; FFI layer can either poll these or
@@ -252,6 +274,7 @@ impl SoftBodyWorld {
             blob_impact_contact_normal: Vec::new(),
             blob_sticky_contact_count: Vec::new(),
             blob_sticky_contact_normal_sum: Vec::new(),
+            particle_touched_this_step: Vec::new(),
             blob_gravity_override: Vec::new(),
             blob_pin_snapshots: Vec::new(),
             base_masses: Vec::new(),
@@ -259,6 +282,9 @@ impl SoftBodyWorld {
             tick: 0,
             rng: Mulberry32::new(rng_seed),
             time_accum: Fx::ZERO,
+            dynamic_items: Vec::new(),
+            spring_pads: Vec::new(),
+            pending_spring_pad_fires: Vec::new(),
             pending_trigger_entered: Vec::new(),
             pending_trigger_exited: Vec::new(),
             pending_crush_events: Vec::new(),
@@ -301,6 +327,7 @@ impl SoftBodyWorld {
             shape_match_k: Fx::ZERO,
             shape_match_damp: Fx::ZERO,
             rest_local: Vec::new(),
+            base_rest_local: Vec::new(),
             shape_match_rest_scale: Fx::ONE,
             use_frame_override: false,
             frame_override: Transform2D { cos: Fx::ONE, sin: Fx::ZERO, tx: Fx::ZERO, ty: Fx::ZERO },
@@ -425,6 +452,7 @@ impl SoftBodyWorld {
             shape_match_k: params.shape_match_k,
             shape_match_damp: params.shape_match_damp,
             rest_local: params.hull_rest_local.clone(),
+            base_rest_local: params.hull_rest_local.clone(),
             shape_match_rest_scale: Fx::ONE,
             use_frame_override: params.pin_frame,
             frame_override: Transform2D {
@@ -484,6 +512,107 @@ impl SoftBodyWorld {
         }
     }
 
+    /// Return every blob whose centroid lies inside `polygon`. Used by
+    /// the engine-side trigger / item / spike-zone systems (Phases 4-6
+    /// of the JS→Rust manager migration) to find what's in a zone
+    /// without round-tripping positions through JS each tick. Sorted by
+    /// blob_id for deterministic iteration order. Skips inactive blobs.
+    pub fn blobs_overlapping_polygon(&self, polygon: &[FxVec2]) -> Vec<BlobId> {
+        let mut out = Vec::new();
+        if polygon.len() < 3 { return out; }
+        for r in &self.blob_ranges {
+            if r.inactive { continue; }
+            let c = self.pos[r.start as usize]; // center particle
+            if is_point_in_polygon(c, polygon) {
+                out.push(r.id);
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Apply a `ForceField` to every blob whose centroid is inside
+    /// `polygon`. Phase 3 foundation API — replaces the per-tick
+    /// per-item JS loops in `dynamicItemManager.ts` (cannon, wind
+    /// zone, conveyor, bumper, wrecking-ball blast, sticky-goo drag).
+    /// Computing the force value in fixed point inside the engine
+    /// eliminates the `Math.cos/sin` calls those item kinds use to
+    /// derive their direction each frame.
+    pub fn apply_force_in_polygon(
+        &mut self,
+        polygon: &[FxVec2],
+        field: ForceField,
+        dt: Fx,
+    ) {
+        if polygon.len() < 3 { return; }
+        // Collect first to avoid borrowing self.blob_ranges through the apply call.
+        let hits: Vec<(BlobId, ParticleIdx, ParticleIdx)> = self.blob_ranges
+            .iter()
+            .filter(|r| !r.inactive)
+            .filter(|r| is_point_in_polygon(self.pos[r.start as usize], polygon))
+            .map(|r| (r.id, r.start, r.end))
+            .collect();
+        match field {
+            ForceField::Uniform { force } => {
+                // f = force * dt, applied to center particle as velocity delta scaled by inv_mass
+                let f = force.scale(dt);
+                for (_id, start, _end) in &hits {
+                    let u = *start as usize;
+                    let dv = f.scale(self.inv_mass[u]);
+                    self.vel[u] = self.vel[u].add(dv);
+                }
+            }
+            ForceField::Radial { center, strength, radius, falloff } => {
+                if radius.0 <= 0 { return; }
+                for (_id, start, _end) in &hits {
+                    let u = *start as usize;
+                    let dx = self.pos[u].x - center.x;
+                    let dy = self.pos[u].y - center.y;
+                    let d_sq = dx * dx + dy * dy;
+                    if d_sq.0 < EPS.0 { continue; }
+                    let d = crate::math::sqrt_fx(d_sq);
+                    if d > radius { continue; }
+                    // mag scaled by falloff
+                    let mag = match falloff {
+                        PointGravityFalloff::Linear => {
+                            // strength * (1 - d/radius)
+                            let one = Fx::ONE;
+                            let t = d / radius;
+                            let scale = if t < one { one - t } else { Fx::ZERO };
+                            strength * scale
+                        }
+                        PointGravityFalloff::InverseSquare => {
+                            // strength * (radius/d)^2  — capped at 1 near center
+                            let cap = radius / Fx::from_int(10); // clamp dist >= radius/10
+                            let denom = if d > cap { d } else { cap };
+                            let ratio = radius / denom;
+                            strength * ratio * ratio
+                        }
+                    };
+                    // unit direction outward from center
+                    let dir_x = dx / d;
+                    let dir_y = dy / d;
+                    let f = FxVec2::new(dir_x * mag, dir_y * mag).scale(dt);
+                    let dv = f.scale(self.inv_mass[u]);
+                    self.vel[u] = self.vel[u].add(dv);
+                }
+            }
+            ForceField::Drag { coefficient } => {
+                // v_new = v * (1 - coefficient * dt), applied to ALL hull
+                // particles (not just center) so the body slows uniformly
+                // without inducing spin.
+                let damp = Fx::ONE - coefficient * dt;
+                let damp = if damp.0 < 0 { Fx::ZERO } else { damp };
+                for (_id, start, end) in &hits {
+                    for i in *start..*end {
+                        let u = i as usize;
+                        self.vel[u] = FxVec2::new(self.vel[u].x * damp, self.vel[u].y * damp);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn set_blob_gravity_override(&mut self, blob_id: BlobId, gravity: Option<FxVec2>) {
         while self.blob_gravity_override.len() <= blob_id as usize {
             self.blob_gravity_override.push(None);
@@ -518,6 +647,22 @@ impl SoftBodyWorld {
         if dt < FX_FRAC_1_240 { dt = FX_FRAC_1_240; }
         if dt > FX_FRAC_1_20  { dt = FX_FRAC_1_20;  }
         self.config.fixed_dt = dt;
+
+        // Phase 4: advance dynamic-item state machines + apply their
+        // forces BEFORE physics substeps. Cannon, catapult, wind,
+        // conveyor, bumper, wrecking-ball etc. all add velocity to
+        // matching blobs via apply_force_in_polygon; the substeps
+        // then integrate those velocities into positions and resolve
+        // collisions normally.
+        if !self.dynamic_items.is_empty() {
+            self.update_dynamic_items(dt);
+        }
+
+        // Phase 5: spring-pad state machines. Run BEFORE substeps so the
+        // updated plate pose / velocity flows through CCD this tick.
+        if !self.spring_pads.is_empty() {
+            self.update_spring_pads(dt);
+        }
 
         let n_sub = self.config.substeps as usize;
         for i in 0..n_sub {
@@ -707,6 +852,7 @@ impl SoftBodyWorld {
         self.blob_ground_contact_normal.clear();     self.blob_ground_contact_normal.resize(nb, None);
         self.blob_impact_contact_point.clear();      self.blob_impact_contact_point.resize(nb, None);
         self.blob_impact_contact_normal.clear();     self.blob_impact_contact_normal.resize(nb, None);
+        self.particle_touched_this_step.clear();     self.particle_touched_this_step.resize(self.pos.len(), false);
         self.solve_collisions(dt);
         self.solve_particle_collisions(dt);
 
@@ -1097,6 +1243,12 @@ impl SoftBodyWorld {
         let w_sum = inv_a + inv_b * wb * wb + inv_c * wc * wc;
         if w_sum < Fx::from_raw(1 << 6) { return; } // ~1e-8
 
+        // Per-particle contact for ledge-hang detection — set for any
+        // softbody-platform contact, not just ground-facing ones, so a
+        // hooked side particle counts the same as on static geometry.
+        if pi < self.particle_touched_this_step.len() {
+            self.particle_touched_this_step[pi] = true;
+        }
         // Ground/impact contact tracking — mirrors `collide_blob_with_poly`
         // so a blob standing on a softbody platform (which goes through this
         // path instead of the static-poly path) registers as grounded.
@@ -1237,6 +1389,10 @@ impl SoftBodyWorld {
             }
 
             if poly_is_static && use_static {
+                // Any static contact — record per-particle for ledge-hang detection.
+                if pi < self.particle_touched_this_step.len() {
+                    self.particle_touched_this_step[pi] = true;
+                }
                 // Ground-contact tracking (most upward-facing wins).
                 let neg_three_tenths = Fx::from_raw((-3i64 * (1i64 << 32)) / 10);
                 if n.y < neg_three_tenths {
@@ -1972,6 +2128,122 @@ impl SoftBodyWorld {
         sh.rest_local[..n].copy_from_slice(&rest_local[..n]);
     }
 
+    /// Engine-side port of `SlimeBlob.updateHullDeformation` (was in
+    /// `src/physics/slimeBlob.ts`). Computes the blob's current rotation
+    /// from its hull shape-match, rotates the world gravity direction into
+    /// the blob's local frame, then writes a squash + lean deformation of
+    /// `base_rest_local` into `rest_local`.
+    ///
+    /// Why this lives in Rust: the JS version called `Math.atan2`,
+    /// `Math.cos`, `Math.sin` on per-tick inputs and wrote the result
+    /// across the wasm boundary. Those JS transcendentals are
+    /// implementation-defined per ECMA and can return slightly different
+    /// f64 results between two V8 instances on the same machine. That
+    /// last-bit divergence quantized into different `Fx` values, the shape
+    /// matching constraint pulled slightly differently each tick, and
+    /// engines that started bit-identical (via keyframe restore) drifted
+    /// apart over a few ticks. By doing the trig in Rust against
+    /// integer-only `sin_fx`/`cos_fx`/`atan2_fx` (LUT-based, deterministic
+    /// to the bit), the result is identical across every wasm instance.
+    ///
+    /// Inputs `squash` (joystick-down amount, 0..1) and `lean`
+    /// (velocity-along-right normalized to -1..1) are still computed in
+    /// JS — they're scalar arithmetic on values JS can produce
+    /// deterministically (clamp + simple float ops, no transcendentals).
+    /// Pass `gravity_dir` as the unit-length world-space gravity direction
+    /// (e.g. `(0, 1)` for default downward gravity).
+    pub fn set_blob_squash_lean(
+        &mut self,
+        blob_id: BlobId,
+        squash: Fx,
+        lean: Fx,
+        gravity_dir: FxVec2,
+    ) {
+        let bid = blob_id as usize;
+        if bid >= self.blob_ranges.len() { return; }
+        let si = self.blob_ranges[bid].shape_idx as usize;
+        if si >= self.shapes.len() { return; }
+        // Gameplay-tuning constants — must match the JS values in
+        // `src/physics/slimeBlob.ts` (SQUASH_X_AMOUNT/SQUASH_Y_AMOUNT/
+        // LEAN_AMOUNT). If gameplay wants per-blob tuning later, lift
+        // these onto Shape and pass through `add_blob_from_hull`.
+        let squash_x_amount = fx_lit(35, 100); // 0.35
+        let squash_y_amount = fx_lit(30, 100); // 0.30
+        let lean_amount     = fx_lit(40, 100); // 0.40
+        // Snapshot the hull indices + base_rest_local out of self.shapes
+        // first so we can release the immutable borrow before taking the
+        // mutable one for the write at the end.
+        let (hull_idx, base_len) = {
+            let sh = &self.shapes[si];
+            if sh.is_static || sh.is_trigger { return; }
+            if sh.base_rest_local.is_empty() { return; }
+            if sh.indices.len() != sh.base_rest_local.len() { return; }
+            (sh.indices.clone(), sh.base_rest_local.len())
+        };
+        // ── 1. blob angle via shape matching ────────────────────────
+        // Same formula as the JS `getBlobAngle()`: for each hull
+        // particle, compute (rest, current_offset_from_centroid) and
+        // accumulate dot/cross sums. atan2(sin_sum, cos_sum) gives the
+        // best-fit rotation from rest → current.
+        let n = base_len;
+        // Centroid of current hull positions.
+        let mut cx = Fx::ZERO; let mut cy = Fx::ZERO;
+        for &pi in &hull_idx {
+            let p = self.pos[pi as usize];
+            cx += p.x; cy += p.y;
+        }
+        let inv_n = Fx::ONE.div(Fx::from_int(n as i32));
+        cx = cx.mul(inv_n);
+        cy = cy.mul(inv_n);
+        let mut sin_sum = Fx::ZERO;
+        let mut cos_sum = Fx::ZERO;
+        {
+            let sh = &self.shapes[si];
+            for i in 0..n {
+                let rest = sh.base_rest_local[i];
+                let p = self.pos[hull_idx[i] as usize];
+                let dx = p.x - cx;
+                let dy = p.y - cy;
+                cos_sum += rest.x.mul(dx) + rest.y.mul(dy);
+                sin_sum += rest.x.mul(dy) - rest.y.mul(dx);
+            }
+        }
+        let angle = crate::math::atan2_fx(sin_sum, cos_sum);
+        // ── 2. rotate world gravity into blob-local frame ──────────
+        // localDown = rot(-angle) * gravity_dir
+        let cos_neg = crate::math::cos_fx(-angle);
+        let sin_neg = crate::math::sin_fx(-angle);
+        let local_down = FxVec2::new(
+            gravity_dir.x.mul(cos_neg) - gravity_dir.y.mul(sin_neg),
+            gravity_dir.x.mul(sin_neg) + gravity_dir.y.mul(cos_neg),
+        );
+        // localRight is perpendicular (90° CCW from localDown), same as JS
+        let local_right = FxVec2::new(-local_down.y, local_down.x);
+        // ── 3. squash / lean scales ────────────────────────────────
+        let scale_right = Fx::ONE + squash.mul(squash_x_amount);
+        let scale_down  = Fx::ONE - squash.mul(squash_y_amount);
+        // ── 4. deform each base hull point ─────────────────────────
+        // The JS formula `(projRight / BLOB_RADIUS) * -leanFactor *
+        // LEAN_AMOUNT * BLOB_RADIUS` algebraically simplifies to
+        // `-projRight * leanFactor * LEAN_AMOUNT`. We use the simpler
+        // form to avoid the unnecessary divide-then-multiply round trip.
+        let lean_scale = -lean.mul(lean_amount);
+        let sh = &mut self.shapes[si];
+        for i in 0..n {
+            let base = sh.base_rest_local[i];
+            let proj_right = base.x.mul(local_right.x) + base.y.mul(local_right.y);
+            let proj_down  = base.x.mul(local_down.x)  + base.y.mul(local_down.y);
+            let scaled_right = proj_right.mul(scale_right);
+            let scaled_down  = proj_down.mul(scale_down);
+            let lean_offset  = proj_right.mul(lean_scale);
+            let down_total = scaled_down + lean_offset;
+            sh.rest_local[i] = FxVec2::new(
+                local_right.x.mul(scaled_right) + local_down.x.mul(down_total),
+                local_right.y.mul(scaled_right) + local_down.y.mul(down_total),
+            );
+        }
+    }
+
     pub fn set_blob_mass_scale(&mut self, blob_id: BlobId, mass_scale: Fx) {
         let bid = blob_id as usize;
         if bid >= self.blob_ranges.len() { return; }
@@ -2076,6 +2348,19 @@ impl SoftBodyWorld {
         let p = self.blob_impact_contact_point.get(bid).copied().flatten()?;
         let n = self.blob_impact_contact_normal.get(bid).copied().flatten()?;
         Some((p, n))
+    }
+
+    /// Per-particle "touched a solid this step" bitmap, indexed in hull order.
+    /// Each byte is 0 or 1. Empty Vec if blob_id is out of range.
+    pub fn get_blob_particle_contacts(&self, blob_id: BlobId) -> Vec<u8> {
+        let Some(r) = self.blob_ranges.get(blob_id as usize) else { return Vec::new(); };
+        let mut out = Vec::with_capacity(r.hull.len());
+        for &pidx in &r.hull {
+            let pi = pidx as usize;
+            let touched = self.particle_touched_this_step.get(pi).copied().unwrap_or(false);
+            out.push(if touched { 1 } else { 0 });
+        }
+        out
     }
 
     pub fn get_blob_sticky_contact(&self, blob_id: BlobId) -> (i32, FxVec2) {
@@ -2882,15 +3167,15 @@ mod tests {
         // A "healthy" blob's max radius from centroid sits near ~28 (half
         // diagonal). Anything dramatically larger means the blob exploded.
 
-        // Regression assertion: at 4 px/frame ceiling descent + 3× rest
-        // threshold + in-place collapse on detection, the blob's first
-        // unrecoverable explosion lands around frame 69 (initial blow-up
-        // is 2.20× which falls under 3×, but subsequent re-crushes
-        // amplify past 3× within ~70 frames). 100 is generous headroom.
+        // Regression assertion: with the 10× rest-extent threshold (RATIO_SQ
+        // = 100, raised from 3× to stop false-positive deaths during normal
+        // squish/stretch play), the catastrophic explosion reaches the new
+        // threshold around frame ~168. 200 keeps generous headroom while
+        // still proving the detector fires on a genuine blow-up.
         let first = first_crush_frame.expect("crush detector failed to flag any frame");
         assert!(
-            first <= 100,
-            "crush detection too late: first flagged frame = {} (expected <= 100)",
+            first <= 200,
+            "crush detection too late: first flagged frame = {} (expected <= 200)",
             first,
         );
     }
