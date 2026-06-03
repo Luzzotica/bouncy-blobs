@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { hasSeenIntro, resetIntroSeen } from '../utils/introSeen'
 import { startMusic, isMusicStarted } from '../utils/music'
 import SettingsModal from '../components/SettingsModal'
+import { assetUrl } from '../utils/assetUrl'
 
 // How much (in %) the background drifts at the extreme edges of the
 // viewport. The full -0.5..+0.5 normalized mouse range will move the bg
@@ -206,7 +207,7 @@ const shell: React.CSSProperties = {
 const bgLayer: React.CSSProperties = {
   position: 'absolute',
   inset: '-2%',
-  backgroundImage: "url('/menu/menu_hero.png')",
+  backgroundImage: `url('${assetUrl('/menu/menu_hero.png')}')`,
   backgroundSize: 'cover',
   backgroundPosition: 'center center',
   backgroundRepeat: 'no-repeat',

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { markIntroSeen } from '../utils/introSeen'
 import { startMusic, pauseMusic, resumeMusic } from '../utils/music'
 import { getSfxVolume } from '../utils/audioSettings'
+import { assetUrl } from '../utils/assetUrl'
 
 interface Panel {
   image: string
@@ -35,7 +36,7 @@ interface Manifest {
   pages: Page[]
 }
 
-const BASE = '/intro/'
+const BASE = assetUrl('/intro/')
 const PANEL_STAGGER_MS = 2000
 const CONTROLS_HIDE_MS = 4000
 const FADE_OUT_MS = 700

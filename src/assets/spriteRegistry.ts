@@ -1,3 +1,5 @@
+import { assetUrl } from '../utils/assetUrl';
+
 // Sprite + collision-shape registry. Loaded from /sprites/manifest.json at
 // boot. Sprites are PNGs in /public/sprites/. Each sprite ships with its own
 // hand-tuned collision shape so non-convex props (pencil, etc.) collide
@@ -38,7 +40,7 @@ export interface LoadedSprite {
 const cache = new Map<string, LoadedSprite>();
 let readyPromise: Promise<void> | null = null;
 
-export function preloadSprites(manifestUrl = '/sprites/manifest.json'): Promise<void> {
+export function preloadSprites(manifestUrl = assetUrl('/sprites/manifest.json')): Promise<void> {
   if (readyPromise) return readyPromise;
   readyPromise = (async () => {
     let manifest: SpriteManifest;
@@ -67,7 +69,7 @@ export function preloadSprites(manifestUrl = '/sprites/manifest.json'): Promise<
               console.warn(`[sprites] failed to load ${def.id} from ${def.image}`);
               resolve();
             };
-            img.src = def.image;
+            img.src = assetUrl(def.image);
           }),
       ),
     );

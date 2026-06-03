@@ -1,6 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
+
+// On itch.io (and any non-root host) the page URL doesn't match our app
+// routes, so BrowserRouter renders nothing. HashRouter is host-agnostic.
+const Router = import.meta.env.BASE_URL === '/' ? BrowserRouter : HashRouter
 import App from './App'
 import { UserProvider } from './contexts/UserContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -10,13 +14,13 @@ import './index.css'
 function mount() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <BrowserRouter>
+      <Router>
         <AuthProvider>
           <UserProvider>
             <App />
           </UserProvider>
         </AuthProvider>
-      </BrowserRouter>
+      </Router>
     </React.StrictMode>,
   )
 }

@@ -4,8 +4,9 @@
 // settings modal and the change applies live here.
 
 import { getMusicVolume, onAudioSettingsChange } from './audioSettings'
+import { assetUrl } from './assetUrl'
 
-const SRC = '/intro/theme.mp3'
+const SRC = assetUrl('/intro/theme.mp3')
 
 let audio: HTMLAudioElement | null = null
 let started = false

@@ -3,10 +3,12 @@
 // load; `preloadBackground()` (called on each level/game init) picks a
 // new random variant so the world doesn't look the same on every run.
 
+import { assetUrl } from '../utils/assetUrl';
+
 const VARIANTS = [
-  '/backgrounds/game_bg_workbench_corner.png',
-  '/backgrounds/game_bg_couch_corner.png',
-  '/backgrounds/game_bg_goop_tank_wide.png',
+  assetUrl('/backgrounds/game_bg_workbench_corner.png'),
+  assetUrl('/backgrounds/game_bg_couch_corner.png'),
+  assetUrl('/backgrounds/game_bg_goop_tank_wide.png'),
 ];
 
 const images: HTMLImageElement[] = [];

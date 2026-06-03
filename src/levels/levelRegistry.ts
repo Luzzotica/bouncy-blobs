@@ -2,6 +2,7 @@ import type { LevelData, LevelType } from './types';
 import { getLevelTypes } from './types';
 import { listLocalMaps, readLocalMap } from '../lib/mapsStore';
 import { listSubscribedItems } from '../lib/workshopApi';
+import { assetUrl } from '../utils/assetUrl';
 
 export type LevelSource = 'builtin' | 'local' | 'workshop';
 
@@ -26,7 +27,7 @@ const levelCache = new Map<string, LevelData>();
 /** Fetch the built-in level manifest (cached after first call). */
 export async function getBuiltinLevels(): Promise<LevelManifestEntry[]> {
   if (manifestCache) return manifestCache;
-  const res = await fetch('/levels/manifest.json');
+  const res = await fetch(assetUrl('/levels/manifest.json'));
   if (!res.ok) throw new Error('Failed to load level manifest');
   const data: Manifest = await res.json();
   manifestCache = data.levels.map(l => ({ ...l, source: 'builtin' as const }));
@@ -45,7 +46,7 @@ export async function loadBuiltinLevel(id: string): Promise<LevelData> {
   const entry = manifest.find(e => e.id === id);
   if (!entry) throw new Error(`Unknown built-in level: ${id}`);
 
-  const res = await fetch(`/levels/${entry.file}`);
+  const res = await fetch(assetUrl(`/levels/${entry.file}`));
   if (!res.ok) throw new Error(`Failed to load level: ${entry.file}`);
   const levelData: LevelData = await res.json();
   levelCache.set(id, levelData);

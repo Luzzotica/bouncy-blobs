@@ -17,7 +17,8 @@
     "record:match": "playwright test ai-content",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "publish:itch": "bash scripts/publish-itch.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",

@@ -8,6 +8,7 @@ import {
   setPlayerColorSetting,
 } from '../utils/audioSettings'
 import { playSfx } from '../utils/audio'
+import { assetUrl } from '../utils/assetUrl'
 
 interface Props {
   open: boolean
@@ -71,7 +72,7 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
 
   function handleSfxPreview() {
     sfxPreviewRef.current?.pause()
-    const a = new Audio('/intro/page-1.mp3')
+    const a = new Audio(assetUrl('/intro/page-1.mp3'))
     a.volume = sfxV
     sfxPreviewRef.current = a
     a.play().catch(() => {})

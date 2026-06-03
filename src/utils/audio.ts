@@ -11,6 +11,7 @@
 //   same frame) don't machine-gun the same buffer.
 
 import { getSfxVolume, onAudioSettingsChange } from './audioSettings'
+import { assetUrl } from './assetUrl'
 
 export interface PlaySfxOptions {
   /** Per-call multiplier on top of the master SFX volume. Default 1. */
@@ -59,7 +60,7 @@ async function fetchBuffer(name: string): Promise<AudioBuffer | null> {
   const c = getCtx()
   if (!c) return null
   try {
-    const res = await fetch(`/sfx/${name}.mp3`)
+    const res = await fetch(assetUrl(`/sfx/${name}.mp3`))
     if (!res.ok) return null
     const arr = await res.arrayBuffer()
     return await c.decodeAudioData(arr)
