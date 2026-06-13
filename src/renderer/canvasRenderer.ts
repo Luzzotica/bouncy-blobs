@@ -5,7 +5,7 @@ import { Camera } from './camera';
 import { drawBlob, drawBlobShine, perturbHullForWind } from './blobRenderer';
 import { drawJellyCandy, SOFT_PLATFORM_PALETTE, setCandyParallax } from './candySkin';
 import { drawStaticPolygon } from './levelRenderer';
-import { drawSprings, drawShapeMatchTargets, drawBlobPoints } from './debugRenderer';
+import { drawSprings, drawShapeMatchTargets, drawBlobPoints, drawBlobHulls } from './debugRenderer';
 import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
 import { drawBlobFace } from './faceRenderer';
 import { drawChain } from './chainRenderer';
@@ -99,6 +99,8 @@ export interface RenderOptions {
   showSprings?: boolean;
   showShapeTargets?: boolean;
   showPoints?: boolean;
+  /** Draw each blob's hull perimeter polygon + its hull points. */
+  showHull?: boolean;
 }
 
 export interface ModeOverlay {
@@ -329,6 +331,11 @@ export function render(
       }
       drawNameTag(ctx, pd.name, c.x, topY, pd.color);
     }
+  }
+
+  // Debug: hull perimeter + hull points (on top of blobs so they're visible)
+  if (options.showHull) {
+    drawBlobHulls(ctx, world);
   }
 
   // Debug: hull + center points (on top of blobs so they're visible)

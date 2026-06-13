@@ -139,6 +139,56 @@ export function drawMassPoints(
   }
 }
 
+/** Draw each blob's hull as a closed perimeter polygon (in hull-ring order)
+ *  plus a dot at every hull particle. The first hull point is drawn in a
+ *  distinct colour so the ring's winding direction is visible — handy for
+ *  inspecting the treadmill contour. */
+export function drawBlobHulls(
+  ctx: CanvasRenderingContext2D,
+  world: SoftBodyEngine,
+  lineColor = 'rgba(80, 255, 160, 0.95)',
+  pointColor = 'rgba(80, 255, 160, 0.95)',
+  firstPointColor = 'rgba(255, 220, 60, 0.95)',
+  pointRadius = 4,
+  lineWidth = 2,
+): void {
+  const pos = world.getPositions();
+  for (let bi = 0; bi < world.getBlobCount(); bi++) {
+    const r = world.blobRanges[bi];
+    if (r.inactive) continue;
+    const hull = r.hull;
+    if (hull.length < 2) continue;
+
+    ctx.save();
+    // Perimeter outline, connecting hull particles in ring order.
+    ctx.beginPath();
+    const first = pos[hull[0]];
+    if (first) ctx.moveTo(first.x, first.y);
+    for (let k = 1; k < hull.length; k++) {
+      const p = pos[hull[k]];
+      if (p) ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+
+    // Dot at each hull point (hull[0] highlighted to show winding).
+    for (let k = 0; k < hull.length; k++) {
+      const p = pos[hull[k]];
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, pointRadius, 0, Math.PI * 2);
+      ctx.fillStyle = k === 0 ? firstPointColor : pointColor;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 /** Render every particle of every blob, with hull and center distinguished. */
 export function drawBlobPoints(
   ctx: CanvasRenderingContext2D,

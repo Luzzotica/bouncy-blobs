@@ -82,6 +82,7 @@ export default function Sandbox() {
   const [levelData, setLevelData] = useState<LevelData | null>(null);
   const [showPoints, setShowPoints] = useState(true);
   const [showTargets, setShowTargets] = useState(false);
+  const [showHull, setShowHull] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playersChained, setPlayersChained] = useState(false);
   const stateRef = useRef<{
@@ -255,6 +256,7 @@ export default function Sandbox() {
       showSprings: false,
       showShapeTargets: false,
       showPoints,
+      showHull,
     };
 
     // Tuned to match the working rope-test demo (src/physics/rope-test.html
@@ -461,6 +463,11 @@ export default function Sandbox() {
       stateRef.current.renderOptions.showShapeTargets = showTargets;
     }
   }, [showTargets]);
+  useEffect(() => {
+    if (stateRef.current) {
+      stateRef.current.renderOptions.showHull = showHull;
+    }
+  }, [showHull]);
 
   if (!levelData) {
     return (
@@ -516,6 +523,20 @@ export default function Sandbox() {
           title="Draw the shape-match rest hull (dashed cyan), the frame centroid (magenta cross), and the center particle (yellow dot) for every blob"
         >
           Targets: {showTargets ? 'ON' : 'OFF'}
+        </button>
+        <button
+          style={{
+            padding: '6px 12px',
+            fontSize: 14,
+            background: showHull ? '#3b6ab8' : '#1f2a3f',
+            color: '#fff',
+            border: '1px solid #4f5874',
+            cursor: 'pointer',
+          }}
+          onClick={() => setShowHull(p => !p)}
+          title="Draw each blob's hull perimeter polygon (green) and its hull points; the first hull point is yellow to show winding direction"
+        >
+          Hull: {showHull ? 'ON' : 'OFF'}
         </button>
         {fromEditor && (
           <button
