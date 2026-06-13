@@ -20,6 +20,7 @@ import { DEFAULT_CONTROLLER_CONFIG } from '../types/controllerConfig';
 import { InputEvent } from '../types';
 import { Player } from '../types/database';
 import { GameModeManager } from './gameModes/gameModeManager';
+import { logMatchEvent } from '../lib/matchEvents';
 import { GameMode, GamePhase } from './gameModes/types';
 import { PartyMode } from './gameModes/partyMode';
 import { KingOfTheHillMode } from './gameModes/kingOfTheHillMode';
@@ -49,6 +50,19 @@ const detTraceEnabled = (() => {
   if (typeof window === 'undefined' || !window.location) return false;
   try {
     return new URLSearchParams(window.location.search).get('detTrace') === '1';
+  } catch { return false; }
+})();
+
+/** Content camera for the match-shorts recorder (`?shorts=1`). Bots-only
+ *  matches normally hold the full-arena wide shot (fit-all with minZoom
+ *  0.254), which leaves a portrait 1080×1920 frame mostly empty. This flag
+ *  tightens the follow: higher zoom floor + less padding, accepting that a
+ *  blob at the far wall occasionally clips offscreen — the camera stays on
+ *  the pack, which is what a short wants. Render-only; never affects sim. */
+const shortsCamEnabled = (() => {
+  if (typeof window === 'undefined' || !window.location) return false;
+  try {
+    return new URLSearchParams(window.location.search).get('shorts') === '1';
   } catch { return false; }
 })();
 
@@ -293,10 +307,12 @@ export class BouncyBlobsGame implements Game {
         onPhaseChange: (phase) => {
           // Wipe the round's slime splats whenever the round itself ends.
           if (phase !== 'playing') clearDecals();
+          logMatchEvent('phase', { phase });
           effects.onPhaseChange(phase);
           this.onPhaseChange?.(phase);
         },
         onGameOver: (winnerId, winnerName) => {
+          logMatchEvent('win', { winnerId, winnerName });
           effects.onGameOver();
           this.onGameOver?.(winnerId, winnerName);
         },
@@ -399,6 +415,12 @@ export class BouncyBlobsGame implements Game {
       spikeManager.onKill = (killedPlayerId, deathPos) => {
         const player = playerManager.getPlayer(killedPlayerId);
         if (player) effects.onSpikeKill(player, deathPos);
+        logMatchEvent('ko', {
+          playerId: killedPlayerId,
+          name: player?.name ?? killedPlayerId,
+          x: deathPos.x,
+          y: deathPos.y,
+        });
         partyMode?.handleSpikeKill(killedPlayerId);
       };
     }
@@ -414,6 +436,52 @@ export class BouncyBlobsGame implements Game {
     world.onBlobCrushed = (blobId) => {
       console.warn(`[physics] blob ${blobId} crushed — collapsed in solver`);
       sm?.killPlayerByBlobId(blobId);
+    };
+
+    // 1 Hz score sampler for the match-event log: emits lead_change /
+    // near_target as the mode scores evolve, plus a coarse score_sample
+    // every 5 s so the highlight picker can reconstruct the score curve.
+    // Observation only — never feeds back into the sim.
+    let scoreSampleAccum = 0;
+    let scoreSampleCount = 0;
+    let lastLeaderId: string | null = null;
+    let nearTargetLogged = false;
+    const sampleScores = (modeManager: GameModeManager, dt: number): void => {
+      if (modeManager.getPhase() !== 'playing') return;
+      scoreSampleAccum += dt;
+      if (scoreSampleAccum < 1) return;
+      scoreSampleAccum = 0;
+      scoreSampleCount++;
+      const state = modeManager.getState();
+      let leaderId: string | null = null;
+      let leaderScore = -Infinity;
+      for (const [id, score] of state.scores) {
+        if (score > leaderScore) { leaderScore = score; leaderId = id; }
+      }
+      if (leaderId !== null && leaderScore > 0 && leaderId !== lastLeaderId) {
+        // Skip the very first leader (someone scoring first isn't a "lead change").
+        if (lastLeaderId !== null) {
+          logMatchEvent('lead_change', {
+            playerId: leaderId,
+            name: playerManager.getPlayer(leaderId)?.name ?? leaderId,
+            score: leaderScore,
+          });
+        }
+        lastLeaderId = leaderId;
+      }
+      const target = this.gameMode?.config.targetScore;
+      if (!nearTargetLogged && target && leaderId !== null && leaderScore >= target * 0.8) {
+        nearTargetLogged = true;
+        logMatchEvent('near_target', {
+          playerId: leaderId,
+          name: playerManager.getPlayer(leaderId)?.name ?? leaderId,
+          score: leaderScore,
+          target,
+        });
+      }
+      if (scoreSampleCount % 5 === 0) {
+        logMatchEvent('score_sample', { scores: Object.fromEntries(state.scores) });
+      }
     };
 
     const loop = new GameLoop({
@@ -438,6 +506,7 @@ export class BouncyBlobsGame implements Game {
       if (modeManager) {
         // Game mode controls when physics runs
         const shouldRunPhysics = modeManager.update(dt, playerManager, world);
+        sampleScores(modeManager, dt);
         if (shouldRunPhysics) {
           let t0 = performance.now();
           playerManager.tickAIInputs(dt, world);
@@ -575,6 +644,8 @@ export class BouncyBlobsGame implements Game {
             maxZoom,
             0, // no lower clamp — let the view zoom out as far as it needs to
           );
+        } else if (shortsCamEnabled) {
+          camera.followTargets(cameraTargets, this.state.canvasWidth, this.state.canvasHeight, 120, 0.592, 0.5);
         } else {
           camera.followTargets(cameraTargets, this.state.canvasWidth, this.state.canvasHeight);
         }

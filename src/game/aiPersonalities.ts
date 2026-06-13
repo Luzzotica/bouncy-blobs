@@ -176,6 +176,30 @@ const goal_seeker: PersonalityFn = (self, world, state) => {
     moveY = -1;
   }
 
+  // Unstick detour. Holding the stick toward the goal pins the blob against
+  // whatever blocks the straight line — observed on KOTH as seekers wedged
+  // for entire matches against the hill platform's side lip or its underside,
+  // never scoring. Detect "no progress": if our best distance-to-goal hasn't
+  // improved in a few seconds, back AWAY from the goal for a beat (clearing
+  // the wall), then resume — the re-approach with a fresh bounce-jump lands
+  // on top instead of into the face. Pure scratch-state, fully deterministic.
+  const detourUntil = (state.scratch.detourUntil as number) ?? -10;
+  if (world.elapsed < detourUntil) {
+    return { moveX: (state.scratch.detourDir as number) ?? 1, moveY: -1, expanding };
+  }
+  const dist = Math.hypot(dx, dy);
+  const bestDist = (state.scratch.bestDist as number) ?? Infinity;
+  if (dist < bestDist - 30) {
+    state.scratch.bestDist = dist;
+    state.scratch.bestDistAt = world.elapsed;
+  } else if (world.elapsed - ((state.scratch.bestDistAt as number) ?? world.elapsed) > 3) {
+    state.scratch.detourDir = sign(-dx) || 1; // away from the goal
+    state.scratch.detourUntil = world.elapsed + 1.4;
+    state.scratch.bestDist = Infinity; // re-arm progress tracking after the detour
+    state.scratch.bestDistAt = world.elapsed + 1.4;
+  }
+  if (state.scratch.bestDistAt === undefined) state.scratch.bestDistAt = world.elapsed;
+
   // Recovery: deep below the goal AND airborne almost certainly means we're
   // bouncing inside a pit. Slamming horizontally just wedges us against the
   // wall — soften the lateral push so the up-force can do its job.

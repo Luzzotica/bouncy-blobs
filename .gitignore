@@ -54,3 +54,6 @@ crates/softbody-wasm/pkg/
 
 # weekly-music-video / trailer pipeline (large local-only assets)
 .music-video/
+
+# match-shorts pipeline run workspaces (videos, large local-only)
+.match-shorts/

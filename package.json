@@ -15,6 +15,7 @@
     "test:e2e:capacity": "playwright test api-reachability room-capacity",
     "test:e2e:all": "playwright test",
     "record:match": "playwright test ai-content",
+    "record:short": "playwright test --project=shorts match-short",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

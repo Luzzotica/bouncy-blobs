@@ -9,9 +9,11 @@
 // independently via `page.evaluate(...)`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { BouncyBlobsGame } from "../game/bouncyBlobsGame";
-import { getFrameProfile, resetFrameProfile, type FrameSample } from "../game/gameLoop";
+import type { BouncyBlobsGame, GameStateSnapshot } from "../game/bouncyBlobsGame";
+import { FIXED_DT, getFrameProfile, resetFrameProfile, type FrameSample } from "../game/gameLoop";
 import { getHashHistory, type HashHistoryEntry } from "./hashHistory";
+import { getMatchEvents, type MatchEvent } from "./matchEvents";
+import { getPacingConfig, setPacingConfig } from "./pacingConfig";
 
 /** Result of the compare-hashes diagnostic. Returned to the host's
  *  overlay; null while a request is in flight, populated once all
@@ -48,6 +50,12 @@ interface DebugBridge {
   getAllPlayerPositions: () => Record<string, { x: number; y: number }>;
   /** Local sim's current tick. */
   getTick: () => number;
+  /** Timestamped gameplay events (KOs, big hits, lead changes, win) for the
+   *  match-shorts recorder. Timestamps are performance.now() seconds; pair
+   *  with `now()` at close time to map onto video time. */
+  getMatchEvents: () => MatchEvent[];
+  /** performance.now() seconds — the same clock getMatchEvents stamps with. */
+  now: () => number;
   /** Networking diagnostics (guest only). Buffer size + latest host tick
    * + the gap between local tick and host tick. If `gap` is negative the
    * guest is ahead (shouldn't happen). If `gap` is climbing, the guest's
@@ -104,6 +112,19 @@ interface DebugBridge {
    *  determinism tests can deterministically drive blob motion and
    *  interaction with spring pads / spikes / trigger zones. */
   setPlayerInput: (playerId: string, moveX: number, moveY: number, expanding: boolean) => void;
+  /** Capture engine + game state to a JS object. Engine bytes are an
+   *  Uint8Array (lossless wasm dump); game state is the manager-tree
+   *  snapshot. Pair with `restoreAll` for offline rollback-determinism
+   *  tests that don't involve networking. */
+  snapshotAll: () => { tick: number; engineBuf: Uint8Array; gameState: GameStateSnapshot } | null;
+  /** Restore both engine + game state from a prior `snapshotAll`. */
+  restoreAll: (snap: { engineBuf: Uint8Array; gameState: GameStateSnapshot }) => boolean;
+  /** Advance the sim by exactly one logic tick at FIXED_DT. Bypasses
+   *  pacingConfig.paused and any lockstep gate. Intended pattern:
+   *  `togglePause(true)` to halt RAF → loop { setPlayerInput(...) →
+   *  stepOne() → snapshot/read hashes }. The pause flag prevents the
+   *  RAF loop from racing this manual stepping. */
+  stepOne: (dt?: number) => void;
 }
 
 let netDiagAccessor: (() => { bufferSize: number; latestHostTick: number; gap: number } | null) | null = null;
@@ -180,6 +201,8 @@ export function installDebugBridge(game: BouncyBlobsGame | null): void {
       return out;
     },
     getTick: () => installedGame?.getWorld()?.tick ?? 0,
+    getMatchEvents: () => getMatchEvents(),
+    now: () => performance.now() / 1000,
     getNetDiag: () => (netDiagAccessor ? netDiagAccessor() : null),
     lastSnaps: () => (snapsAccessor ? snapsAccessor() : []),
     getStateHash: () => {
@@ -211,6 +234,41 @@ export function installDebugBridge(game: BouncyBlobsGame | null): void {
       p.moveX = moveX;
       p.moveY = moveY;
       p.expanding = expanding;
+    },
+    snapshotAll: () => {
+      const game = installedGame;
+      const world = game?.getWorld();
+      if (!game || !world) return null;
+      return {
+        tick: world.tick,
+        engineBuf: world.serializeState(),
+        gameState: game.snapshotGameState(),
+      };
+    },
+    restoreAll: (snap) => {
+      const game = installedGame;
+      const world = game?.getWorld();
+      if (!game || !world) return false;
+      const ok = world.restoreState(snap.engineBuf);
+      if (!ok) return false;
+      game.restoreGameState(snap.gameState);
+      return true;
+    },
+    stepOne: (dt?: number) => {
+      // Force-pause the RAF loop while stepping so a concurrent RAF
+      // can't double-step. Caller-set pause is preserved across the
+      // call by debugStepOnce itself (it saves/restores).
+      const prevPaused = getPacingConfig().paused;
+      if (!prevPaused) setPacingConfig({ paused: true });
+      try {
+        // Optional call: BouncyBlobsGame.debugStepOnce existed as
+        // uncommitted work that was lost in a git incident (2026-06-12);
+        // the bridge keeps the API and no-ops until it's reimplemented.
+        (installedGame as unknown as { debugStepOnce?: (dt: number) => void })
+          ?.debugStepOnce?.(dt ?? FIXED_DT);
+      } finally {
+        if (!prevPaused) setPacingConfig({ paused: false });
+      }
     },
   };
   (window as unknown as { __bbDebug: DebugBridge }).__bbDebug = bridge;

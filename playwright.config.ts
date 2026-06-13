@@ -29,6 +29,22 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      testIgnore: 'match-short.spec.ts',
+    },
+    {
+      // Portrait recording for social shorts (match-shorts pipeline):
+      // native 9:16 at 1080×1920. Project-level `use` overrides the global
+      // 720p viewport/video. Only runs the match-short spec.
+      name: 'shorts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1080, height: 1920 },
+        video: {
+          mode: 'on',
+          size: { width: 1080, height: 1920 },
+        },
+      },
+      testMatch: 'match-short.spec.ts',
     },
   ],
   webServer: {

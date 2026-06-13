@@ -11,6 +11,7 @@ import { addSplat, addTrailSplat, tickDecals, SplatAnchor } from '../renderer/de
 import { addBlobImpact, tickBlobImpacts } from '../renderer/blobImpacts'
 import { GamePhase } from './gameModes/types'
 import { SlimeBlob, BLOB_RADIUS } from '../physics/slimeBlob'
+import { logMatchEvent } from '../lib/matchEvents'
 
 interface BlobTrack {
   prevCentroid: Vec2
@@ -212,6 +213,9 @@ export class EffectsBindings {
         const speed = prevSpeed
         if (speed >= LAND_MIN_SPEED) {
           const t = Math.min(1, (speed - LAND_MIN_SPEED) / (LAND_LOUD_SPEED - LAND_MIN_SPEED))
+          if (t >= 0.6) {
+            logMatchEvent('big_hit', { strength: t, x: c.x, y: c.y })
+          }
           // -50% off the prior 0.12–0.30 envelope → 0.06–0.15.
           const volume = 0.06 + 0.09 * t
           // Range biased well below 1.0 to keep the impact deep/wet rather
@@ -521,6 +525,9 @@ export class EffectsBindings {
         // SFX + splat only when a player is involved (avoid background NPCs
         // bumping each other).
         if (isPlayer[i] || isPlayer[j]) {
+          if (strength >= 0.6) {
+            logMatchEvent('big_hit', { strength, x: cpx, y: cpy })
+          }
           const volume = 0.0525 + 0.0825 * strength
           const pitch = 0.7 + Math.random() * 0.28
           playSfx('land-squelch', { volume, pitch })
