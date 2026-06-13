@@ -33,6 +33,7 @@ import { TriggerManager } from './triggerManager';
 import { ActionManager } from './actionManager';
 import { PlatformMover } from './platformMover';
 import { CameraFollower } from '../renderer/cameraFollower';
+import { SpectatorDirector } from '../renderer/spectatorCamera';
 import { Vec2 } from '../physics/vec2';
 import { EffectsBindings } from './effectsBindings';
 import { updateParticles, clearParticles } from '../renderer/particles';
@@ -63,6 +64,18 @@ const shortsCamEnabled = (() => {
   if (typeof window === 'undefined' || !window.location) return false;
   try {
     return new URLSearchParams(window.location.search).get('shorts') === '1';
+  } catch { return false; }
+})();
+
+/** Spectator camera for the match-shorts recorder (`?spectate=1`). Locks the
+ *  view onto a single blob — zoomed in tight so the player fills the frame —
+ *  and cuts to a new blob when its target dies or the action moves elsewhere
+ *  (see SpectatorDirector). Takes precedence over the `?shorts=1` wide follow.
+ *  Render-only; never affects the sim. */
+const spectateCamEnabled = (() => {
+  if (typeof window === 'undefined' || !window.location) return false;
+  try {
+    return new URLSearchParams(window.location.search).get('spectate') === '1';
   } catch { return false; }
 })();
 
@@ -219,6 +232,8 @@ export class BouncyBlobsGame implements Game {
    * host (laptop local player) and online guests so the view stays
    * centered on the player(s) controlled on THIS machine. */
   private localPlayerIds: Set<string> | null = null;
+  /** Drives the `?spectate=1` content camera (one-blob follow + auto cuts). */
+  private spectatorDirector = new SpectatorDirector();
 
   setLocalPlayerIds(ids: string[] | null): void {
     this.localPlayerIds = ids ? new Set(ids) : null;
@@ -622,7 +637,30 @@ export class BouncyBlobsGame implements Game {
         }
       }
 
-      if (cameraTargets.length > 0 && this.state.canvasWidth > 0) {
+      if (spectateCamEnabled && this.state.canvasWidth > 0) {
+        // Spectator content camera: ignore the local-player filtering and
+        // direct the shot from ALL blobs (bots have no local id). The
+        // director picks one to follow and frames it tight.
+        const scores = modeManager?.getState().scores;
+        const specBlobs = playerManager.getAllPlayers().map((p) => ({
+          id: p.playerId,
+          pos: p.blob.getCentroid(),
+          dead: spikeManager?.isDead(p.playerId) ?? false,
+          score: scores?.get(p.playerId) ?? 0,
+        }));
+        if (specBlobs.length > 0) {
+          const f = this.spectatorDirector.update(dt, specBlobs);
+          camera.followTargets(
+            f.targets,
+            this.state.canvasWidth,
+            this.state.canvasHeight,
+            f.padding,
+            f.maxZoom,
+            f.minZoom,
+          );
+          camera.update(dt);
+        }
+      } else if (cameraTargets.length > 0 && this.state.canvasWidth > 0) {
         // When following only the local player(s): pin the resting view
         // so a single blob is ~5% of the SHORTER screen dimension. Using
         // min(width, height) keeps the blob feeling the same physical

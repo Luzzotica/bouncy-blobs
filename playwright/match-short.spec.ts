@@ -52,8 +52,15 @@ test('record portrait AI match for shorts', async ({ page }) => {
   // hold the hill, which yields null-winner "Time's up!" endings.
   const level = process.env.LEVEL ?? 'classic';
   const mode = process.env.MODE ?? '';
-  // shorts=1 → tighter bots-only camera follow (see bouncyBlobsGame.ts).
-  const params = new URLSearchParams({ offline: '1', ai: LINEUP.join(','), level, shorts: '1' });
+  // spectate=1 → single-blob spectator camera (tight follow + auto cuts);
+  // shorts=1 kept as the fallback wide framing (see bouncyBlobsGame.ts).
+  const params = new URLSearchParams({
+    offline: '1',
+    ai: LINEUP.join(','),
+    level,
+    shorts: '1',
+    spectate: '1',
+  });
   if (mode) params.set('mode', mode);
   await page.goto(`/game?${params.toString()}`);
 
