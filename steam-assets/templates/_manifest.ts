@@ -13,6 +13,7 @@ import { ClientIcon } from "./ClientIcon";
 import { BundleHeader } from "./BundleHeader";
 import { WorkshopBranding } from "./WorkshopBranding";
 import { EndCard } from "./EndCard";
+import { YoutubeBanner } from "./YoutubeBanner";
 
 export interface AssetSpec {
   component: ComponentType;
@@ -49,4 +50,7 @@ export const ASSETS: Record<string, AssetSpec> = {
 
   // 9:16 wishlist end card appended to match-shorts clips.
   endcard: { component: EndCard, width: 1080, height: 1920 },
+
+  // YouTube channel banner (full TV size; key content in the 1235×338 safe band).
+  "youtube-banner": { component: YoutubeBanner, width: 2048, height: 1152 },
 };
