@@ -691,6 +691,13 @@ export class SoftBodyWorld {
     }
   }
 
+  /** Treadmill (no-op in the legacy float sim — production uses the Rust
+   *  engine's per-substep `set_blob_tread`/`apply_tread`). This reference sim
+   *  is test-only; nothing exercises the tread through it. */
+  setBlobTread(_blobId: number, _strength: number): void {
+    // intentionally empty
+  }
+
   // ---- Phase 3 zone-force APIs (interface compliance only) ----
   // The TS sim is non-deterministic by design (float math) and is
   // only used in unit tests. Production runs through the Rust engine

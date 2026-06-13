@@ -36,6 +36,18 @@ const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 const LEDGE_UP_FORCE_MULT = 12.0;
 const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 
+// Hull "treadmill": while touching a surface, circulate the hull-perimeter
+// points along the contour in the direction of movement (like a tank tread).
+// Gripped contact points push the body the opposite way — that reaction is the
+// clamber "pull" (the engine clamps it to a fixed accel ceiling so a face full
+// of contacts can't launch the blob). A constant base guarantees a pull-up is
+// always possible; faster lateral movement spins the tread faster. The base is
+// set high enough to saturate the engine's reaction cap when gripping.
+const TREAD_BASE = 8000;       // constant tread accel (px/s²)
+const TREAD_SPEED_GAIN = 2.0;  // extra tread accel per px/s of lateral speed
+// ±1 — flips which way hull-ring order maps to "toward movement". Tune by feel.
+const TREAD_SIGN = 1;
+
 // Sticky wall stick
 const STICK_MIN_CONTACTS = 2;    // hull points touching sticky surface to engage
 const STICK_RELEASE_GRACE = 0.25;// seconds — can't re-stick to same wall immediately after release
@@ -193,20 +205,17 @@ export class SlimeBlob {
     this.gravityOverride = g;
   }
 
-  /** True when the upper half of the hull (relative to gravity) has at
-   * least LEDGE_HANG_MIN_UPPER_CONTACTS particles touching geometry while
-   * the lower half has none — the blob is hooked on an edge with its
-   * body dangling. Used to amplify UP_FORCE so the player can climb up. */
-  private isLedgeHanging(): boolean {
+  /** Count contacting hull particles split by whether they sit above or below
+   * the hull centroid along the up axis (negated gravity). `upper` contacts
+   * mean the gripping surface is above the blob (ledge/roof); `lower` means
+   * it's a floor. Pure arithmetic + contact reads → deterministic. */
+  private contactSplit(): { upper: number; lower: number } {
     const contacts = this.world.getBlobParticleContacts(this.blobId);
-    if (contacts.length === 0) return false;
+    if (contacts.length === 0) return { upper: 0, lower: 0 };
     const hull = this.world.getHullPolygon(this.blobId);
-    if (hull.length !== contacts.length) return false;
-    // Up axis = negated gravity direction.
+    if (hull.length !== contacts.length) return { upper: 0, lower: 0 };
     const g = this.getGravityDir();
     const upX = -g.x, upY = -g.y;
-    // Centroid of the hull polygon — same projection origin used in
-    // getCentroid(), recomputed here so we don't pay an extra positions fetch.
     let cx = 0, cy = 0;
     for (let i = 0; i < hull.length; i++) { cx += hull[i].x; cy += hull[i].y; }
     cx /= hull.length; cy /= hull.length;
@@ -217,6 +226,15 @@ export class SlimeBlob {
       if (dot > 0) upper++;
       else if (dot < 0) lower++;
     }
+    return { upper, lower };
+  }
+
+  /** True when the upper half of the hull (relative to gravity) has at
+   * least LEDGE_HANG_MIN_UPPER_CONTACTS particles touching geometry while
+   * the lower half has none — the blob is hooked on an edge with its
+   * body dangling. Used to amplify UP_FORCE so the player can climb up. */
+  private isLedgeHanging(): boolean {
+    const { upper, lower } = this.contactSplit();
     return upper >= LEDGE_HANG_MIN_UPPER_CONTACTS && lower === 0;
   }
 
@@ -335,6 +353,30 @@ export class SlimeBlob {
     } else if (this.stickY < -0.1) {
       const upMult = this.isLedgeHanging() ? LEDGE_UP_FORCE_MULT : 1.0;
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
+    }
+
+    // Hull treadmill — while touching a surface and steering laterally, run the
+    // perimeter points along the contour toward the movement direction so the
+    // contact points grip and clamber the blob up onto ledges. If the gripping
+    // surface is ABOVE the blob (hanging on a ledge / under a roof), invert the
+    // tread so it still pulls us up and over the lip.
+    //
+    // IMPORTANT (determinism): decide entirely from snapshotted contact signals
+    // — the ground/impact contact NORMAL + counts are captured by
+    // serializeState, but the per-particle contact bitmap
+    // (getBlobParticleContacts) is NOT, so reading it here would desync the
+    // first tick after a netcode/rollback restore.
+    const impact = this.getImpactContact();
+    const touchingSurface = grounded || sticky.count > 0 || impact !== null;
+    if (touchingSurface && Math.abs(this.stickX) > 0.1) {
+      const vLat = Math.abs(this.getHullVelocityAlong(right));
+      let strength = (TREAD_BASE + TREAD_SPEED_GAIN * vLat) * Math.sign(this.stickX) * TREAD_SIGN;
+      // Surface above ⟺ its outward normal points back along "up" (downward
+      // toward the blob). Use ground normal first, else the impact normal.
+      const ground = this.getGroundContact();
+      const n = ground?.normal ?? impact?.normal ?? null;
+      if (n && (n.x * up.x + n.y * up.y) < 0) strength = -strength;
+      this.world.setBlobTread(this.blobId, strength);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)

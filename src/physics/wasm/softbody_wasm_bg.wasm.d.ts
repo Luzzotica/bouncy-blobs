@@ -72,6 +72,7 @@ export const softbodyworldhandle_setBlobRestLocal: (a: number, b: number, c: num
 export const softbodyworldhandle_setBlobShapeMatchRestScale: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setBlobSpringStiffnessScale: (a: number, b: number, c: number, d: number) => void;
 export const softbodyworldhandle_setBlobSquashLean: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const softbodyworldhandle_setBlobTread: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setParticlePos: (a: number, b: number, c: number, d: number) => void;
 export const softbodyworldhandle_setParticleVel: (a: number, b: number, c: number, d: number) => void;
 export const softbodyworldhandle_setPositionsBulk: (a: number, b: number, c: number) => void;

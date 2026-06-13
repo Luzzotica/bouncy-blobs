@@ -741,6 +741,13 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_setBlobSquashLean(this.__wbg_ptr, blob_id, squash, lean, gravity_x, gravity_y);
     }
     /**
+     * @param {number} blob_id
+     * @param {number} strength
+     */
+    setBlobTread(blob_id, strength) {
+        wasm.softbodyworldhandle_setBlobTread(this.__wbg_ptr, blob_id, strength);
+    }
+    /**
      * @param {number} i
      * @param {number} x
      * @param {number} y

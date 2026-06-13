@@ -159,6 +159,10 @@ impl SoftBodyWorld {
         write_opt_vec2_vec(&mut w, &self.blob_ground_contact_normal);
         write_opt_vec2_vec(&mut w, &self.blob_impact_contact_point);
         write_opt_vec2_vec(&mut w, &self.blob_impact_contact_normal);
+        // Per-particle "touched this step" bitmap. Recomputed each step, but
+        // gameplay (isLedgeHanging, etc.) reads it in the tick AFTER it was
+        // set — so it must be captured for a post-restore tick to match.
+        write_bool_vec(&mut w, &self.particle_touched_this_step);
 
         // Trigger-prev: sorted Vec<(String, bool)>.
         w.u32(self.trigger_prev.len() as u32);
@@ -281,6 +285,7 @@ impl SoftBodyWorld {
         read_opt_vec2_vec(&mut r, &mut self.blob_ground_contact_normal)?;
         read_opt_vec2_vec(&mut r, &mut self.blob_impact_contact_point)?;
         read_opt_vec2_vec(&mut r, &mut self.blob_impact_contact_normal)?;
+        read_bool_vec(&mut r, &mut self.particle_touched_this_step)?;
 
         // Trigger-prev
         let tp_n = r.u32()? as usize;
@@ -366,6 +371,17 @@ fn read_i32_vec(r: &mut SnapReader, out: &mut Vec<i32>) -> Result<(), &'static s
     out.clear();
     out.reserve(n);
     for _ in 0..n { out.push(r.i32()?); }
+    Ok(())
+}
+fn write_bool_vec(w: &mut SnapWriter, v: &[bool]) {
+    w.u32(v.len() as u32);
+    for b in v { w.bool(*b); }
+}
+fn read_bool_vec(r: &mut SnapReader, out: &mut Vec<bool>) -> Result<(), &'static str> {
+    let n = r.u32()? as usize;
+    out.clear();
+    out.reserve(n);
+    for _ in 0..n { out.push(r.bool()?); }
     Ok(())
 }
 fn write_vec2_vec(w: &mut SnapWriter, v: &[FxVec2]) {

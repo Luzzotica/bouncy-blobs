@@ -229,6 +229,11 @@ impl SoftBodyWorldHandle {
         self.inner.apply_blob_linear_velocity_delta(blob_id, fv(dvx, dvy));
     }
 
+    #[wasm_bindgen(js_name = setBlobTread)]
+    pub fn set_blob_tread(&mut self, blob_id: u32, strength: f64) {
+        self.inner.set_blob_tread(blob_id, Fx::from_f64(strength));
+    }
+
     // ---- Phase 3 zone-force APIs (foundation for Phases 4-6) ----
 
     /// Find every blob whose centroid is inside `polygon`. Returns
