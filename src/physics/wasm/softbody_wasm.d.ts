@@ -210,7 +210,7 @@ export class SoftBodyWorldHandle {
      * integer LUTs inside the engine.
      */
     setBlobSquashLean(blob_id: number, squash: number, lean: number, gravity_x: number, gravity_y: number): void;
-    setBlobTread(blob_id: number, strength: number): void;
+    setBlobTread(blob_id: number, strength: number, react_scale: number): void;
     setParticlePos(i: number, x: number, y: number): void;
     setParticleVel(i: number, x: number, y: number): void;
     /**
@@ -375,7 +375,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_setBlobShapeMatchRestScale: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobSpringStiffnessScale: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setBlobSquashLean: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-    readonly softbodyworldhandle_setBlobTread: (a: number, b: number, c: number) => void;
+    readonly softbodyworldhandle_setBlobTread: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setParticlePos: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setParticleVel: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setPositionsBulk: (a: number, b: number, c: number) => void;

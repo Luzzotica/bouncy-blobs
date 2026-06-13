@@ -743,9 +743,10 @@ export class SoftBodyWorldHandle {
     /**
      * @param {number} blob_id
      * @param {number} strength
+     * @param {number} react_scale
      */
-    setBlobTread(blob_id, strength) {
-        wasm.softbodyworldhandle_setBlobTread(this.__wbg_ptr, blob_id, strength);
+    setBlobTread(blob_id, strength, react_scale) {
+        wasm.softbodyworldhandle_setBlobTread(this.__wbg_ptr, blob_id, strength, react_scale);
     }
     /**
      * @param {number} i

@@ -230,8 +230,8 @@ impl SoftBodyWorldHandle {
     }
 
     #[wasm_bindgen(js_name = setBlobTread)]
-    pub fn set_blob_tread(&mut self, blob_id: u32, strength: f64) {
-        self.inner.set_blob_tread(blob_id, Fx::from_f64(strength));
+    pub fn set_blob_tread(&mut self, blob_id: u32, strength: f64, react_scale: f64) {
+        self.inner.set_blob_tread(blob_id, Fx::from_f64(strength), Fx::from_f64(react_scale));
     }
 
     // ---- Phase 3 zone-force APIs (foundation for Phases 4-6) ----

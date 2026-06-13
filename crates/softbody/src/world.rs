@@ -180,6 +180,11 @@ pub struct SoftBodyWorld {
     /// every substep AFTER shape-matching (so it isn't immediately cancelled),
     /// then cleared at the end of `step()`. Transient → not snapshotted.
     pub(crate) blob_tread_strength: Vec<Fx>,
+    /// Per-blob scale [0..1] on the tread's body-reaction ("pull"), set with
+    /// the strength each frame. Gameplay zeroes it on flat ground so the
+    /// surface still visibly circulates without shoving the blob sideways
+    /// (the reaction is only wanted for climbing steep/overhead surfaces).
+    pub(crate) blob_tread_react: Vec<Fx>,
     pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
     pub(crate) base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
@@ -282,6 +287,7 @@ impl SoftBodyWorld {
             particle_touched_this_step: Vec::new(),
             blob_gravity_override: Vec::new(),
             blob_tread_strength: Vec::new(),
+            blob_tread_react: Vec::new(),
             blob_pin_snapshots: Vec::new(),
             base_masses: Vec::new(),
             config,
@@ -527,11 +533,17 @@ impl SoftBodyWorld {
     /// over surfaces it grips. Applied every substep AFTER shape-matching (see
     /// `apply_tread`) so the constraint doesn't immediately cancel it. Must be
     /// re-set each frame — it's cleared at the end of `step()`.
-    pub fn set_blob_tread(&mut self, blob_id: BlobId, strength: Fx) {
+    /// `react_scale` (0..1) scales the body-reaction "pull" only — the visible
+    /// surface circulation always runs at full `strength`. Gameplay passes 0 on
+    /// flat ground (circulate visually, don't shove the body sideways) and ~1
+    /// when climbing a steep/overhead surface.
+    pub fn set_blob_tread(&mut self, blob_id: BlobId, strength: Fx, react_scale: Fx) {
         while self.blob_tread_strength.len() <= blob_id as usize {
             self.blob_tread_strength.push(Fx::ZERO);
+            self.blob_tread_react.push(Fx::ZERO);
         }
         self.blob_tread_strength[blob_id as usize] = strength;
+        self.blob_tread_react[blob_id as usize] = react_scale;
     }
 
     /// Apply the per-blob tread for one substep. A tank tread is a REACTION:
@@ -568,6 +580,11 @@ impl SoftBodyWorld {
                     body_reaction = body_reaction.sub(t.scale(step));
                 }
             }
+            // Scale the body reaction by the per-blob react factor (0 on flat
+            // ground → circulate visually but don't shove sideways; ~1 when
+            // climbing). The visible circulation above is unaffected.
+            let react = self.blob_tread_react.get(bi).copied().unwrap_or(Fx::ZERO);
+            body_reaction = body_reaction.scale(react);
             // Cap the reaction to a fixed acceleration ceiling (px/s²) so a
             // face full of contacts can't launch the blob — it should clamber,
             // not cannon — while staying a meaningful pull (comparable to the
@@ -758,6 +775,7 @@ impl SoftBodyWorld {
         // Tread is a per-frame command — clear it so a blob only treads on
         // frames where gameplay set it. Keeps it transient (never snapshotted).
         for s in self.blob_tread_strength.iter_mut() { *s = Fx::ZERO; }
+        for s in self.blob_tread_react.iter_mut() { *s = Fx::ZERO; }
 
         self.tick += 1;
     }
@@ -2799,7 +2817,7 @@ mod tests {
         let rb = standard_square_blob(&mut b, FxVec2::new(fx(0), fx(0)), "p");
 
         let dt = Fx::ONE / Fx::from_int(60);
-        a.set_blob_tread(ra.blob_id, fx(900));
+        a.set_blob_tread(ra.blob_id, fx(900), Fx::ONE);
         a.apply_tread(dt);
 
         // Net linear momentum imparted to the hull ≈ 0 (tangents around a
@@ -2811,7 +2829,7 @@ mod tests {
         assert!(sum.length_squared() < fx(1), "tread added net momentum: {:?}", sum);
 
         // Determinism: same call on an identical world → identical velocities.
-        b.set_blob_tread(rb.blob_id, fx(900));
+        b.set_blob_tread(rb.blob_id, fx(900), Fx::ONE);
         b.apply_tread(dt);
         for (&ha, &hb) in a.blob_ranges[ra.blob_id as usize].hull.iter()
             .zip(b.blob_ranges[rb.blob_id as usize].hull.iter())
@@ -2860,12 +2878,12 @@ mod tests {
         let left = FxVec2::new(fx(-1), fx(0));
         for _ in 0..120 {
             wt.apply_blob_move_force(rt.blob_id, left, fx(240), dt);
-            wt.set_blob_tread(rt.blob_id, fx(900));
+            wt.set_blob_tread(rt.blob_id, fx(900), Fx::ONE);
             wt.step(dt);
             wn.apply_blob_move_force(rn.blob_id, left, fx(240), dt);
             wn.step(dt); // no tread
             wb.apply_blob_move_force(rb.blob_id, left, fx(240), dt);
-            wb.set_blob_tread(rb.blob_id, fx(900));
+            wb.set_blob_tread(rb.blob_id, fx(900), Fx::ONE);
             wb.step(dt);
         }
         let ct = rt.center_idx as usize;

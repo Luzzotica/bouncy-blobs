@@ -42,7 +42,11 @@ const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 // contact points push the body the opposite way — that reaction is the clamber
 // "pull" (the engine clamps it to a fixed accel ceiling). The rate is CONSTANT
 // (not scaled by speed) and deliberately gentle.
-const TREAD_RATE = 1500;       // constant tread accel (px/s²)
+const TREAD_RATE = 7500;       // constant tread accel (px/s²) — visual rotation
+// Contact-normal·up above this = "flat ground": the surface still circulates
+// visually but its body-reaction pull is suppressed so walking stays normal
+// speed. Below it (steeper / overhead) the pull engages to clamber.
+const FLAT_GROUND_DOT = 0.7;
 // ±1 — flips which way hull-ring order maps to "toward movement". Tune by feel.
 const TREAD_SIGN = 1;
 
@@ -366,11 +370,18 @@ export class SlimeBlob {
     // bitmap for the body reaction.
     if (Math.abs(this.stickX) > 0.1) {
       let strength = TREAD_RATE * Math.sign(this.stickX) * TREAD_SIGN;
-      // Surface above ⟺ its outward normal points back along "up" (downward
-      // toward the blob). Use ground normal first, else the impact normal.
+      // Body-reaction "pull" scale: full while climbing, but ZERO on flat
+      // ground so the surface still visibly circulates without shoving the blob
+      // sideways (that horizontal shove was the "moving too fast on the ground"
+      // — the pull is only wanted to clamber steep/overhead surfaces).
+      let reactScale = 1;
       const n = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
-      if (n && (n.x * up.x + n.y * up.y) < 0) strength = -strength;
-      this.world.setBlobTread(this.blobId, strength);
+      if (n) {
+        const upDot = n.x * up.x + n.y * up.y; // +1 floor below, -1 roof above
+        if (upDot < 0) strength = -strength;   // surface above → invert tread
+        if (upDot > FLAT_GROUND_DOT) reactScale = 0; // ~flat floor → no pull
+      }
+      this.world.setBlobTread(this.blobId, strength, reactScale);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
