@@ -180,11 +180,6 @@ pub struct SoftBodyWorld {
     /// every substep AFTER shape-matching (so it isn't immediately cancelled),
     /// then cleared at the end of `step()`. Transient → not snapshotted.
     pub(crate) blob_tread_strength: Vec<Fx>,
-    /// Per-blob scale [0..1] on the tread's body-reaction ("pull"), set with
-    /// the strength each frame. Gameplay zeroes it on flat ground so the
-    /// surface still visibly circulates without shoving the blob sideways
-    /// (the reaction is only wanted for climbing steep/overhead surfaces).
-    pub(crate) blob_tread_react: Vec<Fx>,
     pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
     pub(crate) base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
@@ -287,7 +282,6 @@ impl SoftBodyWorld {
             particle_touched_this_step: Vec::new(),
             blob_gravity_override: Vec::new(),
             blob_tread_strength: Vec::new(),
-            blob_tread_react: Vec::new(),
             blob_pin_snapshots: Vec::new(),
             base_masses: Vec::new(),
             config,
@@ -524,35 +518,23 @@ impl SoftBodyWorld {
         }
     }
 
-    /// Treadmill: set this blob's tread strength for the current step. The
-    /// hull *surface* "flows" around the perimeter contour like a tank tread —
+    /// Treadmill: set this blob's tread strength for the current step. The hull
+    /// *surface* "flows" around the perimeter contour like a tank tread —
     /// `strength` is signed (sign picks the circulation direction in hull-ring
-    /// order); magnitude is a tread acceleration (px/s²). The whole shape stays
-    /// put (NOT rigid rotation); hull points in contact with geometry convert
-    /// the tangential motion into traction, letting the blob clamber up onto /
-    /// over surfaces it grips. Applied every substep AFTER shape-matching (see
-    /// `apply_tread`) so the constraint doesn't immediately cancel it. Must be
-    /// re-set each frame — it's cleared at the end of `step()`.
-    /// `react_scale` (0..1) scales the body-reaction "pull" only — the visible
-    /// surface circulation always runs at full `strength`. Gameplay passes 0 on
-    /// flat ground (circulate visually, don't shove the body sideways) and ~1
-    /// when climbing a steep/overhead surface.
-    pub fn set_blob_tread(&mut self, blob_id: BlobId, strength: Fx, react_scale: Fx) {
+    /// order); magnitude is a tread velocity (px/s). Purely visual surface
+    /// motion — it does NOT translate the body. Applied every substep AFTER
+    /// shape-matching (see `apply_tread`) so the constraint doesn't immediately
+    /// cancel it. Re-set each frame — cleared at the end of `step()`.
+    pub fn set_blob_tread(&mut self, blob_id: BlobId, strength: Fx) {
         while self.blob_tread_strength.len() <= blob_id as usize {
             self.blob_tread_strength.push(Fx::ZERO);
-            self.blob_tread_react.push(Fx::ZERO);
         }
         self.blob_tread_strength[blob_id as usize] = strength;
-        self.blob_tread_react[blob_id as usize] = react_scale;
     }
 
-    /// Apply the per-blob tread for one substep. A tank tread is a REACTION:
-    /// the surface points circulate along the contour (the visible treadmill),
-    /// and every point that's gripping geometry pushes the body the opposite
-    /// way — that reaction is what pulls/clambers the blob along the surface.
-    /// Free (non-contact) points only circulate (cosmetic). Deterministic:
-    /// fixed-point only, fixed hull-ring order, snapshotted contact bitmap,
-    /// no transcendentals.
+    /// Apply the per-blob tread for one substep: circulate the hull-perimeter
+    /// points along the contour (the visible treadmill). Deterministic:
+    /// fixed-point only, fixed hull-ring order, no transcendentals.
     fn apply_tread(&mut self, dt: Fx) {
         for bi in 0..self.blob_ranges.len() {
             let strength = self.blob_tread_strength.get(bi).copied().unwrap_or(Fx::ZERO);
@@ -562,7 +544,6 @@ impl SoftBodyWorld {
             let n = r.hull.len();
             if n < 3 { continue; }
             let step = strength * dt;
-            let mut body_reaction = FxVec2::ZERO;
             for k in 0..n {
                 // Contour tangent at hull point k via central difference of its
                 // ring neighbours — the direction along the perimeter outline.
@@ -572,31 +553,7 @@ impl SoftBodyWorld {
                 if tangent.length_squared() < EPS { continue; }
                 let t = tangent.normalize();
                 let u = r.hull[k] as usize;
-                // Circulate the surface point (the visible tread flow).
                 self.vel[u] = self.vel[u].add(t.scale(step));
-                // Gripped point → its tread reaction propels the body the
-                // opposite way (this is the "pull").
-                if self.particle_touched_this_step.get(u).copied().unwrap_or(false) {
-                    body_reaction = body_reaction.sub(t.scale(step));
-                }
-            }
-            // Scale the body reaction by the per-blob react factor (0 on flat
-            // ground → circulate visually but don't shove sideways; ~1 when
-            // climbing). The visible circulation above is unaffected.
-            let react = self.blob_tread_react.get(bi).copied().unwrap_or(Fx::ZERO);
-            body_reaction = body_reaction.scale(react);
-            // Cap the reaction to a fixed acceleration ceiling (px/s²) so a
-            // face full of contacts can't launch the blob — it should clamber,
-            // not cannon — while staying a meaningful pull (comparable to the
-            // ledge up-force). Independent of contact count.
-            let max_r = Fx::from_int(6000) * dt;
-            if body_reaction.length() > max_r {
-                body_reaction = body_reaction.normalize().scale(max_r);
-            }
-            if body_reaction.length_squared() >= EPS {
-                for i in r.start..r.end {
-                    self.vel[i as usize] = self.vel[i as usize].add(body_reaction);
-                }
             }
         }
     }
@@ -775,7 +732,6 @@ impl SoftBodyWorld {
         // Tread is a per-frame command — clear it so a blob only treads on
         // frames where gameplay set it. Keeps it transient (never snapshotted).
         for s in self.blob_tread_strength.iter_mut() { *s = Fx::ZERO; }
-        for s in self.blob_tread_react.iter_mut() { *s = Fx::ZERO; }
 
         self.tick += 1;
     }
@@ -2817,7 +2773,7 @@ mod tests {
         let rb = standard_square_blob(&mut b, FxVec2::new(fx(0), fx(0)), "p");
 
         let dt = Fx::ONE / Fx::from_int(60);
-        a.set_blob_tread(ra.blob_id, fx(900), Fx::ONE);
+        a.set_blob_tread(ra.blob_id, fx(900));
         a.apply_tread(dt);
 
         // Net linear momentum imparted to the hull ≈ 0 (tangents around a
@@ -2829,78 +2785,13 @@ mod tests {
         assert!(sum.length_squared() < fx(1), "tread added net momentum: {:?}", sum);
 
         // Determinism: same call on an identical world → identical velocities.
-        b.set_blob_tread(rb.blob_id, fx(900), Fx::ONE);
+        b.set_blob_tread(rb.blob_id, fx(900));
         b.apply_tread(dt);
         for (&ha, &hb) in a.blob_ranges[ra.blob_id as usize].hull.iter()
             .zip(b.blob_ranges[rb.blob_id as usize].hull.iter())
         {
             assert_eq!(a.vel[ha as usize].x.raw(), b.vel[hb as usize].x.raw());
             assert_eq!(a.vel[ha as usize].y.raw(), b.vel[hb as usize].y.raw());
-        }
-    }
-
-    // Helper: build a world with a lower floor and a raised platform to its
-    // left, leaving a vertical face (ledge) at x = -40 between y=100..200.
-    // Returns the blob resting on the lower floor against the face.
-    fn clamber_world() -> (SoftBodyWorld, BlobResult) {
-        let mut cfg = WorldConfig::default();
-        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
-        cfg.substeps = 4;
-        let mut w = SoftBodyWorld::new(cfg, 1);
-        // Lower floor: x in [-40, 500], top at y=200.
-        w.register_static_polygon(vec![
-            FxVec2::new(fx(-40), fx(200)), FxVec2::new(fx(500), fx(200)),
-            FxVec2::new(fx(500), fx(400)), FxVec2::new(fx(-40), fx(400)),
-        ], SurfaceMaterial::Default, None, None, None);
-        // Upper platform (ledge to climb): x in [-500,-40], top at y=100.
-        w.register_static_polygon(vec![
-            FxVec2::new(fx(-500), fx(100)), FxVec2::new(fx(-40), fx(100)),
-            FxVec2::new(fx(-40), fx(400)), FxVec2::new(fx(-500), fx(400)),
-        ], SurfaceMaterial::Default, None, None, None);
-        let res = standard_square_blob(&mut w, FxVec2::new(fx(10), fx(150)), "p0");
-        let dt = Fx::ONE / Fx::from_int(60);
-        for _ in 0..120 { w.step(dt); } // settle on the lower floor by the face
-        (w, res)
-    }
-
-    #[test]
-    fn tread_is_active_bounded_and_deterministic_against_geometry() {
-        // While gripping geometry, the tread must (a) measurably affect the
-        // blob's motion (it's wired through the substep loop), (b) stay BOUNDED
-        // — the clamped grip-reaction must never launch the blob — and (c) be
-        // byte-identical across two worlds. The actual clamber *feel* (sign +
-        // strength) is tuned in-game in real hanging scenarios, which this
-        // synthetic floor-against-wall rig can't faithfully reproduce.
-        let dt = Fx::ONE / Fx::from_int(60);
-        let (mut wt, rt) = clamber_world();   // with tread
-        let (mut wn, rn) = clamber_world();   // control, no tread
-        let (mut wb, rb) = clamber_world();   // determinism twin of wt
-        let left = FxVec2::new(fx(-1), fx(0));
-        for _ in 0..120 {
-            wt.apply_blob_move_force(rt.blob_id, left, fx(240), dt);
-            wt.set_blob_tread(rt.blob_id, fx(900), Fx::ONE);
-            wt.step(dt);
-            wn.apply_blob_move_force(rn.blob_id, left, fx(240), dt);
-            wn.step(dt); // no tread
-            wb.apply_blob_move_force(rb.blob_id, left, fx(240), dt);
-            wb.set_blob_tread(rb.blob_id, fx(900), Fx::ONE);
-            wb.step(dt);
-        }
-        let ct = rt.center_idx as usize;
-        // (a) tread changed the trajectory vs the no-tread control (it's wired
-        // through the substep loop). Magnitude/feel is tuned in-game.
-        let moved = (wt.pos[ct].x - wn.pos[rn.center_idx as usize].x).abs()
-            + (wt.pos[ct].y - wn.pos[rn.center_idx as usize].y).abs();
-        assert!(moved > Fx::ZERO, "tread should affect motion; delta={}", moved.to_f64());
-        // (b) bounded — no explosion.
-        for &h in &rt.hull_indices {
-            assert!(wt.pos[h as usize].x.abs() < fx(2000) && wt.pos[h as usize].y.abs() < fx(2000),
-                "tread launched the blob out of bounds: {:?}", wt.pos[h as usize]);
-        }
-        // (c) deterministic: identical worlds → byte-identical state.
-        for i in 0..wt.pos.len() {
-            assert_eq!(wt.pos[i], wb.pos[i], "tread non-deterministic at particle {}", i);
-            assert_eq!(wt.vel[i], wb.vel[i], "tread non-deterministic vel at particle {}", i);
         }
     }
 

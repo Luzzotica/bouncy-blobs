@@ -162,11 +162,9 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   applyBlobLinearVelocityDelta(blobId: number, deltaV: Vec2): void;
   /** Treadmill: set this blob's tread for the current step. `strength` (signed
    *  — sign picks the circulation direction) drives the visible hull-perimeter
-   *  circulation; `reactScale` (0..1) scales ONLY the body-reaction "pull" that
-   *  gripped contact points exert (pass 0 on flat ground so the surface still
-   *  flows without shoving the blob sideways; ~1 when climbing). Re-set each
-   *  frame; cleared per step. */
-  setBlobTread(blobId: number, strength: number, reactScale: number): void;
+   *  surface circulation. Purely visual — does not translate the body. Re-set
+   *  each frame; cleared per step. */
+  setBlobTread(blobId: number, strength: number): void;
   applyBlobExpand(blobId: number, expandForce: number): void;
   applyExternalForcePoint(i: number, f: Vec2): void;
 

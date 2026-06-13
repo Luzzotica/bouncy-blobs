@@ -36,18 +36,14 @@ const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 const LEDGE_UP_FORCE_MULT = 12.0;
 const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 
-// Hull "treadmill": circulate the hull-perimeter points along the contour in
-// the direction of movement (like a tank tread) whenever steering laterally —
-// always, even airborne or riding another blob / softbody platform. Gripped
-// contact points push the body the opposite way — that reaction is the clamber
-// "pull" (the engine clamps it to a fixed accel ceiling). The rate is CONSTANT
-// (not scaled by speed) and deliberately gentle.
-const TREAD_RATE = 7500;       // constant tread accel (px/s²) — visual rotation
-// Contact-normal·up above this = "flat ground": the surface still circulates
-// visually but its body-reaction pull is suppressed so walking stays normal
-// speed. Below it (steeper / overhead) the pull engages to clamber.
-const FLAT_GROUND_DOT = 0.7;
-// ±1 — flips which way hull-ring order maps to "toward movement". Tune by feel.
+// Hull "treadmill": circulate the hull-perimeter points along the contour
+// (like a tank tread) whenever the player is steering in ANY direction. Purely
+// visual — the surface flows, it doesn't push the body. The circulation sign
+// makes the surface flow "toward movement" relative to whatever surface the
+// blob is on/against (cross of the movement direction with the contact normal,
+// or world-up in the air). Constant rate, not scaled by speed.
+const TREAD_RATE = 7500;       // constant tread velocity (px/s) — visual only
+// ±1 — flips the overall circulation direction. Tune by feel.
 const TREAD_SIGN = 1;
 
 // Sticky wall stick
@@ -342,9 +338,16 @@ export class SlimeBlob {
     const right = vec2(down.y, -down.x); // perpendicular, gravity-relative (for lean)
     const up = vec2(-down.x, -down.y);
 
-    // Lateral movement — world-fixed X. Reduced in air.
-    const grounded = this.world.getBlobGroundContacts(this.blobId) > 0;
-    const airMult = grounded ? 1.0 : AIR_MOVE_MULTIPLIER;
+    // "On the ground" = touching ANYTHING (floor, wall, ledge, or another
+    // blob / softbody platform), not just floor-facing static geometry. Air
+    // movement only kicks in when the blob is truly touching nothing. The
+    // per-particle contact bitmap is snapshotted, so this is rollback-safe.
+    const contacts = this.world.getBlobParticleContacts(this.blobId);
+    let touching = false;
+    for (let i = 0; i < contacts.length; i++) { if (contacts[i]) { touching = true; break; } }
+
+    // Lateral movement — world-fixed X. Reduced only when airborne.
+    const airMult = touching ? 1.0 : AIR_MOVE_MULTIPLIER;
     const lateralDir = vec2(this.stickX, 0);
     this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult, delta);
 
@@ -357,31 +360,22 @@ export class SlimeBlob {
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
     }
 
-    // Hull treadmill — run the perimeter points along the contour toward the
-    // movement direction whenever steering laterally, at a constant gentle
-    // rate, ALWAYS (even airborne or riding another blob / softbody platform;
-    // grounding isn't required — the engine's contact bitmap drives the clamber
-    // pull wherever the hull actually grips). If the gripping surface is ABOVE
-    // the blob (hanging on a ledge / under a roof), invert so it still pulls us
-    // up and over the lip.
-    //
-    // Determinism: the strength uses only snapshotted signals (ground/impact
-    // contact NORMAL); the engine reads the snapshotted per-particle contact
-    // bitmap for the body reaction.
-    if (Math.abs(this.stickX) > 0.1) {
-      let strength = TREAD_RATE * Math.sign(this.stickX) * TREAD_SIGN;
-      // Body-reaction "pull" scale: full while climbing, but ZERO on flat
-      // ground so the surface still visibly circulates without shoving the blob
-      // sideways (that horizontal shove was the "moving too fast on the ground"
-      // — the pull is only wanted to clamber steep/overhead surfaces).
-      let reactScale = 1;
-      const n = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
-      if (n) {
-        const upDot = n.x * up.x + n.y * up.y; // +1 floor below, -1 roof above
-        if (upDot < 0) strength = -strength;   // surface above → invert tread
-        if (upDot > FLAT_GROUND_DOT) reactScale = 0; // ~flat floor → no pull
+    // Hull treadmill — purely visual surface circulation. Runs whenever the
+    // player steers in ANY direction. The sign makes the surface flow "toward
+    // movement" relative to whatever surface we're on/against: cross of the
+    // world movement direction with the contact normal (world-up in the air).
+    // This naturally handles floor (roll), wall/ledge (tread up), and roof
+    // (flip) without special cases. Deterministic: input + snapshotted normal.
+    if (Math.abs(this.stickX) > 0.1 || Math.abs(this.stickY) > 0.1) {
+      // World-space movement: stickX is world-fixed lateral; stickY is
+      // gravity-relative (positive = toward gravity / down).
+      const moveX = this.stickX + down.x * this.stickY;
+      const moveY = down.y * this.stickY;
+      const cn = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? up;
+      const dir = Math.sign(moveX * cn.y - moveY * cn.x); // 2D cross(move, normal)
+      if (dir !== 0) {
+        this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
       }
-      this.world.setBlobTread(this.blobId, strength, reactScale);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)

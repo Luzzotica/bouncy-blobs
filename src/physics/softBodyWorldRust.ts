@@ -342,8 +342,8 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   applyBlobLinearVelocityDelta(blobId: number, deltaV: Vec2): void {
     this.h.applyBlobLinearVelocityDelta(blobId, deltaV.x, deltaV.y);
   }
-  setBlobTread(blobId: number, strength: number, reactScale: number): void {
-    this.h.setBlobTread(blobId, strength, reactScale);
+  setBlobTread(blobId: number, strength: number): void {
+    this.h.setBlobTread(blobId, strength);
   }
 
   // ---- Phase 3 zone-force APIs ----
