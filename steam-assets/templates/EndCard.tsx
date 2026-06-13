@@ -1,22 +1,23 @@
 import React from "react";
-import { Frame, Logo, Blob, PaperCard, palette, fonts } from "./_shared";
+import { Frame, Logo, PaperCard, palette, fonts, GEN } from "./_shared";
 
 // 1080×1920 portrait end card appended to match-shorts clips. On-brand
-// cream-paper-and-purple-tape "wishlist" call-to-action. Rendered to PNG via
-// the steam-assets harness and consumed by scripts/match-shorts/cut.ts.
+// cream-paper-and-purple-tape "wishlist" call-to-action, built around the
+// real teal blob mascot (public/refs/generated/small.png). Rendered to PNG
+// via the steam-assets harness; consumed by scripts/match-shorts/cut.ts.
 export function EndCard() {
   return (
     <Frame width={1080} height={1920} background={palette.bg}>
-      {/* Soft lavender glow behind the action */}
+      {/* Lavender glow behind the mascot */}
       <div
         style={{
           position: "absolute",
           left: "50%",
-          top: "42%",
-          width: 1300,
-          height: 1300,
+          top: "44%",
+          width: 1400,
+          height: 1400,
           transform: "translate(-50%, -50%)",
-          background: `radial-gradient(circle, rgba(199,125,255,0.22) 0%, rgba(199,125,255,0) 60%)`,
+          background: `radial-gradient(circle, rgba(199,125,255,0.28) 0%, rgba(199,125,255,0) 60%)`,
         }}
       />
 
@@ -28,21 +29,31 @@ export function EndCard() {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          gap: 70,
+          gap: 56,
           padding: 80,
           boxSizing: "border-box",
         }}
       >
         <Logo size={2.0} />
 
-        {/* Blob trio */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 40 }}>
-          <div style={{ transform: "rotate(-8deg)" }}><Blob size={150} hue={palette.accentPink} /></div>
-          <Blob size={230} hue={palette.blob} />
-          <div style={{ transform: "rotate(7deg)" }}><Blob size={150} hue={palette.accentYellow} /></div>
-        </div>
+        {/* Hero mascot. The asset's own dark-purple vignette blends into the
+            frame background, so no seam despite being a square source. */}
+        <img
+          src={GEN.small}
+          alt="Bouncy Blobs mascot"
+          style={{
+            width: 720,
+            height: 720,
+            objectFit: "contain",
+            // Feather the square source edges into the card background so the
+            // asset's own vignette doesn't read as a visible box.
+            WebkitMaskImage: "radial-gradient(circle at 50% 48%, #000 58%, transparent 78%)",
+            maskImage: "radial-gradient(circle at 50% 48%, #000 58%, transparent 78%)",
+            filter: "drop-shadow(0 24px 40px rgba(0,0,0,0.45))",
+          }}
+        />
 
-        <PaperCard tape={palette.accentYellow} rotate={-2} padding="40px 64px">
+        <PaperCard tape={palette.accentYellow} rotate={-2} padding="38px 64px">
           <div
             style={{
               fontFamily: fonts.display,

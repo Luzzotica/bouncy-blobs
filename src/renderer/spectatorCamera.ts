@@ -57,11 +57,13 @@ const IDLE_MAX_SEC = 2.5;
 // before the camera switches to a new leader — avoids jitter near ties.
 const LEAD_MARGIN = 70;
 
-// Framing knobs, tuned for a 1080×1920 portrait frame. A lone focus blob ends
-// up ~20% of frame width; the view widens (down to minZoom) when a scrum forms.
-const PADDING = 230;
-const MIN_ZOOM = 0.55;
-const MAX_ZOOM = 2.2;
+// Framing knobs, tuned for a 1080×1920 portrait frame. Pulled back ~50% from
+// the original tight values so fast blobs don't outrun the (lerped) camera and
+// leave frame — a lone focus blob now fills ~half the width, with margin for
+// chaos. The view widens further (down to minZoom) when a scrum forms.
+const PADDING = 320;
+const MIN_ZOOM = 0.28;
+const MAX_ZOOM = 1.1;
 
 export class SpectatorDirector {
   private focusId: string | null = null;
