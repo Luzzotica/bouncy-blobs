@@ -36,15 +36,13 @@ const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 const LEDGE_UP_FORCE_MULT = 12.0;
 const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 
-// Hull "treadmill": while touching a surface, circulate the hull-perimeter
-// points along the contour in the direction of movement (like a tank tread).
-// Gripped contact points push the body the opposite way — that reaction is the
-// clamber "pull" (the engine clamps it to a fixed accel ceiling so a face full
-// of contacts can't launch the blob). A constant base guarantees a pull-up is
-// always possible; faster lateral movement spins the tread faster. The base is
-// set high enough to saturate the engine's reaction cap when gripping.
-const TREAD_BASE = 8000;       // constant tread accel (px/s²)
-const TREAD_SPEED_GAIN = 2.0;  // extra tread accel per px/s of lateral speed
+// Hull "treadmill": circulate the hull-perimeter points along the contour in
+// the direction of movement (like a tank tread) whenever steering laterally —
+// always, even airborne or riding another blob / softbody platform. Gripped
+// contact points push the body the opposite way — that reaction is the clamber
+// "pull" (the engine clamps it to a fixed accel ceiling). The rate is CONSTANT
+// (not scaled by speed) and deliberately gentle.
+const TREAD_RATE = 1500;       // constant tread accel (px/s²)
 // ±1 — flips which way hull-ring order maps to "toward movement". Tune by feel.
 const TREAD_SIGN = 1;
 
@@ -355,26 +353,22 @@ export class SlimeBlob {
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
     }
 
-    // Hull treadmill — while touching a surface and steering laterally, run the
-    // perimeter points along the contour toward the movement direction so the
-    // contact points grip and clamber the blob up onto ledges. If the gripping
-    // surface is ABOVE the blob (hanging on a ledge / under a roof), invert the
-    // tread so it still pulls us up and over the lip.
+    // Hull treadmill — run the perimeter points along the contour toward the
+    // movement direction whenever steering laterally, at a constant gentle
+    // rate, ALWAYS (even airborne or riding another blob / softbody platform;
+    // grounding isn't required — the engine's contact bitmap drives the clamber
+    // pull wherever the hull actually grips). If the gripping surface is ABOVE
+    // the blob (hanging on a ledge / under a roof), invert so it still pulls us
+    // up and over the lip.
     //
-    // IMPORTANT (determinism): decide entirely from snapshotted contact signals
-    // — the ground/impact contact NORMAL + counts are captured by
-    // serializeState, but the per-particle contact bitmap
-    // (getBlobParticleContacts) is NOT, so reading it here would desync the
-    // first tick after a netcode/rollback restore.
-    const impact = this.getImpactContact();
-    const touchingSurface = grounded || sticky.count > 0 || impact !== null;
-    if (touchingSurface && Math.abs(this.stickX) > 0.1) {
-      const vLat = Math.abs(this.getHullVelocityAlong(right));
-      let strength = (TREAD_BASE + TREAD_SPEED_GAIN * vLat) * Math.sign(this.stickX) * TREAD_SIGN;
+    // Determinism: the strength uses only snapshotted signals (ground/impact
+    // contact NORMAL); the engine reads the snapshotted per-particle contact
+    // bitmap for the body reaction.
+    if (Math.abs(this.stickX) > 0.1) {
+      let strength = TREAD_RATE * Math.sign(this.stickX) * TREAD_SIGN;
       // Surface above ⟺ its outward normal points back along "up" (downward
       // toward the blob). Use ground normal first, else the impact normal.
-      const ground = this.getGroundContact();
-      const n = ground?.normal ?? impact?.normal ?? null;
+      const n = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
       if (n && (n.x * up.x + n.y * up.y) < 0) strength = -strength;
       this.world.setBlobTread(this.blobId, strength);
     }
