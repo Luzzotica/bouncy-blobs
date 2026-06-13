@@ -227,13 +227,16 @@ export class SlimeBlob {
     return { upper, lower };
   }
 
-  /** True when the upper half of the hull (relative to gravity) has at
-   * least LEDGE_HANG_MIN_UPPER_CONTACTS particles touching geometry while
-   * the lower half has none — the blob is hooked on an edge with its
-   * body dangling. Used to amplify UP_FORCE so the player can climb up. */
-  private isLedgeHanging(): boolean {
-    const { upper, lower } = this.contactSplit();
-    return upper >= LEDGE_HANG_MIN_UPPER_CONTACTS && lower === 0;
+  /** True when something is pressing on the blob's upper half (relative to
+   * gravity) — a ledge, roof, or another blob / softbody platform resting
+   * above. Drives the 12× UP_FORCE so the player can clamber up into / stick
+   * under it. The per-particle contact bitmap is set for softbody contacts
+   * too (see resolve_point_in_shape in world.rs), so this works uniformly for
+   * hardbody and softbody surfaces. Unlike a strict ledge "hang" it does NOT
+   * require the lower half to be free, so it also fires when standing under
+   * an overhang. */
+  private hasOverheadContact(): boolean {
+    return this.contactSplit().upper >= LEDGE_HANG_MIN_UPPER_CONTACTS;
   }
 
   /** Get the effective gravity direction (normalized). */
@@ -356,26 +359,26 @@ export class SlimeBlob {
     if (this.stickY > 0.1) {
       this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier, delta);
     } else if (this.stickY < -0.1) {
-      const upMult = this.isLedgeHanging() ? LEDGE_UP_FORCE_MULT : 1.0;
+      // 12× clamber/stick force whenever something is pressing on our upper
+      // half — a ledge, roof, OR another blob / softbody platform above us.
+      const upMult = this.hasOverheadContact() ? LEDGE_UP_FORCE_MULT : 1.0;
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
     }
 
-    // Hull treadmill — purely visual surface circulation. Runs whenever the
-    // player steers in ANY direction. The sign makes the surface flow "toward
-    // movement" relative to whatever surface we're on/against: cross of the
-    // world movement direction with the contact normal (world-up in the air).
-    // This naturally handles floor (roll), wall/ledge (tread up), and roof
-    // (flip) without special cases. Deterministic: input + snapshotted normal.
+    // Hull treadmill — purely visual surface circulation, running whenever the
+    // player steers in ANY direction. Direction comes from the horizontal
+    // component of movement against a STABLE gravity-up reference (the old
+    // contact-normal reference jittered/flipped between contacts and passed
+    // through zero, which made the tread momentarily stop). A fallback keeps it
+    // spinning for pure-vertical movement so it NEVER freezes while moving.
     if (Math.abs(this.stickX) > 0.1 || Math.abs(this.stickY) > 0.1) {
       // World-space movement: stickX is world-fixed lateral; stickY is
       // gravity-relative (positive = toward gravity / down).
       const moveX = this.stickX + down.x * this.stickY;
       const moveY = down.y * this.stickY;
-      const cn = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? up;
-      const dir = Math.sign(moveX * cn.y - moveY * cn.x); // 2D cross(move, normal)
-      if (dir !== 0) {
-        this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
-      }
+      let dir = Math.sign(moveX * up.y - moveY * up.x); // cross(move, gravity-up)
+      if (dir === 0) dir = Math.sign(this.stickY) || Math.sign(this.stickX) || 1;
+      this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
