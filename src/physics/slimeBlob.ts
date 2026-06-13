@@ -44,7 +44,7 @@ const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 // or world-up in the air). Constant rate, not scaled by speed.
 const TREAD_RATE = 7500;       // constant tread velocity (px/s) — visual only
 // ±1 — flips the overall circulation direction. Tune by feel.
-const TREAD_SIGN = 1;
+const TREAD_SIGN = -1;
 
 // Sticky wall stick
 const STICK_MIN_CONTACTS = 2;    // hull points touching sticky surface to engage
