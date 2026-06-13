@@ -15,7 +15,7 @@ import { preloadSprites, getSprite } from '../assets/spriteRegistry';
 import { preloadBackground } from '../renderer/backgroundRenderer';
 import type { GetSpriteShape } from '../levels/levelLoader';
 import { defaultLevel } from '../levels/defaultLevel';
-import { LevelData } from '../levels/types';
+import { LevelData, getLevelTypes } from '../levels/types';
 import { DEFAULT_CONTROLLER_CONFIG } from '../types/controllerConfig';
 import { InputEvent } from '../types';
 import { Player } from '../types/database';
@@ -642,14 +642,25 @@ export class BouncyBlobsGame implements Game {
         // direct the shot from ALL blobs (bots have no local id). The
         // director picks one to follow and frames it tight.
         const scores = modeManager?.getState().scores;
-        const specBlobs = playerManager.getAllPlayers().map((p) => ({
+        const allPlayers = playerManager.getAllPlayers();
+        const specBlobs = allPlayers.map((p) => ({
           id: p.playerId,
           pos: p.blob.getCentroid(),
           dead: spikeManager?.isDead(p.playerId) ?? false,
           score: scores?.get(p.playerId) ?? 0,
         }));
+        // In racing modes, direct the camera as a race: follow first place
+        // (closest to the goal). KOTH/brawl modes pass null → action-follow.
+        let raceGoal: Vec2 | null = null;
+        const mode = modeManager?.getMode();
+        const lvlTypes = mode ? getLevelTypes(mode.getLevel()) : [];
+        const isRace = lvlTypes.includes('solo_racing') || lvlTypes.includes('team_racing');
+        if (isRace && mode?.getGoalForBlob && allPlayers[0]) {
+          const g = mode.getGoalForBlob(allPlayers[0], modeManager!.getState());
+          if (g) raceGoal = { x: g.x, y: g.y };
+        }
         if (specBlobs.length > 0) {
-          const f = this.spectatorDirector.update(dt, specBlobs);
+          const f = this.spectatorDirector.update(dt, specBlobs, raceGoal);
           camera.followTargets(
             f.targets,
             this.state.canvasWidth,

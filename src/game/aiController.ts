@@ -109,13 +109,45 @@ interface IdRng { next(): number; }
  *  with the same session seed generate the same bot ids) — never from
  *  `Math.random()`, which would diverge across browsers and break netplay
  *  determinism. */
+// Callsign pool — each bot gets a distinct random name (Halo-style guest
+// callsigns), drawn deterministically from the session RNG so two clients
+// with the same seed name their bots identically. Playful + blobby to match
+// the game's identity.
+const BOT_NAMES = [
+  'Wobblesworth', 'Sir Bounce-a-Lot', 'Goopzilla', 'McSquish', 'Jellybean',
+  'Splatatouille', 'Gloopy', 'Bubbles', 'Slime Shady', 'Jiggles',
+  'Plopper', 'Goober', 'Wiggles', 'Mochi', 'Puddingcup',
+  'Bloblin', 'Squelch', 'Gel-Man', 'Captain Squish', 'Blobzilla',
+  'Snot Rocket', 'Gummy', 'Ooze Newton', 'Drippy', 'Boingo',
+  'Sir Splats', 'Wobbleton', 'Jiggly Puff', 'Gloob', 'Squidgy',
+  'Bouncer', 'Mr. Bubbly', 'Goolius', 'Splooch', 'Tapioca',
+  'Blubber', 'Squishy McFly', 'Glorp', 'Bouncey', 'Slurp',
+];
+
 let botCounter = 0;
+// Names handed out this match — reset implicitly per page load (each
+// recording / fresh session). Self-heals if the pool is exhausted.
+const usedNames = new Set<string>();
+
+function pickBotName(rng: IdRng): string {
+  if (usedNames.size >= BOT_NAMES.length) usedNames.clear();
+  const start = Math.floor(rng.next() * BOT_NAMES.length);
+  for (let k = 0; k < BOT_NAMES.length; k++) {
+    const name = BOT_NAMES[(start + k) % BOT_NAMES.length];
+    if (!usedNames.has(name)) {
+      usedNames.add(name);
+      return name;
+    }
+  }
+  return BOT_NAMES[start];
+}
+
 export function nextBotIdentity(personality: PersonalityName, rng: IdRng): { id: string; name: string } {
   botCounter += 1;
   const suffix = Math.floor(rng.next() * 9999);
   return {
     id: `bot-${personality}-${botCounter}-${suffix}`,
-    name: `Bot ${botCounter} (${personality})`,
+    name: pickBotName(rng),
   };
 }
 

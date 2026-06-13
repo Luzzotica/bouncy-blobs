@@ -12,6 +12,7 @@ import { CommunityIcon } from "./CommunityIcon";
 import { ClientIcon } from "./ClientIcon";
 import { BundleHeader } from "./BundleHeader";
 import { WorkshopBranding } from "./WorkshopBranding";
+import { EndCard } from "./EndCard";
 
 export interface AssetSpec {
   component: ComponentType;
@@ -45,4 +46,7 @@ export const ASSETS: Record<string, AssetSpec> = {
 
   // Optional: only relevant if the game uses Steam Workshop.
   "workshop-branding": { component: WorkshopBranding, width: 948, height: 203, scale: 2 },
+
+  // 9:16 wishlist end card appended to match-shorts clips.
+  endcard: { component: EndCard, width: 1080, height: 1920 },
 };
