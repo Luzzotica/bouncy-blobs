@@ -366,8 +366,6 @@ export class SlimeBlob {
     // ~0 wall, -1 ceiling. Used to throttle non-floor movement.
     const cnorm = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
     const upDot = cnorm ? (cnorm.x * up.x + cnorm.y * up.y) : (onFloor ? 1 : 0);
-    // Something pressing on our upper half (ledge / roof / blob above).
-    const overhead = this.hasOverheadContact();
 
     // Lateral movement — world-fixed X. Full on a floor, throttled on
     // walls/ceilings (low friction there would otherwise let you zoom), least
@@ -383,7 +381,7 @@ export class SlimeBlob {
     } else if (this.stickY < -0.1) {
       // 12× clamber/stick force whenever something is pressing on our upper
       // half — a ledge, roof, OR another blob / softbody platform above us.
-      const upMult = overhead ? LEDGE_UP_FORCE_MULT : 1.0;
+      const upMult = this.hasOverheadContact() ? LEDGE_UP_FORCE_MULT : 1.0;
       // Keep the strong UP for sticking UNDER a ceiling (normal points down,
       // upDot < 0) but cut it on a vertical WALL (normal ~horizontal) so you
       // can't shoot straight up a wall.
@@ -425,7 +423,7 @@ export class SlimeBlob {
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
-    this.updateHullDeformation(down, right, overhead);
+    this.updateHullDeformation(down, right);
 
     // Expand shape scale animation
     const targetShapeScale = this.expandPressed ? this.expandShapeScaleMax : 1.0;
@@ -457,19 +455,14 @@ export class SlimeBlob {
     return sum / this.hullIndices.length;
   }
 
-  private updateHullDeformation(down: Vec2, right: Vec2, overhead: boolean): void {
+  private updateHullDeformation(down: Vec2, right: Vec2): void {
     // ── Scalar inputs computed in JS ───────────────────────────────
     // These are pure arithmetic (max/min/divide) on velocity & input —
     // bit-deterministic in IEEE 754, so we can compute them on the JS
     // side and let the engine quantize them once at the wasm boundary.
     const vLateral = this.getHullVelocityAlong(right);
     const lean = Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED));
-    // Press DOWN flattens the blob (crouch). Press UP into an overhead surface
-    // (ceiling/ledge) ALSO flattens it — against the ceiling — so we don't bulge
-    // into a rounded oval that "rolls"/slides along it. Same squash, just driven
-    // by the opposite stick when we're stuck underneath something.
-    let squash = Math.max(0, this.stickY);
-    if (overhead && this.stickY < 0) squash = Math.max(squash, -this.stickY);
+    const squash = Math.max(0, this.stickY);
 
     // ── The trig + per-particle deformation lives in Rust now ──────
     // The JS version of this used `Math.atan2/cos/sin` to compute the
