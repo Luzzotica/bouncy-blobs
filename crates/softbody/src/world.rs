@@ -544,16 +544,37 @@ impl SoftBodyWorld {
             let n = r.hull.len();
             if n < 3 { continue; }
             let step = strength * dt;
+            // Contour tangent at hull point k (central diff of ring neighbours).
+            let tangent_at = |pos: &Vec<FxVec2>, k: usize| -> Option<FxVec2> {
+                let prev = pos[r.hull[(k + n - 1) % n] as usize];
+                let next = pos[r.hull[(k + 1) % n] as usize];
+                let tan = next.sub(prev);
+                if tan.length_squared() < EPS { None } else { Some(tan.normalize()) }
+            };
+            // Circulate only the FREE (non-contact) hull points. A circulating
+            // CONTACT point has tangential velocity relative to the surface, and
+            // the contact solver turns that into a sideways body drag (the
+            // "gliding along the ceiling" bug) — so gripped points stay put,
+            // like a tread's contact patch. But dropping points breaks the
+            // ring's tangent symmetry (Σtangent = 0), which would make the
+            // remaining points impart NET momentum and drift the body the other
+            // way. So subtract the mean free tangent: the surface still visibly
+            // flows, with zero net translation.
+            let touched = |u: usize| self.particle_touched_this_step.get(u).copied().unwrap_or(false);
+            let mut mean = FxVec2::ZERO;
+            let mut free = 0i32;
             for k in 0..n {
-                // Contour tangent at hull point k via central difference of its
-                // ring neighbours — the direction along the perimeter outline.
-                let prev = self.pos[r.hull[(k + n - 1) % n] as usize];
-                let next = self.pos[r.hull[(k + 1) % n] as usize];
-                let tangent = next.sub(prev);
-                if tangent.length_squared() < EPS { continue; }
-                let t = tangent.normalize();
+                if touched(r.hull[k] as usize) { continue; }
+                if let Some(t) = tangent_at(&self.pos, k) { mean = mean.add(t); free += 1; }
+            }
+            if free == 0 { continue; }
+            mean = mean.scale(Fx::ONE / Fx::from_int(free));
+            for k in 0..n {
                 let u = r.hull[k] as usize;
-                self.vel[u] = self.vel[u].add(t.scale(step));
+                if touched(u) { continue; }
+                if let Some(t) = tangent_at(&self.pos, k) {
+                    self.vel[u] = self.vel[u].add(t.sub(mean).scale(step));
+                }
             }
         }
     }
@@ -2794,6 +2815,7 @@ mod tests {
             assert_eq!(a.vel[ha as usize].y.raw(), b.vel[hb as usize].y.raw());
         }
     }
+
 
     #[test]
     fn blob_falls_onto_floor_and_does_not_tunnel() {

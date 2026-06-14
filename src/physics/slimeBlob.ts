@@ -46,7 +46,7 @@ const WALL_CLIMB_MULT = 0.35;
 // there, so without drag the blob accelerates to runaway speeds. Above
 // NONFLOOR_MAX_SPEED (px/s) we bleed off velocity each tick, giving a terminal
 // velocity instead of infinite climb/slide.
-const NONFLOOR_MAX_SPEED = 900;
+const NONFLOOR_MAX_SPEED = 1500;
 const NONFLOOR_DAMP = 6.0; // fraction of over-speed removed per second (×dt/tick)
 
 // Hull "treadmill": circulate the hull-perimeter points along the contour
@@ -409,20 +409,17 @@ export class SlimeBlob {
       }
     }
 
-    // Hull treadmill — purely visual surface circulation, running whenever the
-    // player steers in ANY direction. Direction comes from the horizontal
-    // component of movement against a STABLE gravity-up reference (the old
-    // contact-normal reference jittered/flipped between contacts and passed
-    // through zero, which made the tread momentarily stop). A fallback keeps it
-    // spinning for pure-vertical movement so it NEVER freezes while moving.
+    // Hull treadmill — circulate the surface only for movement ALONG whatever
+    // we're touching (or world-up in the air). `treadDirection` returns 0 when
+    // the input pushes purely INTO/OUT of the surface — e.g. holding up to
+    // stick under a ceiling — so the tread doesn't run and can't glide the body
+    // sideways. Movement along a floor / wall / ceiling treads normally.
     if (Math.abs(this.stickX) > 0.1 || Math.abs(this.stickY) > 0.1) {
-      // World-space movement: stickX is world-fixed lateral; stickY is
-      // gravity-relative (positive = toward gravity / down).
-      const moveX = this.stickX + down.x * this.stickY;
-      const moveY = down.y * this.stickY;
-      let dir = Math.sign(moveX * up.y - moveY * up.x); // cross(move, gravity-up)
-      if (dir === 0) dir = Math.sign(this.stickY) || Math.sign(this.stickX) || 1;
-      this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
+      const n = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? up;
+      const dir = treadDirection(this.stickX, this.stickY, down, n);
+      if (dir !== 0) {
+        this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
+      }
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
@@ -595,4 +592,25 @@ export class SlimeBlob {
 function moveToward(current: number, target: number, maxDelta: number): number {
   if (Math.abs(target - current) <= maxDelta) return target;
   return current + Math.sign(target - current) * maxDelta;
+}
+
+/**
+ * Signed treadmill circulation direction (−1, 0, or +1) for the given movement
+ * input against the contact surface.
+ *
+ * The surface should only "tread" for movement ALONG it — the cross product of
+ * the world-space movement direction with the surface normal is zero when the
+ * input pushes purely INTO or OUT of the surface (e.g. holding up to stick to a
+ * ceiling, or pressing straight up off the floor), so the tread doesn't run and
+ * can't drag the body sideways. Movement along a floor/wall/ceiling treads.
+ *
+ * `stickX` is world-fixed lateral; `stickY` is gravity-relative (positive =
+ * toward gravity). `down` = gravity dir; `normal` = contact surface normal (or
+ * gravity-up when airborne). Pure arithmetic → deterministic.
+ */
+export function treadDirection(stickX: number, stickY: number, down: Vec2, normal: Vec2): number {
+  const moveX = stickX + down.x * stickY;
+  const moveY = down.y * stickY;
+  // `|| 0` normalises -0 → 0 so callers/tests get a clean zero.
+  return Math.sign(moveX * normal.y - moveY * normal.x) || 0; // sign of cross(move, normal)
 }
