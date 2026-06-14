@@ -42,12 +42,6 @@ const NONFLOOR_MOVE_MULT = 0.4;
 // Climb up-force scale on vertical WALLS (vs ceilings). Keeps the strong UP for
 // sticking under a ceiling but cuts it on walls so you can't shoot straight up.
 const WALL_CLIMB_MULT = 0.35;
-// Linear damping on walls/ceilings (NOT the floor) — contact friction is ~0
-// there, so without drag the blob accelerates to runaway speeds. Above
-// NONFLOOR_MAX_SPEED (px/s) we bleed off velocity each tick, giving a terminal
-// velocity instead of infinite climb/slide.
-const NONFLOOR_MAX_SPEED = 1500;
-const NONFLOOR_DAMP = 6.0; // fraction of over-speed removed per second (×dt/tick)
 
 // Hull "treadmill": circulate the hull-perimeter points along the contour
 // (like a tank tread) whenever the player is steering in ANY direction. Purely
@@ -387,26 +381,6 @@ export class SlimeBlob {
       // can't shoot straight up a wall.
       const climbScale = (cnorm && upDot > -0.5) ? WALL_CLIMB_MULT : 1.0;
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier * climbScale, delta);
-    }
-
-    // Linear damping on non-floor surfaces only (floor movement is fine as-is).
-    // Bleeds off the blob's translational speed once it exceeds a cap so you
-    // get a terminal velocity on walls/ceilings instead of accelerating
-    // forever. Subtracting a uniform delta damps the translation while leaving
-    // the internal jiggle untouched.
-    if (touching && !onFloor) {
-      const vel = this.world.getVelocities();
-      let vx = 0, vy = 0;
-      for (const idx of this.hullIndices) { vx += vel[idx].x; vy += vel[idx].y; }
-      const inv = 1 / this.hullIndices.length;
-      vx *= inv; vy *= inv;
-      const speed = Math.sqrt(vx * vx + vy * vy);
-      if (speed > NONFLOOR_MAX_SPEED) {
-        // Linear drag above the cap, clamped so we never undershoot it.
-        const drop = Math.min(speed - NONFLOOR_MAX_SPEED, NONFLOOR_DAMP * speed * delta);
-        const k = -drop / speed; // negative → reduces the translational velocity
-        this.world.applyBlobLinearVelocityDelta(this.blobId, vec2(vx * k, vy * k));
-      }
     }
 
     // Hull treadmill — circulate the surface only for movement ALONG whatever
