@@ -35,6 +35,13 @@ const UP_FORCE = 96.0;         // upward force (per-second, gentle float)
 // UP_FORCE so it beats gravity (~980/s²) and lets the player clamber up.
 const LEDGE_UP_FORCE_MULT = 12.0;
 const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
+// Lateral move force on non-floor surfaces (walls / ceilings). Contact friction
+// is low there, so full force lets you zoom across a ceiling faster than the
+// ground — this throttles it. Between AIR_MOVE_MULTIPLIER (0.3) and floor (1.0).
+const NONFLOOR_MOVE_MULT = 0.4;
+// Climb up-force scale on vertical WALLS (vs ceilings). Keeps the strong UP for
+// sticking under a ceiling but cuts it on walls so you can't shoot straight up.
+const WALL_CLIMB_MULT = 0.35;
 
 // Hull "treadmill": circulate the hull-perimeter points along the contour
 // (like a tank tread) whenever the player is steering in ANY direction. Purely
@@ -341,18 +348,25 @@ export class SlimeBlob {
     const right = vec2(down.y, -down.x); // perpendicular, gravity-relative (for lean)
     const up = vec2(-down.x, -down.y);
 
-    // "On the ground" = touching ANYTHING (floor, wall, ledge, or another
-    // blob / softbody platform), not just floor-facing static geometry. Air
-    // movement only kicks in when the blob is truly touching nothing. The
-    // per-particle contact bitmap is snapshotted, so this is rollback-safe.
+    // Contact state. `touching` = any contact at all (floor, wall, ledge, or
+    // another blob / softbody platform). `onFloor` = a floor-FACING contact
+    // (normal points up) — only this gets full movement authority. The
+    // per-particle bitmap + contact counts are snapshotted, so rollback-safe.
     const contacts = this.world.getBlobParticleContacts(this.blobId);
     let touching = false;
     for (let i = 0; i < contacts.length; i++) { if (contacts[i]) { touching = true; break; } }
+    const onFloor = this.world.getBlobGroundContacts(this.blobId) > 0;
+    // Surface orientation from the representative contact normal: +1 floor,
+    // ~0 wall, -1 ceiling. Used to throttle non-floor movement.
+    const cnorm = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
+    const upDot = cnorm ? (cnorm.x * up.x + cnorm.y * up.y) : (onFloor ? 1 : 0);
 
-    // Lateral movement — world-fixed X. Reduced only when airborne.
-    const airMult = touching ? 1.0 : AIR_MOVE_MULTIPLIER;
+    // Lateral movement — world-fixed X. Full on a floor, throttled on
+    // walls/ceilings (low friction there would otherwise let you zoom), least
+    // in the air.
+    const lateralMult = onFloor ? 1.0 : (touching ? NONFLOOR_MOVE_MULT : AIR_MOVE_MULTIPLIER);
     const lateralDir = vec2(this.stickX, 0);
-    this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * airMult, delta);
+    this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * lateralMult, delta);
 
     // Gravity-axis forces from joystick Y — still gravity-relative so
     // "push down" always means "press into whatever the floor is".
@@ -362,7 +376,11 @@ export class SlimeBlob {
       // 12× clamber/stick force whenever something is pressing on our upper
       // half — a ledge, roof, OR another blob / softbody platform above us.
       const upMult = this.hasOverheadContact() ? LEDGE_UP_FORCE_MULT : 1.0;
-      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier, delta);
+      // Keep the strong UP for sticking UNDER a ceiling (normal points down,
+      // upDot < 0) but cut it on a vertical WALL (normal ~horizontal) so you
+      // can't shoot straight up a wall.
+      const climbScale = (cnorm && upDot > -0.5) ? WALL_CLIMB_MULT : 1.0;
+      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier * climbScale, delta);
     }
 
     // Hull treadmill — purely visual surface circulation, running whenever the
