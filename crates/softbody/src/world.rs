@@ -1503,9 +1503,15 @@ impl SoftBodyWorld {
                 // friction, killing ground movement.
                 if !apply_velocity_impulses { continue; }
 
-                // Remove velocity into wall.
+                // Remove velocity into wall. The magnitude removed is the
+                // per-tick normal impulse pressing us into THIS surface —
+                // gravity on a floor, but also the player's up-force when stuck
+                // under a ceiling or pushing into a wall. We feed it into the
+                // friction normal load below so non-floor surfaces get friction
+                // too (the gravity-only `jn_rest` is ~0 there).
                 let v_rel0 = if has_sv { self.vel[pi].sub(sv) } else { self.vel[pi] };
                 let vn_in_wall = v_rel0.dot(n);
+                let press_speed = if vn_in_wall < Fx::ZERO { Fx::ZERO - vn_in_wall } else { Fx::ZERO };
                 if vn_in_wall < Fx::ZERO {
                     self.vel[pi] = self.vel[pi].sub(n.scale(vn_in_wall));
                 }
@@ -1538,7 +1544,11 @@ impl SoftBodyWorld {
                         let up_dir = g_dir.neg();
                         let support = up_dir.dot(n).max(Fx::ZERO).min(Fx::ONE);
                         let jn_rest = self.mass[pi] * g_len * support * contact_dt * self.config.static_friction_normal_load_scale;
-                        let jn = jn_collision.max(jn_rest);
+                        // Normal load from being actively pressed into the
+                        // surface (player up-force on a ceiling, push into a
+                        // wall) — gives friction where gravity alone gives none.
+                        let jn_press = self.mass[pi] * press_speed;
+                        let jn = jn_collision.max(jn_rest).max(jn_press);
                         let jt_uncap = -self.mass[pi] * v_t;
                         let cap = friction_mu * jn;
                         let mut jt = jt_uncap;
@@ -2816,6 +2826,43 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn ceiling_contact_has_friction() {
+        // While held against a ceiling by an up-force, lateral coasting must
+        // DECELERATE (friction) instead of sliding forever. Gravity gives no
+        // normal load on a ceiling, so friction has to come from the up-force
+        // pressing the blob into it (the `jn_press` term).
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 1);
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(100)), FxVec2::new(fx(800), fx(100)),
+            FxVec2::new(fx(800), fx(160)), FxVec2::new(fx(-800), fx(160)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(195)), "p");
+        let dt = Fx::ONE / Fx::from_int(60);
+        let up = FxVec2::new(Fx::ZERO, fx(-1));
+        let up_force = fx(2000); // beats gravity → pinned, pressing into ceiling
+        for _ in 0..180 { w.apply_blob_move_force(res.blob_id, up, up_force, dt); w.step(dt); }
+        let avg_vx = |w: &SoftBodyWorld| {
+            let mut s = Fx::ZERO;
+            for &h in &res.hull_indices { s = s + w.vel[h as usize].x; }
+            (s / Fx::from_int(res.hull_indices.len() as i32)).abs()
+        };
+        // Kick it sideways, then just hold up (no lateral input) and coast.
+        w.apply_blob_linear_velocity_delta(res.blob_id, FxVec2::new(fx(700), Fx::ZERO));
+        w.apply_blob_move_force(res.blob_id, up, up_force, dt); w.step(dt);
+        let v_early = avg_vx(&w);
+        for _ in 0..60 { w.apply_blob_move_force(res.blob_id, up, up_force, dt); w.step(dt); }
+        let v_late = avg_vx(&w);
+        assert!(
+            v_late < v_early * fx_lit(8, 10),
+            "ceiling friction should slow lateral coasting: early={} late={}",
+            v_early.to_f64(), v_late.to_f64(),
+        );
+    }
 
     #[test]
     fn blob_falls_onto_floor_and_does_not_tunnel() {
