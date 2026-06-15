@@ -532,15 +532,24 @@ export default function Controller() {
 
       const { moveX, moveY, expanding } = inputRef.current;
 
+      // Continuous level-state input rides the unreliable "input" channel:
+      // latest-value, no head-of-line blocking on a lossy link. A dropped
+      // packet is superseded by the next 30Hz sample 33ms later, and the host
+      // coasts on its last-known joystick value in the meantime. Fall back to
+      // the reliable channel if "input" isn't open yet (early in connect).
+      const sendInput = (data: string): void => {
+        if (!manager.send("host", "input", data)) manager.sendPrimary("host", data);
+      };
+
       if (controllerMode === 'placement') {
         // In placement mode, send cursor movement
-        manager.sendPrimary("host", JSON.stringify({
+        sendInput(JSON.stringify({
           type: 'cursor_move',
           value: { x: moveX, y: moveY },
         }));
       } else {
         // Normal mode + party box: send standard input
-        manager.sendPrimary("host", JSON.stringify({
+        sendInput(JSON.stringify({
           type: 'player_input_batch',
           timestamp: Date.now(),
           inputs: {

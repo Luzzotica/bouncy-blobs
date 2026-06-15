@@ -33,5 +33,10 @@ export interface ChannelTopology {
 
 export function channelsForKind(kind: string): ChannelTopology {
   if (kind === "screen") return { primary: "state", unreliable: "input" };
+  // Phones get an unreliable "input" channel alongside reliable "data" so the
+  // continuous 30Hz joystick stream is sent latest-value/UDP-like. On a lossy
+  // link a reliable-ordered channel head-of-line-blocks: one dropped packet
+  // stalls every later one until retransmit. Discrete events stay on "data".
+  if (kind === "phone") return { primary: "data", unreliable: "input" };
   return { primary: "data" };
 }
