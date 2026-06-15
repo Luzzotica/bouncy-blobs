@@ -1,4 +1,5 @@
 import type {
+  Attestation,
   RoomClientConfig,
   CreateRoomResult,
   JoinRoomResult,
@@ -58,6 +59,15 @@ export class RoomService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly pollIntervalMs: number;
+  private readonly platform: string;
+  private readonly getAttestation?: () => Promise<Attestation | string | null>;
+
+  // Short-lived session token (minted at /api/auth/token). Cached + refreshed
+  // before expiry; a single in-flight refresh is shared so concurrent calls
+  // don't each mint their own token.
+  private sessionToken: string | null = null;
+  private sessionExpiresAt = 0; // epoch ms
+  private tokenRefresh: Promise<void> | null = null;
 
   // Set after createRoom() / joinRoom(). Either one is sufficient to auth
   // mutating requests; sendSignal picks whichever is populated.
@@ -76,6 +86,8 @@ export class RoomService {
     this.apiKey = config.apiKey;
     if (!this.apiKey) throw new Error("RoomClientConfig.apiKey is required");
     this.pollIntervalMs = config.pollIntervalMs ?? 1500;
+    this.platform = config.platform ?? "web";
+    this.getAttestation = config.getAttestation;
   }
 
   // ─── Room lifecycle ───────────────────────────────────────────────────────
@@ -241,8 +253,59 @@ export class RoomService {
 
   // ─── HTTP plumbing ────────────────────────────────────────────────────────
 
+  // Auth header for a signalling call. Prefers the session token; falls back to
+  // the raw API key before the first successful exchange (and while the backend
+  // still accepts raw keys during the rollout).
   private authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    if (this.sessionToken) {
+      return { Authorization: `Bearer ${this.sessionToken}`, ...extra };
+    }
     return { "X-API-Key": this.apiKey, ...extra };
+  }
+
+  /**
+   * Ensure a fresh session token, exchanging the API key (+ attestation) at
+   * /api/auth/token when missing or near expiry. Best-effort: if the exchange
+   * fails we leave sessionToken null so calls fall back to the raw API key —
+   * which still works until the backend flips ENFORCE_SESSION_TOKENS on.
+   */
+  private async ensureToken(): Promise<void> {
+    const skewMs = 30_000; // refresh 30s before expiry
+    if (this.sessionToken && Date.now() < this.sessionExpiresAt - skewMs) return;
+    if (this.tokenRefresh) return this.tokenRefresh;
+
+    this.tokenRefresh = (async () => {
+      try {
+        let attestation: string | undefined;
+        let steamId: string | undefined;
+        if (this.getAttestation) {
+          const a = await this.getAttestation();
+          if (typeof a === "string") attestation = a;
+          else if (a) {
+            attestation = a.token;
+            steamId = a.steamId;
+          }
+        }
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/auth/token`, {
+          method: "POST",
+          headers: { "X-API-Key": this.apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ platform: this.platform, attestation, steam_id: steamId }),
+        });
+        if (!res.ok) {
+          const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          throw new Error(`token exchange ${res.status}: ${b?.error ?? res.statusText}`);
+        }
+        const data = (await res.json()) as { session_token: string; expires_in: number };
+        this.sessionToken = data.session_token;
+        this.sessionExpiresAt = Date.now() + data.expires_in * 1000;
+      } catch (err) {
+        console.warn("[RoomService] token exchange failed, falling back to API key:", err);
+        this.sessionToken = null;
+      } finally {
+        this.tokenRefresh = null;
+      }
+    })();
+    return this.tokenRefresh;
   }
 
   private readonly fetchTimeoutMs = 8000;
@@ -263,6 +326,7 @@ export class RoomService {
   }
 
   private async get(path: string): Promise<unknown> {
+    await this.ensureToken();
     const res = await this.fetchWithTimeout(`${this.baseUrl}${path}`, { headers: this.authHeaders() });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -272,6 +336,7 @@ export class RoomService {
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {
+    await this.ensureToken();
     const res = await this.fetchWithTimeout(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: this.authHeaders({ "Content-Type": "application/json" }),
@@ -285,6 +350,7 @@ export class RoomService {
   }
 
   private async patch(path: string, body: unknown): Promise<unknown> {
+    await this.ensureToken();
     const res = await this.fetchWithTimeout(`${this.baseUrl}${path}`, {
       method: "PATCH",
       headers: this.authHeaders({ "Content-Type": "application/json" }),

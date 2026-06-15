@@ -30,6 +30,22 @@ const DEFAULT_RTC_CONFIG: RTCConfiguration = {
 // TURN allocations on flaky cellular.
 const CONNECT_TIMEOUT_MS = 8_000;
 
+// Once a connection is live, `iceConnectionState`/`connectionState` can drop
+// to "disconnected" (or even "failed") on a restrictive/rebinding NAT —
+// airport & hotel wifi are the classic offenders. The spec treats these as
+// RECOVERABLE: ICE keeps probing other candidate pairs and will fail over to
+// the TURN *relay* pair if we let it. So instead of tearing down on the first
+// blip (which also auto-ends the host's room), we arm this grace window and
+// kick an ICE restart. We only fire a real disconnect if the link hasn't
+// recovered by the time it elapses. Generous because the offer/answer for the
+// restart rides the poll-based signalling channel, which adds a round trip.
+const RECOVERY_GRACE_MS = 10_000;
+
+// Cap ICE restarts per transport so a permanently-dead network can't spin the
+// signalling channel forever. Two attempts is enough to cover a one-off relay
+// allocation hiccup without becoming a busy-loop.
+const MAX_ICE_RESTARTS = 2;
+
 const NET_DEBUG = (() => {
   try {
     return typeof window !== "undefined"
@@ -55,6 +71,8 @@ export class WebRtcTransport implements Transport {
   private channels: Map<string, RTCDataChannel> = new Map();
   private pendingIce: RTCIceCandidateInit[] = [];
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private iceRestarts = 0;
   private startedAtMs = 0;
   private seenCandidateTypes: Set<string> = new Set();
   private disposed = false;
@@ -79,6 +97,63 @@ export class WebRtcTransport implements Transport {
 
   private emit(phase: string, detail?: Record<string, unknown>): void {
     this.callbacks.onPhase?.(this.remoteId, phase, detail);
+  }
+
+  /** The link is (re)established. Cancel any pending grace teardown and let
+   * a future blip earn a fresh budget of ICE restarts. */
+  private onConnectionHealthy(): void {
+    if (this.recoveryTimer) {
+      dbg("recovery-cancelled", { remoteId: this.remoteId });
+      this.emit("recovered");
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+    this.iceRestarts = 0;
+  }
+
+  /** Enter recovery after a transient ICE drop instead of tearing down.
+   * Kicks an ICE restart (offerer side) to force re-gathering — crucially a
+   * fresh TURN relay allocation — and arms a single grace timer. We only fire
+   * a real disconnect if the link is still unhealthy when it elapses.
+   * Idempotent: a second drop while already recovering is a no-op. */
+  private startRecovery(reason: string): void {
+    if (this.disposed || this.firedDisconnect) return;
+    if (this.recoveryTimer) return; // already counting down
+    dbg("recovery-start", { remoteId: this.remoteId, reason });
+    this.emit("recovering", { reason });
+    void this.tryIceRestart();
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      const cs = this.pc?.connectionState;
+      const ics = this.pc?.iceConnectionState;
+      // Recovered out from under us between the timer firing and now? Bail.
+      if (cs === "connected" || ics === "connected" || ics === "completed") return;
+      dbg("recovery-timeout", { remoteId: this.remoteId, connectionState: cs, iceConnectionState: ics });
+      this.fireDisconnectOnce(`${reason} (no recovery in ${RECOVERY_GRACE_MS}ms)`);
+    }, RECOVERY_GRACE_MS);
+  }
+
+  /** Offerer-only: renegotiate with `iceRestart` so both ends re-gather
+   * candidates (new srflx + a fresh relay allocation) and ICE can converge on
+   * the TURN relay when the direct path is dead. The answerer re-gathers
+   * automatically when it receives the restart offer (see handleSignal). */
+  private async tryIceRestart(): Promise<void> {
+    const pc = this.pc;
+    if (!pc || this.disposed) return;
+    if (this.role !== "offerer") return; // answerer waits for the restart offer
+    if (this.iceRestarts >= MAX_ICE_RESTARTS) {
+      dbg("ice-restart-capped", { remoteId: this.remoteId, attempts: this.iceRestarts });
+      return;
+    }
+    this.iceRestarts += 1;
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      this.emit("ice-restart", { attempt: this.iceRestarts });
+      await this.room.sendSignal(this.remoteId, "offer", { type: offer.type, sdp: offer.sdp });
+    } catch (err) {
+      dbg("ice-restart-failed", { remoteId: this.remoteId, err: String(err) });
+    }
   }
 
   async start(): Promise<void> {
@@ -108,8 +183,16 @@ export class WebRtcTransport implements Transport {
       const s = this.pc?.connectionState;
       dbg("connectionstate", { remoteId: this.remoteId, state: s });
       this.emit("pc-state", { state: s });
-      if (s === "failed" || s === "closed" || s === "disconnected") {
-        this.fireDisconnectOnce(`connectionState=${s}`);
+      if (s === "connected") {
+        // (Re)established — cancel any pending grace teardown.
+        this.onConnectionHealthy();
+      } else if (s === "closed") {
+        // We closed it (dispose / explicit teardown). Terminal.
+        this.fireDisconnectOnce("connectionState=closed");
+      } else if (s === "failed" || s === "disconnected") {
+        // RECOVERABLE — do NOT tear down. Arm the grace window + ICE restart
+        // so ICE can fail over to the TURN relay instead of killing the room.
+        this.startRecovery(`connectionState=${s}`);
       }
     };
 
@@ -117,9 +200,13 @@ export class WebRtcTransport implements Transport {
       const s = this.pc?.iceConnectionState;
       dbg("iceconnectionstate", { remoteId: this.remoteId, state: s });
       this.emit("ice-state", { state: s });
+      if (s === "connected" || s === "completed") {
+        this.onConnectionHealthy();
+        return;
+      }
       // Capture candidate-pair state at the moment of failure / disconnect.
-      // Critical: do this BEFORE `fireDisconnectOnce` triggers higher-layer
-      // dispose, which would null out `this.pc` and make getStats unreachable.
+      // Critical: do this BEFORE any teardown nulls out `this.pc` and makes
+      // getStats unreachable.
       if (s === "failed" || s === "disconnected") {
         void this.collectCandidatePairs().then((pairs) => {
           if (pairs.length > 0) {
@@ -127,11 +214,10 @@ export class WebRtcTransport implements Transport {
             this.emit("pairs-on-fail", { state: s, pairs });
           }
         }).catch(() => { /* PC may already be gone */ });
-      }
-      // Safari/iOS sometimes never advances `connectionState` past 'connecting'
-      // even after ICE fails — listen here too.
-      if (s === "failed") {
-        this.fireDisconnectOnce("iceConnectionState=failed");
+        // Recover rather than disconnect. Safari/iOS sometimes never advances
+        // `connectionState` past 'connecting' even after ICE fails, so this is
+        // the only signal we get there — route it through recovery too.
+        this.startRecovery(`iceConnectionState=${s}`);
       }
     };
 
@@ -302,6 +388,10 @@ export class WebRtcTransport implements Transport {
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
+    }
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
     }
     this.pc?.close();
     this.pc = null;

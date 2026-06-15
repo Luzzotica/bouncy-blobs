@@ -101,13 +101,33 @@ export interface ListRoomsResult {
   rooms: RoomSummary[];
 }
 
+/** Proof the client returns to attest itself for the token exchange. */
+export interface Attestation {
+  /** Provider token — Cloudflare Turnstile token (web) or Steam ticket (steam). */
+  token?: string;
+  /** Steam-only: the steamid the ticket belongs to (optional binding). */
+  steamId?: string;
+}
+
 export interface RoomClientConfig {
-  /** Base URL of the hexii (or compatible) signaling backend. */
+  /** Base URL of the arcadii (hexii) signaling backend. */
   baseUrl: string;
-  /** API key sent as X-API-Key. */
+  /**
+   * API key. Exchanged once at POST /api/auth/token for a short-lived session
+   * token; the raw key is no longer sent on signalling calls (it falls back to
+   * X-API-Key only while the backend's ENFORCE_SESSION_TOKENS is off).
+   */
   apiKey: string;
   /** Poll interval in milliseconds. Default: 1500. */
   pollIntervalMs?: number;
+  /** Platform claimed at token exchange: 'web' | 'steam' | 'dev'. Default 'web'. */
+  platform?: string;
+  /**
+   * Returns the attestation proof for the token exchange (e.g. a freshly-solved
+   * Turnstile token, or a Steam auth ticket). Omit in local dev — the backend
+   * waves through 'dev'/localhost. Returning null skips attestation.
+   */
+  getAttestation?: () => Promise<Attestation | string | null>;
 }
 
 // ── Callbacks ───────────────────────────────────────────────────────────────

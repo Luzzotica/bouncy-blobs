@@ -29,6 +29,7 @@ export type {
   PollSignalsResult,
   ListRoomsResult,
   RoomClientConfig,
+  Attestation,
   PeerCallbacks,
 } from "./types";
 
