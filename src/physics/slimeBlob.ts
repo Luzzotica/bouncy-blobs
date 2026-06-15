@@ -360,6 +360,8 @@ export class SlimeBlob {
     // ~0 wall, -1 ceiling. Used to throttle non-floor movement.
     const cnorm = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? null;
     const upDot = cnorm ? (cnorm.x * up.x + cnorm.y * up.y) : (onFloor ? 1 : 0);
+    // Something pressing on our upper half (ledge / roof / blob above).
+    const overhead = this.hasOverheadContact();
 
     // Lateral movement — world-fixed X. Full on a floor, throttled on
     // walls/ceilings (low friction there would otherwise let you zoom), least
@@ -375,7 +377,7 @@ export class SlimeBlob {
     } else if (this.stickY < -0.1) {
       // 12× clamber/stick force whenever something is pressing on our upper
       // half — a ledge, roof, OR another blob / softbody platform above us.
-      const upMult = this.hasOverheadContact() ? LEDGE_UP_FORCE_MULT : 1.0;
+      const upMult = overhead ? LEDGE_UP_FORCE_MULT : 1.0;
       // Keep the strong UP for sticking UNDER a ceiling (normal points down,
       // upDot < 0) but cut it on a vertical WALL (normal ~horizontal) so you
       // can't shoot straight up a wall.
@@ -383,17 +385,13 @@ export class SlimeBlob {
       this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier * climbScale, delta);
     }
 
-    // Hull treadmill — circulate the surface only for movement ALONG whatever
-    // we're touching (or world-up in the air). `treadDirection` returns 0 when
-    // the input pushes purely INTO/OUT of the surface — e.g. holding up to
-    // stick under a ceiling — so the tread doesn't run and can't glide the body
-    // sideways. Movement along a floor / wall / ceiling treads normally.
-    if (Math.abs(this.stickX) > 0.1 || Math.abs(this.stickY) > 0.1) {
-      const n = this.getGroundContact()?.normal ?? this.getImpactContact()?.normal ?? up;
-      const dir = treadDirection(this.stickX, this.stickY, down, n);
-      if (dir !== 0) {
-        this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
-      }
+    // Hull treadmill — spins ONLY when steering left/right (A/D), in a
+    // gravity-based direction (stable; no contact-normal lookup, which went
+    // ambiguous when pressing up and froze the rotation). Reverses when holding
+    // up into an overhead surface so it clambers up & over.
+    const dir = treadDirection(this.stickX, this.stickY, down, overhead);
+    if (dir !== 0) {
+      this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
@@ -569,22 +567,28 @@ function moveToward(current: number, target: number, maxDelta: number): number {
 }
 
 /**
- * Signed treadmill circulation direction (−1, 0, or +1) for the given movement
- * input against the contact surface.
+ * Signed treadmill circulation direction (−1, 0, or +1).
  *
- * The surface should only "tread" for movement ALONG it — the cross product of
- * the world-space movement direction with the surface normal is zero when the
- * input pushes purely INTO or OUT of the surface (e.g. holding up to stick to a
- * ceiling, or pressing straight up off the floor), so the tread doesn't run and
- * can't drag the body sideways. Movement along a floor/wall/ceiling treads.
+ * Deliberately simple and stable — derived from GRAVITY, never the contact
+ * normal (which goes ambiguous when pressing up and made the tread freeze):
+ *  - Only spins when the player is moving left/right intentionally (A/D); pure
+ *    up/down input returns 0, so it never spins/freezes while just climbing or
+ *    sticking.
+ *  - Direction = roll sense of the lateral input relative to gravity-up
+ *    (`cross((stickX,0), up)`), so it rolls the natural way on the ground.
+ *  - UNLESS holding up INTO something overhead (ceiling/overhang) — then it
+ *    reverses so the surface clambers up-and-over instead of rolling backwards.
  *
- * `stickX` is world-fixed lateral; `stickY` is gravity-relative (positive =
- * toward gravity). `down` = gravity dir; `normal` = contact surface normal (or
- * gravity-up when airborne). Pure arithmetic → deterministic.
+ * `stickX` is world-fixed lateral; `stickY` is gravity-relative (negative = up,
+ * against gravity). `down` = gravity dir. `overhead` = something pressing on the
+ * blob's upper half. Pure arithmetic → deterministic.
  */
-export function treadDirection(stickX: number, stickY: number, down: Vec2, normal: Vec2): number {
-  const moveX = stickX + down.x * stickY;
-  const moveY = down.y * stickY;
-  // `|| 0` normalises -0 → 0 so callers/tests get a clean zero.
-  return Math.sign(moveX * normal.y - moveY * normal.x) || 0; // sign of cross(move, normal)
+export function treadDirection(stickX: number, stickY: number, down: Vec2, overhead: boolean): number {
+  if (Math.abs(stickX) <= 0.1) return 0; // only intentional A/D spins the hull
+  const upY = -down.y; // y-component of gravity-up
+  // cross((stickX,0), up).z = stickX*up.y - 0*up.x = stickX * upY.
+  let dir = Math.sign(stickX * upY) || 0;
+  // Holding up into a ceiling/overhang: reverse so it clambers up & over.
+  if (overhead && stickY < -0.1) dir = -dir;
+  return dir;
 }

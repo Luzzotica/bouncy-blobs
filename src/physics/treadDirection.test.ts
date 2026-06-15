@@ -2,42 +2,38 @@ import { describe, it, expect } from "vitest";
 import { treadDirection } from "./slimeBlob";
 import { vec2 } from "./vec2";
 
-// Standard gravity points +y (down); world-up is (0,-1).
+// Standard gravity points +y (down). stickY < 0 = up (against gravity).
 const down = vec2(0, 1);
-const up = vec2(0, -1);
-// Surface normals are the OUTWARD normal pushing the blob off the surface:
-const floorN = vec2(0, -1);   // floor below → pushes up
-const ceilingN = vec2(0, 1);  // ceiling above → pushes down
-const leftWallN = vec2(1, 0); // wall on the left → pushes right
 
-describe("treadDirection — tread only ALONG a surface, not into it", () => {
-  it("does NOT tread when holding up to stick under a ceiling (into surface)", () => {
-    expect(treadDirection(0, -1, down, ceilingN)).toBe(0);
+describe("treadDirection — gravity-based, only on intentional A/D", () => {
+  it("does NOT spin without left/right input (pure up)", () => {
+    expect(treadDirection(0, -1, down, false)).toBe(0);
+    expect(treadDirection(0, -1, down, true)).toBe(0); // even with overhead
   });
 
-  it("does NOT tread pressing straight up off the floor (out of surface)", () => {
-    expect(treadDirection(0, -1, down, floorN)).toBe(0);
+  it("does NOT spin without left/right input (pure down)", () => {
+    expect(treadDirection(0, 1, down, false)).toBe(0);
   });
 
-  it("does NOT tread pressing straight down into the floor", () => {
-    expect(treadDirection(0, 1, down, floorN)).toBe(0);
+  it("spins when moving left/right, opposite signs for opposite directions", () => {
+    const right = treadDirection(1, 0, down, false);
+    const left = treadDirection(-1, 0, down, false);
+    expect(right).not.toBe(0);
+    expect(left).toBe(-right);
   });
 
-  it("treads when moving laterally along the floor", () => {
-    expect(treadDirection(1, 0, down, floorN)).not.toBe(0);
-    // left vs right circulate opposite ways
-    expect(treadDirection(-1, 0, down, floorN)).toBe(-treadDirection(1, 0, down, floorN));
+  it("ignores tiny stick noise below the deadzone", () => {
+    expect(treadDirection(0.05, 0, down, false)).toBe(0);
   });
 
-  it("treads when moving laterally along a ceiling", () => {
-    expect(treadDirection(1, 0, down, ceilingN)).not.toBe(0);
+  it("reverses when holding UP into an overhead surface (clamber)", () => {
+    const normal = treadDirection(1, -1, down, false); // A/D + up, nothing above
+    const overhead = treadDirection(1, -1, down, true); // A/D + up, ceiling above
+    expect(normal).not.toBe(0);
+    expect(overhead).toBe(-normal);
   });
 
-  it("treads when climbing UP a wall (movement along the wall)", () => {
-    expect(treadDirection(0, -1, down, leftWallN)).not.toBe(0);
-  });
-
-  it("treads horizontally in the air (world-up reference)", () => {
-    expect(treadDirection(1, 0, down, up)).not.toBe(0);
+  it("does NOT reverse for overhead without holding up", () => {
+    expect(treadDirection(1, 0, down, true)).toBe(treadDirection(1, 0, down, false));
   });
 });
