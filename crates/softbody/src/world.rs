@@ -532,9 +532,14 @@ impl SoftBodyWorld {
         self.blob_tread_strength[blob_id as usize] = strength;
     }
 
-    /// Apply the per-blob tread for one substep: circulate the hull-perimeter
-    /// points along the contour (the visible treadmill). Deterministic:
-    /// fixed-point only, fixed hull-ring order, no transcendentals.
+    /// Apply the per-blob tread for one substep: spin the hull-perimeter points
+    /// AROUND the centroid (the visible treadmill). Each point's tangent is the
+    /// perpendicular of ITS OWN radius from the centroid — not the direction to
+    /// its ring neighbours — so a point that gets knocked out of place still
+    /// gets a sensible rotational velocity and keeps orbiting (the old
+    /// neighbour-difference tangent degenerated for displaced points and the
+    /// rotation locally "broke down"). Deterministic: fixed-point only, no
+    /// transcendentals.
     fn apply_tread(&mut self, dt: Fx) {
         for bi in 0..self.blob_ranges.len() {
             let strength = self.blob_tread_strength.get(bi).copied().unwrap_or(Fx::ZERO);
@@ -544,35 +549,39 @@ impl SoftBodyWorld {
             let n = r.hull.len();
             if n < 3 { continue; }
             let step = strength * dt;
-            // Contour tangent at hull point k (central diff of ring neighbours).
-            let tangent_at = |pos: &Vec<FxVec2>, k: usize| -> Option<FxVec2> {
-                let prev = pos[r.hull[(k + n - 1) % n] as usize];
-                let next = pos[r.hull[(k + 1) % n] as usize];
-                let tan = next.sub(prev);
-                if tan.length_squared() < EPS { None } else { Some(tan.normalize()) }
+            // Hull centroid.
+            let mut cx = Fx::ZERO;
+            let mut cy = Fx::ZERO;
+            for &h in &r.hull { let p = self.pos[h as usize]; cx = cx + p.x; cy = cy + p.y; }
+            let inv_n = Fx::ONE / Fx::from_int(n as i32);
+            let centroid = FxVec2::new(cx * inv_n, cy * inv_n);
+            // Unit tangent = perpendicular to the point's radius from centroid.
+            let tangent_at = |pos: &Vec<FxVec2>, u: usize| -> Option<FxVec2> {
+                let rad = pos[u].sub(centroid);
+                if rad.length_squared() < EPS { return None; }
+                Some(FxVec2::new(Fx::ZERO - rad.y, rad.x).normalize())
             };
-            // Circulate only the FREE (non-contact) hull points. A circulating
-            // CONTACT point has tangential velocity relative to the surface, and
-            // the contact solver turns that into a sideways body drag (the
-            // "gliding along the ceiling" bug) — so gripped points stay put,
-            // like a tread's contact patch. But dropping points breaks the
-            // ring's tangent symmetry (Σtangent = 0), which would make the
-            // remaining points impart NET momentum and drift the body the other
-            // way. So subtract the mean free tangent: the surface still visibly
-            // flows, with zero net translation.
+            // Spin only the FREE (non-contact) hull points — a circulating
+            // CONTACT point has tangential velocity relative to the surface,
+            // which the contact solver turns into a sideways body drag (the
+            // "gliding along the ceiling" bug); gripped points stay put like a
+            // tread's contact patch. Skipping points breaks the symmetry that
+            // keeps net momentum zero, so subtract the mean free tangent: the
+            // surface still visibly spins with ~zero net translation.
             let touched = |u: usize| self.particle_touched_this_step.get(u).copied().unwrap_or(false);
             let mut mean = FxVec2::ZERO;
             let mut free = 0i32;
-            for k in 0..n {
-                if touched(r.hull[k] as usize) { continue; }
-                if let Some(t) = tangent_at(&self.pos, k) { mean = mean.add(t); free += 1; }
+            for &h in &r.hull {
+                let u = h as usize;
+                if touched(u) { continue; }
+                if let Some(t) = tangent_at(&self.pos, u) { mean = mean.add(t); free += 1; }
             }
             if free == 0 { continue; }
             mean = mean.scale(Fx::ONE / Fx::from_int(free));
-            for k in 0..n {
-                let u = r.hull[k] as usize;
+            for &h in &r.hull {
+                let u = h as usize;
                 if touched(u) { continue; }
-                if let Some(t) = tangent_at(&self.pos, k) {
+                if let Some(t) = tangent_at(&self.pos, u) {
                     self.vel[u] = self.vel[u].add(t.sub(mean).scale(step));
                 }
             }

@@ -47,9 +47,10 @@ const WALL_CLIMB_MULT = 0.35;
 // (like a tank tread) whenever the player is steering in ANY direction. Purely
 // visual — the surface flows, it doesn't push the body. The circulation sign
 // makes the surface flow "toward movement" relative to whatever surface the
-// blob is on/against (cross of the movement direction with the contact normal,
-// or world-up in the air). Constant rate, not scaled by speed.
-const TREAD_RATE = 7500;       // constant tread velocity (px/s) — visual only
+// blob is on/against. Rate scales with how fast we're moving, over a low
+// constant minimum so it still ticks over at a crawl and ramps up at speed.
+const TREAD_BASE = 2000;       // min tread rate (px/s²) when barely moving
+const TREAD_SPEED_GAIN = 2.0;  // extra tread rate per px/s of lateral speed
 // ±1 — flips the overall circulation direction. Tune by feel.
 const TREAD_SIGN = -1;
 
@@ -391,7 +392,9 @@ export class SlimeBlob {
     // up into an overhead surface so it clambers up & over.
     const dir = treadDirection(this.stickX, this.stickY, down, overhead);
     if (dir !== 0) {
-      this.world.setBlobTread(this.blobId, TREAD_RATE * dir * TREAD_SIGN);
+      // Spin faster the faster we're actually moving, over a low minimum.
+      const rate = TREAD_BASE + TREAD_SPEED_GAIN * Math.abs(this.getHullVelocityAlong(right));
+      this.world.setBlobTread(this.blobId, rate * dir * TREAD_SIGN);
     }
 
     // Hull shape deformation from velocity + input (gravity-relative)
