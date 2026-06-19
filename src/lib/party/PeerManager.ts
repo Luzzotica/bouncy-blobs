@@ -136,6 +136,15 @@ export class PeerManager {
     }
   }
 
+  /** The remote kind ('phone' | 'screen' | …) of a known peer, or undefined
+   * if no transport is registered for that id. Used by the host to route
+   * incoming messages by peer kind rather than by channel name (phones and
+   * screens now share the unreliable 'input' channel but speak different
+   * message schemas on it). */
+  getPeerKind(peerId: string): string | undefined {
+    return this.peers.get(peerId)?.remoteKind;
+  }
+
   getConnectedPeers(): { peerId: string; kind: string }[] {
     return [...this.peers.values()]
       .filter((p) => p.isOpen())

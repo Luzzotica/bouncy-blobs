@@ -1401,10 +1401,17 @@ export default function GameMaster() {
             managerRef.current?.disposePeer(peerId);
           },
           onMessage: (peerId, channel, data) => {
-            // Screen peers use named channels ('state', 'input'); route to the
-            // screen handler. Phone peers use the primary channel ('data');
-            // route to the controller handler.
-            if (channel === 'state' || channel === 'input') {
+            // Route by peer KIND, not channel name. Screen (guest-laptop) peers
+            // speak the lockstep protocol on 'state'/'input'. Phone controllers
+            // now ALSO use the unreliable 'input' channel for their latest-value
+            // joystick stream (player_input_batch / cursor_move) — but those are
+            // JSON control messages, not lockstep frames. Routing by channel
+            // alone would feed phone input into handleScreenMessage, whose
+            // 'input' branch drops anything that isn't {type:'input', frames}
+            // — silently swallowing every joystick sample (no motion). So only
+            // dispatch to the screen handler for genuine screen peers.
+            const kind = managerRef.current?.getPeerKind(peerId);
+            if (kind !== 'phone' && (channel === 'state' || channel === 'input')) {
               handleScreenMessage(peerId, channel, data);
               return;
             }

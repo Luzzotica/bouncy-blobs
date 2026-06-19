@@ -1,9 +1,12 @@
 import { type Page, expect } from "@playwright/test";
 
+// Default to the live (prod) backend so e2e runs hit the same server the app
+// does (.env / .env.local set VITE_PARTY_API_URL=https://www.sterlinglong.me).
+// Override via the shell env to point at a local rooms server.
 export const PARTY_API_URL =
-  process.env.VITE_PARTY_API_URL ?? "http://192.168.1.11:3000";
+  process.env.VITE_PARTY_API_URL ?? "https://www.sterlinglong.me";
 export const MP_API_KEY =
-  process.env.VITE_MP_API_KEY ?? "mpk_live_OIXff-qF_jHThMV9pDGvwh0PsHe2xP0o";
+  process.env.VITE_MP_API_KEY ?? "mpk_live_igwS_xp_ksHKhBN1pmLtYs8Rbu1P2Puz";
 
 export const noisySafe = (m: string): boolean =>
   m.includes("Failed to load resource") ||
