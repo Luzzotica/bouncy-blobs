@@ -58,6 +58,13 @@ const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 // to 12×+), so the detector still fires — just a few frames later.
 pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
 
+// The inverse "crush" failure: a blob squeezed (pinched between a wall and a
+// moving platform, etc.) until its hull surface area collapses below 1/10 of
+// its ideal area. Think of it as pressure = ideal_area / current_area; this
+// fires at pressure >= 10. 10× headroom means normal pressure-driven squish
+// (which the solver re-inflates) never trips it — only a genuine crush does.
+pub const CRUSH_AREA_MIN_RATIO: Fx = Fx::from_raw((1i64 << 32) / 10); // 0.1
+
 pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
 
 const FX_FRAC_1_60: Fx = Fx::from_raw((1i64 << 32) / 60); // 1/60
@@ -811,7 +818,18 @@ impl SoftBodyWorld {
             }
 
             let blow_up_threshold_sq = rest_max_sq_scaled * CRUSH_HULL_SPREAD_RATIO_SQ;
-            let crushed = out_of_bounds || cur_max_sq > blow_up_threshold_sq;
+
+            // Pressure / squeeze check: current hull surface area vs the same
+            // ideal (scale-corrected) area the pressure solver targets. Apples
+            // to apples — both come from `signed_area_polygon`. Fire when the
+            // blob has been crushed to <= 1/10 of its ideal area.
+            let hull_poly: Vec<FxVec2> = r.hull.iter().map(|&i| self.pos[i as usize]).collect();
+            let cur_area = Fx::from_raw(signed_area_polygon(&hull_poly).raw().abs());
+            let target_area = self.shape_pressure_target_area(si);
+            let crushed_small =
+                target_area > Fx::ZERO && cur_area < target_area * CRUSH_AREA_MIN_RATIO;
+
+            let crushed = out_of_bounds || cur_max_sq > blow_up_threshold_sq || crushed_small;
 
             if crushed {
                 let bid = bi as BlobId;
@@ -3342,6 +3360,61 @@ mod tests {
             first <= 200,
             "crush detection too late: first flagged frame = {} (expected <= 200)",
             first,
+        );
+    }
+
+    // Overwrite a blob's hull particle positions with a square of half-extent
+    // `half` centered at the origin. Used to drive the area-based crush check
+    // directly, bypassing the solver (which would re-inflate the hull before
+    // `detect_crush_events` runs at the end of `step`).
+    fn set_hull_square(w: &mut SoftBodyWorld, hull: &[usize], half: i32) {
+        let h = fx(half);
+        let corners = [
+            FxVec2::new(-h, -h),
+            FxVec2::new( h, -h),
+            FxVec2::new( h,  h),
+            FxVec2::new(-h,  h),
+        ];
+        assert_eq!(hull.len(), corners.len());
+        for (i, &idx) in hull.iter().enumerate() {
+            w.pos[idx] = corners[i];
+        }
+    }
+
+    #[test]
+    fn pressure_crush_flags_blob_squeezed_below_tenth_area() {
+        // 40×40 blob → rest hull area = 1600; 1/10 threshold = 160.
+        let mut w = SoftBodyWorld::new(WorldConfig::default(), 1);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "victim");
+        let hull: Vec<usize> = res.hull_indices.iter().map(|&i| i as usize).collect();
+
+        // Squeeze to a 10×10 square → area 100 < 160. Should flag.
+        set_hull_square(&mut w, &hull, 5);
+        w.detect_crush_events();
+        let flagged = w.take_crush_events();
+        assert!(
+            flagged.contains(&0),
+            "expected blob 0 to be crush-flagged when squeezed to 1/16 area, got {:?}",
+            flagged,
+        );
+    }
+
+    #[test]
+    fn pressure_crush_ignores_normal_squish() {
+        // 40×40 blob → rest area 1600; 1/10 threshold = 160.
+        let mut w = SoftBodyWorld::new(WorldConfig::default(), 1);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "victim");
+        let hull: Vec<usize> = res.hull_indices.iter().map(|&i| i as usize).collect();
+
+        // Squish to a 30×30 square → area 900 (~0.56 of rest). Well above the
+        // 1/10 threshold; normal play must never trigger a death.
+        set_hull_square(&mut w, &hull, 15);
+        w.detect_crush_events();
+        let flagged = w.take_crush_events();
+        assert!(
+            flagged.is_empty(),
+            "normal squish (0.56 area) must not be crush-flagged, got {:?}",
+            flagged,
         );
     }
 }
