@@ -570,7 +570,7 @@ export default function GameMaster() {
   // the server push the room stays stuck at whatever max_peers was when the
   // room was created (default 4).
   const changeMaxPlayers = useCallback((next: number) => {
-    const clamped = Math.min(Math.max(Math.trunc(next), 1), 16);
+    const clamped = Math.min(Math.max(Math.trunc(next), 1), 8);
     setMaxPlayers(clamped);
     roomRef.current?.setMaxPeers(clamped).catch((err) => {
       console.warn('Failed to update server max_peers:', err);

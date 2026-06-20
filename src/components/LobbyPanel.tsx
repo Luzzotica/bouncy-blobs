@@ -229,7 +229,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
             data-testid="max-players"
             type="number"
             min={1}
-            max={16}
+            max={8}
             value={maxPlayers}
             onChange={(e) => onChangeMaxPlayers(Number(e.target.value))}
             style={{ ...selectStyle, width: 56 }}

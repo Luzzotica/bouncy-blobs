@@ -641,13 +641,14 @@ function Slider({ label, value, min, max, step, suffix, onChange }: {
         <span style={{ color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{value}{suffix}</span>
       </div>
       <input
+        className="bb-range"
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: '100%', accentColor: '#c77dff' }}
+        style={{ width: '100%', '--range-fill': `${((value - min) / (max - min)) * 100}%` } as React.CSSProperties}
       />
     </div>
   );

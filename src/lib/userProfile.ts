@@ -49,7 +49,7 @@ export function getStoredRoomPrefs(): StoredRoomPrefs {
     roomName = localStorage.getItem(KEY_ROOM_NAME) ?? "";
     isPublic = localStorage.getItem(KEY_ROOM_IS_PUBLIC) === "1";
     const mp = parseInt(localStorage.getItem(KEY_ROOM_MAX_PLAYERS) ?? "", 10);
-    if (Number.isFinite(mp) && mp >= 1 && mp <= 16) maxPlayers = mp;
+    if (Number.isFinite(mp) && mp >= 1 && mp <= 8) maxPlayers = mp;
   } catch { /* ignore */ }
   return { roomName, isPublic, maxPlayers };
 }

@@ -110,12 +110,13 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
         <label style={row}>
           <span style={label}>Music</span>
           <input
+            className="bb-range"
             type="range"
             min="0"
             max="100"
             value={Math.round(musicV * 100)}
             onChange={handleMusicChange}
-            style={slider}
+            style={{ ...slider, '--range-fill': `${Math.round(musicV * 100)}%` } as React.CSSProperties}
           />
           <span style={valueText}>{Math.round(musicV * 100)}</span>
         </label>
@@ -123,6 +124,7 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
         <label style={row}>
           <span style={label}>Sound FX</span>
           <input
+            className="bb-range"
             type="range"
             min="0"
             max="100"
@@ -130,7 +132,7 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
             onChange={handleSfxChange}
             onMouseUp={handleSfxPreview}
             onTouchEnd={handleSfxPreview}
-            style={slider}
+            style={{ ...slider, '--range-fill': `${Math.round(sfxV * 100)}%` } as React.CSSProperties}
           />
           <span style={valueText}>{Math.round(sfxV * 100)}</span>
         </label>

@@ -17,7 +17,7 @@ export class FreeplayMode implements GameMode {
     name: 'Freeplay',
     description: 'Lobby playground',
     minPlayers: 0,
-    maxPlayers: 16,
+    maxPlayers: 8,
     countdownDuration: 0,
     resultsDuration: 0,
   };

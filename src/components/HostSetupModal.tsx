@@ -180,13 +180,14 @@ export default function HostSetupModal({ onSubmit, onCancel }: Props): JSX.Eleme
         <label style={fieldLabel}>
           <span style={fieldLabelText}>Max players: {maxPlayers}</span>
           <input
+            className="bb-range"
             data-testid="host-setup-max-players"
             type="range"
             min={2}
-            max={16}
+            max={8}
             value={maxPlayers}
             onChange={(e) => setMaxPlayers(parseInt(e.target.value, 10))}
-            style={slider}
+            style={{ ...slider, '--range-fill': `${((maxPlayers - 2) / (8 - 2)) * 100}%` } as React.CSSProperties}
           />
         </label>
 
