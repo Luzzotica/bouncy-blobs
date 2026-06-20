@@ -1,6 +1,5 @@
 import { GameMode, GameModeState, GamePhase } from './types';
 import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
-import { SoftBodyWorld } from '../../physics/softBodyWorld';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager } from '../playerManager';
 

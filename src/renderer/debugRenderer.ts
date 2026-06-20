@@ -1,6 +1,5 @@
 import { Vec2 } from '../physics/vec2';
 import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
-import { SoftBodyWorld } from '../physics/softBodyWorld';
 
 export function drawSprings(
   ctx: CanvasRenderingContext2D,

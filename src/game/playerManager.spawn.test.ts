@@ -16,10 +16,13 @@
 //       property that lets host+guest end up at the same coordinates
 //       without snapshot syncing first.
 
-import { describe, expect, it } from 'vitest';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
+import { describe, expect, it, beforeAll } from 'vitest';
+import { SoftBodyWorldRust } from '../physics/softBodyWorldRust';
+import { loadWasmForTests } from '../physics/testWasm';
 import { vec2 } from '../physics/vec2';
 import { PlayerManager } from './playerManager';
+
+beforeAll(async () => { await loadWasmForTests(); });
 
 const SPAWN_POINTS = [
   vec2(-200, 380),
@@ -29,7 +32,7 @@ const SPAWN_POINTS = [
 
 describe('PlayerManager — guest-spawn regression', () => {
   it('addPlayer creates a blob in the engine (so the guest can SEE it)', () => {
-    const world = new SoftBodyWorld({ rngSeed: 1 });
+    const world = new SoftBodyWorldRust({ rngSeed: 1 });
     const pm = new PlayerManager(SPAWN_POINTS);
     expect(world.getBlobCount()).toBe(0);
     const mp = pm.addPlayer('p1', 'Player One', world);
@@ -50,7 +53,7 @@ describe('PlayerManager — guest-spawn regression', () => {
     // + world. Without snapshot sync, both must land at the same coordinates
     // for the keyframe path to be a no-op rather than a visible teleport.
     function build() {
-      const world = new SoftBodyWorld({ rngSeed: 42 });
+      const world = new SoftBodyWorldRust({ rngSeed: 42 });
       const pm = new PlayerManager(SPAWN_POINTS);
       return { world, pm };
     }
@@ -65,7 +68,7 @@ describe('PlayerManager — guest-spawn regression', () => {
   });
 
   it('different playerIds spawn at different positions (no collision spawn)', () => {
-    const world = new SoftBodyWorld({ rngSeed: 1 });
+    const world = new SoftBodyWorldRust({ rngSeed: 1 });
     const pm = new PlayerManager(SPAWN_POINTS);
     const a = pm.addPlayer('alpha', 'A', world);
     const b = pm.addPlayer('beta', 'B', world);
@@ -80,8 +83,8 @@ describe('PlayerManager — guest-spawn regression', () => {
     // The host inserts players in connection order. The guest may receive
     // player_join events in a different order. The deterministic spawn
     // derivation must be order-independent — driven purely by playerId.
-    const host = { w: new SoftBodyWorld({ rngSeed: 9 }), pm: new PlayerManager(SPAWN_POINTS) };
-    const guest = { w: new SoftBodyWorld({ rngSeed: 9 }), pm: new PlayerManager(SPAWN_POINTS) };
+    const host = { w: new SoftBodyWorldRust({ rngSeed: 9 }), pm: new PlayerManager(SPAWN_POINTS) };
+    const guest = { w: new SoftBodyWorldRust({ rngSeed: 9 }), pm: new PlayerManager(SPAWN_POINTS) };
     host.pm.addPlayer('a', 'A', host.w);
     host.pm.addPlayer('b', 'B', host.w);
     guest.pm.addPlayer('b', 'B', guest.w);
@@ -100,7 +103,7 @@ describe('PlayerManager — guest-spawn regression', () => {
     // Guards against the bug where joinAsLocalPlayer ran twice (e.g., effect
     // dependency churn) and would otherwise create duplicate blobs at
     // different positions.
-    const world = new SoftBodyWorld({ rngSeed: 1 });
+    const world = new SoftBodyWorldRust({ rngSeed: 1 });
     const pm = new PlayerManager(SPAWN_POINTS);
     const first = pm.addPlayer('p1', 'P1', world);
     const second = pm.addPlayer('p1', 'P1', world);

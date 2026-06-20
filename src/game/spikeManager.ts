@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { Vec2, vec2 } from '../physics/vec2';
 import { SpikeDef, ZoneDef } from '../levels/types';
 import { PlayerManager } from './playerManager';

@@ -1,12 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
+import { SoftBodyWorldRust } from '../physics/softBodyWorldRust';
+import { loadWasmForTests } from '../physics/testWasm';
 import { TriggerManager } from '../game/triggerManager';
 import { ActionManager } from '../game/actionManager';
 import { PlatformMover } from '../game/platformMover';
 import { loadLevel } from './levelLoader';
 import { LevelData } from './types';
+
+beforeAll(async () => { await loadWasmForTests(); });
 
 function loadShowcase(): LevelData {
   const p = resolve(__dirname, '../../public/levels/showcase.json');
@@ -89,7 +92,7 @@ describe('showcase level — covers every element type', () => {
   });
 
   it('loads cleanly into the runtime and a continuous action raises bridge points while the trigger is occupied', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const loaded = loadLevel(world, level);
 
     // Sanity — every PointShape mapped to particles.

@@ -4,6 +4,7 @@ import { COLOR_PALETTE } from '../constants/customization';
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import { PERSONALITY_LABELS, type PersonalityName } from '../game/aiPersonalities';
 import type { LevelData, LevelType } from '../levels/types';
+import { features } from '../config/featureFlags';
 import MapPickerModal from './MapPickerModal';
 import FaceSwatch from './FaceSwatch';
 
@@ -27,8 +28,9 @@ export interface MapOption {
 
 export const MODE_OPTIONS: { id: LevelType; label: string }[] = [
   { id: 'solo_racing', label: 'Racing' },
-  // Chained Together and Party hidden from UI — not working right now.
-  // Code, level JSON, and the mode files remain so re-enabling is easy.
+  // Chained Climb is gated on the `chainedClimb` feature flag (hidden in demo
+  // builds). Party remains hidden until its mode is fixed up.
+  ...(features.chainedClimb ? [{ id: 'team_racing' as LevelType, label: 'Chained Climb' }] : []),
   { id: 'koth',        label: 'King of the Hill' },
 ];
 

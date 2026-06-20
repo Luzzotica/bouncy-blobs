@@ -43,8 +43,8 @@ npm run build:wasm
 # Browser demos
 npm run dev
 # then visit:
-#   http://localhost:5173/src/physics/wasm-demo.html
-#   http://localhost:5173/src/physics/netplay-determinism.html
+#   http://localhost:5170/src/physics/wasm-demo.html
+#   http://localhost:5170/src/physics/netplay-determinism.html
 ```
 
 ## Determinism guarantees, in plain English
@@ -87,8 +87,8 @@ The Rust engine is now wired into the live `BouncyBlobsGame`. Flip
 ```bash
 npm run build:wasm   # produces src/physics/wasm/* artifacts
 npm run dev          # boot dev server
-# open http://localhost:5173/?engine=rust  → game runs on Rust sim
-# open http://localhost:5173/             → game runs on TS sim (default)
+# open http://localhost:5170/?engine=rust  → game runs on Rust sim
+# open http://localhost:5170/             → game runs on TS sim (default)
 ```
 
 Architecture:
@@ -105,8 +105,8 @@ is loaded before the game tries to construct an engine.
 ### Netplay validation procedure (manual)
 
 1. Start two clients on the same dev server:
-   - Tab A: `http://localhost:5173/?engine=rust` (host)
-   - Tab B: `http://localhost:5173/?engine=rust` (guest)
+   - Tab A: `http://localhost:5170/?engine=rust` (host)
+   - Tab B: `http://localhost:5170/?engine=rust` (guest)
 2. Host a lobby, join from the other tab.
 3. Play for at least 60 seconds with active blob-blob collisions and CCD.
 4. In the devtools console of each tab, run:

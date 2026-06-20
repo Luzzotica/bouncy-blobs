@@ -1,0 +1,172 @@
+{
+  "name": "Swervy",
+  "version": 1,
+  "levelTypes": [
+    "team_racing",
+    "solo_racing"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_1",
+      "x": -310.00000000000006,
+      "y": 730,
+      "width": 2000,
+      "height": 240,
+      "rotation": 1.5707963267948963
+    },
+    {
+      "id": "plat_9",
+      "x": 80,
+      "y": -380,
+      "width": 920,
+      "height": 280,
+      "rotation": 0
+    },
+    {
+      "id": "plat_10",
+      "x": 540,
+      "y": 160,
+      "width": 440,
+      "height": 840,
+      "rotation": 0
+    },
+    {
+      "id": "plat_11",
+      "x": 287.19300090006305,
+      "y": 2477.193000900063,
+      "width": 2240,
+      "height": 840,
+      "rotation": 0.7853981633974483
+    },
+    {
+      "id": "plat_12",
+      "x": 1660,
+      "y": 2860,
+      "width": 1840,
+      "height": 880,
+      "rotation": 0
+    },
+    {
+      "id": "plat_13",
+      "x": 1980,
+      "y": 2370,
+      "width": 1400,
+      "height": 500,
+      "rotation": -0.5235987755982989
+    },
+    {
+      "id": "plat_14",
+      "x": 2450,
+      "y": 2270,
+      "width": 580,
+      "height": 1620,
+      "rotation": 0.5235987755982988
+    },
+    {
+      "id": "plat_15",
+      "x": 2910,
+      "y": 1700,
+      "width": 740,
+      "height": 1200,
+      "rotation": 0
+    },
+    {
+      "id": "plat_16",
+      "x": 2360,
+      "y": 590,
+      "width": 240,
+      "height": 1420,
+      "rotation": -0.5235987755982989
+    },
+    {
+      "id": "plat_17",
+      "x": 1600,
+      "y": -430,
+      "width": 1640,
+      "height": 300,
+      "rotation": 0.7853981633974483
+    },
+    {
+      "id": "plat_18",
+      "x": 110,
+      "y": -1070,
+      "width": 1940,
+      "height": 420,
+      "rotation": 0
+    },
+    {
+      "id": "plat_19",
+      "x": -1040,
+      "y": 150,
+      "width": 480,
+      "height": 2220,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": 0,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_2",
+      "x": 180,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_3",
+      "x": 0,
+      "y": 200,
+      "type": "player"
+    },
+    {
+      "id": "sp_4",
+      "x": 180,
+      "y": 200,
+      "type": "player"
+    },
+    {
+      "id": "sp_5",
+      "x": 180,
+      "y": 40,
+      "type": "player"
+    },
+    {
+      "id": "sp_6",
+      "x": 0,
+      "y": 40,
+      "type": "player"
+    },
+    {
+      "id": "sp_7",
+      "x": 0,
+      "y": -120,
+      "type": "player"
+    },
+    {
+      "id": "sp_8",
+      "x": 180,
+      "y": -120,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    {
+      "id": "goal_20",
+      "x": -1440,
+      "y": 1820,
+      "width": 1200,
+      "height": 1520
+    }
+  ],
+  "softPlatforms": []
+}

@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { rect as hullRect, rectAnchorIndices, circle as hullCircle } from '../physics/hullPresets';

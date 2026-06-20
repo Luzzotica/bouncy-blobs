@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { vec2 } from '../physics/vec2';
 import { ActionDef, ActionEasing, ActionTarget } from '../levels/types';
 import type { TriggerManager } from './triggerManager';

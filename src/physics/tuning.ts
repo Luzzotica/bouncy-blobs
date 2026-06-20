@@ -4,6 +4,6 @@ export const RADIAL_K = 75.0;
 export const RADIAL_DAMP = 4.2;
 export const PRESSURE_K = 0.12;
 export const SHAPE_MATCH_K = 132.0;
-export const SHAPE_MATCH_DAMP = 4.6;
+export const SHAPE_MATCH_DAMP = 1.5; // TEMP: lowered from 4.6 to unlock floor roll-churn (the shape-match damp term was bleeding the spin); tune to taste
 export const CENTER_MASS = 0.2;
 export const HULL_MASS = 0.12;

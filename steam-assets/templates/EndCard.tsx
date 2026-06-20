@@ -78,7 +78,7 @@ export function EndCard() {
             textAlign: "center",
           }}
         >
-          Search “Bouncy Blobs” on Steam
+          Link in description 👇
         </div>
       </div>
     </Frame>

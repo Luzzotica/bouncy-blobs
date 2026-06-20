@@ -1,5 +1,4 @@
-export { SoftBodyWorld } from './softBodyWorld';
-export type { SoftBodyWorldConfig } from './softBodyWorld';
+export type { SoftBodyWorldConfig } from './engineConfig';
 export { SlimeBlob } from './slimeBlob';
 export type { SlimeBlobConfig, HullPreset } from './slimeBlob';
 export * as Vec2 from './vec2';

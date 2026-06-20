@@ -37,6 +37,13 @@ export async function getBuiltinLevels(): Promise<LevelManifestEntry[]> {
 /** Back-compat alias. */
 export const getAvailableLevels = getBuiltinLevels;
 
+/** Drop cached manifest + level data so the next fetch re-reads from disk.
+ *  Used by the dev "Publish to Game" flow after writing a new/updated map. */
+export function invalidateBuiltinCache(): void {
+  manifestCache = null;
+  levelCache.clear();
+}
+
 /** Load a built-in level by its manifest id (cached after first load). */
 export async function loadBuiltinLevel(id: string): Promise<LevelData> {
   const cached = levelCache.get(id);

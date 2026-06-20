@@ -26,6 +26,10 @@ export class SoftBodyWorldHandle {
      * Returns a BlobHandle with the blob id + key particle indices.
      */
     addBlobFromHull(hull_rest_local: Float64Array, center_local_x: number, center_local_y: number, center_mass: number, hull_mass: number, spring_k: number, spring_damp: number, radial_k: number, radial_damp: number, pressure_k: number, shape_match_k: number, shape_match_damp: number, world_origin_x: number, world_origin_y: number, sort_key: string, static_hull_indices: Uint32Array, static_center: boolean, pin_frame: boolean): BlobHandle;
+    /**
+     * Unilateral distance leash between two blobs. See core `add_blob_tether`.
+     */
+    addBlobTether(blob_a: number, blob_b: number, slack: number, stiffness: number, max_force: number): void;
     addBumper(id: number, x: number, y: number, radius: number): number;
     addCannon(id: number, x: number, y: number, w: number, h: number, rotation: number): number;
     addCatapult(id: number, x: number, y: number, w: number, h: number): number;
@@ -134,6 +138,12 @@ export class SoftBodyWorldHandle {
      * Flat (x,y,x,y,...) buffer of the blob's hull polygon in CCW order.
      */
     getHullPolygon(blob_id: number): Float64Array;
+    /**
+     * Per-particle inverse mass (0 = anchored / static). Managers read this
+     * to tell pinned points from dynamic ones (e.g. ActionManager skips
+     * anchored targets).
+     */
+    getInvMass(): Float64Array;
     /**
      * Read a single particle position as (x, y) into a 2-element f64 array.
      */
@@ -311,6 +321,7 @@ export interface InitOutput {
     readonly __wbg_softbodyworldhandle_free: (a: number, b: number) => void;
     readonly blobhandle_hullIndices: (a: number) => number;
     readonly softbodyworldhandle_addBlobFromHull: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
+    readonly softbodyworldhandle_addBlobTether: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly softbodyworldhandle_addBumper: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly softbodyworldhandle_addCannon: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly softbodyworldhandle_addCatapult: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -349,6 +360,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_getBlobShapeMatchTargetHull: (a: number, b: number) => number;
     readonly softbodyworldhandle_getBlobStickyContact: (a: number, b: number) => number;
     readonly softbodyworldhandle_getHullPolygon: (a: number, b: number) => number;
+    readonly softbodyworldhandle_getInvMass: (a: number) => number;
     readonly softbodyworldhandle_getParticlePos: (a: number, b: number) => number;
     readonly softbodyworldhandle_getParticleVel: (a: number, b: number) => number;
     readonly softbodyworldhandle_getPositions: (a: number) => number;

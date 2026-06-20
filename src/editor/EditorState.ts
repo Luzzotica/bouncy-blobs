@@ -231,6 +231,10 @@ export class EditorState {
   localId: string | null = null;
   /** Steam Workshop PublishedFileId once this map has been published. */
   workshopId: string | null = null;
+  /** Dev-only: the built-in manifest id this map maps to, when editing a
+   *  shipped map in place. Drives the default id in the "Publish to Game"
+   *  dialog so re-publishing overwrites the same file. */
+  builtinId: string | null = null;
 
   onChange?: () => void;
 

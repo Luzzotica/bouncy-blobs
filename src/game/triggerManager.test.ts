@@ -1,11 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { SoftBodyWorldRust } from '../physics/softBodyWorldRust';
+import { loadWasmForTests } from '../physics/testWasm';
 import { vec2 } from '../physics/vec2';
 import { TriggerManager } from './triggerManager';
 import { TriggerDef } from '../levels/types';
 
+beforeAll(async () => { await loadWasmForTests(); });
+
 function setup(opts: { chargeSeconds?: number } = {}) {
-  const world = new SoftBodyWorld();
+  const world = new SoftBodyWorldRust();
   const def: TriggerDef = {
     id: 't1', x: 0, y: 100, width: 50, height: 10, rotation: 0,
     chargeSeconds: opts.chargeSeconds,

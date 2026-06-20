@@ -254,6 +254,13 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   // ---- level-author additions ----
   addParticle(p: Vec2, v: Vec2, m: number, radius: number): number;
   addRopeChain(idxA: number, idxB: number, opts: RopeChainOpts): RopeChainResult;
+  /**
+   * Unilateral distance leash between two blobs. While their hull centroids are
+   * within `slack` it does nothing (zero weight, free movement/jumps); past it
+   * a pull of `min(stiffness * overshoot, maxForce)` is spread evenly across
+   * every hull particle of both blobs, translating each as a whole.
+   */
+  addBlobTether(blobA: number, blobB: number, slack: number, stiffness: number, maxForce: number): void;
   /** Add a spring outside any blob (point shapes, ropes). */
   addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void;
   /** Pull a particle toward a fixed world-position with k/damp. */

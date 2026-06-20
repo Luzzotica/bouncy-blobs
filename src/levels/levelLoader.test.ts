@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { SoftBodyWorldRust } from '../physics/softBodyWorldRust';
+import { loadWasmForTests } from '../physics/testWasm';
 import { loadLevel } from './levelLoader';
 import { LevelData } from './types';
+
+beforeAll(async () => { await loadWasmForTests(); });
 
 function emptyLevel(): LevelData {
   return {
@@ -17,7 +20,7 @@ function emptyLevel(): LevelData {
 
 describe('levelLoader — PointShape hydration (soft-blob)', () => {
   it('expands a closed hull into a soft-body blob: 1 center + N hull particles', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       pointShapes: [{
@@ -42,7 +45,7 @@ describe('levelLoader — PointShape hydration (soft-blob)', () => {
   });
 
   it('anchored points become static hull particles (invMass=0)', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       pointShapes: [{
@@ -68,7 +71,7 @@ describe('levelLoader — PointShape hydration (soft-blob)', () => {
   });
 
   it('skips degenerate (<3 points) shapes', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       pointShapes: [{
@@ -84,7 +87,7 @@ describe('levelLoader — PointShape hydration (soft-blob)', () => {
   });
 
   it('reverses CW point rings so the hull is CCW for the engine', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     // CW triangle in screen coords (y-down): vertices ordered clockwise.
     const level: LevelData = {
       ...emptyLevel(),
@@ -109,7 +112,7 @@ describe('levelLoader — PointShape hydration (soft-blob)', () => {
 
 describe('levelLoader — Chain hydration', () => {
   it('creates a rope between two fixed anchors with inner segment particles', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       chains: [{
@@ -132,7 +135,7 @@ describe('levelLoader — Chain hydration', () => {
   });
 
   it('drops chains whose endpoint references a missing blob', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       chains: [{
@@ -150,7 +153,7 @@ describe('levelLoader — Chain hydration', () => {
 
 describe('levelLoader — Trigger area registration', () => {
   it('registers each trigger as a sensor polygon and indexes shape→triggerId', () => {
-    const world = new SoftBodyWorld();
+    const world = new SoftBodyWorldRust();
     const level: LevelData = {
       ...emptyLevel(),
       triggers: [

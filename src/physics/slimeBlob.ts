@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from './softBodyWorld';
-import type { SoftBodyEngine } from "./SoftBodyEngine";
+import type { SoftBodyEngine } from './SoftBodyEngine';
 import { Vec2, vec2, ZERO } from './vec2';
 import * as Tuning from './tuning';
 import * as HullPresets from './hullPresets';
@@ -43,16 +42,33 @@ const NONFLOOR_MOVE_MULT = 0.4;
 // sticking under a ceiling but cuts it on walls so you can't shoot straight up.
 const WALL_CLIMB_MULT = 0.35;
 
-// Hull "treadmill": circulate the hull-perimeter points along the contour
-// (like a tank tread) whenever the player is steering in ANY direction. Purely
-// visual — the surface flows, it doesn't push the body. The circulation sign
-// makes the surface flow "toward movement" relative to whatever surface the
-// blob is on/against. Rate scales with how fast we're moving, over a low
-// constant minimum so it still ticks over at a crawl and ramps up at speed.
-const TREAD_BASE = 2000;       // min tread rate (px/s²) when barely moving
-const TREAD_SPEED_GAIN = 2.0;  // extra tread rate per px/s of lateral speed
-// ±1 — flips the overall circulation direction. Tune by feel.
-const TREAD_SIGN = -1;
+// Hull "treadmill": circulate the hull-perimeter points so the blob looks
+// like a WHEEL rolling over whatever surface it's on. Purely visual — the
+// surface flows, it doesn't push the body. Rolling-without-slip: the tread's
+// surface speed tracks how fast we're moving ALONG the contact surface, and
+// the roll direction is the rolling sense `n × v` (n = contact normal) — so
+// it rolls correctly on floor, wall, or ceiling with no special-casing. A
+// stopped blob doesn't spin; a fast one spins fast.
+const TREAD_ROLL_GAIN = 7.0;   // tread circulation rate per px/s of surface speed (tune by feel)
+// Lively spin floor: while STEERING, the wheel spins this hard even at a crawl,
+// so a grippy floor that friction pins to a low speed still looks alive — the
+// same gusto you get gliding fast on a (near-frictionless) ceiling. Scaled by
+// |stick| for analog control, and added on top of the speed-proportional term.
+const TREAD_STEER_BASE = 4800;
+// Direction at a standstill: the intent term (±1) is scaled to this px/s so it
+// sets the roll sense when surfaceSpeed≈0, but real motion (which is larger)
+// takes over once you're moving. ~0 on walls (intent is horizontal), so wall
+// roll direction comes purely from actual vertical motion.
+const DIR_INTENT_BIAS = 120;
+// Rolling and leaning are competing visuals — a leaned (sheared) rest shape is
+// a rotational detent that stalls the spin. Fade lean while steering.
+const LEAN_ROLL_SUPPRESS = 0.15;
+// Master switch for the hull lean deformation. OFF while we test whether the
+// lean shear is what makes the wheel feel "stuck". Flip back to true to restore.
+const HULL_LEAN_ENABLED = false;
+const TREAD_MIN_SPEED = 6;     // px/s deadzone so jitter doesn't spin a near-stopped blob
+// ±1 — flips the overall roll direction if the wheel turns the wrong way.
+const TREAD_SIGN = 1;
 
 // Sticky wall stick
 const STICK_MIN_CONTACTS = 2;    // hull points touching sticky surface to engage
@@ -66,7 +82,7 @@ export interface SlimeBlobConfig {
   expandShapeScaleSpeed?: number;
   expandShapeScaleSpeedPress?: number;
   /** Stable cross-client identifier — see `BlobRange.sortKey` and
-   * `SoftBodyWorld.addBlobFromHull`'s `sortKey` parameter. Pass the
+   * `SoftBodyEngine.addBlobFromHull`'s `sortKey` parameter. Pass the
    * playerId for player blobs, the NPC id for NPCs. Omit for single-
    * player / editor / test contexts where cross-client order doesn't
    * matter. */
@@ -119,7 +135,9 @@ export class SlimeBlob {
     this.playerControlled = config.playerControlled ?? true;
     this.expandShapeScaleMax = config.expandShapeScaleMax ?? 3.0;
     this.expandShapeScaleSpeed = config.expandShapeScaleSpeed ?? 18.0;
-    this.expandShapeScaleSpeedPress = config.expandShapeScaleSpeedPress ?? 36.0;
+    // TEMP jump test (lever 1: how FAST we expand). 36 → 24: a slower press-ramp
+    // means a gentler push-off against the surface → lower jump. Tune to taste.
+    this.expandShapeScaleSpeedPress = config.expandShapeScaleSpeedPress ?? 24.0;
 
     const hullPreset = config.hullPreset ?? 'circle16';
     const hullLocal = getHullLocal(hullPreset);
@@ -334,11 +352,14 @@ export class SlimeBlob {
     const expandSpringMult = this.expandPressed ? EXPAND_SPRING_STIFFNESS_MULT : 1.0;
     this.world.setBlobSpringStiffnessScale(this.blobId, expandSpringMult);
 
-    // Gravity-relative frame, still needed for the up/down stick axis +
-    // hull lean. Movement scheme:
-    //   - LATERAL (stickX) is WORLD-FIXED: A always = world left, D always
-    //     = world right, regardless of gravity orientation. Keeps muscle
-    //     memory stable inside gravity zones that flip / tilt gravity.
+    // Gravity-relative frame. Movement scheme:
+    //   - LATERAL (stickX) is GRAVITY-RELATIVE: A/D push ALONG the floor
+    //     (perpendicular to gravity), whatever orientation the floor is at.
+    //     World-fixed X used to be used here for "muscle memory", but under
+    //     sideways/tilted gravity that aims the force INTO the floor-wall, so
+    //     the player just floats and can't traverse. Aligning to `right` makes
+    //     A/D always walk along the surface, and feeds the tread-rate sample
+    //     below (which projects hull velocity onto `right`).
     //   - DOWN/UP (stickY) stays gravity-relative: push "toward gravity"
     //     to crouch / fall faster, push "against gravity" to float. This
     //     is the "physical" axis — pushing harder into whatever the floor
@@ -346,7 +367,7 @@ export class SlimeBlob {
     //   - JUMP is the soft-body expand, which physically pushes off
     //     whatever surface you're touching — gravity-agnostic by design.
     const down = this.getGravityDir();
-    const right = vec2(down.y, -down.x); // perpendicular, gravity-relative (for lean)
+    const right = vec2(down.y, -down.x); // perpendicular, gravity-relative
     const up = vec2(-down.x, -down.y);
 
     // Contact state. `touching` = any contact at all (floor, wall, ledge, or
@@ -364,11 +385,11 @@ export class SlimeBlob {
     // Something pressing on our upper half (ledge / roof / blob above).
     const overhead = this.hasOverheadContact();
 
-    // Lateral movement — world-fixed X. Full on a floor, throttled on
-    // walls/ceilings (low friction there would otherwise let you zoom), least
-    // in the air.
+    // Lateral movement — along the gravity-relative `right` axis (floor
+    // tangent). Full on a floor, throttled on walls/ceilings (low friction
+    // there would otherwise let you zoom), least in the air.
     const lateralMult = onFloor ? 1.0 : (touching ? NONFLOOR_MOVE_MULT : AIR_MOVE_MULTIPLIER);
-    const lateralDir = vec2(this.stickX, 0);
+    const lateralDir = vec2(right.x * this.stickX, right.y * this.stickX);
     this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * lateralMult, delta);
 
     // Gravity-axis forces from joystick Y — still gravity-relative so
@@ -376,26 +397,55 @@ export class SlimeBlob {
     if (this.stickY > 0.1) {
       this.world.applyBlobMoveForce(this.blobId, down, DOWN_FORCE * this.stickY * this.moveForceMultiplier, delta);
     } else if (this.stickY < -0.1) {
-      // 12× clamber/stick force whenever something is pressing on our upper
-      // half — a ledge, roof, OR another blob / softbody platform above us.
-      const upMult = overhead ? LEDGE_UP_FORCE_MULT : 1.0;
-      // Keep the strong UP for sticking UNDER a ceiling (normal points down,
-      // upDot < 0) but cut it on a vertical WALL (normal ~horizontal) so you
-      // can't shoot straight up a wall.
-      const climbScale = (cnorm && upDot > -0.5) ? WALL_CLIMB_MULT : 1.0;
-      this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier * climbScale, delta);
+      // UP only does something when there's a WALL to climb or a CEILING/ledge
+      // to stick under — pressing up in open air or on flat ground gives NO
+      // float (removed). Wall = contact normal ~horizontal; ceiling/ledge =
+      // something overhead or a downward-facing contact normal.
+      const isWall = cnorm !== null && Math.abs(upDot) < 0.5;
+      const isCeilingStick = overhead || (cnorm !== null && upDot < -0.5);
+      if (isWall || isCeilingStick) {
+        // 12× clamber/stick force whenever something is pressing on our upper
+        // half — a ledge, roof, OR another blob / softbody platform above us.
+        const upMult = overhead ? LEDGE_UP_FORCE_MULT : 1.0;
+        // Keep the strong UP for sticking UNDER a ceiling (normal points down,
+        // upDot < 0) but cut it on a vertical WALL (normal ~horizontal) so you
+        // can't shoot straight up a wall.
+        const climbScale = (cnorm && upDot > -0.5) ? WALL_CLIMB_MULT : 1.0;
+        this.world.applyBlobMoveForce(this.blobId, up, UP_FORCE * upMult * -this.stickY * this.moveForceMultiplier * climbScale, delta);
+      }
     }
 
-    // Hull treadmill — spins ONLY when steering left/right (A/D), in a
-    // gravity-based direction (stable; no contact-normal lookup, which went
-    // ambiguous when pressing up and froze the rotation). Reverses when holding
-    // up into an overhead surface so it clambers up & over.
-    const dir = treadDirection(this.stickX, this.stickY, down, overhead);
-    if (dir !== 0) {
-      // Spin faster the faster we're actually moving, over a low minimum.
-      const rate = TREAD_BASE + TREAD_SPEED_GAIN * Math.abs(this.getHullVelocityAlong(right));
-      this.world.setBlobTread(this.blobId, rate * dir * TREAD_SIGN);
+    // Hull rolls like a wheel. The roll direction comes from the velocity ALONG
+    // the contact surface: `surfaceSpeed = v · tangent` where the tangent is the
+    // contact normal rotated 90° (so v·tangent == n×v, the roll sense). This
+    // auto-rolls the right way on floor / wall / ceiling. Falls back to the
+    // gravity-relative frame when airborne, and reverses when clambering UP into
+    // an overhead surface so it climbs up & over.
+    //
+    // Rate = a lively STEER_BASE (while steering) + a speed-proportional ramp.
+    // The base keeps the wheel alive on a grippy floor where friction pins your
+    // speed low; the ramp keeps the beloved fast spin when you glide quick on a
+    // near-frictionless ceiling. Not steering → free-roll from actual motion.
+    const rollNormal = cnorm ?? up;                          // points out of the surface, into the blob
+    const rollTangent = vec2(-rollNormal.y, rollNormal.x);   // CCW tangent along the surface
+    const surfaceSpeed = this.getHullVelocityAlong(rollTangent);
+    const steering = Math.abs(this.stickX) > 0.1;
+    let tread: number;
+    if (steering) {
+      // Direction = ACTUAL rolling sense (surfaceSpeed = n×v), so it's correct
+      // on floor, ceiling AND walls (where motion is vertical). The intent term
+      // only biases the sign at a standstill so it doesn't flicker; it's ~0 on
+      // walls, so wall direction comes purely from how you're climbing.
+      const intentAlong = (right.x * rollTangent.x + right.y * rollTangent.y) * this.stickX;
+      const dir = Math.sign(surfaceSpeed + intentAlong * DIR_INTENT_BIAS) || 1;
+      tread = dir * (TREAD_STEER_BASE * Math.abs(this.stickX) + TREAD_ROLL_GAIN * Math.abs(surfaceSpeed));
+    } else if (Math.abs(surfaceSpeed) >= TREAD_MIN_SPEED) {
+      // Free-rolling (sliding / knocked back): follow actual motion.
+      tread = TREAD_ROLL_GAIN * surfaceSpeed;
+    } else {
+      tread = 0;
     }
+    this.world.setBlobTread(this.blobId, tread * TREAD_SIGN);
 
     // Hull shape deformation from velocity + input (gravity-relative)
     this.updateHullDeformation(down, right);
@@ -436,7 +486,11 @@ export class SlimeBlob {
     // bit-deterministic in IEEE 754, so we can compute them on the JS
     // side and let the engine quantize them once at the wasm boundary.
     const vLateral = this.getHullVelocityAlong(right);
-    const lean = Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED));
+    let lean = HULL_LEAN_ENABLED ? Math.max(-1, Math.min(1, vLateral / LEAN_MAX_SPEED)) : 0;
+    // Fade the lean while steering: a leaned (sheared) rest shape forms a
+    // rotational detent that stalls the rolling tread. Round wheel rolls; leaned
+    // wheel jams.
+    if (HULL_LEAN_ENABLED && Math.abs(this.stickX) > 0.1) lean *= LEAN_ROLL_SUPPRESS;
     const squash = Math.max(0, this.stickY);
 
     // ── The trig + per-particle deformation lives in Rust now ──────
@@ -569,29 +623,3 @@ function moveToward(current: number, target: number, maxDelta: number): number {
   return current + Math.sign(target - current) * maxDelta;
 }
 
-/**
- * Signed treadmill circulation direction (−1, 0, or +1).
- *
- * Deliberately simple and stable — derived from GRAVITY, never the contact
- * normal (which goes ambiguous when pressing up and made the tread freeze):
- *  - Only spins when the player is moving left/right intentionally (A/D); pure
- *    up/down input returns 0, so it never spins/freezes while just climbing or
- *    sticking.
- *  - Direction = roll sense of the lateral input relative to gravity-up
- *    (`cross((stickX,0), up)`), so it rolls the natural way on the ground.
- *  - UNLESS holding up INTO something overhead (ceiling/overhang) — then it
- *    reverses so the surface clambers up-and-over instead of rolling backwards.
- *
- * `stickX` is world-fixed lateral; `stickY` is gravity-relative (negative = up,
- * against gravity). `down` = gravity dir. `overhead` = something pressing on the
- * blob's upper half. Pure arithmetic → deterministic.
- */
-export function treadDirection(stickX: number, stickY: number, down: Vec2, overhead: boolean): number {
-  if (Math.abs(stickX) <= 0.1) return 0; // only intentional A/D spins the hull
-  const upY = -down.y; // y-component of gravity-up
-  // cross((stickX,0), up).z = stickX*up.y - 0*up.x = stickX * upY.
-  let dir = Math.sign(stickX * upY) || 0;
-  // Holding up into a ceiling/overhang: reverse so it clambers up & over.
-  if (overhead && stickY < -0.1) dir = -dir;
-  return dir;
-}

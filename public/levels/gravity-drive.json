@@ -1,0 +1,123 @@
+{
+  "name": "Gravity Drive",
+  "version": 1,
+  "levelTypes": [
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_103",
+      "x": 180,
+      "y": 920,
+      "width": 1520,
+      "height": 320,
+      "rotation": 0
+    },
+    {
+      "id": "plat_111",
+      "x": 110,
+      "y": -1000,
+      "width": 580,
+      "height": 520,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": 0,
+      "y": 380,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "gravityZones": [
+    {
+      "id": "grav_104",
+      "x": 130,
+      "y": -1040,
+      "width": 1980,
+      "height": 1960,
+      "field": {
+        "kind": "point",
+        "center": {
+          "x": 130,
+          "y": -1040
+        },
+        "strength": 20000,
+        "falloff": "inverseSquare"
+      }
+    },
+    {
+      "id": "grav_106",
+      "x": 150,
+      "y": -2450,
+      "width": 4620,
+      "height": 780,
+      "field": {
+        "kind": "uniform",
+        "vector": {
+          "x": 0,
+          "y": 9800
+        }
+      }
+    },
+    {
+      "id": "grav_107",
+      "x": 1820,
+      "y": -840,
+      "width": 1300,
+      "height": 3200,
+      "field": {
+        "kind": "uniform",
+        "vector": {
+          "x": -9800,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "grav_108",
+      "x": -1500,
+      "y": -900,
+      "width": 1300,
+      "height": 3200,
+      "field": {
+        "kind": "uniform",
+        "vector": {
+          "x": 9800,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "grav_110",
+      "x": 180,
+      "y": 380,
+      "width": 4620,
+      "height": 780,
+      "field": {
+        "kind": "uniform",
+        "vector": {
+          "x": 0,
+          "y": -9800
+        }
+      }
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_105",
+      "x": 120,
+      "y": -1020,
+      "width": 760,
+      "height": 800
+    }
+  ],
+  "softPlatforms": []
+}

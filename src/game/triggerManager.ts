@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { TriggerDef } from '../levels/types';
 
 interface RegisteredTrigger {

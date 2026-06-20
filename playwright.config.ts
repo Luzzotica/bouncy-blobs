@@ -17,7 +17,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5170',
     viewport: { width: 1280, height: 720 },
     trace: 'retain-on-failure',
     video: {
@@ -49,7 +49,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
-    url: 'http://localhost:5173',
+    url: 'http://localhost:5170',
     reuseExistingServer: true,
     timeout: 60_000,
   },

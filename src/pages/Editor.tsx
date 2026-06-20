@@ -5,8 +5,11 @@ import EditorToolbar from '../editor/EditorToolbar';
 import EditorCanvas from '../editor/EditorCanvas';
 import EditorProperties from '../editor/EditorProperties';
 import MapPreview from '../components/MapPreview';
+import PublishToGameDialog from '../editor/PublishToGameDialog';
+import { DEV_MAPS, deleteGameMap, setMapHidden } from '../lib/devMaps';
 import { LevelData, LevelType, getLevelTypes, validateLevelType } from '../levels/types';
-import { getBuiltinLevels, loadBuiltinLevel, LevelManifestEntry } from '../levels/levelRegistry';
+import { features } from '../config/featureFlags';
+import { getBuiltinLevels, loadBuiltinLevel, invalidateBuiltinCache, LevelManifestEntry } from '../levels/levelRegistry';
 import {
   deleteLocalMap,
   listLocalMaps,
@@ -30,10 +33,18 @@ import {
 
 const LEVEL_TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
-  team_racing: 'Chained Together',
+  team_racing: 'Chained Climb',
   party: 'Party',
   koth: 'King of the Hill',
 };
+
+// Modes the editor lets you author. Party stays out until its mode is fixed;
+// Chained Climb is gated on the `chainedClimb` feature flag (hidden in demo builds).
+const EDITOR_LEVEL_TYPES: LevelType[] = [
+  'solo_racing',
+  ...(features.chainedClimb ? (['team_racing'] as LevelType[]) : []),
+  'koth',
+];
 
 const LEVEL_TYPE_COLORS: Record<LevelType, string> = {
   solo_racing: '#4a9eff',
@@ -42,11 +53,37 @@ const LEVEL_TYPE_COLORS: Record<LevelType, string> = {
   koth: '#ffa500',
 };
 
+/** Small coloured chips showing which game modes a map supports. */
+function ModeBadges({ types }: { types: LevelType[] }) {
+  if (types.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+      {types.map(lt => (
+        <span
+          key={lt}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '1px 6px',
+            borderRadius: 3,
+            background: LEVEL_TYPE_COLORS[lt] + '22',
+            color: LEVEL_TYPE_COLORS[lt],
+            border: `1px solid ${LEVEL_TYPE_COLORS[lt]}44`,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {LEVEL_TYPE_LABELS[lt]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 type EditorPhase = 'list' | 'new_level_type' | 'editing';
 
 const LEVEL_TYPE_DESCRIPTIONS: Record<LevelType, string> = {
   solo_racing: 'First to the finish wins',
-  team_racing: 'Chained together — everyone reaches the end',
+  team_racing: 'Chained together — everyone climbs to the summit',
   party: 'UCH-style rounds with item placement',
   koth: 'Control the hill to score points',
 };
@@ -87,7 +124,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
       </div>
       <p style={{ color: '#888', fontSize: 14, margin: 0 }}>Select one or more modes this map supports</p>
       <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-        {(['solo_racing', 'koth'] as LevelType[]).map(lt => {
+        {EDITOR_LEVEL_TYPES.map(lt => {
           const active = selected.has(lt);
           return (
             <button
@@ -162,6 +199,7 @@ export default function Editor() {
   /** Cached LevelData for preview thumbnails, keyed by source ("builtin:<id>" or "local:<id>"). */
   const [previewLevels, setPreviewLevels] = useState<Record<string, LevelData>>({});
   const [steamReady, setSteamReady] = useState(false);
+  const [showPublishGame, setShowPublishGame] = useState(false);
   const stateRef = useRef<EditorState | null>(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -358,6 +396,49 @@ export default function Editor() {
     }
   }, [forceUpdate]);
 
+  // Dev-only: edit a shipped map *in place* — no "(Copy)" rename, and stamp the
+  // builtinId so "Publish to Game" defaults to overwriting the same file.
+  const handleEditBuiltinInPlace = useCallback(async (entry: LevelManifestEntry) => {
+    try {
+      const level = await loadBuiltinLevel(entry.id);
+      const fresh = new EditorState(level);
+      fresh.localId = null;
+      fresh.workshopId = null;
+      fresh.builtinId = entry.id;
+      stateRef.current = fresh;
+      setPhase('editing');
+      forceUpdate();
+    } catch (err: any) {
+      alert('Failed to load level: ' + err.message);
+    }
+  }, [forceUpdate]);
+
+  // Dev-only: remove a shipped map from the repo (deletes public/levels/<id>.json
+  // and its manifest entry). Commit the change to deploy the removal.
+  const handleUnpublishBuiltin = useCallback(async (entry: LevelManifestEntry) => {
+    if (!confirm(`Unpublish "${entry.name}"?\n\nThis deletes public/levels/${entry.file} and removes it from the manifest. Commit to deploy the removal.`)) return;
+    try {
+      await deleteGameMap(entry.id);
+      invalidateBuiltinCache();
+      setBuiltinLevels(prev => prev.filter(e => e.id !== entry.id));
+    } catch (err: any) {
+      alert('Unpublish failed: ' + (err?.message ?? err));
+    }
+  }, []);
+
+  // Dev-only: flip a shipped map's hidden flag. Hidden maps stay loadable in the
+  // editor/sandbox but won't show in hosting flows.
+  const handleToggleHidden = useCallback(async (entry: LevelManifestEntry) => {
+    const next = !entry.hidden;
+    try {
+      await setMapHidden(entry.id, next);
+      invalidateBuiltinCache();
+      setBuiltinLevels(prev => prev.map(e => (e.id === entry.id ? { ...e, hidden: next } : e)));
+    } catch (err: any) {
+      alert('Failed to update: ' + (err?.message ?? err));
+    }
+  }, []);
+
   const handleEditLocal = useCallback(async (item: LocalMap) => {
     try {
       const mf = await readLocalMap(item.id);
@@ -470,6 +551,7 @@ export default function Editor() {
                   <div style={{ color: '#666', fontSize: 11 }}>
                     Updated {new Date(item.updatedAtMs).toLocaleDateString()}
                   </div>
+                  {lvl && <ModeBadges types={getLevelTypes(lvl)} />}
                   <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                     {item.workshopId && (
                       <button
@@ -574,15 +656,51 @@ export default function Editor() {
                 }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = '#7b68ee')}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a3a5a')}
-                  onClick={() => handleEditBuiltin(entry)}
+                  onClick={() => (DEV_MAPS ? handleEditBuiltinInPlace(entry) : handleEditBuiltin(entry))}
                 >
                   <div style={{ background: '#0f1629', borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {lvl
                       ? <MapPreview level={lvl} width={260} height={160} />
                       : <span style={{ color: '#555', fontSize: 11 }}>Loading…</span>}
                   </div>
-                  <span style={{ color: '#ddd', fontSize: 14, fontWeight: 600 }}>{entry.name}</span>
-                  <div style={{ color: '#888', fontSize: 11, marginTop: 2 }}>Opens as copy</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#ddd', fontSize: 14, fontWeight: 600, flex: 1 }}>{entry.name}</span>
+                    {entry.hidden && <span style={{ fontSize: 10, color: '#888', border: '1px solid #444', borderRadius: 3, padding: '1px 5px' }}>hidden</span>}
+                  </div>
+                  <ModeBadges types={lvl ? getLevelTypes(lvl) : (entry.levelTypes ?? [])} />
+                  {DEV_MAPS ? (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleEditBuiltinInPlace(entry); }}
+                        style={{ background: '#c77dff', border: 'none', borderRadius: 3, color: '#fff', fontSize: 11, padding: '3px 8px', cursor: 'pointer', fontWeight: 600 }}
+                        title={`Edit ${entry.file} in place — publish overwrites the shipped map`}
+                      >
+                        Edit in place
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleEditBuiltin(entry); }}
+                        style={{ background: '#2a3a5a', border: '1px solid #3a4a6a', borderRadius: 3, color: '#ddd', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                      >
+                        Open as copy
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleHidden(entry); }}
+                        style={{ background: entry.hidden ? '#2d6a4f' : '#3a3a1a', border: '1px solid #5a5a2a', borderRadius: 3, color: entry.hidden ? '#bdf5cd' : '#e0d27a', fontSize: 11, padding: '3px 8px', cursor: 'pointer', marginLeft: 'auto' }}
+                        title={entry.hidden ? 'Show in hosting flows' : 'Hide from hosting flows (stays editable here)'}
+                      >
+                        {entry.hidden ? 'Unhide' : 'Hide'}
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleUnpublishBuiltin(entry); }}
+                        style={{ background: '#6b0000', border: 'none', borderRadius: 3, color: '#faa', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        title={`Delete ${entry.file} from the repo`}
+                      >
+                        Unpublish
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ color: '#888', fontSize: 11, marginTop: 2 }}>Opens as copy</div>
+                  )}
                 </div>
               );
             })}
@@ -605,7 +723,7 @@ export default function Editor() {
           Back
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
-          {(['solo_racing', 'koth'] as LevelType[]).map(lt => {
+          {EDITOR_LEVEL_TYPES.map(lt => {
             const enabled = getLevelTypes(editorState.level).includes(lt);
             const missing = validateLevelType(editorState.level, lt);
             const disabled = !enabled && missing !== null;
@@ -655,6 +773,15 @@ export default function Editor() {
         <div style={{ flex: 1 }}>
           <EditorToolbar state={editorState} onUpdate={forceUpdate} onTestPlay={handleTestPlay} steamAvailable={steamReady} />
         </div>
+        {DEV_MAPS && (
+          <button
+            onClick={() => setShowPublishGame(true)}
+            style={{ padding: '6px 12px', fontSize: 12, background: '#c77dff', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
+            title="Write this map into public/levels so it ships with the game"
+          >
+            {editorState.builtinId ? `Publish ▸ ${editorState.builtinId}` : 'Publish to Game'}
+          </button>
+        )}
         <SaveStatusBadge status={saveStatus} />
       </div>
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -663,6 +790,21 @@ export default function Editor() {
         </div>
         <EditorProperties state={editorState} onUpdate={forceUpdate} />
       </div>
+      {showPublishGame && (
+        <PublishToGameDialog
+          state={editorState}
+          existingIds={builtinLevels.map(l => l.id)}
+          onClose={() => setShowPublishGame(false)}
+          onPublished={(id) => {
+            setShowPublishGame(false);
+            forceUpdate();
+            getBuiltinLevels().then(setBuiltinLevels).catch(() => {});
+            setSaveStatus('saved');
+            // eslint-disable-next-line no-alert
+            alert(`Published "${id}" to the game.\nWrote public/levels/${id}.json + manifest. Commit to deploy.`);
+          }}
+        />
+      )}
     </div>
   );
 }

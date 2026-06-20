@@ -255,27 +255,11 @@
   "spikes": [
     {
       "id": "spike_1",
-      "x": 120,
-      "y": 1580,
-      "width": 4360,
+      "x": 330,
+      "y": 1597.5,
+      "width": 3740,
       "height": 35,
       "rotation": 0
-    },
-    {
-      "id": "spike_20",
-      "x": -1210,
-      "y": 280.0000000000001,
-      "width": 160,
-      "height": 100,
-      "rotation": -3.1415926535897927
-    },
-    {
-      "id": "spike_38",
-      "x": 2850,
-      "y": 240,
-      "width": 1820,
-      "height": 80,
-      "rotation": -1.5707963267948957
     }
   ],
   "springPads": [
@@ -357,6 +341,36 @@
       ],
       "requireMode": "any",
       "mode": "continuous"
+    }
+  ],
+  "deathZones": [
+    {
+      "id": "death_39",
+      "x": 640,
+      "y": -3000,
+      "width": 9120,
+      "height": 960
+    },
+    {
+      "id": "death_40",
+      "x": 4680,
+      "y": 1480,
+      "width": 1000,
+      "height": 7960
+    },
+    {
+      "id": "death_41",
+      "x": -370,
+      "y": 4820,
+      "width": 9140,
+      "height": 1080
+    },
+    {
+      "id": "death_42",
+      "x": -4450,
+      "y": 390,
+      "width": 980,
+      "height": 7780
     }
   ]
 }

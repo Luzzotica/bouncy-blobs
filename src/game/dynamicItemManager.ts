@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { Vec2, vec2, add, scale, sub, length, normalize, distanceTo } from '../physics/vec2';
 import { PlayerManager } from './playerManager';
 import { PartyItemType } from './partyItems/types';

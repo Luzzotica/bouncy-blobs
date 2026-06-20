@@ -1,0 +1,266 @@
+{
+  "name": "Springy",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_115",
+      "x": 30,
+      "y": 710,
+      "width": 660,
+      "height": 180,
+      "rotation": 0
+    },
+    {
+      "id": "plat_131",
+      "x": 950,
+      "y": 1340,
+      "width": 1100,
+      "height": 240,
+      "rotation": 0
+    },
+    {
+      "id": "plat_137",
+      "x": -610,
+      "y": 330,
+      "width": 540,
+      "height": 1140,
+      "rotation": -0.2617993877991494
+    },
+    {
+      "id": "plat_138",
+      "x": 250,
+      "y": 1180,
+      "width": 340,
+      "height": 760,
+      "rotation": 0
+    },
+    {
+      "id": "plat_140",
+      "x": -320,
+      "y": -490,
+      "width": 1480,
+      "height": 700,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": 0,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_116",
+      "x": -140,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_117",
+      "x": 120,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_118",
+      "x": 280,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_119",
+      "x": -180,
+      "y": 560,
+      "type": "player"
+    },
+    {
+      "id": "sp_120",
+      "x": -40,
+      "y": 560,
+      "type": "player"
+    },
+    {
+      "id": "sp_121",
+      "x": 100,
+      "y": 560,
+      "type": "player"
+    },
+    {
+      "id": "sp_122",
+      "x": 240,
+      "y": 560,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "springPads": [
+    {
+      "id": "spring_114",
+      "x": 955,
+      "y": 867.5,
+      "width": 150,
+      "height": 55,
+      "rotation": -1.5707963267948966,
+      "fireSpeed": 2500
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_133",
+      "x": 80,
+      "y": -1050,
+      "width": 640,
+      "height": 380
+    }
+  ],
+  "goalZones": [
+    {
+      "id": "goal_132",
+      "x": 1850,
+      "y": -1430,
+      "width": 620,
+      "height": 380
+    }
+  ],
+  "spikes": [
+    {
+      "id": "spike_135",
+      "x": 940,
+      "y": 1220,
+      "width": 1040,
+      "height": 40,
+      "rotation": 0
+    }
+  ],
+  "pointShapes": [
+    {
+      "id": "shape_139",
+      "points": [
+        {
+          "x": 1540,
+          "y": 1460,
+          "anchored": false
+        },
+        {
+          "x": 1540,
+          "y": -1220,
+          "anchored": false
+        },
+        {
+          "x": 2180,
+          "y": -1220,
+          "anchored": false
+        },
+        {
+          "x": 2780,
+          "y": -840,
+          "anchored": false
+        },
+        {
+          "x": 2600,
+          "y": 1340,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    },
+    {
+      "id": "shape_141",
+      "points": [
+        {
+          "x": -360,
+          "y": -880,
+          "anchored": false
+        },
+        {
+          "x": -1040,
+          "y": -860,
+          "anchored": false
+        },
+        {
+          "x": -1040,
+          "y": -1600,
+          "anchored": false
+        },
+        {
+          "x": -240,
+          "y": -2500,
+          "anchored": false
+        },
+        {
+          "x": 1360,
+          "y": -2700,
+          "anchored": false
+        },
+        {
+          "x": 2360,
+          "y": -2720,
+          "anchored": false
+        },
+        {
+          "x": 2740,
+          "y": -2140,
+          "anchored": false
+        },
+        {
+          "x": 2980,
+          "y": -1340,
+          "anchored": false
+        },
+        {
+          "x": 2800,
+          "y": -880,
+          "anchored": false
+        },
+        {
+          "x": 2220,
+          "y": -1240,
+          "anchored": false
+        },
+        {
+          "x": 2200,
+          "y": -1680,
+          "anchored": false
+        },
+        {
+          "x": 1520,
+          "y": -1920,
+          "anchored": false
+        },
+        {
+          "x": 360,
+          "y": -1700,
+          "anchored": false
+        },
+        {
+          "x": -280,
+          "y": -1260,
+          "anchored": false
+        },
+        {
+          "x": -300,
+          "y": -960,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    }
+  ]
+}

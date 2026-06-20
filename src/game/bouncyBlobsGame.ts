@@ -1,6 +1,5 @@
 import React from 'react';
 import { Game, GameContext, GameDefinition, GameState } from './GameInterface';
-import { SoftBodyWorld } from '../physics/softBodyWorld';
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { createSoftBodyEngine } from '../physics/engineSelector';
 import { SlimeBlob } from '../physics/slimeBlob';
@@ -176,7 +175,7 @@ export class BouncyBlobsGame implements Game {
   private state: BouncyBlobsGameState | null = null;
   private onStateChange?: () => void;
   private gameMode: GameMode | null = null;
-  /** Seed for the SoftBodyWorld's deterministic RNG. Host generates a seed at
+  /** Seed for the SoftBodyEngine's deterministic RNG. Host generates a seed at
    * session start and broadcasts it via the `level_loaded` reliable event so
    * every guest's local sim consumes the same random stream. */
   private rngSeed: number = 1;

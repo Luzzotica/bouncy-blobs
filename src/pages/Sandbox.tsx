@@ -259,52 +259,26 @@ export default function Sandbox() {
       showHull,
     };
 
-    // Tuned to match the working rope-test demo (src/physics/rope-test.html
-     // scene 4 "two blobs over peg"): dense short segments + high iteration
-     // count make the rope feel taut and predictable.
-     //
-     // Endpoint = a hull particle, NOT the center. The center is a virtual
-     // control point: each substep `pin_blob_centers_to_hull_centroid`
-     // overwrites pos[centerIdx], discarding any correction the chain
-     // solver applied (see crates/softbody/src/world.rs step 13). Attaching
-     // to a real hull particle means the chain actually yanks the blob.
+    // Phase 1 leash: a unilateral distance constraint between the two blobs,
+    // applied in the Rust engine (`addBlobTether`). No rope particles, no
+    // weight — while the blobs are within PLAYER_CHAIN_TOTAL_LENGTH it does
+    // nothing at all; past it, an elastic pull is spread evenly across every
+    // hull particle of both blobs, so each is translated as a whole toward the
+    // other (no single-point yank, never drags you to the ground). The visual
+    // is just a line between the two centroids that reddens as it goes taut.
+    // (A real geometry-wrapping rope is a separate, later effort.)
     const PLAYER_CHAIN_TOTAL_LENGTH = 700;
+    const TETHER_STIFFNESS = 4;   // pull per world-unit past the slack budget
+    const TETHER_MAX_FORCE = 560; // peak pull, in MOVE_FORCE (≈240) units
     const createPlayerChain = (): boolean => {
       if (!playerBlob2 || state.playerChain) return false;
-      // Pick the hull particle on each blob closest to the other blob, so
-      // the rope attaches on the "facing" side instead of yanking from a
-      // random vertex.
-      const pickFacingHullIdx = (a: SlimeBlob, b: SlimeBlob): number => {
-        const target = world.pos[b.centerIdx] ?? a.getCentroid();
-        let best = a.hullIndices[0];
-        let bestD = Infinity;
-        for (const idx of a.hullIndices) {
-          const p = world.pos[idx];
-          if (!p) continue;
-          const dx = p.x - target.x;
-          const dy = p.y - target.y;
-          const d = dx * dx + dy * dy;
-          if (d < bestD) { bestD = d; best = idx; }
-        }
-        return best;
-      };
-      const aIdx = pickFacingHullIdx(playerBlob, playerBlob2);
-      const bIdx = pickFacingHullIdx(playerBlob2, playerBlob);
-      // Match the rope-test demo (src/physics/rope-test.html scene 4) —
-      // `segmentMass: 0.5` is what makes PBD pair-corrections actually
-      // propagate from end to end, so when the rope wraps around a wall
-      // the geodesic length is what limits the players. A featherweight
-      // chain (mass≪hull) collapses corrections onto the segment side
-      // and the rope effectively never goes taut.
-      const rope = world.addRopeChain(aIdx, bIdx, {
-        totalLength: PLAYER_CHAIN_TOTAL_LENGTH,
-        maxSegmentLength: 12,
-        segmentMass: 0.5,
-        segmentRadius: 6,
-        iterations: 16,
-      });
+      world.addBlobTether(
+        playerBlob.blobId, playerBlob2.blobId,
+        PLAYER_CHAIN_TOTAL_LENGTH, TETHER_STIFFNESS, TETHER_MAX_FORCE,
+      );
+      // Two endpoints for the rendered line: each blob's centre particle.
       state.playerChain = {
-        particleIndices: [aIdx, ...rope.particleIndices, bIdx],
+        particleIndices: [playerBlob.centerIdx, playerBlob2.centerIdx],
         totalLength: PLAYER_CHAIN_TOTAL_LENGTH,
       };
       return true;

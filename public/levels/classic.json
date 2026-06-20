@@ -1,7 +1,6 @@
 {
   "name": "Classic Race",
   "version": 1,
-  "levelType": "solo_racing",
   "bounds": {
     "width": 8000,
     "height": 2200
@@ -338,5 +337,9 @@
       "height": 35,
       "rotation": 0
     }
+  ],
+  "levelTypes": [
+    "solo_racing",
+    "team_racing"
   ]
 }

@@ -1,0 +1,117 @@
+{
+  "name": "Wall Climb",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_23",
+      "x": -450,
+      "y": 810,
+      "width": 1860,
+      "height": 540,
+      "rotation": 0
+    },
+    {
+      "id": "plat_24",
+      "x": -1190,
+      "y": -790,
+      "width": 460,
+      "height": 2740,
+      "rotation": 0
+    },
+    {
+      "id": "plat_25",
+      "x": 290,
+      "y": -810,
+      "width": 420,
+      "height": 2740,
+      "rotation": 0
+    },
+    {
+      "id": "plat_26",
+      "x": -460,
+      "y": -2640,
+      "width": 1920,
+      "height": 120,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": 0,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_29",
+      "x": -880,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_30",
+      "x": -740,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_31",
+      "x": -600,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_32",
+      "x": -440,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_33",
+      "x": -280,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_34",
+      "x": -120,
+      "y": 440,
+      "type": "player"
+    },
+    {
+      "id": "sp_35",
+      "x": -380,
+      "y": 300,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    {
+      "id": "goal_27",
+      "x": -440,
+      "y": -2480,
+      "width": 960,
+      "height": 160
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_28",
+      "x": -440,
+      "y": -1830,
+      "width": 1040,
+      "height": 660
+    }
+  ]
+}

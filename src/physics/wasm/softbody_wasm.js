@@ -98,6 +98,17 @@ export class SoftBodyWorldHandle {
         return BlobHandle.__wrap(ret);
     }
     /**
+     * Unilateral distance leash between two blobs. See core `add_blob_tether`.
+     * @param {number} blob_a
+     * @param {number} blob_b
+     * @param {number} slack
+     * @param {number} stiffness
+     * @param {number} max_force
+     */
+    addBlobTether(blob_a, blob_b, slack, stiffness, max_force) {
+        wasm.softbodyworldhandle_addBlobTether(this.__wbg_ptr, blob_a, blob_b, slack, stiffness, max_force);
+    }
+    /**
      * @param {number} id
      * @param {number} x
      * @param {number} y
@@ -499,6 +510,16 @@ export class SoftBodyWorldHandle {
      */
     getHullPolygon(blob_id) {
         const ret = wasm.softbodyworldhandle_getHullPolygon(this.__wbg_ptr, blob_id);
+        return takeObject(ret);
+    }
+    /**
+     * Per-particle inverse mass (0 = anchored / static). Managers read this
+     * to tell pinned points from dynamic ones (e.g. ActionManager skips
+     * anchored targets).
+     * @returns {Float64Array}
+     */
+    getInvMass() {
+        const ret = wasm.softbodyworldhandle_getInvMass(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**

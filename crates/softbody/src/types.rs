@@ -172,9 +172,19 @@ pub struct WorldConfig {
     pub static_edge_friction_mu: Fx,
     pub static_friction_min_tang_speed: Fx,
     pub static_friction_normal_load_scale: Fx,
+    /// Scales the friction normal-load contributed by *actively pressing* into
+    /// a surface (`jn_press`). The raw inward speed is a large per-tick load, so
+    /// at 1.0 a player holding into a wall/ceiling has nearly all along-surface
+    /// motion arrested every tick (the "grind"). Keep it below 1 so pressing
+    /// still grips (wall-stick / climb) without killing lateral movement.
+    pub static_friction_press_load_scale: Fx,
     pub hull_vertex_damping_per_sec: Fx,
     pub center_hull_damping_per_sec: Fx,
     pub hull_damp_skip_above_speed: Fx,
+    /// Global linear drag on dynamic particles: `vel *= 1 - this*dt` each step.
+    /// Caps top speed now that lower surface friction no longer does. Gentle so
+    /// it doesn't visibly slow the tread circulation. 0 = off.
+    pub linear_damping_per_sec: Fx,
 }
 
 #[derive(Clone, Debug)]

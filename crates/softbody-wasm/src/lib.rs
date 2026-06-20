@@ -417,6 +417,18 @@ impl SoftBodyWorldHandle {
         Float64Array::from(&buf[..])
     }
 
+    /// Per-particle inverse mass (0 = anchored / static). Managers read this
+    /// to tell pinned points from dynamic ones (e.g. ActionManager skips
+    /// anchored targets).
+    #[wasm_bindgen(js_name = getInvMass)]
+    pub fn get_inv_mass(&self) -> Float64Array {
+        let mut buf = vec![0.0f64; self.inner.inv_mass.len()];
+        for (i, m) in self.inner.inv_mass.iter().enumerate() {
+            buf[i] = m.to_f64();
+        }
+        Float64Array::from(&buf[..])
+    }
+
     /// Flat (x,y,x,y,...) buffer of the blob's hull polygon in CCW order.
     #[wasm_bindgen(js_name = getHullPolygon)]
     pub fn get_hull_polygon(&self, blob_id: u32) -> Float64Array {
@@ -795,6 +807,12 @@ impl SoftBodyWorldHandle {
             layer, mask, iterations,
         );
         js_sys::Uint32Array::from(&inner[..])
+    }
+
+    /// Unilateral distance leash between two blobs. See core `add_blob_tether`.
+    #[wasm_bindgen(js_name = addBlobTether)]
+    pub fn add_blob_tether(&mut self, blob_a: u32, blob_b: u32, slack: f64, stiffness: f64, max_force: f64) {
+        self.inner.add_blob_tether(blob_a, blob_b, Fx::from_f64(slack), Fx::from_f64(stiffness), Fx::from_f64(max_force));
     }
 
     #[wasm_bindgen(js_name = addHomeAnchor)]

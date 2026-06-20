@@ -59,11 +59,17 @@ const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
 
 // The inverse "crush" failure: a blob squeezed (pinched between a wall and a
-// moving platform, etc.) until its hull surface area collapses below 1/10 of
+// moving platform, etc.) until its hull surface area collapses below 1/15 of
 // its ideal area. Think of it as pressure = ideal_area / current_area; this
-// fires at pressure >= 10. 10× headroom means normal pressure-driven squish
-// (which the solver re-inflates) never trips it — only a genuine crush does.
-pub const CRUSH_AREA_MIN_RATIO: Fx = Fx::from_raw((1i64 << 32) / 10); // 0.1
+// fires at pressure >= 15. 15× headroom means a hard landing (even holding
+// DOWN, which can momentarily squish the hull to ~1/10) no longer false-trips
+// it — only a genuine sustained crush does.
+pub const CRUSH_AREA_MIN_RATIO: Fx = Fx::from_raw((1i64 << 32) / 15); // 0.0667
+
+// A squeeze must persist this many consecutive frames to count as a real crush.
+// A hard landing (even holding DOWN) bottoms out for only 1-2 frames; a genuine
+// pinch (wall vs moving platform) holds. Gates the crush EVENT only.
+pub const CRUSH_SUSTAIN_FRAMES: i32 = 6;
 
 pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
 
@@ -94,6 +100,22 @@ pub struct Chain {
     pub particle_indices: Vec<usize>,
     pub max_segment_length: Fx,
     pub iterations: u32,
+}
+
+/// A simple distance-based leash between two blobs (Phase 1 — a straight
+/// line, not yet a geometry-aware rope). It's UNILATERAL: while the blobs'
+/// hull centroids are within `slack` it does nothing at all (zero weight,
+/// free movement and jumps). Past `slack` it applies an elastic pull
+/// `min(stiffness * overshoot, max_force)` spread EVENLY across every hull
+/// particle of both blobs, so each is translated as a whole toward the other
+/// — no single-point yank, and no rope weight to drag you down.
+#[derive(Clone, Debug)]
+pub struct BlobTether {
+    pub blob_a: usize,
+    pub blob_b: usize,
+    pub slack: Fx,
+    pub stiffness: Fx,
+    pub max_force: Fx,
 }
 
 /// Per-material restitution + friction (mirrors MATERIAL_PARAMS in TS).
@@ -163,6 +185,7 @@ pub struct SoftBodyWorld {
     pub(crate) anchors: Vec<Anchor>,
     pub(crate) distance_max_constraints: Vec<(usize, usize, Fx)>,
     pub(crate) chains: Vec<Chain>,
+    pub(crate) blob_tethers: Vec<BlobTether>,
 
     pub(crate) trigger_prev: Vec<(String, bool)>, // sorted Vec acts as deterministic map
 
@@ -187,6 +210,12 @@ pub struct SoftBodyWorld {
     /// every substep AFTER shape-matching (so it isn't immediately cancelled),
     /// then cleared at the end of `step()`. Transient → not snapshotted.
     pub(crate) blob_tread_strength: Vec<Fx>,
+    /// Consecutive frames each blob's hull has been squeezed below the crush
+    /// area threshold. A crush only counts once it's been SUSTAINED for
+    /// `CRUSH_SUSTAIN_FRAMES` — so a 1-2 frame hard-landing blip doesn't fire a
+    /// false crush. Side-channel (gates the crush event only; never mutates
+    /// pos/vel), so it isn't snapshotted.
+    pub(crate) blob_crush_frames: Vec<i32>,
     pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
     pub(crate) base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
@@ -251,9 +280,13 @@ impl Default for WorldConfig {
             static_edge_friction_mu: fx_lit(164, 100),
             static_friction_min_tang_speed: fx_lit(6, 100),
             static_friction_normal_load_scale: Fx::from_int(2),
+            // 0.35 — pressing into a wall/ceiling still grips enough to climb /
+            // stick, but no longer arrests along-surface motion every tick.
+            static_friction_press_load_scale: fx_lit(35, 100),
             hull_vertex_damping_per_sec: fx_lit(12, 1000),
             center_hull_damping_per_sec: fx_lit(4, 1000),
             hull_damp_skip_above_speed: Fx::from_int(220),
+            linear_damping_per_sec: Fx::ZERO,
         }
     }
 }
@@ -278,6 +311,7 @@ impl SoftBodyWorld {
             anchors: Vec::new(),
             distance_max_constraints: Vec::new(),
             chains: Vec::new(),
+            blob_tethers: Vec::new(),
             trigger_prev: Vec::new(),
             blob_ground_contacts: Vec::new(),
             blob_ground_contact_point: Vec::new(),
@@ -289,6 +323,7 @@ impl SoftBodyWorld {
             particle_touched_this_step: Vec::new(),
             blob_gravity_override: Vec::new(),
             blob_tread_strength: Vec::new(),
+            blob_crush_frames: Vec::new(),
             blob_pin_snapshots: Vec::new(),
             base_masses: Vec::new(),
             config,
@@ -568,26 +603,27 @@ impl SoftBodyWorld {
                 if rad.length_squared() < EPS { return None; }
                 Some(FxVec2::new(Fx::ZERO - rad.y, rad.x).normalize())
             };
-            // Spin only the FREE (non-contact) hull points — a circulating
-            // CONTACT point has tangential velocity relative to the surface,
-            // which the contact solver turns into a sideways body drag (the
-            // "gliding along the ceiling" bug); gripped points stay put like a
-            // tread's contact patch. Skipping points breaks the symmetry that
-            // keeps net momentum zero, so subtract the mean free tangent: the
-            // surface still visibly spins with ~zero net translation.
-            let touched = |u: usize| self.particle_touched_this_step.get(u).copied().unwrap_or(false);
+            // Spin EVERY hull point — contact points included. A circulating
+            // contact point has tangential velocity against the ground, and the
+            // contact solver's friction turns that into forward pull: that's
+            // ROLLING, not a bug. (Previously we skipped gripped points to dodge
+            // that pull, which is exactly why the wheel went dead on the floor —
+            // the contact patch never received the spin, so there was no
+            // traction to convert torque into rolling.)
+            //
+            // We still subtract the mean tangent so the DIRECT injection adds
+            // pure rotation with no teleporting drift; the net translation comes
+            // honestly from friction on the spinning contact patch.
             let mut mean = FxVec2::ZERO;
-            let mut free = 0i32;
+            let mut count = 0i32;
             for &h in &r.hull {
                 let u = h as usize;
-                if touched(u) { continue; }
-                if let Some(t) = tangent_at(&self.pos, u) { mean = mean.add(t); free += 1; }
+                if let Some(t) = tangent_at(&self.pos, u) { mean = mean.add(t); count += 1; }
             }
-            if free == 0 { continue; }
-            mean = mean.scale(Fx::ONE / Fx::from_int(free));
+            if count == 0 { continue; }
+            mean = mean.scale(Fx::ONE / Fx::from_int(count));
             for &h in &r.hull {
                 let u = h as usize;
-                if touched(u) { continue; }
                 if let Some(t) = tangent_at(&self.pos, u) {
                     self.vel[u] = self.vel[u].add(t.sub(mean).scale(step));
                 }
@@ -829,20 +865,40 @@ impl SoftBodyWorld {
             let crushed_small =
                 target_area > Fx::ZERO && cur_area < target_area * CRUSH_AREA_MIN_RATIO;
 
-            let crushed = out_of_bounds || cur_max_sq > blow_up_threshold_sq || crushed_small;
+            let blew_up = out_of_bounds || cur_max_sq > blow_up_threshold_sq;
 
-            if crushed {
+            // Sustained-squeeze gate: only count a squeeze as a crush once it's
+            // held for CRUSH_SUSTAIN_FRAMES. A hard-landing blip (1-2 frames)
+            // resets the counter and never fires. A blow-up is always instant.
+            if self.blob_crush_frames.len() <= bi {
+                self.blob_crush_frames.resize(bi + 1, 0);
+            }
+            if crushed_small {
+                self.blob_crush_frames[bi] += 1;
+            } else {
+                self.blob_crush_frames[bi] = 0;
+            }
+            let sustained_crush = self.blob_crush_frames[bi] >= CRUSH_SUSTAIN_FRAMES;
+
+            if blew_up || sustained_crush {
                 let bid = bi as BlobId;
                 if !self.pending_crush_events.contains(&bid) {
                     self.pending_crush_events.push(bid);
                 }
-                // Defense in depth: collapse the blob's particles to its
-                // centroid and zero their velocities. Even if the TS-side
-                // listener never fires (or no-ops), the constraint solver
-                // re-inflates the blob to its rest pose next frame instead
-                // of leaving an exploded mess on screen. If the crusher
-                // is still active we re-detect next frame and re-collapse
-                // — bounded oscillation, not lightyear sprawl.
+            }
+
+            // Collapse-to-centroid is the recovery for a BLOW-UP (hull sprawled
+            // across the screen): snap the particles back so the solver re-pulls
+            // a clean rest pose instead of leaving an exploded mess.
+            //
+            // Do NOT collapse a SQUEEZE (crushed_small). Collapsing zeroes the
+            // hull area, which (a) makes the blob VANISH leaving only the face
+            // rendered at the centroid, and (b) — since area 0 is always below
+            // the threshold — re-fires every frame so it never recovers. That's
+            // the "hard landing → blob disappears until I expand" bug. A
+            // squeezed blob re-inflates on its own via pressure + shape-match
+            // once the squeeze releases, so we leave it alone.
+            if blew_up {
                 let cx = c.x.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
                 let cy = c.y.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
                 let collapse = FxVec2::new(cx, cy);
@@ -911,6 +967,19 @@ impl SoftBodyWorld {
         // integration + contact resolution (shape-match would otherwise pull
         // the tangential motion straight back out).
         self.apply_tread(dt);
+        // Distance leash between blob pairs — a force in the force phase.
+        self.apply_blob_tethers(dt);
+
+        // Linear velocity damping (global drag) — bounds top speed now that the
+        // lowered surface friction no longer caps it. Gentle, so it barely
+        // touches the tread circulation.
+        if self.config.linear_damping_per_sec > Fx::ZERO {
+            let factor = Fx::ONE - self.config.linear_damping_per_sec * dt;
+            for i in 0..n {
+                if self.inv_mass[i].is_zero() { continue; }
+                self.vel[i] = self.vel[i].scale(factor);
+            }
+        }
 
         // 6. Semi-implicit Euler — save prev positions for CCD sweep
         let prev_pos: Vec<FxVec2> = self.pos.clone();
@@ -1574,7 +1643,7 @@ impl SoftBodyWorld {
                         // Normal load from being actively pressed into the
                         // surface (player up-force on a ceiling, push into a
                         // wall) — gives friction where gravity alone gives none.
-                        let jn_press = self.mass[pi] * press_speed;
+                        let jn_press = self.mass[pi] * press_speed * self.config.static_friction_press_load_scale;
                         let jn = jn_collision.max(jn_rest).max(jn_press);
                         let jt_uncap = -self.mass[pi] * v_t;
                         let cap = friction_mu * jn;
@@ -1973,6 +2042,49 @@ impl SoftBodyWorld {
     // =====================================================================
     // Chain solver (forward + backward sweep per iteration)
     // =====================================================================
+
+    /// Apply each blob tether's unilateral elastic pull for this substep,
+    /// spread across all hull particles of both blobs (same per-particle-force
+    /// convention as `apply_blob_move_force`) so each blob translates as a
+    /// whole. No pull at all within the slack budget.
+    fn apply_blob_tethers(&mut self, dt: Fx) {
+        for t in self.blob_tethers.clone() {
+            let (ra, rb) = match (
+                self.blob_ranges.get(t.blob_a).cloned(),
+                self.blob_ranges.get(t.blob_b).cloned(),
+            ) {
+                (Some(ra), Some(rb)) => (ra, rb),
+                _ => continue,
+            };
+            if ra.inactive || rb.inactive || ra.hull.is_empty() || rb.hull.is_empty() {
+                continue;
+            }
+            let hull_a: Vec<usize> = ra.hull.iter().map(|&i| i as usize).collect();
+            let hull_b: Vec<usize> = rb.hull.iter().map(|&i| i as usize).collect();
+            let ca = centroid_from_indices(&self.pos, &hull_a);
+            let cb = centroid_from_indices(&self.pos, &hull_b);
+            let d = cb.sub(ca);
+            let dist = d.length();
+            let overshoot = dist - t.slack;
+            // Within reach the leash is limp: no pull, free movement + jumps.
+            if overshoot <= Fx::ZERO || dist < EPS {
+                continue;
+            }
+            let n = d.scale(Fx::ONE / dist);
+            let mut force = t.stiffness * overshoot;
+            if force > t.max_force {
+                force = t.max_force;
+            }
+            let impulse = force * dt;
+            // A pulls toward B, B pulls toward A.
+            for &h in &hull_a {
+                self.vel[h] = self.vel[h].add(n.scale(impulse * self.inv_mass[h]));
+            }
+            for &h in &hull_b {
+                self.vel[h] = self.vel[h].sub(n.scale(impulse * self.inv_mass[h]));
+            }
+        }
+    }
 
     fn solve_chains(&mut self) {
         for chain in self.chains.clone() {
@@ -2649,6 +2761,18 @@ impl SoftBodyWorld {
         self.home_anchors.push(HomeAnchor { idx, home, k, damp });
     }
 
+    /// Register a unilateral distance leash between two blobs. See
+    /// [`BlobTether`].
+    pub fn add_blob_tether(&mut self, blob_a: u32, blob_b: u32, slack: Fx, stiffness: Fx, max_force: Fx) {
+        self.blob_tethers.push(BlobTether {
+            blob_a: blob_a as usize,
+            blob_b: blob_b as usize,
+            slack,
+            stiffness,
+            max_force,
+        });
+    }
+
     /// Append a hard max-distance constraint between two particles. The
     /// step-7 constraint pass iterates these every substep alongside
     /// welds and anchors, so this is independent of the chain solver
@@ -3045,6 +3169,38 @@ mod tests {
     }
 
     #[test]
+    fn blob_tether_pulls_when_overstretched_and_is_limp_within_slack() {
+        let make = |slack: i32| -> (SoftBodyWorld, BlobResult, BlobResult) {
+            let mut cfg = WorldConfig::default();
+            cfg.gravity = FxVec2::ZERO;
+            cfg.substeps = 4;
+            let mut w = SoftBodyWorld::new(cfg, 1);
+            let a = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "a");
+            let b = standard_square_blob(&mut w, FxVec2::new(fx(400), fx(0)), "b");
+            w.add_blob_tether(a.blob_id, b.blob_id, fx(slack), fx_lit(4, 1), fx(600));
+            (w, a, b)
+        };
+        let dt = Fx::ONE / Fx::from_int(60);
+
+        // Overstretched (400 apart, slack 200) → reel together.
+        let (mut w, a, b) = make(200);
+        let hull_a: Vec<usize> = a.hull_indices.iter().map(|&i| i as usize).collect();
+        let hull_b: Vec<usize> = b.hull_indices.iter().map(|&i| i as usize).collect();
+        let ax0 = centroid_from_indices(&w.pos, &hull_a).x;
+        let bx0 = centroid_from_indices(&w.pos, &hull_b).x;
+        for _ in 0..120 { w.step(dt); }
+        assert!(centroid_from_indices(&w.pos, &hull_a).x > ax0 + fx(20), "A should be pulled toward B");
+        assert!(centroid_from_indices(&w.pos, &hull_b).x < bx0 - fx(20), "B should be pulled toward A");
+
+        // Within slack (400 apart, slack 600) → limp, no movement.
+        let (mut w2, a2, _b2) = make(600);
+        let hull_a2: Vec<usize> = a2.hull_indices.iter().map(|&i| i as usize).collect();
+        let ax0b = centroid_from_indices(&w2.pos, &hull_a2).x;
+        for _ in 0..120 { w2.step(dt); }
+        assert!((centroid_from_indices(&w2.pos, &hull_a2).x - ax0b).abs() < fx(1), "limp leash must not move the blob");
+    }
+
+    #[test]
     fn snapshot_round_trip_reproduces_state() {
         // Set up a non-trivial scene (gravity, floor, two blobs, head-on
         // collision so all the contact-tracking arrays get populated).
@@ -3382,19 +3538,31 @@ mod tests {
     }
 
     #[test]
-    fn pressure_crush_flags_blob_squeezed_below_tenth_area() {
-        // 40×40 blob → rest hull area = 1600; 1/10 threshold = 160.
+    fn pressure_crush_flags_blob_only_when_squeeze_is_sustained() {
+        // 40×40 blob → rest hull area = 1600; 1/15 threshold ≈ 106.
         let mut w = SoftBodyWorld::new(WorldConfig::default(), 1);
         let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "victim");
         let hull: Vec<usize> = res.hull_indices.iter().map(|&i| i as usize).collect();
 
-        // Squeeze to a 10×10 square → area 100 < 160. Should flag.
+        // Squeeze to a 10×10 square → area 100, below the 1/15 threshold.
         set_hull_square(&mut w, &hull, 5);
+
+        // A single frame of squeeze must NOT flag — that's a hard-landing blip.
         w.detect_crush_events();
+        assert!(
+            w.take_crush_events().is_empty(),
+            "a 1-frame squeeze should not be treated as a crush",
+        );
+
+        // Held below the threshold for CRUSH_SUSTAIN_FRAMES total → flags.
+        for _ in 1..CRUSH_SUSTAIN_FRAMES {
+            set_hull_square(&mut w, &hull, 5); // keep it squeezed (no physics step here)
+            w.detect_crush_events();
+        }
         let flagged = w.take_crush_events();
         assert!(
             flagged.contains(&0),
-            "expected blob 0 to be crush-flagged when squeezed to 1/16 area, got {:?}",
+            "expected blob 0 to be crush-flagged after a SUSTAINED squeeze, got {:?}",
             flagged,
         );
     }

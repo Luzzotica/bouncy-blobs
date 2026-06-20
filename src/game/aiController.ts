@@ -8,7 +8,6 @@ import {
   type PersonalityState,
 } from './aiPersonalities';
 import { Vec2, vec2 } from '../physics/vec2';
-import type { SoftBodyWorld } from '../physics/softBodyWorld';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AIController

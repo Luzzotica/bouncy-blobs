@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from './camera';
 import { drawBlob, drawBlobShine, perturbHullForWind } from './blobRenderer';
@@ -275,6 +274,11 @@ export function render(
   const nowMs = performance.now();
   const shineTime = nowMs / 1000;
 
+  // Chains/tethers — drawn BEHIND the blobs so the line tucks under them.
+  for (const chain of chains) {
+    drawChain(ctx, world, chain.particleIndices, chain.totalLength);
+  }
+
   // NPC blobs — no wind perturbation; NPCs render with their raw hull so
   // they don't appear to jitter when idle (the soft-body sim already
   // produces a tiny centroid wobble that would otherwise drive the wind
@@ -356,11 +360,6 @@ export function render(
       ctx.stroke();
     }
     ctx.setLineDash([]);
-  }
-
-  // Editor-authored chains. Drawn on top of blobs so the rope visibly drapes.
-  for (const chain of chains) {
-    drawChain(ctx, world, chain.particleIndices, chain.totalLength);
   }
 
   // Sticky-wall aim indicator: arrow from blob centroid showing release direction

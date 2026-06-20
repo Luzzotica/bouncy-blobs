@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../../physics/SoftBodyEngine';
 import { Camera } from '../../renderer/camera';
 import { PlayerManager, ManagedPlayer } from '../playerManager';
 import { LevelData } from '../../levels/types';

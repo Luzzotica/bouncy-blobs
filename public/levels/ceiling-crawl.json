@@ -1,0 +1,223 @@
+{
+  "name": "Ceiling Crawl",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_36",
+      "x": 210,
+      "y": 830,
+      "width": 1740,
+      "height": 420,
+      "rotation": 0
+    },
+    {
+      "id": "plat_37",
+      "x": 2310,
+      "y": -130,
+      "width": 2940,
+      "height": 220,
+      "rotation": 0
+    },
+    {
+      "id": "plat_38",
+      "x": 4960,
+      "y": 780,
+      "width": 2480,
+      "height": 440,
+      "rotation": 0
+    },
+    {
+      "id": "plat_39",
+      "x": -990,
+      "y": 140,
+      "width": 700,
+      "height": 2000,
+      "rotation": 0
+    },
+    {
+      "id": "plat_40",
+      "x": 260,
+      "y": -550,
+      "width": 1880,
+      "height": 700,
+      "rotation": 0
+    },
+    {
+      "id": "plat_51",
+      "x": 2410,
+      "y": 1150,
+      "width": 3140,
+      "height": 300,
+      "rotation": 0
+    },
+    {
+      "id": "plat_52",
+      "x": 4350,
+      "y": -560,
+      "width": 220,
+      "height": 1080,
+      "rotation": 0
+    },
+    {
+      "id": "plat_53",
+      "x": 4350,
+      "y": 270,
+      "width": 220,
+      "height": 540,
+      "rotation": 0
+    },
+    {
+      "id": "plat_54",
+      "x": 3290,
+      "y": -1020,
+      "width": 1900,
+      "height": 280,
+      "rotation": 0
+    },
+    {
+      "id": "plat_55",
+      "x": 2100,
+      "y": -590,
+      "width": 520,
+      "height": 700,
+      "rotation": 0
+    },
+    {
+      "id": "plat_59",
+      "x": 5490,
+      "y": -570,
+      "width": 2100,
+      "height": 220,
+      "rotation": 0
+    },
+    {
+      "id": "plat_60",
+      "x": 6390,
+      "y": 270,
+      "width": 420,
+      "height": 1540,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": 0,
+      "y": 380,
+      "type": "player"
+    },
+    {
+      "id": "sp_41",
+      "x": -500,
+      "y": 480,
+      "type": "player"
+    },
+    {
+      "id": "sp_42",
+      "x": -320,
+      "y": 480,
+      "type": "player"
+    },
+    {
+      "id": "sp_43",
+      "x": -500,
+      "y": 280,
+      "type": "player"
+    },
+    {
+      "id": "sp_44",
+      "x": -320,
+      "y": 300,
+      "type": "player"
+    },
+    {
+      "id": "sp_45",
+      "x": 200,
+      "y": 480,
+      "type": "player"
+    },
+    {
+      "id": "sp_46",
+      "x": 200,
+      "y": 260,
+      "type": "player"
+    },
+    {
+      "id": "sp_47",
+      "x": 440,
+      "y": 420,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "hillZones": [
+    {
+      "id": "hill_48",
+      "x": 2380,
+      "y": 100,
+      "width": 1120,
+      "height": 240
+    }
+  ],
+  "goalZones": [
+    {
+      "id": "goal_49",
+      "x": 5790,
+      "y": 300,
+      "width": 740,
+      "height": 520
+    }
+  ],
+  "spikes": [
+    {
+      "id": "spike_50",
+      "x": 2400,
+      "y": 1010,
+      "width": 2640,
+      "height": 60,
+      "rotation": 0
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trig_56",
+      "x": 2510,
+      "y": -560,
+      "width": 260,
+      "height": 600,
+      "rotation": 0
+    }
+  ],
+  "actions": [
+    {
+      "id": "act_57",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_53",
+          "endX": 4840,
+          "endY": -220
+        }
+      ],
+      "duration": 1,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_56"
+      ],
+      "requireMode": "any",
+      "mode": "oneShot"
+    }
+  ],
+  "softPlatforms": []
+}

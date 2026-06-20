@@ -1,14 +1,12 @@
-// Construct a softbody engine. The Rust integer sim is the only
-// runtime engine now — the legacy TS float sim has been retired in
-// favour of consolidating behaviour into one deterministic codebase.
-// (`softBodyWorld.ts` still exists for unit-tests and as reference;
-// it's no longer reachable from gameplay.)
+// Construct a softbody engine. The Rust integer sim is the only engine —
+// the legacy TS float sim has been deleted so there's a single deterministic
+// codebase that runs everywhere (local, online, ranked).
 //
 // The wasm-backed engine requires the wasm module to be loaded before
 // construction. Game bootstrap should `await prepareEngine()` at startup.
 
 import type { SoftBodyEngine } from './SoftBodyEngine';
-import type { SoftBodyWorldConfig } from './softBodyWorld';
+import type { SoftBodyWorldConfig } from './engineConfig';
 import { SoftBodyWorldRust, loadWasm } from './softBodyWorldRust';
 
 export type EnginePick = 'rust';

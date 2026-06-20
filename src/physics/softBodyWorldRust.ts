@@ -115,10 +115,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
     return out;
   }
   get invMass(): readonly number[] {
-    const n = this.h.particleCount();
-    const out: number[] = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = 0;
-    return out;
+    return Array.from(this.h.getInvMass() as Float64Array);
   }
   get fixedDt(): number { return 1 / 60; }
 
@@ -532,6 +529,10 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
       opts.iterations ?? 12,
     );
     return { particleIndices: Array.from(inner) };
+  }
+
+  addBlobTether(blobA: number, blobB: number, slack: number, stiffness: number, maxForce: number): void {
+    this.h.addBlobTether(blobA, blobB, slack, stiffness, maxForce);
   }
 
   addExtraSpring(i: number, j: number, rest: number, k: number, damp: number): void {

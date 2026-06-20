@@ -1101,7 +1101,7 @@ export default function GameMaster() {
             }
           });
           try {
-            // ?level=koth|classic|chained|party|blob-hill|default
+            // ?level=koth|classic|chained-climb|party|blob-hill|default
             // ?mode=koth|solo_racing|team_racing|party (overrides the level's default mode)
             const levelId = (searchParams.get('level') ?? 'default').trim();
             const modeOverride = (searchParams.get('mode') ?? '').trim() as LevelType | '';
@@ -1515,7 +1515,7 @@ export default function GameMaster() {
         // In dev, use the LAN IP so phones on the same network can connect
         let origin = window.location.origin;
         if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-          const port = window.location.port || '5173';
+          const port = window.location.port || '5170';
           origin = `http://${LOCAL_LAN_IP}:${port}`;
         }
         setJoinUrl(`${origin}/controller/${sid}`);

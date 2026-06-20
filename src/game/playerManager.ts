@@ -1,5 +1,4 @@
-import { SoftBodyWorld } from '../physics/softBodyWorld';
-import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
+import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { SlimeBlob, HullPreset } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { playerColor } from '../renderer/colors';
@@ -75,7 +74,7 @@ export class PlayerManager {
     const blob = new SlimeBlob(world, spawnPos, {
       playerControlled: true,
       hullPreset,
-      // Cross-client sort key — used by SoftBodyWorld's collision-pair
+      // Cross-client sort key — used by SoftBodyEngine's collision-pair
       // iteration so host and guest process the same blob-blob contact in
       // the same order even when their local insertion order differs
       // (host adds itself first then receives guest's player_join; guest
@@ -115,7 +114,7 @@ export class PlayerManager {
   removePlayer(playerId: string): void {
     const p = this.players.get(playerId);
     if (!p) return;
-    // Free the blob's slot in the SoftBodyWorld so other blobs no longer
+    // Free the blob's slot in the SoftBodyEngine so other blobs no longer
     // collide with an invisible body at the leaver's last position.
     p.blob.destroy();
     this.players.delete(playerId);
