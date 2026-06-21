@@ -4,6 +4,8 @@ import { installUiSounds } from './utils/uiSounds'
 import { preloadAll, SFX_NAMES } from './utils/audio'
 import { onJoinRequested, onLaunchJoin } from './lib/steamLobbyApi'
 import Home from './pages/Home'
+import PlayHub from './pages/PlayHub'
+import PlayLevel from './pages/PlayLevel'
 import Sandbox from './pages/Sandbox'
 import Editor from './pages/Editor'
 import GameMaster from './pages/GameMaster'
@@ -43,6 +45,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/play" element={<PlayHub />} />
+      <Route path="/play/level" element={<PlayLevel />} />
       <Route path="/sandbox" element={<Sandbox />} />
       <Route path="/editor" element={<Editor />} />
       <Route path="/game" element={<GameMaster />} />

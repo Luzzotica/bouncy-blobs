@@ -150,6 +150,65 @@ export function devMapsPlugin(): any {
           sendJson(res, 500, { error: err?.message ?? String(err) });
         }
       });
+
+      // ── Single-player "Play" campaign editing ──────────────────────────
+      // Lets the level designer define/reorder the campaign and persist it to
+      // public/campaigns/<id>.json. Serve-only, like the maps endpoints above.
+      const campaignsDir = path.resolve(server.config.root, 'public', 'campaigns');
+
+      server.middlewares.use('/__dev/campaigns', async (req: any, res: any) => {
+        try {
+          const url = req.url || '/';
+
+          if (req.method === 'GET') {
+            // /__dev/campaigns/<id>
+            const id = url.replace(/^\/+/, '').split('?')[0] || 'play';
+            if (!SLUG_RE.test(id)) {
+              sendJson(res, 400, { error: `Invalid campaign id "${id}".` });
+              return;
+            }
+            const fp = path.join(campaignsDir, `${id}.json`);
+            if (!fs.existsSync(fp)) {
+              sendJson(res, 404, { error: `No campaign "${id}".` });
+              return;
+            }
+            sendJson(res, 200, JSON.parse(fs.readFileSync(fp, 'utf8')));
+            return;
+          }
+
+          if (req.method === 'POST' && url.startsWith('/save')) {
+            const { id, name, levels } = JSON.parse(await readBody(req));
+            if (typeof id !== 'string' || !SLUG_RE.test(id)) {
+              sendJson(res, 400, { error: `Invalid campaign id "${id}".` });
+              return;
+            }
+            if (!Array.isArray(levels) || levels.some((l: any) => typeof l?.id !== 'string')) {
+              sendJson(res, 400, { error: 'levels must be an array of { id, name? }.' });
+              return;
+            }
+            // Every referenced level must be a known builtin map.
+            const known = new Set(loadManifest().levels.map((l) => l.id));
+            const unknown = levels.map((l: any) => l.id).filter((lid: string) => !known.has(lid));
+            if (unknown.length > 0) {
+              sendJson(res, 400, { error: `Unknown level id(s): ${unknown.join(', ')}` });
+              return;
+            }
+            const clean = {
+              id,
+              name: name || id,
+              levels: levels.map((l: any) => (l.name ? { id: l.id, name: l.name } : { id: l.id })),
+            };
+            fs.mkdirSync(campaignsDir, { recursive: true });
+            fs.writeFileSync(path.join(campaignsDir, `${id}.json`), JSON.stringify(clean, null, 2) + '\n', 'utf8');
+            sendJson(res, 200, { ok: true, id });
+            return;
+          }
+
+          sendJson(res, 404, { error: 'Unknown dev-campaigns route' });
+        } catch (err: any) {
+          sendJson(res, 500, { error: err?.message ?? String(err) });
+        }
+      });
     },
   };
 }

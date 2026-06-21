@@ -6,6 +6,7 @@ import EditorCanvas from '../editor/EditorCanvas';
 import EditorProperties from '../editor/EditorProperties';
 import MapPreview from '../components/MapPreview';
 import PublishToGameDialog from '../editor/PublishToGameDialog';
+import CampaignEditor from '../editor/CampaignEditor';
 import { DEV_MAPS, deleteGameMap, setMapHidden } from '../lib/devMaps';
 import { LevelData, LevelType, getLevelTypes, validateLevelType } from '../levels/types';
 import { features } from '../config/featureFlags';
@@ -200,6 +201,7 @@ export default function Editor() {
   const [previewLevels, setPreviewLevels] = useState<Record<string, LevelData>>({});
   const [steamReady, setSteamReady] = useState(false);
   const [showPublishGame, setShowPublishGame] = useState(false);
+  const [showCampaign, setShowCampaign] = useState(false);
   const stateRef = useRef<EditorState | null>(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -782,6 +784,15 @@ export default function Editor() {
             {editorState.builtinId ? `Publish ▸ ${editorState.builtinId}` : 'Publish to Game'}
           </button>
         )}
+        {DEV_MAPS && (
+          <button
+            onClick={() => setShowCampaign(true)}
+            style={{ padding: '6px 12px', fontSize: 12, background: '#5a189a', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
+            title="Define the order of levels in the single-player Play campaign"
+          >
+            Campaign
+          </button>
+        )}
         <SaveStatusBadge status={saveStatus} />
       </div>
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -790,6 +801,7 @@ export default function Editor() {
         </div>
         <EditorProperties state={editorState} onUpdate={forceUpdate} />
       </div>
+      {showCampaign && <CampaignEditor onClose={() => setShowCampaign(false)} />}
       {showPublishGame && (
         <PublishToGameDialog
           state={editorState}

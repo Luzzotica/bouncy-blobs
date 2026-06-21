@@ -1216,23 +1216,6 @@ export default function OnlineGuest() {
   // the wire); we use simple subtraction with a wrap window.
   const lastTickRef = useRef<number>(-1);
 
-  // Client-Side Prediction input history. Each entry records what the local
-  // player applied at a given tick. We don't implement full rollback (replay
-  // local inputs from the server's tick forward); the spec explicitly allows
-  // "snap or interpolate" reconciliation, which is what `blendParticle` does.
-  // Keeping the buffer means we *can* upgrade to rollback later without
-  // restructuring the rest of the guest.
-  const INPUT_HISTORY_SIZE = 120;
-  const inputHistoryRef = useRef<Array<{ tick: number; moveX: number; moveY: number; expanding: boolean }>>([]);
-  const inputTickRef = useRef<number>(0);
-
-  function recordLocalInput(moveX: number, moveY: number, expanding: boolean): void {
-    const tick = inputTickRef.current++;
-    const buf = inputHistoryRef.current;
-    buf.push({ tick, moveX, moveY, expanding });
-    if (buf.length > INPUT_HISTORY_SIZE) buf.shift();
-  }
-
   function applySnapshot(frame: SnapshotFrame): void {
     const game = gameRef.current;
     const ctx = gameContextRef.current;
@@ -1759,29 +1742,22 @@ export default function OnlineGuest() {
       mp.expanding = keys.space;
     };
 
-    /** Send the current key state to the host TAGGED with the tick at
-     *  which this guest applied (or will apply) it. The host applies
-     *  the input at that exact tick on its own sim (rolling back its
-     *  sim if late). This is what makes the two sims agree: both apply
-     *  the same input value at the same logical tick. */
+    /** Send the current raw key state to the host. We do NOT tag it with a
+     *  tick: in the host-authoritative lockstep model the host assigns the
+     *  tick — it applies whatever we send at its OWN current tick and
+     *  broadcasts it back stamped with that tick. We then apply that echo
+     *  in strict lockstep (~2× ping after the keypress). No local
+     *  prediction, no rollback; the host is the single source of truth for
+     *  input ordering. The `tick` field is kept for wire-format
+     *  compatibility but is ignored by the host. */
     const sendInputUpdate = (): void => {
       const manager = managerRef.current;
       if (!manager) return;
-      const world = gameRef.current?.getWorld();
-      if (!world) return;
       const moveX = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
       const moveY = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
-      // writeLocalIntent already wrote MP; the value will be consumed
-      // by the NEXT sim tick (world.tick + 1). Forward-tag the message
-      // by `inputDelayTicks` so the host has headroom to buffer it
-      // before the claimed tick — eliminates "input arrived after host
-      // already passed claimed tick → silently dropped → guest stalls"
-      // under normal network jitter (rollback path is currently off).
-      const applyTick = world.tick + 1 + getPacingConfig().inputDelayTicks;
-      recordLocalInput(moveX, moveY, keys.space);
       const batch: InputBatch = {
         type: "input",
-        frames: [{ playerId: localPlayerIdRef.current, moveX, moveY, expanding: keys.space, tick: applyTick }],
+        frames: [{ playerId: localPlayerIdRef.current, moveX, moveY, expanding: keys.space, tick: 0 }],
       };
       manager.send("host", "input", JSON.stringify(batch));
     };

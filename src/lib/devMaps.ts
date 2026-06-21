@@ -63,6 +63,30 @@ export async function deleteGameMap(id: string): Promise<void> {
   if (!res.ok) throw new Error((await res.text().catch(() => res.statusText)) || `Delete failed (${res.status})`);
 }
 
+/** Shape of a single-player campaign written to public/campaigns/<id>.json. */
+export interface CampaignSaveArgs {
+  id: string;
+  name: string;
+  levels: { id: string; name?: string }[];
+}
+
+/** Read the Play campaign straight off disk via the dev server. Dev-only. */
+export async function fetchDevCampaign(id = 'play'): Promise<CampaignSaveArgs> {
+  const res = await fetch(`/__dev/campaigns/${id}`);
+  if (!res.ok) throw new Error(`Failed to read campaign (${res.status})`);
+  return res.json();
+}
+
+/** Persist the campaign (level list + order) into the repo. Dev-only. */
+export async function saveDevCampaign(args: CampaignSaveArgs): Promise<void> {
+  const res = await fetch('/__dev/campaigns/save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) throw new Error((await res.text().catch(() => res.statusText)) || `Save failed (${res.status})`);
+}
+
 /** Read the live manifest straight off disk via the dev server. Dev-only. */
 export async function fetchDevManifest(): Promise<LevelManifestEntry[]> {
   const res = await fetch('/__dev/levels/manifest');

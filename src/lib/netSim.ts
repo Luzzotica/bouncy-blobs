@@ -22,11 +22,17 @@ export interface NetSimConfig {
   dropPct: number;
 }
 
+// In dev, default the sim ON to a realistic "wifi" profile so every local
+// playtest exercises the netcode under jitter + loss. Production ships clean
+// (disabled). Override live via the debug panel (backtick / ?net=debug) or
+// ?netSim=lat,jit,drop. Keep these numbers in sync with the "wifi" preset
+// in NetDebugOverlay.tsx.
+const DEV = import.meta.env.DEV;
 const config: NetSimConfig = {
-  enabled: false,
-  latencyMs: 0,
-  jitterMs: 0,
-  dropPct: 0,
+  enabled: DEV,
+  latencyMs: DEV ? 60 : 0,
+  jitterMs: DEV ? 20 : 0,
+  dropPct: DEV ? 1 : 0,
 };
 
 const listeners = new Set<(c: NetSimConfig) => void>();

@@ -21,7 +21,8 @@ interface MenuButtonConfig {
 }
 
 const MENU: MenuButtonConfig[] = [
-  { label: 'Host',          to: '/game',    testId: 'host-button',   tape: '#c77dff' },
+  { label: 'Play',          to: '/play',    testId: 'play-button',   tape: '#c77dff' },
+  { label: 'Host',          to: '/game',    testId: 'host-button',   tape: '#5a189a' },
   { label: 'Browse Lobbies', to: '/lobbies', testId: 'browse-button', tape: '#5a189a' },
   { label: 'Sandbox',       to: '/sandbox', tape: '#2d6a4f' },
   { label: 'Level Editor',  to: '/editor',  tape: '#e85d75' },

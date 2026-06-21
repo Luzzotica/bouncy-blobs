@@ -163,8 +163,13 @@ export default function GameMaster() {
   // the tagged tick, the host rolls back via `hostRollbackRef` (see
   // installHostBroadcastHook) so the late input still gets applied at
   // its claimed tick.
-  const pendingGuestInputsRef = useRef<Map<string, Map<number, { moveX: number; moveY: number; expanding: boolean }>>>(new Map());
   const hostRollbackRef = useRef<RollbackController | null>(null);
+  // Rolling per-player intent history (one entry per tick) that the host
+  // re-broadcasts as the K-redundancy input window. A ref (not a closure
+  // local) so the late-input rollback handler can overwrite the corrected
+  // inputs here after a host rollback — letting peers reconcile from the
+  // input stream alone instead of being force-resynced with a keyframe.
+  const recentScheduleRef = useRef<Map<string, Map<number, { moveX: number; moveY: number; expanding: boolean }>>>(new Map());
   // Compare-hashes diagnostic: bucket of guest replies received in
   // response to a request_hashes broadcast. The debug overlay's
   // `triggerCompare()` button broadcasts a request, waits ~500ms, then
@@ -1203,89 +1208,28 @@ export default function GameMaster() {
             try {
               const batch = JSON.parse(text);
               if (batch?.type !== 'input' || !Array.isArray(batch.frames)) return;
-              // Each guest input frame is tagged with the guest's
-              // `world.tick + 1` — the tick at which the guest's local
-              // sim will (or did) apply the input. Queue it for the
-              // host's preTickHook to drain at the same tick. If the
-              // host already passed that tick, trigger a rollback so
-              // the input still gets applied at its claimed tick.
+              // HOST-AUTHORITATIVE LOCKSTEP (no prediction, no rollback).
+              // The guest's frame carries its raw key state; we IGNORE any
+              // tick tag on it. The host applies it to the player's
+              // ManagedPlayer NOW, so the next preTickHook captures it as
+              // intent at the host's CURRENT tick, applies it to physics,
+              // and broadcasts it tagged with that tick. The input is thus
+              // applied at "the tick it arrived at the host" — never in the
+              // past, so the host never has to roll back. Guests then apply
+              // that host-stamped input in strict lockstep (~2× ping after
+              // the keypress). Sticky: MP retains the last received value
+              // until a newer frame arrives, so a dropped input packet is
+              // covered by the guest's 60Hz resend.
               const game = gameRef.current;
-              const world = game?.getWorld();
-              const hostTick = world?.tick ?? 0;
+              const pm = game?.getPlayerManager();
+              if (!pm) return;
               for (const f of batch.frames) {
                 if (typeof f?.playerId !== 'string') continue;
-                const claimedTick = Number(f.tick) >>> 0;
-                const mx = quantizeAxis(Number(f.moveX) || 0);
-                const my = quantizeAxis(Number(f.moveY) || 0);
-                const exp = !!f.expanding;
-                // Stash for preTickHook drain.
-                let perTick = pendingGuestInputsRef.current.get(f.playerId);
-                if (!perTick) {
-                  perTick = new Map();
-                  pendingGuestInputsRef.current.set(f.playerId, perTick);
-                }
-                perTick.set(claimedTick, { moveX: mx, moveY: my, expanding: exp });
-                // Prune anything older than rollback window (~maxTicks).
-                const cutoff = hostTick - 60;
-                for (const t of perTick.keys()) if (t < cutoff) perTick.delete(t);
-                // Late input → host rollback. world.tick === N means
-                // "N steps completed" — next step produces N+1. So
-                // claimedTick <= world.tick means the host already
-                // produced state for that tick → rewind to claimedTick,
-                // swap this player's input at that tick, replay forward.
-                // The Rust+wasm engine snapshot + game.snapshotGameState()
-                // are lossless together (proven by 8/8 in
-                // src/lib/rollbackExactness.test.ts); rc.onAuthoritativeInputs
-                // restores both via the rc.recordTick stack.
-                // Host rollback is gated on PacingConfig.enableRollback.
-                // Default OFF — see pacingConfig.ts for rationale. With
-                // the engine proven cross-tab deterministic and the
-                // bootstrap keyframe doing the only sync we need,
-                // strict-lockstep play (no late-input rollback) gives
-                // bit-identical sims on every client. Re-enable via
-                // ?rollback=1 once the manager migrations land and the
-                // rollback-vs-hash-ring interaction is fully audited.
-                if (getPacingConfig().enableRollback && game && world && hostRollbackRef.current && claimedTick <= hostTick) {
-                  const rc = hostRollbackRef.current;
-                  const recorded = rc.getRecordedInputs(claimedTick);
-                  if (recorded) {
-                    const auth: InputSet = { ...recorded, [f.playerId]: { moveX: mx, moveY: my, expanding: exp } };
-                    const rolled = rc.onAuthoritativeInputs(new Map([[claimedTick, auth]]), world, game);
-                    // ──────────────────────────────────────────────
-                    // CRITICAL FIX — keyframe-after-rollback ordering.
-                    // A host rollback retroactively rewrites every
-                    // tick from claimedTick forward. Any keyframe we
-                    // already broadcast (which guests have already
-                    // committed to by calling world.restoreState) is
-                    // now based on a HISTORY THAT NEVER HAPPENED on
-                    // the host. The guest is sitting at the
-                    // pre-rollback state; the host is at the
-                    // post-rollback state; the next per-tick deltas
-                    // arrive but applying them to mismatched
-                    // starting states drifts further every tick —
-                    // exactly the "first overlapping tick after KF
-                    // diverges, all subsequent ticks red" symptom
-                    // the cross-tab determinism playwright test
-                    // reproduced.
-                    //
-                    // Force the next broadcast to be a keyframe so
-                    // the guest re-restores to the new authoritative
-                    // post-rollback state. Cost: one extra ~5 KB
-                    // engineState blob on the next 250ms tick; happens
-                    // only when a late guest input actually fires a
-                    // rollback (rare in steady-state lockstep).
-                    // Rollback fired → next periodic broadcast must
-                    // be a keyframe (to resync the guest to the new
-                    // post-rollback state). When rollback is OFF
-                    // (default) this branch is unreachable.
-                    if (rolled > 0) {
-                      forceKeyframeRef.current = true;
-                    }
-                  }
-                  // If no recorded snapshot exists for that tick (too
-                  // old — beyond rc's rolling window), silently drop —
-                  // guest will resync via the next keyframe.
-                }
+                const mp = pm.getPlayer(f.playerId);
+                if (!mp) continue;
+                mp.moveX = quantizeAxis(Number(f.moveX) || 0);
+                mp.moveY = quantizeAxis(Number(f.moveY) || 0);
+                mp.expanding = !!f.expanding;
               }
             } catch (err) {
               console.warn('[room] bad input batch from screen:', err);
@@ -1996,40 +1940,37 @@ export default function GameMaster() {
   // `?inputDelay=N` for the host's URL.
   // Bandwidth: 4 players × ~30 bytes × 60 Hz ≈ 7 KB/s. Tiny.
   // Helper: install the host's per-tick input pipeline on a freshly
-  // created BouncyBlobsGame. Tick-tagged input model:
+  // created BouncyBlobsGame. HOST-AUTHORITATIVE LOCKSTEP model:
   //
-  // 1. Guests send each input with `tick = guest.world.tick + 1` (the
-  //    sim tick at which the guest's local prediction will apply it).
-  //    The handleScreenMessage 'input' branch above buffers these into
-  //    `pendingGuestInputsRef[playerId][tick]`. If the host has already
-  //    passed the claimed tick, it ALSO triggers a rollback via
-  //    `hostRollbackRef.onAuthoritativeInputs` so the late input still
-  //    gets applied at its claimed tick.
-  // 2. preTickHook at host.tick H drains `pendingGuestInputsRef[*][H]`
-  //    into ManagedPlayer for each guest player BEFORE intent capture —
-  //    so the host's sim applies the SAME input value at the SAME
-  //    logical tick the guest's local sim did. Sims agree.
-  // 3. Host's own local player and AI players continue to use the
-  //    natural MP write path (InputManager events / tickAIInputs).
+  // 1. Guests send their raw key state (untagged) over the 'input'
+  //    channel. The handleScreenMessage 'input' branch above writes it
+  //    straight onto the guest's ManagedPlayer the moment it arrives —
+  //    no per-tick queue, no claimed tick. MP is sticky.
+  // 2. preTickHook at host.tick H captures every player's CURRENT MP as
+  //    the intent for tick H, applies it to physics, and stamps it H. So
+  //    a guest input is applied "at the tick it arrived at the host" — it
+  //    can never be in the past, so the host never rolls back.
+  // 3. Host's own local player and AI players use the natural MP write
+  //    path (InputManager events / tickAIInputs).
   // 4. Broadcast K=REDUNDANCY_TICKS ticks of recent inputs on the
   //    unreliable channel — drops invisible within the redundancy window.
-  // 5. `hostRollbackRef.recordTick` snapshots the engine every N ticks
-  //    so the rollback path has somewhere to restore from.
-  //
-  // The previous `inputDelay` scheduling has been removed — inputs apply
-  // at the exact tick the source claimed (guest's predicted tick for
-  // guests, host's tick for host's local). The `inputDelayTicks` pacing
-  // slider is preserved in PacingConfig but no longer affects host
-  // behaviour. Rollback covers the late-arrival case that inputDelay
-  // used to mask.
+  //    Guests apply this host-stamped stream in STRICT LOCKSTEP (their
+  //    own input echoes back ~2× ping after the keypress). No prediction.
+  // 5. `hostRollbackRef.recordTick` still snapshots the engine so the
+  //    OPT-IN `?rollback=1` client-prediction path has restore points;
+  //    in the default model nothing calls onAuthoritativeInputs.
   const installHostBroadcastHook = useCallback((game: BouncyBlobsGame) => {
     type Intent = { moveX: number; moveY: number; expanding: boolean };
     initPacingFromUrl();
     // Rolling history of recently-applied per-player intents (one entry
     // per tick), for redundant broadcast. RC's own inputHistory is the
     // source of truth for replay; this map is the wire-format snapshot
-    // we hand to the encoder.
-    const recentSchedule = new Map<string, Map<number, Intent>>();
+    // we hand to the encoder. Backed by recentScheduleRef so the late-input
+    // rollback handler can patch corrected inputs in. Reset on each install
+    // (game restart) so stale high-tick entries from a prior game don't
+    // linger once world.tick resets to 0.
+    recentScheduleRef.current = new Map<string, Map<number, Intent>>();
+    const recentSchedule = recentScheduleRef.current;
     const RECENT_KEEP = REDUNDANCY_TICKS * 4;
 
     // Install the host's RollbackController. Used for two things:
@@ -2120,28 +2061,18 @@ export default function GameMaster() {
       const T = world.tick + 1;
       const players = pm.getAllPlayers();
 
-      // 1. Drain pendingGuestInputsRef[*][T] → ManagedPlayer for each
-      //    guest player. This sets MP to exactly what the guest's local
-      //    sim used at tick T, so the host's sim applies the same value.
-      //    Sticky behaviour: if no entry for this tick, MP retains its
-      //    previous value (= last drained or last InputManager write).
-      for (const [pid, perTick] of pendingGuestInputsRef.current) {
-        const v = perTick.get(T);
-        if (!v) continue;
-        const mp = pm.getPlayer(pid);
-        if (mp) {
-          mp.moveX = v.moveX;
-          mp.moveY = v.moveY;
-          mp.expanding = v.expanding;
-        }
-        perTick.delete(T);
-      }
+      // 1. Guest inputs are already written straight onto each guest's
+      //    ManagedPlayer the moment they arrive (see the 'input' channel
+      //    handler) — no per-tick drain queue. MP is sticky: it holds the
+      //    last received key state until a newer frame lands, so the host
+      //    applies the guest's current intent at THIS tick (T), which is
+      //    exactly the "apply at the tick it arrived" model. Host-local
+      //    players + AI already have their MP set by the input/AI layer.
 
       // 2. Quantize ManagedPlayer values for ALL players (host local +
-      //    drained guests + AI) so the value applied to physics is the
-      //    canonical i8-precision value. Guests apply the same quantized
-      //    value (the wire format quantizes on both sides), so sims
-      //    agree bit-for-bit.
+      //    guests + AI) so the value applied to physics is the canonical
+      //    i8-precision value. Guests apply the same quantized value (the
+      //    wire format quantizes on both sides), so sims agree bit-for-bit.
       for (const p of players) {
         p.moveX = quantizeAxis(p.moveX);
         p.moveY = quantizeAxis(p.moveY);

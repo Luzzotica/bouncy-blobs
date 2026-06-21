@@ -116,15 +116,14 @@ test("Host and guest hash rings agree at every overlapping tick", async ({ brows
     )
     .toBeGreaterThan(0);
   // Focus the guest page so keyboard input WOULD be captured by the
-  // canvas — but we no longer drive keyboard input in this test. With
-  // PacingConfig.enableRollback = false (the default), any guest input
-  // that arrives at the host after the host has passed the tagged tick
-  // gets silently dropped, which guarantees host/guest divergence as
-  // soon as Playwright's keyboard timing produces a single late event.
-  // Strict lockstep without input variance is the right test for "is
-  // the engine + netcode pipeline deterministic" — and the next test
-  // in this file (with ?keyframe=0) exercises a longer pure-physics
-  // run via the same path.
+  // canvas — but we deliberately drive NO keyboard input in this test.
+  // This isolates "is the engine + netcode pipeline deterministic" from
+  // input-timing effects: with zero input variance, no input is ever late,
+  // so the rollback path never fires regardless of PacingConfig.enableRollback
+  // (now ON by default). Rollback under late input is covered separately by
+  // src/game/rollback/lockstepLatency.test.ts. The next test in this file
+  // (with ?keyframe=0, which also gates rollback off) exercises a longer
+  // pure-physics run via the same path.
   await pageB.locator("body").click();
   await pageB.waitForTimeout(INPUT_BURST_MS + POST_INPUT_SETTLE_MS);
 

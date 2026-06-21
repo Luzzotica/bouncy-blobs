@@ -21,11 +21,13 @@ export interface PacingConfig {
    * Guest allows a 2nd step per RAF when `depth >= bufferTarget + 2`.
    * Higher = more tolerance for jitter at the cost of input latency. */
   bufferTarget: number;
-  /** Host: how many ticks between periodic full-state keyframes. 60 = ~1s
-   * (default), 0 = disabled. The compact slot-based input format + K=120
-   * input redundancy on the unreliable channel mean inputs are nearly
-   * never lost, but keyframes are still the recovery path if a desync
-   * does occur (cross-browser float drift, integrator skew, etc.). */
+  /** Host: how many ticks between periodic full-state keyframes. Default 0
+   * = DISABLED. The deterministic Rust engine running the host-stamped
+   * input stream keeps every peer bit-identical, so periodic full-state
+   * resyncs are unnecessary — and the resync visibly glitched the guest
+   * when it landed. Keyframes fire ONLY on bootstrap/join/leave
+   * (forceKeyframeRef). Set `?keyframe=N` to re-introduce a safety cadence
+   * (N ticks) if a determinism bug ever needs masking while debugging. */
   keyframeIntervalTicks: number;
   /** Guest: when true, the guest's own player input is applied LOCALLY
    * the moment a key event fires (client-side prediction) and the
@@ -59,27 +61,41 @@ export interface PacingConfig {
    * false, both sides just stall on missing inputs and rely on the
    * deterministic engine + bootstrap keyframe for sync.
    *
-   * Default is FALSE while the Rust engine migration is in progress:
-   * with the engine proven cross-tab deterministic and rollback
-   * machinery introducing edge-case ring/timing mismatches (the
-   * default cross-tab determinism test flapped between 0 and 30
-   * mismatches per run with rollback ON), shipping with rollback OFF
-   * gives stable lockstep play. Once the Phase 2-8 manager migrations
-   * land and rollback's interaction with the hash ring is fully
-   * audited, this can flip back on. */
+   * Default is FALSE. The shipping model is pure host-authoritative
+   * lockstep with NO prediction and NO rollback: the guest sends its raw
+   * key state to the host (untagged); the host applies it at its OWN
+   * current tick and broadcasts it back stamped with that tick; guests
+   * apply the host's stamped inputs in strict lockstep (~2× ping after the
+   * keypress). Because the host assigns the tick on arrival, an input is
+   * never "in the past" — the host never needs to roll back, and guests
+   * never speculate, so there is nothing to reconcile. Rollback remains an
+   * opt-in experiment (`?rollback=1`) for client-side prediction; its
+   * machinery (RollbackController) is still exercised by
+   * lockstepLatency.test.ts. The Rust+wasm engine's determinism
+   * (rollbackExactness.test.ts) is what lets strict lockstep stay
+   * bit-identical across peers. */
   enableRollback: boolean;
 }
 
 const config: PacingConfig = {
   inputDelayTicks: 2,
   bufferTarget: 3,
-  keyframeIntervalTicks: 60,
+  // 0 = NO periodic keyframes. The sim is deterministic (Rust integer
+  // engine) and runs off the host-stamped input stream, so a periodic
+  // full-state resync is unnecessary — and it visibly glitched the guest
+  // when it landed. Keyframes now fire ONLY on bootstrap/join/leave
+  // (forceKeyframeRef). Re-enable a safety cadence with `?keyframe=N`.
+  keyframeIntervalTicks: 0,
   stallPredictThreshold: 3,
   // Default to OFF so 2-tab desync diagnostics can verify whether
   // prediction is the cause. Flip to true to re-enable Phase 3
   // local-player prediction.
   clientPrediction: false,
   paused: false,
+  // OFF by default — pure host-authoritative lockstep (host stamps each
+  // input at the tick it arrives, guests apply in strict lockstep). No
+  // late inputs to reconcile, so no rollback needed. `?rollback=1` opts
+  // into the client-prediction + rollback experiment. See field doc above.
   enableRollback: false,
 };
 
