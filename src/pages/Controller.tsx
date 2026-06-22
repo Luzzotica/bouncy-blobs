@@ -5,6 +5,7 @@ import type { PeerCallbacks } from '../lib/party';
 import { roomConfig } from '../lib/partyConfig';
 import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
+import { shapeJoystickInput } from '../lib/joystickInput';
 
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 type ControllerMode = 'normal' | 'party_box' | 'placement';
@@ -59,8 +60,11 @@ function Joystick({ onChange }: { onChange: (x: number, y: number) => void }) {
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > 1) { dx /= dist; dy /= dist; }
 
+    // Thumb visual follows the (magnitude-clamped) finger; the OUTPUT is shaped
+    // so up/down snaps to full and left/right reaches its full per-axis range.
     setThumbPos({ x: dx, y: dy });
-    onChange(dx, dy);
+    const s = shapeJoystickInput(dx, dy);
+    onChange(s.x, s.y);
   }, [onChange]);
 
   const reset = useCallback(() => {
@@ -237,7 +241,8 @@ function NormalModeZones({
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > 1) { dx /= dist; dy /= dist; }
     setThumbOffset({ x: dx, y: dy });
-    onMove(dx, dy);
+    const s = shapeJoystickInput(dx, dy);
+    onMove(s.x, s.y);
   }, [joystickOrigin, onMove]);
 
   const handleLeftUp = useCallback(() => {

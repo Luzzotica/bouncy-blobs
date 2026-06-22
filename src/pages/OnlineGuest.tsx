@@ -44,7 +44,7 @@ import { KingOfTheHillMode } from "../game/gameModes/kingOfTheHillMode";
 import { FreeplayMode } from "../game/gameModes/freeplayMode";
 import { getLevelTypes } from "../levels/types";
 import type { GameMode, GamePhase } from "../game/gameModes/types";
-import { getPendingJoin, clearPendingJoin } from "./LobbyBrowser";
+import { getPendingJoin, clearPendingJoin } from "../lib/pendingJoin";
 
 // Guest → host input send rate. Bumped from 30 → 60 to match the host's
 // physics tick rate, so the host's preTickHook sees a fresh input on

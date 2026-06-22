@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { installUiSounds } from './utils/uiSounds'
 import { preloadAll, SFX_NAMES } from './utils/audio'
 import { onJoinRequested, onLaunchJoin } from './lib/steamLobbyApi'
@@ -11,7 +11,7 @@ import Editor from './pages/Editor'
 import GameMaster from './pages/GameMaster'
 import Controller from './pages/Controller'
 import JoinLobby from './pages/JoinLobby'
-import LobbyBrowser from './pages/LobbyBrowser'
+import Multiplayer from './pages/Multiplayer'
 import OnlineGuest from './pages/OnlineGuest'
 import Intro from './pages/Intro'
 
@@ -52,7 +52,9 @@ export default function App() {
       <Route path="/game" element={<GameMaster />} />
       <Route path="/join" element={<JoinLobby />} />
       <Route path="/controller/:sessionId" element={<Controller />} />
-      <Route path="/lobbies" element={<LobbyBrowser />} />
+      <Route path="/multiplayer" element={<Multiplayer />} />
+      {/* Old Browse route — folded into Multiplayer; redirect stale links. */}
+      <Route path="/lobbies" element={<Navigate to="/multiplayer" replace />} />
       <Route path="/online-guest" element={<OnlineGuest />} />
       <Route path="/intro" element={<Intro />} />
     </Routes>

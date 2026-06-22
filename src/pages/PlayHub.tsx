@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { loadPlayCampaign, type CampaignLevelEntry } from '../lib/campaignRegistry';
 import { getBuiltinLevels } from '../levels/levelRegistry';
 import { getPlayProgress, isUnlocked, type PlayProgress } from '../lib/playProgress';
+import HomeBackground from '../components/HomeBackground';
 
 function formatTime(ms: number | null): string {
   if (ms == null) return '—';
@@ -33,7 +34,8 @@ export default function PlayHub() {
   const ids = useMemo(() => (levels ?? []).map((l) => l.id), [levels]);
 
   return (
-    <div style={shell}>
+    <HomeBackground>
+      <div style={content}>
       <div style={topBar}>
         <Link to="/"><button style={backBtn}>← Home</button></Link>
         <h1 style={title}>Play</h1>
@@ -74,7 +76,7 @@ export default function PlayHub() {
                     <>
                       <span style={{ color: '#2d6a4f', fontWeight: 800 }}>✓ Cleared</span>
                       <span style={metaDim}>Best {formatTime(p!.bestTimeMs)}</span>
-                      <span style={metaDim}>☠ {p!.deaths}</span>
+                      <span style={metaDim}><span style={{ fontSize: 40, lineHeight: 1 }}>☠</span> {p!.deaths}</span>
                     </>
                   ) : (
                     <span style={{ color: '#5a189a', fontWeight: 800 }}>▶ Play</span>
@@ -85,12 +87,15 @@ export default function PlayHub() {
           })}
         </div>
       )}
-    </div>
+      </div>
+    </HomeBackground>
   );
 }
 
-const shell: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: '#0a0612',
+// Scrollable content layer over the shared HomeBackground (which supplies the
+// fixed hero bg + overlay).
+const content: React.CSSProperties = {
+  position: 'absolute', inset: 0,
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   padding: '24px 32px 40px', overflowY: 'auto',
 };

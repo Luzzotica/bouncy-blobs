@@ -326,6 +326,18 @@ export default function GameMaster() {
   // auto-fills it). Holds display name, room name, password, etc — the
   // values that get baked into createHostRoom opts.
   const [hostConfig, setHostConfig] = useState<HostSetupResult | null>(null);
+  // When the Multiplayer page's host form is submitted it stashes the
+  // HostSetupResult and routes here — consume it on mount so we skip the
+  // in-page HostSetupModal and go straight to creating the room.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('pendingHostSetup');
+      if (raw) {
+        sessionStorage.removeItem('pendingHostSetup');
+        setHostConfig(JSON.parse(raw) as HostSetupResult);
+      }
+    } catch { /* ignore malformed hand-off */ }
+  }, []);
   // Host's local-player customization. Picker UI lives in the LobbyPanel.
   // Defaults are reconciled against the live taken-color set in an effect
   // below so a host opening the page after others have joined doesn't collide.

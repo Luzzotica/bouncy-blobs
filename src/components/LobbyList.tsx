@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { RoomService } from "../lib/party";
 import type { RoomSummary } from "../lib/party";
 import { roomConfig, GAME_ID } from "../lib/partyConfig";
@@ -8,42 +8,22 @@ import {
   setStoredDisplayName,
   resolveDefaultDisplayName,
 } from "../lib/userProfile";
+import { setPendingJoin } from "../lib/pendingJoin";
 
-const PENDING_JOIN_KEY = "pendingLobbyJoin";
-
-export interface PendingJoin {
-  room_id: string;
-  display_name: string;
-  password: string;
-}
-
-export function getPendingJoin(): PendingJoin | null {
-  try {
-    const raw = sessionStorage.getItem(PENDING_JOIN_KEY);
-    return raw ? (JSON.parse(raw) as PendingJoin) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearPendingJoin(): void {
-  sessionStorage.removeItem(PENDING_JOIN_KEY);
-}
-
-export default function LobbyBrowser() {
+// Browse + join joinable online lobbies. Self-contained (fetches its own
+// list, owns the display-name + password prompt) and fills its parent
+// container, so it can drop into the Multiplayer page's right column. On
+// join it stashes the pending join and navigates to /online-guest.
+export default function LobbyList() {
   const navigate = useNavigate();
   const [lobbies, setLobbies] = useState<RoomSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
   const [refreshing, setRefreshing] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   // Single source of truth for the guest's display name. Pre-filled from
-  // localStorage (or Steam persona when running under Steam); persisted on
-  // every join so returning users don't have to retype it.
+  // localStorage (or Steam persona under Steam); persisted on every change.
   const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
-  // Per-row state for the "Join" pop-out so each row can independently
-  // show the password prompt without React tree churn.
   const [joinTarget, setJoinTarget] = useState<RoomSummary | null>(null);
   const [joinPassword, setJoinPassword] = useState("");
 
@@ -75,8 +55,6 @@ export default function LobbyBrowser() {
     return () => { cancelled = true; clearInterval(i); };
   }, [refreshTick]);
 
-  /** Open the per-row password prompt (or commit immediately for
-   *  rooms that aren't password-protected). */
   function beginJoin(lobby: RoomSummary) {
     if (!displayName.trim()) {
       setError("Enter a display name first");
@@ -90,17 +68,13 @@ export default function LobbyBrowser() {
     void commitJoin(lobby, "");
   }
 
-  /** Actually navigate to /online-guest with the chosen room + password. */
   async function commitJoin(lobby: RoomSummary, password: string) {
     const name = displayName.trim();
     if (!name) return;
     setStoredDisplayName(name);
     setBusy(true);
     try {
-      sessionStorage.setItem(
-        PENDING_JOIN_KEY,
-        JSON.stringify({ room_id: lobby.room_id, display_name: name, password } satisfies PendingJoin),
-      );
+      setPendingJoin({ room_id: lobby.room_id, display_name: name, password });
       navigate("/online-guest");
     } catch (err) {
       setError((err as Error).message);
@@ -109,13 +83,6 @@ export default function LobbyBrowser() {
     }
   }
 
-  /**
-   * Join a private (unlisted) lobby by typing its join code. The room
-   * service has a public `lookupByCode` endpoint that returns a
-   * RoomSummary even for private rooms — we then funnel through the
-   * same `join()` flow as picking from the listing so password +
-   * display-name prompts behave identically.
-   */
   async function joinByCode() {
     if (!displayName.trim()) {
       setError("Enter a display name first");
@@ -142,34 +109,35 @@ export default function LobbyBrowser() {
   }
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", maxWidth: 720, margin: "0 auto", padding: 24, gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-        <h1 style={{ fontSize: 32 }}>Online Lobbies</h1>
+    <div style={panel}>
+      <div style={headerRow}>
+        <h2 style={{ fontSize: 22, margin: 0, color: "#fffae6" }}>Lobbies</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             data-testid="refresh-lobbies-button"
             onClick={() => setRefreshTick((t) => t + 1)}
             disabled={busy || refreshing}
-            style={{ padding: "8px 16px" }}
+            style={smallBtn}
             title="Refresh lobby list"
           >
-            {refreshing ? "⏳ Refreshing…" : "🔄 Refresh"}
+            {refreshing ? "⏳" : "🔄"}
           </button>
           <button
             data-testid="enter-room-code-button"
             onClick={joinByCode}
             disabled={busy}
-            style={{ padding: "8px 16px", background: "#5dd6ff", color: "#0a0612", fontWeight: 600 }}
+            style={{ ...smallBtn, background: "#5dd6ff", color: "#0a0612", fontWeight: 600 }}
             title="Join a private lobby by typing its join code"
           >
-            🔑 Enter Code
+            🔑 Code
           </button>
-          <Link to="/"><button style={{ padding: "8px 16px" }}>← Home</button></Link>
         </div>
       </div>
-      {error && <div style={{ color: "#f66", flexShrink: 0 }}>{error}</div>}
-      <label style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-        <span style={{ fontSize: 13, color: "#bbb" }}>Your name</span>
+
+      {error && <div style={{ color: "#ff9a9a", fontSize: 13 }}>{error}</div>}
+
+      <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontSize: 13, color: "#cbb8e6" }}>Your name</span>
         <input
           data-testid="lobby-display-name"
           type="text"
@@ -181,49 +149,38 @@ export default function LobbyBrowser() {
             setDisplayName(v);
             setStoredDisplayName(v);
           }}
-          style={{
-            padding: "8px 10px",
-            fontSize: 15,
-            borderRadius: 6,
-            border: "1px solid #444",
-            background: "#0f0a18",
-            color: "#fff",
-          }}
+          style={inputStyle}
         />
       </label>
-      <div data-testid="lobby-list" style={{ flex: 1, minHeight: 0, overflowY: "auto", borderRadius: 8, border: "1px solid #333" }}>
+
+      <div data-testid="lobby-list" style={listBox}>
         {lobbies.length === 0 && (
-          <div style={{ padding: 24, textAlign: "center", color: "#888" }}>
-            No public lobbies yet. <Link to="/game" style={{ color: "#c77dff" }}>Host one</Link>!
+          <div style={{ padding: 24, textAlign: "center", color: "#9b8bb5", fontSize: 14 }}>
+            No public lobbies yet — host one on the left!
           </div>
         )}
         {lobbies.map((l) => (
-          <div key={l.room_id} data-testid={`lobby-row-${l.join_code}`} style={{
-            padding: 16,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            borderTop: "1px solid #222",
-          }}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>
+          <div key={l.room_id} data-testid={`lobby-row-${l.join_code}`} style={lobbyRow}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#fffae6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {l.is_password_protected && <span title="Password protected" style={{ marginRight: 6 }}>🔒</span>}
                 {l.display_name || "Untitled lobby"}
               </div>
-              <div style={{ color: "#888", fontSize: 13 }}>
-                {l.peer_count}/{l.max_peers} peers · code {l.join_code}
+              <div style={{ color: "#9b8bb5", fontSize: 12 }}>
+                {l.peer_count}/{l.max_peers} · code {l.join_code}
               </div>
             </div>
             <button
               onClick={() => beginJoin(l)}
               disabled={busy || l.peer_count >= l.max_peers}
-              style={{ padding: "10px 20px", background: "#c77dff" }}
+              style={{ ...joinBtn, background: l.peer_count >= l.max_peers ? "#555" : "#c77dff" }}
             >
               {l.peer_count >= l.max_peers ? "Full" : "Join"}
             </button>
           </div>
         ))}
       </div>
+
       {joinTarget && (
         <div
           data-testid="join-password-backdrop"
@@ -257,20 +214,18 @@ export default function LobbyBrowser() {
               value={joinPassword}
               onChange={(e) => setJoinPassword(e.target.value)}
               placeholder="Enter password"
-              style={{ padding: "8px 10px", fontSize: 15, borderRadius: 6, border: "1px solid #444", background: "#0f0a18", color: "#fff" }}
+              style={inputStyle}
             />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setJoinTarget(null)} style={{ padding: "8px 16px" }}>
+              <button type="button" onClick={() => setJoinTarget(null)} style={smallBtn}>
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!joinPassword}
                 style={{
-                  padding: "8px 18px",
+                  ...joinBtn,
                   background: joinPassword ? "#c77dff" : "#555",
-                  color: "#0a0612",
-                  fontWeight: 600,
                   cursor: joinPassword ? "pointer" : "not-allowed",
                 }}
               >
@@ -283,3 +238,63 @@ export default function LobbyBrowser() {
     </div>
   );
 }
+
+const panel: React.CSSProperties = {
+  height: "100%",
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  padding: 20,
+  borderRadius: 12,
+  background: "rgba(15, 10, 24, 0.82)",
+  border: "1px solid rgba(199,125,255,0.25)",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+  backdropFilter: "blur(4px)",
+  minHeight: 0,
+};
+
+const headerRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+};
+
+const inputStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  fontSize: 15,
+  borderRadius: 6,
+  border: "1px solid #444",
+  background: "#0f0a18",
+  color: "#fff",
+};
+
+const listBox: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: "auto",
+  borderRadius: 8,
+  border: "1px solid rgba(255,255,255,0.08)",
+};
+
+const lobbyRow: React.CSSProperties = {
+  padding: 14,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 10,
+  borderTop: "1px solid rgba(255,255,255,0.06)",
+};
+
+const smallBtn: React.CSSProperties = {
+  padding: "8px 14px",
+  fontSize: 14,
+};
+
+const joinBtn: React.CSSProperties = {
+  padding: "10px 20px",
+  background: "#c77dff",
+  color: "#0a0612",
+  fontWeight: 600,
+  flexShrink: 0,
+};
