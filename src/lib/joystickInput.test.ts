@@ -1,42 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { shapeJoystickInput } from "./joystickInput";
+import { shapeJoystickInput, BAND_HALF, DEADZONE_X } from "./joystickInput";
 
-// Phone joystick should be as easy to max out as a keyboard: up/down snaps to
-// full past a small deadzone; left/right is proportional but reaches ±1 at full
-// sideways tilt, independent of the vertical axis.
+// Square pad with a horizontal band: horizontal snaps to ±1 past a deadzone and
+// is always active; vertical is 3 zones (above band = up, in band = none, below
+// band = down).
 describe("shapeJoystickInput", () => {
-  it("snaps a slight vertical tilt to full ±1", () => {
-    expect(shapeJoystickInput(0, -0.2).y).toBe(-1); // slight up → full up
-    expect(shapeJoystickInput(0, 0.2).y).toBe(1);   // slight down → full down
+  it("snaps horizontal straight to ±1 past the deadzone", () => {
+    expect(shapeJoystickInput(0.2, 0).x).toBe(1);   // barely right → full right
+    expect(shapeJoystickInput(-0.2, 0).x).toBe(-1);
+    expect(shapeJoystickInput(1, 0).x).toBe(1);
   });
 
-  it("zeroes inputs inside the deadzones", () => {
-    const s = shapeJoystickInput(0.05, 0.1); // |x|<0.1, |y|<0.15
-    expect(s.x).toBe(0);
-    expect(s.y).toBe(0);
+  it("ignores tiny horizontal drift inside the deadzone", () => {
+    expect(shapeJoystickInput(DEADZONE_X - 0.01, 0).x).toBe(0);
   });
 
-  it("reaches full ±1 horizontally at full sideways tilt", () => {
-    expect(shapeJoystickInput(1, 0).x).toBeCloseTo(1, 5);
-    expect(shapeJoystickInput(-1, 0).x).toBeCloseTo(-1, 5);
-    expect(shapeJoystickInput(1, 0).y).toBe(0);
+  it("is pure left/right while inside the band", () => {
+    expect(shapeJoystickInput(0.5, 0)).toEqual({ x: 1, y: 0 });
+    expect(shapeJoystickInput(0.5, BAND_HALF - 0.01)).toEqual({ x: 1, y: 0 });
+    expect(shapeJoystickInput(0, 0)).toEqual({ x: 0, y: 0 });
   });
 
-  it("frees each axis on a diagonal — full up, proportional sideways (not capped at 0.707)", () => {
-    const s = shapeJoystickInput(0.707, -0.707);
-    expect(s.y).toBe(-1);              // vertical no longer stuck at 0.707
-    expect(s.x).toBeGreaterThan(0.6);  // proportional, well above the old 0.707-cap behaviour
-    expect(s.x).toBeLessThan(0.75);
+  it("maps above the band to up, below the band to down", () => {
+    expect(shapeJoystickInput(0, -(BAND_HALF + 0.01)).y).toBe(-1); // above → up
+    expect(shapeJoystickInput(0, BAND_HALF + 0.01).y).toBe(1);     // below → down
   });
 
-  it("supports 'up + near-full sideways' like a keyboard", () => {
-    // Push mostly right with a slight up tilt: X stays high, Y snaps to full up.
-    const s = shapeJoystickInput(0.95, -0.3);
-    expect(s.y).toBe(-1);
-    expect(s.x).toBeGreaterThan(0.9);
-  });
-
-  it("clamps over-range input (finger past the ring) to ±1", () => {
-    expect(shapeJoystickInput(1.8, -1.8)).toEqual({ x: 1, y: -1 });
+  it("allows diagonals — left/right stays active above/below the band", () => {
+    expect(shapeJoystickInput(0.5, -0.9)).toEqual({ x: 1, y: -1 });  // up-right
+    expect(shapeJoystickInput(-0.5, 0.9)).toEqual({ x: -1, y: 1 });  // down-left
   });
 });

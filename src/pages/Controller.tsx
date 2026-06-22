@@ -5,7 +5,7 @@ import type { PeerCallbacks } from '../lib/party';
 import { roomConfig } from '../lib/partyConfig';
 import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
-import { shapeJoystickInput } from '../lib/joystickInput';
+import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
 
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 type ControllerMode = 'normal' | 'party_box' | 'placement';
@@ -40,6 +40,20 @@ const FACE_PRESETS = [
   { id: 'monocle', label: 'o_Q' },
 ];
 
+// Faint direction labels for the square pad's up / band / down zones.
+const zoneHint: React.CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '50%',
+  transform: 'translate(-50%, -50%)',
+  color: 'rgba(199, 177, 255, 0.55)',
+  fontSize: 18,
+  fontWeight: 800,
+  letterSpacing: 2,
+  pointerEvents: 'none',
+  userSelect: 'none',
+};
+
 // ─── Joystick Component ──────────────────────────────────────────────────────
 
 function Joystick({ onChange }: { onChange: (x: number, y: number) => void }) {
@@ -55,14 +69,13 @@ function Joystick({ onChange }: { onChange: (x: number, y: number) => void }) {
     const cy = rect.top + rect.height / 2;
     const radius = Math.min(rect.width, rect.height) / 2;
 
-    let dx = (clientX - cx) / radius;
-    let dy = (clientY - cy) / radius;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 1) { dx /= dist; dy /= dist; }
+    const dx = (clientX - cx) / radius;
+    const dy = (clientY - cy) / radius;
 
-    // Thumb visual follows the (magnitude-clamped) finger; the OUTPUT is shaped
-    // so up/down snaps to full and left/right reaches its full per-axis range.
-    setThumbPos({ x: dx, y: dy });
+    // Thumb visual follows the finger, clamped to the SQUARE (per-axis). The
+    // OUTPUT is shaped: horizontal snaps to ±1, vertical is the 3-zone band.
+    const clamp = (v: number) => (v < -1 ? -1 : v > 1 ? 1 : v);
+    setThumbPos({ x: clamp(dx), y: clamp(dy) });
     const s = shapeJoystickInput(dx, dy);
     onChange(s.x, s.y);
   }, [onChange]);
@@ -95,38 +108,44 @@ function Joystick({ onChange }: { onChange: (x: number, y: number) => void }) {
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       style={{
-        width: 160,
-        height: 160,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, #2a3a5a 0%, #1a1a2e 100%)',
+        width: 180,
+        height: 180,
+        borderRadius: 16,
+        background: 'linear-gradient(180deg, #2a3a5a 0%, #1a1a2e 100%)',
         border: '2px solid #3a4a6a',
         position: 'relative',
         touchAction: 'none',
         cursor: 'grab',
+        overflow: 'hidden',
       }}
     >
+      {/* Center band = left/right zone. Above it = UP, below it = DOWN. */}
+      <div style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: `${50 - BAND_HALF * 100}%`,
+        height: `${BAND_HALF * 200}%`,
+        background: 'rgba(167, 139, 250, 0.16)',
+        borderTop: '2px dashed rgba(167, 139, 250, 0.5)',
+        borderBottom: '2px dashed rgba(167, 139, 250, 0.5)',
+        pointerEvents: 'none',
+      }}>
+        <span style={zoneHint}>◀ ▶</span>
+      </div>
+      <span style={{ ...zoneHint, top: '12%' }}>▲</span>
+      <span style={{ ...zoneHint, top: '82%' }}>▼</span>
       {/* Thumb */}
       <div style={{
         position: 'absolute',
         width: 52,
         height: 52,
-        borderRadius: '50%',
+        borderRadius: 12,
         background: 'radial-gradient(circle at 35% 35%, #a78bfa, #7c5cbf)',
         boxShadow: '0 2px 8px rgba(124, 92, 191, 0.4)',
-        left: `calc(50% + ${thumbPos.x * 50}px - 26px)`,
-        top: `calc(50% + ${thumbPos.y * 50}px - 26px)`,
+        left: `calc(50% + ${thumbPos.x * 60}px - 26px)`,
+        top: `calc(50% + ${thumbPos.y * 60}px - 26px)`,
         transition: activeRef.current ? 'none' : 'left 0.15s ease-out, top 0.15s ease-out',
-        pointerEvents: 'none',
-      }} />
-      {/* Center indicator */}
-      <div style={{
-        position: 'absolute',
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        background: '#4a5a7a',
-        left: 'calc(50% - 4px)',
-        top: 'calc(50% - 4px)',
         pointerEvents: 'none',
       }} />
     </div>
@@ -236,11 +255,11 @@ function NormalModeZones({
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
-    let dx = (cx - joystickOrigin.x) / JOYSTICK_RADIUS;
-    let dy = (cy - joystickOrigin.y) / JOYSTICK_RADIUS;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 1) { dx /= dist; dy /= dist; }
-    setThumbOffset({ x: dx, y: dy });
+    const dx = (cx - joystickOrigin.x) / JOYSTICK_RADIUS;
+    const dy = (cy - joystickOrigin.y) / JOYSTICK_RADIUS;
+    // Thumb visual clamped to the SQUARE (per-axis); output is the square+band shaping.
+    const clamp = (v: number) => (v < -1 ? -1 : v > 1 ? 1 : v);
+    setThumbOffset({ x: clamp(dx), y: clamp(dy) });
     const s = shapeJoystickInput(dx, dy);
     onMove(s.x, s.y);
   }, [joystickOrigin, onMove]);
@@ -267,6 +286,7 @@ function NormalModeZones({
       {/* Left zone — dynamic joystick */}
       <div
         ref={leftRef}
+        data-testid="controller-move-zone"
         onPointerDown={handleLeftDown}
         onPointerMove={handleLeftMove}
         onPointerUp={handleLeftUp}
@@ -295,26 +315,39 @@ function NormalModeZones({
         {/* Dynamic joystick visual */}
         {joystickOrigin && (
           <>
-            {/* Base ring */}
+            {/* Base square with a center band: middle = left/right, above =
+                up, below = down. */}
             <div style={{
               position: 'absolute',
-              left: joystickOrigin.x - 50,
-              top: joystickOrigin.y - 50,
-              width: 100,
-              height: 100,
-              borderRadius: '50%',
+              left: joystickOrigin.x - 55,
+              top: joystickOrigin.y - 55,
+              width: 110,
+              height: 110,
+              borderRadius: 14,
               border: '2px solid rgba(167, 139, 250, 0.3)',
               background: 'rgba(42, 58, 90, 0.25)',
+              overflow: 'hidden',
               pointerEvents: 'none',
-            }} />
+            }}>
+              <div style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: `${50 - BAND_HALF * 100}%`,
+                height: `${BAND_HALF * 200}%`,
+                background: 'rgba(167, 139, 250, 0.18)',
+                borderTop: '2px dashed rgba(167, 139, 250, 0.5)',
+                borderBottom: '2px dashed rgba(167, 139, 250, 0.5)',
+              }} />
+            </div>
             {/* Thumb */}
             <div style={{
               position: 'absolute',
-              left: joystickOrigin.x + thumbOffset.x * 40 - 22,
-              top: joystickOrigin.y + thumbOffset.y * 40 - 22,
+              left: joystickOrigin.x + thumbOffset.x * 44 - 22,
+              top: joystickOrigin.y + thumbOffset.y * 44 - 22,
               width: 44,
               height: 44,
-              borderRadius: '50%',
+              borderRadius: 11,
               background: 'radial-gradient(circle at 35% 35%, #a78bfa, #7c5cbf)',
               boxShadow: '0 2px 8px rgba(124, 92, 191, 0.5)',
               pointerEvents: 'none',

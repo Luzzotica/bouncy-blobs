@@ -138,3 +138,86 @@ test("Phone controller input moves the host's blob", async ({ browser }) => {
   await ctxA.close();
   await ctxB.close();
 });
+
+/**
+ * Drives the ACTUAL on-screen joystick (the square pad with a center band),
+ * not the keyboard fallback. Dispatches pointer drags on the move zone and
+ * asserts the host's blob steers accordingly — proving the touch → shaped
+ * input (shapeJoystickInput) → wire → host-sim path works end to end.
+ *
+ * Horizontal is the gravity-independent, sign-stable axis, so we validate
+ * left/right here; the band's vertical 3-zone mapping is covered precisely by
+ * the unit test (src/lib/joystickInput.test.ts).
+ */
+test("Phone controller joystick steers the host's blob", async ({ browser }) => {
+  test.setTimeout(180_000);
+
+  const ctxA = await browser.newContext();
+  const ctxB = await browser.newContext();
+  const pageA = await ctxA.newPage();
+  const pageB = await ctxB.newPage();
+  const aErr = trackErrors(pageA);
+
+  const { joinCode } = await startHosting(pageA);
+  const beforeIds = new Set(Object.keys(await readAllPositions(pageA)));
+  await joinAsPhone(pageB, joinCode, "Sticky");
+
+  const newPhoneId = async (): Promise<string | null> => {
+    const ids = Object.keys(await readAllPositions(pageA)).filter((id) => !beforeIds.has(id));
+    return ids[0] ?? null;
+  };
+  await expect
+    .poll(newPhoneId, { timeout: 30_000, message: "host should spawn a blob for the joined phone" })
+    .not.toBeNull();
+  const phoneId = await newPhoneId();
+  expect(phoneId).not.toBeNull();
+  if (!phoneId) return;
+
+  const start = await readPos(pageA, phoneId);
+  expect(start, "phone blob should have a position on the host").not.toBeNull();
+  if (!start) return;
+
+  // Center of the move zone = the dynamic joystick origin on pointerdown.
+  const zone = pageB.getByTestId("controller-move-zone");
+  const box = await zone.boundingBox();
+  expect(box, "move zone should be visible on the live controller").not.toBeNull();
+  if (!box) return;
+  const ox = box.x + box.width / 2;
+  const oy = box.y + box.height / 2;
+  // 70px ≈ 0.875 of JOYSTICK_RADIUS (80) — well past the 0.15 deadzone, so the
+  // horizontal axis snaps straight to ±1. Stays within the band vertically
+  // (dy = 0), i.e. pure left/right.
+
+  // Drag RIGHT.
+  await pageB.mouse.move(ox, oy);
+  await pageB.mouse.down();
+  await pageB.mouse.move(ox + 70, oy, { steps: 4 });
+  await expect
+    .poll(async () => (await readPos(pageA, phoneId))?.x ?? start.x, {
+      timeout: 15_000,
+      message: "joystick dragged RIGHT should move the host blob right",
+    })
+    .toBeGreaterThan(start.x + 25);
+  await pageB.mouse.up();
+
+  const afterRight = await readPos(pageA, phoneId);
+  expect(afterRight).not.toBeNull();
+  if (!afterRight) return;
+
+  // Drag LEFT — must reverse, proving it's steering, not one-time drift.
+  await pageB.mouse.move(ox, oy);
+  await pageB.mouse.down();
+  await pageB.mouse.move(ox - 70, oy, { steps: 4 });
+  await expect
+    .poll(async () => (await readPos(pageA, phoneId))?.x ?? afterRight.x, {
+      timeout: 15_000,
+      message: "joystick dragged LEFT should move the host blob left",
+    })
+    .toBeLessThan(afterRight.x - 25);
+  await pageB.mouse.up();
+
+  expect(aErr.errors, aErr.errors.join("\n")).toHaveLength(0);
+
+  await ctxA.close();
+  await ctxB.close();
+});
