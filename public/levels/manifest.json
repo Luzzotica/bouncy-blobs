@@ -23,6 +23,7 @@
     { "id": "platforms-be-movin", "name": "Platforms Be MOVIN", "file": "platforms-be-movin.json", "levelTypes": ["solo_racing","team_racing","koth"] },
     { "id": "squeeze-up", "name": "Squeeze Up", "file": "squeeze-up.json", "levelTypes": ["solo_racing","team_racing","koth"] },
     { "id": "squeeze-in", "name": "Squeeze In", "file": "squeeze-in.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "getting-crushed", "name": "Getting Crushed", "file": "getting-crushed.json", "levelTypes": ["solo_racing","team_racing"] }
+    { "id": "getting-crushed", "name": "Getting Crushed", "file": "getting-crushed.json", "levelTypes": ["solo_racing","team_racing"] },
+    { "id": "crush-test", "name": "Crush Test", "file": "crush-test.json", "levelTypes": ["solo_racing"], "hidden": true }
   ]
 }

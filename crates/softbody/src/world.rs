@@ -53,9 +53,8 @@ const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 //       that the ratio check might miss if both rest and current grow
 //       together.
 // 10² = 100 in Fx. Generous headroom for legitimate squish/stretch under
-// normal play; the repro-test catastrophic explosion blows past 10×
-// within a handful of frames (frame 27 = 2.20×, then unbounded growth
-// to 12×+), so the detector still fires — just a few frames later.
+// normal play (incl. fast falls); only a true blow-up exceeds it. Per-substep
+// over-expansion is constrained separately by the integrity pass below.
 pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
 
 // The inverse "crush" failure: a blob squeezed (pinched between a wall and a
@@ -75,6 +74,21 @@ pub const CRUSH_AREA_MIN_RATIO: Fx = Fx::from_raw((1i64 << 32) / 15); // 0.0667
 pub const CRUSH_SUSTAIN_FRAMES: i32 = 2;
 
 pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
+
+// ── Per-substep blob integrity (crush detection) ───────────────────────────
+// Substeps a blob must be continuously crushed before it dies. 1 = die the
+// instant it's caught between opposing static surfaces and squeezed — once we'd
+// have to rebuild its rest pose at the last free spot, it's a crush, so just
+// kill it. (Tunable up if a rare 1-substep blip ever false-fires.)
+pub const INTEGRITY_DEATH_SUBSTEPS: i32 = 1;
+// Two static contacts count as "opposing" (a sandwich) when their directions
+// from the centroid point at least this far apart (dot ≤ -0.5 ≈ >120°). Catches
+// vertical crushes (floor/ceiling) AND side crushes (wall/wall) alike.
+pub const CRUSH_OPPOSING_DOT: Fx = Fx::from_raw(-(1i64 << 32) / 2); // -0.5
+// While SANDWICHED (touched on opposing sides), a hull area below this fraction
+// of rest means the blob is actively being squeezed → it's a crush. A blob just
+// resting under a static platform sits near 1.0 and isn't flagged.
+pub const INTEGRITY_CRUSH_AREA_RATIO: Fx = Fx::from_raw((9i64 << 32) / 10); // 0.9
 
 const FX_FRAC_1_60: Fx = Fx::from_raw((1i64 << 32) / 60); // 1/60
 const FX_FRAC_1_240: Fx = Fx::from_raw((1i64 << 32) / 240); // 1/240
@@ -206,6 +220,17 @@ pub struct SoftBodyWorld {
     // edge during collision resolution. Reset each step alongside the other
     // contact trackers. Consumed by ledge-hang detection (slimeBlob.ts).
     pub(crate) particle_touched_this_step: Vec<bool>,
+    /// Like `particle_touched_this_step` but set ONLY for contacts with STATIC
+    /// geometry (not blob-vs-blob). The integrity pass uses this to tell a
+    /// genuine crush (squeezed between walls/platforms) from a blob merely being
+    /// piled on by other soft blobs. Transient per-substep; not snapshotted.
+    pub(crate) particle_touched_static_this_step: Vec<bool>,
+    /// The outward surface normal of each particle's most recent STATIC contact
+    /// this substep (only meaningful where `particle_touched_static_this_step`).
+    /// Crush detection looks for two normals pointing in OPPOSING directions —
+    /// a blob squeezed between surfaces whose normals oppose, rather than just
+    /// pressed flat against one. Transient per-substep; not snapshotted.
+    pub(crate) particle_static_normal_this_step: Vec<FxVec2>,
 
     pub(crate) blob_gravity_override: Vec<Option<FxVec2>>,
     /// Per-blob treadmill strength for THIS step (signed; px/s² along the hull
@@ -219,6 +244,18 @@ pub struct SoftBodyWorld {
     /// false crush. Side-channel (gates the crush event only; never mutates
     /// pos/vel), so it isn't snapshotted.
     pub(crate) blob_crush_frames: Vec<i32>,
+    /// Consecutive SUBSTEPS each blob has been continuously crushed by the
+    /// per-substep integrity pass (`enforce_blob_integrity`). Fires a crush
+    /// death at `INTEGRITY_DEATH_SUBSTEPS`. Side-channel like
+    /// `blob_crush_frames` (the clamp/freeze it drives DO mutate pos/vel, which
+    /// are snapshotted; the counter itself is re-derivable) — not snapshotted.
+    pub(crate) blob_integrity_violations: Vec<i32>,
+    /// Each blob's hull centroid from the last substep it was FREE (not
+    /// sandwiched between opposing contacts). When a crush is detected the blob
+    /// is reset to its rest pose here, so it dies essentially where it last
+    /// stood rather than drifting/tunnelling through the crusher. Side-channel,
+    /// not snapshotted (re-derived from the snapshotted pos).
+    pub(crate) blob_safe_centroid: Vec<FxVec2>,
     pub(crate) blob_pin_snapshots: Vec<(BlobId, Vec<FxVec2>)>, // sorted
 
     pub(crate) base_masses: Vec<(BlobId, Vec<Fx>)>, // sorted
@@ -324,9 +361,13 @@ impl SoftBodyWorld {
             blob_sticky_contact_count: Vec::new(),
             blob_sticky_contact_normal_sum: Vec::new(),
             particle_touched_this_step: Vec::new(),
+            particle_touched_static_this_step: Vec::new(),
+            particle_static_normal_this_step: Vec::new(),
             blob_gravity_override: Vec::new(),
             blob_tread_strength: Vec::new(),
             blob_crush_frames: Vec::new(),
+            blob_integrity_violations: Vec::new(),
+            blob_safe_centroid: Vec::new(),
             blob_pin_snapshots: Vec::new(),
             base_masses: Vec::new(),
             config,
@@ -1028,8 +1069,18 @@ impl SoftBodyWorld {
         self.blob_impact_contact_point.clear();      self.blob_impact_contact_point.resize(nb, None);
         self.blob_impact_contact_normal.clear();     self.blob_impact_contact_normal.resize(nb, None);
         self.particle_touched_this_step.clear();     self.particle_touched_this_step.resize(self.pos.len(), false);
+        self.particle_touched_static_this_step.clear(); self.particle_touched_static_this_step.resize(self.pos.len(), false);
+        self.particle_static_normal_this_step.clear(); self.particle_static_normal_this_step.resize(self.pos.len(), FxVec2::ZERO);
         self.solve_collisions(dt);
         self.solve_particle_collisions(dt);
+
+        // 9b. Per-substep blob integrity: stop the depenetration solver from
+        // teleporting a squeezed blob through a collider, cap hull over-spread,
+        // and freeze + flag a continuously-crushed blob for death. Runs after
+        // both collision solvers (so it clamps the final post-collision pos)
+        // and before the centre-pin (13) so the pinned centre reflects the
+        // clamped hull. `prev_pos` is this substep's start position.
+        self.enforce_blob_integrity();
 
         // 10. Triggers
         self.process_trigger_events();
@@ -1061,6 +1112,114 @@ impl SoftBodyWorld {
         // under expand), and (b) the center can never be wedged inside
         // a polygon since it's always recomputed from hull positions.
         self.pin_blob_centers_to_hull_centroid();
+    }
+
+    /// Per-substep "blob integrity" pass. For every active hull blob:
+    ///   - **Crush → reset to last-free pose**: a blob is crushed when it is
+    ///     SANDWICHED — touching STATIC geometry on opposing sides in ANY
+    ///     orientation (floor/ceiling OR wall/wall) — AND being squeezed (hull
+    ///     area below `INTEGRITY_CRUSH_AREA_RATIO`).
+    ///     It's rebuilt at its rest shape at `blob_safe_centroid` (the last
+    ///     position it stood free) with zero velocity, so it dies where it was
+    ///     instead of tunnelling through the crusher, and the substep is counted.
+    ///     After `INTEGRITY_DEATH_SUBSTEPS` continuous crushed substeps, flag a
+    ///     crush death. Static-only sandwich means soft blobs piling on each
+    ///     other (normal play) is never mistaken for a crush.
+    ///   - **Otherwise**: record the free centroid (the next crush's reset
+    ///     target) and clear the crush counter. Free hulls are left alone so
+    ///     fast launches / squash / lean aren't fought.
+    ///
+    /// All fixed-point + fixed iteration order → deterministic. The counters are
+    /// side-channels; the pos/vel writes are part of the snapshotted sim.
+    fn enforce_blob_integrity(&mut self) {
+        let nb = self.blob_ranges.len();
+        if self.blob_integrity_violations.len() < nb { self.blob_integrity_violations.resize(nb, 0); }
+        if self.blob_safe_centroid.len() < nb { self.blob_safe_centroid.resize(nb, FxVec2::ZERO); }
+
+        for bi in 0..nb {
+            let r = self.blob_ranges[bi].clone();
+            if r.inactive || r.hull.is_empty() {
+                self.blob_integrity_violations[bi] = 0;
+                continue;
+            }
+            let si = r.shape_idx as usize;
+            if si >= self.shapes.len() { continue; }
+            let rest_local = {
+                let sh = &self.shapes[si];
+                if sh.rest_local.is_empty() { continue; }
+                sh.rest_local.clone()
+            };
+            let target_area = self.shape_pressure_target_area(si);
+
+            let hull_us: Vec<usize> = r.hull.iter().map(|&i| i as usize).collect();
+            let c = centroid_from_indices(&self.pos, &hull_us);
+
+            // Hull area vs the area it's trying to hold (over-compression test).
+            let hull_poly: Vec<FxVec2> = hull_us.iter().map(|&i| self.pos[i]).collect();
+            let cur_area = Fx::from_raw(signed_area_polygon(&hull_poly).raw().abs());
+            let compressed = target_area > Fx::ZERO && cur_area < target_area * INTEGRITY_CRUSH_AREA_RATIO;
+
+            // Sandwiched: STATIC surfaces pressing from OPPOSING directions — in
+            // ANY orientation, so a side crush (wall vs wall) counts the same as
+            // a vertical one (floor vs ceiling). We compare the surface NORMALS
+            // (push directions), NOT point positions: a blob squished flat onto
+            // one floor has every contact normal pointing up (not opposing), so
+            // it's not mistaken for a crush; a real pinch has opposing normals.
+            // A resting ground contact (`blob_ground_contacts`, registered while
+            // merely standing on a floor before any penetration) adds an upward
+            // normal. Static-only means soft blobs piling on is NOT a crush.
+            let grav = self.blob_gravity_override.get(bi).copied().flatten().unwrap_or(self.config.gravity);
+            let mut normals: Vec<FxVec2> = Vec::new();
+            for &h in r.hull.iter() {
+                let hu = h as usize;
+                if self.inv_mass[hu].is_zero() { continue; }
+                if !self.particle_touched_static_this_step.get(hu).copied().unwrap_or(false) { continue; }
+                let n = self.particle_static_normal_this_step[hu];
+                if n.length_squared() > Fx::from_raw(1i64 << 30) { normals.push(n); }
+            }
+            let has_ground = self.blob_ground_contacts.get(bi).copied().unwrap_or(0) > 0;
+            if has_ground && grav.length_squared() > Fx::ONE {
+                normals.push(grav.normalize().scale(Fx::from_int(-1)));
+            }
+            let mut sandwiched = false;
+            'pair: for i in 0..normals.len() {
+                for j in (i + 1)..normals.len() {
+                    if normals[i].dot(normals[j]) < CRUSH_OPPOSING_DOT { sandwiched = true; break 'pair; }
+                }
+            }
+
+            // A crush = squeezed between opposing static geometry. (Over-expansion
+            // isn't lethal — fast falls / launches stretch the hull harmlessly.)
+            let crushed = sandwiched && compressed;
+
+            if crushed {
+                // Rebuild the rest pose at the last free centroid: holds the
+                // blob in place (no tunnel), de-deforms it, zeroes velocity.
+                let target = self.blob_safe_centroid[bi];
+                self.pos[r.start as usize] = target;
+                self.vel[r.start as usize] = FxVec2::ZERO;
+                for (k, &h) in r.hull.iter().enumerate() {
+                    let local = rest_local.get(k).copied().unwrap_or(FxVec2::ZERO);
+                    self.pos[h as usize] = target.add(local);
+                    self.vel[h as usize] = FxVec2::ZERO;
+                }
+                self.blob_integrity_violations[bi] += 1;
+                if self.blob_integrity_violations[bi] >= INTEGRITY_DEATH_SUBSTEPS {
+                    let bid = bi as BlobId;
+                    if !self.pending_crush_events.contains(&bid) {
+                        self.pending_crush_events.push(bid);
+                    }
+                }
+                continue;
+            }
+
+            // Free this substep: remember where we stood (for the next crush's
+            // reset target) and reset the crush counter. Over-expansion isn't
+            // clamped here — a crush is held at rest by the reset above, and
+            // clamping a free hull would fight legitimate fast launches / squash.
+            if !sandwiched { self.blob_safe_centroid[bi] = c; }
+            self.blob_integrity_violations[bi] = 0;
+        }
     }
 
     fn pin_blob_centers_to_hull_centroid(&mut self) {
@@ -1567,6 +1726,10 @@ impl SoftBodyWorld {
                 // Any static contact — record per-particle for ledge-hang detection.
                 if pi < self.particle_touched_this_step.len() {
                     self.particle_touched_this_step[pi] = true;
+                }
+                if pi < self.particle_touched_static_this_step.len() {
+                    self.particle_touched_static_this_step[pi] = true;
+                    self.particle_static_normal_this_step[pi] = n;
                 }
                 // Ground-contact tracking (most upward-facing wins).
                 let neg_three_tenths = Fx::from_raw((-3i64 * (1i64 << 32)) / 10);
@@ -3046,6 +3209,225 @@ mod tests {
             "ceiling friction should slow lateral coasting: early={} late={}",
             v_early.to_f64(), v_late.to_f64(),
         );
+    }
+
+    /// Build a world with a floor (top y=100) and a player-ish square blob
+    /// settled on it, plus a ceiling polygon we descend onto the blob.
+    /// Returns (world, blob, ceiling_idx, settled_centroid, hull).
+    fn crush_setup(seed: u32) -> (SoftBodyWorld, BlobResult, usize, FxVec2, Vec<ParticleIdx>) {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, seed);
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(100)), FxVec2::new(fx(800), fx(100)),
+            FxVec2::new(fx(800), fx(300)), FxVec2::new(fx(-800), fx(300)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let ceil_idx = w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(-240)), FxVec2::new(fx(800), fx(-240)),
+            FxVec2::new(fx(800), fx(-40)), FxVec2::new(fx(-800), fx(-40)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "p");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..60 { w.step(dt); }
+        let hull = res.hull_indices.clone();
+        let mut c = FxVec2::ZERO;
+        for &h in &hull { c = c.add(w.pos[h as usize]); }
+        let c0 = c.scale(Fx::ONE / Fx::from_int(hull.len() as i32));
+        (w, res, ceil_idx, c0, hull)
+    }
+
+    fn hull_centroid(w: &SoftBodyWorld, hull: &[ParticleIdx]) -> FxVec2 {
+        let mut c = FxVec2::ZERO;
+        for &h in hull { c = c.add(w.pos[h as usize]); }
+        c.scale(Fx::ONE / Fx::from_int(hull.len() as i32))
+    }
+
+    // A blob crushed between a static floor and a descending platform must:
+    //   (1) die within 10px of where it stood (never tunnel through),
+    //   (2) never let a hull point spread >50px past its rest radius,
+    //   (3) actually get flagged for a crush death.
+    #[test]
+    fn crush_holds_blob_in_place_and_flags_death() {
+        let (mut w, _res, ceil_idx, c0, hull) = crush_setup(1);
+        let dt = Fx::ONE / Fx::from_int(60);
+        // Square blob: rest corner radius √(20²+20²) ≈ 28.3 → spread cap ≈ 78.3.
+        let rest_corner = FxVec2::new(fx(20), fx(20)).length().to_f64();
+        let spread_cap = rest_corner + 50.0;
+
+        // Descend the ceiling bottom 4px/step until the crush fires — in game
+        // the blob is killed/respawned on that first event, so the drift at that
+        // moment is what "die within 10px" means.
+        let mut crush_drift = -1.0f64;
+        let mut cy = -40i32;
+        for _ in 0..40 {
+            cy += 4;
+            w.static_surfaces[ceil_idx].poly = vec![
+                FxVec2::new(fx(-800), fx(cy-200)), FxVec2::new(fx(800), fx(cy-200)),
+                FxVec2::new(fx(800), fx(cy)), FxVec2::new(fx(-800), fx(cy)),
+            ];
+            w.step(dt);
+            let crushed = !w.take_crush_events().is_empty();
+            let c = hull_centroid(&w, &hull);
+            // (2) no hull point spreads past rest + 50 at any point.
+            for &h in &hull {
+                let d = w.pos[h as usize].sub(c).length().to_f64();
+                assert!(d < spread_cap + 1.0, "hull point spread {:.1} > cap {:.1}", d, spread_cap);
+            }
+            if crushed { crush_drift = c.sub(c0).length().to_f64(); break; }
+        }
+        // (3) the crush must have been flagged, and (1) within 10px of the ground.
+        assert!(crush_drift >= 0.0, "a crush death should have been flagged");
+        assert!(crush_drift < 10.0, "blob drifted {:.1}px before the crush fired", crush_drift);
+    }
+
+    // The whole crush sequence must be byte-identical across two worlds — the
+    // integrity pass is part of the deterministic fixed-point sim.
+    #[test]
+    fn crush_is_deterministic() {
+        let (mut a, _ra, ca_idx, _ca0, ha) = crush_setup(7);
+        let (mut b, _rb, cb_idx, _cb0, hb) = crush_setup(7);
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut cy = -40i32;
+        for _ in 0..40 {
+            cy += 4;
+            let poly = vec![
+                FxVec2::new(fx(-800), fx(cy-200)), FxVec2::new(fx(800), fx(cy-200)),
+                FxVec2::new(fx(800), fx(cy)), FxVec2::new(fx(-800), fx(cy)),
+            ];
+            a.static_surfaces[ca_idx].poly = poly.clone();
+            b.static_surfaces[cb_idx].poly = poly;
+            a.step(dt);
+            b.step(dt);
+            assert_eq!(a.take_crush_events(), b.take_crush_events());
+            for (&pa, &pb) in ha.iter().zip(hb.iter()) {
+                assert_eq!(a.pos[pa as usize].x.raw(), b.pos[pb as usize].x.raw());
+                assert_eq!(a.pos[pa as usize].y.raw(), b.pos[pb as usize].y.raw());
+            }
+        }
+    }
+
+    // The integrity pass must NOT clamp or crush-flag a fast free fall (the
+    // fall-off-the-map kill plane relies on blobs actually falling fast).
+    #[test]
+    fn freefall_is_not_clamped_or_crushed_by_integrity() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(3920));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 1);
+        let res = standard_square_blob(&mut w, FxVec2::new(fx(2000), fx(-200)), "f");
+        let dt = Fx::ONE / Fx::from_int(60);
+        let y0 = w.pos[res.center_idx as usize].y.to_f64();
+        for _ in 0..180 { w.step(dt); }
+        let y1 = w.pos[res.center_idx as usize].y.to_f64();
+        assert!(y1 - y0 > 10000.0, "freefall slowed by integrity pass: only {:.0}px", y1 - y0);
+        assert!(w.take_crush_events().is_empty(), "a free fall must not be flagged as a crush");
+    }
+
+    // Two blobs side-by-side under a descending platform must BOTH be crushed —
+    // their blob-vs-blob contact in the middle must not hide either one's
+    // floor+ceiling static sandwich.
+    #[test]
+    fn two_blobs_crushed_together_both_die() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 3);
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(100)), FxVec2::new(fx(800), fx(100)),
+            FxVec2::new(fx(800), fx(300)), FxVec2::new(fx(-800), fx(300)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let ceil = w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(-240)), FxVec2::new(fx(800), fx(-240)),
+            FxVec2::new(fx(800), fx(-40)), FxVec2::new(fx(-800), fx(-40)),
+        ], SurfaceMaterial::Default, None, None, None);
+        // Close enough to touch once squeezed (square half-width 20).
+        let a = standard_square_blob(&mut w, FxVec2::new(fx(-28), fx(0)), "a");
+        let b = standard_square_blob(&mut w, FxVec2::new(fx(28), fx(0)), "b");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..60 { w.step(dt); }
+
+        let mut crushed: Vec<BlobId> = Vec::new();
+        let mut cy = -40i32;
+        for _ in 0..40 {
+            cy += 4;
+            w.static_surfaces[ceil].poly = vec![
+                FxVec2::new(fx(-800), fx(cy-200)), FxVec2::new(fx(800), fx(cy-200)),
+                FxVec2::new(fx(800), fx(cy)), FxVec2::new(fx(-800), fx(cy)),
+            ];
+            w.step(dt);
+            for id in w.take_crush_events() { if !crushed.contains(&id) { crushed.push(id); } }
+            if crushed.contains(&a.blob_id) && crushed.contains(&b.blob_id) { break; }
+        }
+        assert!(crushed.contains(&a.blob_id), "left blob should be crushed");
+        assert!(crushed.contains(&b.blob_id), "right blob should be crushed");
+    }
+
+    // A victim blob pressed hard onto a grounded bystander must NOT crush the
+    // bystander — the only thing above it is a soft blob, not static geometry.
+    #[test]
+    fn landed_on_bystander_is_not_crushed() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(3920));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 9);
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(100)), FxVec2::new(fx(800), fx(100)),
+            FxVec2::new(fx(800), fx(300)), FxVec2::new(fx(-800), fx(300)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let by = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(60)), "by");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..60 { w.step(dt); }
+        let vic = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(-200)), "vic");
+        let mut by_crushed = false;
+        for _ in 0..120 {
+            let down = FxVec2::new(Fx::ZERO, Fx::ONE);
+            w.apply_blob_move_force(vic.blob_id, down, fx(180) * fx(60), dt);
+            w.step(dt);
+            if w.take_crush_events().contains(&by.blob_id) { by_crushed = true; break; }
+        }
+        assert!(!by_crushed, "a piled-on bystander must not be crushed");
+    }
+
+    // A blob squeezed sideways between two walls (one closing in) must die — the
+    // sandwich detector is orientation-agnostic, not just floor/ceiling.
+    #[test]
+    fn blob_crushed_from_the_side_dies() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(1000));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 5);
+        // Floor.
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-800), fx(100)), FxVec2::new(fx(800), fx(100)),
+            FxVec2::new(fx(800), fx(300)), FxVec2::new(fx(-800), fx(300)),
+        ], SurfaceMaterial::Default, None, None, None);
+        // Fixed left wall: its right face is at x = -60.
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-260), fx(-300)), FxVec2::new(fx(-60), fx(-300)),
+            FxVec2::new(fx(-60), fx(100)), FxVec2::new(fx(-260), fx(100)),
+        ], SurfaceMaterial::Default, None, None, None);
+        // Right wall: left face starts at x = 60, slides left to crush the blob.
+        let rw = w.register_static_polygon(vec![
+            FxVec2::new(fx(60), fx(-300)), FxVec2::new(fx(260), fx(-300)),
+            FxVec2::new(fx(260), fx(100)), FxVec2::new(fx(60), fx(100)),
+        ], SurfaceMaterial::Default, None, None, None);
+        let blob = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(60)), "s");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..60 { w.step(dt); }
+
+        let mut crushed = false;
+        let mut rx = 60i32;
+        for _ in 0..50 {
+            rx -= 4;
+            w.static_surfaces[rw].poly = vec![
+                FxVec2::new(fx(rx), fx(-300)), FxVec2::new(fx(rx+200), fx(-300)),
+                FxVec2::new(fx(rx+200), fx(100)), FxVec2::new(fx(rx), fx(100)),
+            ];
+            w.step(dt);
+            if w.take_crush_events().contains(&blob.blob_id) { crushed = true; break; }
+        }
+        assert!(crushed, "a blob crushed sideways between two walls must die");
     }
 
     #[test]
