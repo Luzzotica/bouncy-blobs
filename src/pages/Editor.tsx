@@ -31,16 +31,24 @@ import {
   readSubscribedLevelJson,
   type WorkshopItemDetail,
 } from '../lib/workshopApi';
+import {
+  COLORS,
+  HAIRLINE,
+  pickerLabel,
+  paperBtnSm,
+  actionBtn,
+  actionBtnSm,
+} from '../theme/uiTheme';
 
 const LEVEL_TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
-  team_racing: 'Chained Climb',
+  team_racing: 'Chained Together',
   party: 'Party',
   koth: 'King of the Hill',
 };
 
 // Modes the editor lets you author. Party stays out until its mode is fixed;
-// Chained Climb is gated on the `chainedClimb` feature flag (hidden in demo builds).
+// Chained Together is gated on the `chainedClimb` feature flag (hidden in demo builds).
 const EDITOR_LEVEL_TYPES: LevelType[] = [
   'solo_racing',
   ...(features.chainedClimb ? (['team_racing'] as LevelType[]) : []),
@@ -104,10 +112,10 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
   };
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f1629', gap: 20 }}>
-      <h2 style={{ color: '#c77dff', fontSize: 24, margin: 0 }}>New Level</h2>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: COLORS.paper, gap: 20 }}>
+      <h2 style={{ color: COLORS.ink, fontWeight: 900, fontSize: 24, margin: 0 }}>New Level</h2>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-        <label style={{ color: '#aaa', fontSize: 13 }}>Name</label>
+        <label style={{ color: COLORS.inkFaint, fontSize: 13 }}>Name</label>
         <input
           type="text"
           autoFocus
@@ -118,12 +126,12 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
           maxLength={80}
           style={{
             padding: '8px 12px', fontSize: 15, minWidth: 280,
-            background: '#1a2240', border: '1px solid #2a3a5a', borderRadius: 6,
-            color: '#fff', textAlign: 'center',
+            background: COLORS.paperInput, border: '2px solid #0a0612', borderRadius: 4,
+            color: COLORS.ink, textAlign: 'center',
           }}
         />
       </div>
-      <p style={{ color: '#888', fontSize: 14, margin: 0 }}>Select one or more modes this map supports</p>
+      <p style={{ color: COLORS.inkFaint, fontSize: 14, margin: 0 }}>Select one or more modes this map supports</p>
       <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
         {EDITOR_LEVEL_TYPES.map(lt => {
           const active = selected.has(lt);
@@ -135,7 +143,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
                 padding: '24px 32px',
                 fontSize: 16,
                 fontWeight: 'bold',
-                background: active ? LEVEL_TYPE_COLORS[lt] + '22' : '#1a2240',
+                background: active ? LEVEL_TYPE_COLORS[lt] + '22' : COLORS.paperInput,
                 border: `2px solid ${active ? LEVEL_TYPE_COLORS[lt] : LEVEL_TYPE_COLORS[lt] + '44'}`,
                 borderRadius: 12,
                 color: LEVEL_TYPE_COLORS[lt],
@@ -146,7 +154,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
               }}
             >
               <div>{LEVEL_TYPE_LABELS[lt]}</div>
-              <div style={{ fontSize: 11, color: '#888', marginTop: 6, fontWeight: 'normal' }}>
+              <div style={{ fontSize: 11, color: COLORS.inkFaint, marginTop: 6, fontWeight: 'normal' }}>
                 {LEVEL_TYPE_DESCRIPTIONS[lt]}
               </div>
             </button>
@@ -156,7 +164,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
       <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
         <button
           onClick={onBack}
-          style={{ padding: '8px 20px', fontSize: 13, background: '#2a3a5a', border: 'none', borderRadius: 6, color: '#aaa', cursor: 'pointer' }}
+          style={{ ...paperBtnSm, padding: '8px 20px' }}
         >
           Back
         </button>
@@ -164,11 +172,10 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
           onClick={() => onCreateNew(Array.from(selected), trimmedName)}
           disabled={!canSubmit}
           style={{
-            padding: '8px 24px', fontSize: 14, fontWeight: 'bold',
-            background: canSubmit ? '#c77dff' : '#333',
-            border: 'none', borderRadius: 6,
-            color: canSubmit ? '#fff' : '#666',
+            ...actionBtn(COLORS.lavender, COLORS.ink),
+            padding: '8px 24px', fontSize: 14,
             cursor: canSubmit ? 'pointer' : 'not-allowed',
+            opacity: canSubmit ? 1 : 0.5,
           }}
         >
           {busy ? 'Creating…' : 'Create Level'}
@@ -183,10 +190,10 @@ function SaveStatusBadge({ status }: { status: 'idle' | 'saving' | 'saved' | 'er
     : status === 'saved' ? 'Saved ✓'
     : status === 'error' ? 'Save failed'
     : '';
-  const color = status === 'error' ? '#ff6666'
-    : status === 'saving' ? '#c7a94a'
-    : status === 'saved' ? '#4ae04a'
-    : '#888';
+  const color = status === 'error' ? COLORS.danger
+    : status === 'saving' ? COLORS.inkDim
+    : status === 'saved' ? COLORS.green
+    : COLORS.inkFaint;
   if (!text) return null;
   return <span style={{ color, fontSize: 11, marginRight: 8 }}>{text}</span>;
 }
@@ -493,24 +500,33 @@ export default function Editor() {
   // --- Level list screen ---
   if (phase === 'list') {
     return (
-      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#0f1629' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', background: '#16213e', borderBottom: '1px solid #333' }}>
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.paper }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', background: COLORS.paper, borderBottom: '3px solid #0a0612' }}>
           <Link to="/">
-            <button style={{ padding: '6px 12px', fontSize: 13 }}>Home</button>
+            <button className="bb-hover-btn" style={paperBtnSm}>Home</button>
           </Link>
-          <h2 style={{ color: '#c77dff', fontSize: 20, margin: 0, flex: 1 }}>Level Editor</h2>
+          <h2 style={{ color: COLORS.ink, fontWeight: 900, fontSize: 20, margin: 0, flex: 1, textShadow: '1px 1px 0 rgba(199,125,255,0.4)' }}>Level Editor</h2>
           {steamReady && (
             <button
               onClick={() => { openWorkshopBrowseOverlay().catch(err => alert('Failed to open Workshop: ' + (err?.message ?? err))); }}
-              style={{ padding: '8px 16px', fontSize: 13, background: '#2d6a4f', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer' }}
+              style={actionBtnSm(COLORS.green)}
               title="Browse the Steam Workshop in the Steam overlay"
             >
               Browse Workshop
             </button>
           )}
+          {DEV_MAPS && (
+            <button
+              onClick={() => setShowCampaign(true)}
+              style={actionBtnSm(COLORS.purple)}
+              title="Define the order of levels in the single-player Play campaign"
+            >
+              Campaign
+            </button>
+          )}
           <button
             onClick={() => setPhase('new_level_type')}
-            style={{ padding: '8px 20px', fontSize: 14, background: '#c77dff', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}
+            style={actionBtn(COLORS.lavender, COLORS.ink)}
           >
             + New Level
           </button>
@@ -518,47 +534,48 @@ export default function Editor() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           {/* Local maps */}
-          <h3 style={{ color: '#aaa', fontSize: 14, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: 1 }}>
-            Your Maps {localMaps.length > 0 && <span style={{ color: '#666' }}>({localMaps.length})</span>}
+          <h3 style={{ ...pickerLabel, fontSize: 14, margin: '0 0 12px', letterSpacing: 1 }}>
+            Your Maps {localMaps.length > 0 && <span style={{ color: COLORS.inkDim }}>({localMaps.length})</span>}
           </h3>
           {localMaps.length === 0 ? (
-            <p style={{ color: '#666', fontSize: 13, marginBottom: 32 }}>No saved maps yet. Create one!</p>
+            <p style={{ color: COLORS.inkFaint, fontSize: 13, marginBottom: 32 }}>No saved maps yet. Create one!</p>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginBottom: 32 }}>
               {localMaps.map(item => {
                 const lvl = previewLevels[`local:${item.id}`];
                 return (
                 <div key={item.id} style={{
-                  background: '#1a2240', borderRadius: 8, padding: 12, border: '1px solid #2a3a5a',
+                  background: COLORS.paper, borderRadius: 6, padding: 12, border: '4px solid #0a0612',
+                  boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
                   cursor: 'pointer', transition: 'border-color 0.15s',
                 }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = '#7b68ee')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a3a5a')}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = COLORS.purple)}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#0a0612')}
                   onClick={() => handleEditLocal(item)}
                 >
-                  <div style={{ background: '#0f1629', borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: COLORS.workCanvas, borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {lvl
                       ? <MapPreview level={lvl} width={260} height={160} />
                       : <span style={{ color: '#555', fontSize: 11 }}>Loading…</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: '#ddd', fontSize: 15, fontWeight: 600 }}>{item.name}</span>
+                    <span style={{ color: COLORS.ink, fontSize: 15, fontWeight: 600 }}>{item.name}</span>
                     {item.workshopId && (
                       <span style={{
-                        fontSize: 10, padding: '2px 6px', borderRadius: 3,
-                        background: '#2d8a4f22', color: '#4ae04a',
+                        fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                        background: '#2d8a4f22', color: COLORS.green,
                       }}>Workshop</span>
                     )}
                   </div>
-                  <div style={{ color: '#666', fontSize: 11 }}>
+                  <div style={{ color: COLORS.inkFaint, fontSize: 11 }}>
                     Updated {new Date(item.updatedAtMs).toLocaleDateString()}
                   </div>
                   {lvl && <ModeBadges types={getLevelTypes(lvl)} />}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                     {item.workshopId && (
                       <button
                         onClick={(e) => { e.stopPropagation(); openWorkshopOverlay(item.workshopId!); }}
-                        style={{ background: '#2d6a4f', border: 'none', borderRadius: 3, color: '#fff', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        style={actionBtnSm(COLORS.green)}
                       >
                         View on Workshop
                       </button>
@@ -566,7 +583,7 @@ export default function Editor() {
                     {canRevealInFiles() ? (
                       <button
                         onClick={async (e) => { e.stopPropagation(); try { await revealMapInFiles(item.id); } catch (err: any) { alert('Reveal failed: ' + (err?.message ?? err)); } }}
-                        style={{ background: '#2a3a5a', border: '1px solid #3a4a6a', borderRadius: 3, color: '#ddd', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        style={paperBtnSm}
                         title={item.path}
                       >
                         Show in Finder
@@ -574,14 +591,14 @@ export default function Editor() {
                     ) : (
                       <button
                         onClick={async (e) => { e.stopPropagation(); const mf = await readLocalMap(item.id); await downloadMapJson(item, mf.level); }}
-                        style={{ background: '#2a3a5a', border: '1px solid #3a4a6a', borderRadius: 3, color: '#ddd', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        style={paperBtnSm}
                       >
                         Download
                       </button>
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteLocal(item); }}
-                      style={{ background: '#6b0000', border: 'none', borderRadius: 3, color: '#faa', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                      style={actionBtnSm(COLORS.danger)}
                     >
                       Delete
                     </button>
@@ -595,46 +612,47 @@ export default function Editor() {
           {/* Workshop subscriptions */}
           {steamReady && (
             <>
-              <h3 style={{ color: '#aaa', fontSize: 14, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: 1 }}>
-                Subscribed Workshop Maps {subscribed.length > 0 && <span style={{ color: '#666' }}>({subscribed.length})</span>}
+              <h3 style={{ ...pickerLabel, fontSize: 14, margin: '0 0 12px', letterSpacing: 1 }}>
+                Subscribed Workshop Maps {subscribed.length > 0 && <span style={{ color: COLORS.inkDim }}>({subscribed.length})</span>}
               </h3>
               {subscribed.length === 0 ? (
-                <p style={{ color: '#666', fontSize: 13, marginBottom: 32 }}>
+                <p style={{ color: COLORS.inkFaint, fontSize: 13, marginBottom: 32 }}>
                   None yet. Click <em>Browse Workshop</em> above to find some.
                 </p>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginBottom: 32 }}>
                   {subscribed.map(item => (
                     <div key={item.workshopId} style={{
-                      background: '#1a2240', borderRadius: 8, padding: 12, border: '1px solid #2a3a5a',
+                      background: COLORS.paper, borderRadius: 6, padding: 12, border: '4px solid #0a0612',
+                      boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
                       cursor: 'pointer', transition: 'border-color 0.15s',
                     }}
-                      onMouseEnter={e => (e.currentTarget.style.borderColor = '#7b68ee')}
-                      onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a3a5a')}
+                      onMouseEnter={e => (e.currentTarget.style.borderColor = COLORS.purple)}
+                      onMouseLeave={e => (e.currentTarget.style.borderColor = '#0a0612')}
                       onClick={() => handleEditWorkshop(item)}
                     >
-                      <div style={{ background: '#0f1629', borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ background: COLORS.workCanvas, borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {item.previewUrl
                           ? <img src={item.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           : <span style={{ color: '#555', fontSize: 11 }}>No preview</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span style={{ color: '#ddd', fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.title}</span>
-                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, background: '#2d8a4f22', color: '#4ae04a' }}>Workshop</span>
+                        <span style={{ color: COLORS.ink, fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.title}</span>
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#2d8a4f22', color: COLORS.green }}>Workshop</span>
                       </div>
-                      <div style={{ color: '#666', fontSize: 11 }}>
+                      <div style={{ color: COLORS.inkFaint, fontSize: 11 }}>
                         ▲ {item.numUpvotes} · ▼ {item.numDownvotes}
                       </div>
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); openWorkshopOverlay(item.workshopId); }}
-                          style={{ background: '#2d6a4f', border: 'none', borderRadius: 3, color: '#fff', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                          style={actionBtnSm(COLORS.green)}
                         >
                           View on Workshop
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleUnsubscribe(item); }}
-                          style={{ background: '#6b0000', border: 'none', borderRadius: 3, color: '#faa', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                          style={actionBtnSm(COLORS.danger)}
                         >
                           Unsubscribe
                         </button>
@@ -647,61 +665,62 @@ export default function Editor() {
           )}
 
           {/* Built-in levels */}
-          <h3 style={{ color: '#aaa', fontSize: 14, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Built-in Levels</h3>
+          <h3 style={{ ...pickerLabel, fontSize: 14, margin: '0 0 12px', letterSpacing: 1 }}>Built-in Levels</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginBottom: 32 }}>
             {builtinLevels.map(entry => {
               const lvl = previewLevels[`builtin:${entry.id}`];
               return (
                 <div key={entry.id} style={{
-                  background: '#1a2240', borderRadius: 8, padding: 12, border: '1px solid #2a3a5a',
+                  background: COLORS.paper, borderRadius: 6, padding: 12, border: '4px solid #0a0612',
+                  boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
                   cursor: 'pointer', transition: 'border-color 0.15s',
                 }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = '#7b68ee')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a3a5a')}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = COLORS.purple)}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#0a0612')}
                   onClick={() => (DEV_MAPS ? handleEditBuiltinInPlace(entry) : handleEditBuiltin(entry))}
                 >
-                  <div style={{ background: '#0f1629', borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: COLORS.workCanvas, borderRadius: 4, overflow: 'hidden', marginBottom: 8, aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {lvl
                       ? <MapPreview level={lvl} width={260} height={160} />
                       : <span style={{ color: '#555', fontSize: 11 }}>Loading…</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#ddd', fontSize: 14, fontWeight: 600, flex: 1 }}>{entry.name}</span>
-                    {entry.hidden && <span style={{ fontSize: 10, color: '#888', border: '1px solid #444', borderRadius: 3, padding: '1px 5px' }}>hidden</span>}
+                    <span style={{ color: COLORS.ink, fontSize: 14, fontWeight: 600, flex: 1 }}>{entry.name}</span>
+                    {entry.hidden && <span style={{ fontSize: 10, color: COLORS.inkFaint, border: '1px solid ' + HAIRLINE, borderRadius: 4, padding: '1px 5px' }}>hidden</span>}
                   </div>
                   <ModeBadges types={lvl ? getLevelTypes(lvl) : (entry.levelTypes ?? [])} />
                   {DEV_MAPS ? (
-                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleEditBuiltinInPlace(entry); }}
-                        style={{ background: '#c77dff', border: 'none', borderRadius: 3, color: '#fff', fontSize: 11, padding: '3px 8px', cursor: 'pointer', fontWeight: 600 }}
+                        style={actionBtnSm(COLORS.lavender, COLORS.ink)}
                         title={`Edit ${entry.file} in place — publish overwrites the shipped map`}
                       >
                         Edit in place
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleEditBuiltin(entry); }}
-                        style={{ background: '#2a3a5a', border: '1px solid #3a4a6a', borderRadius: 3, color: '#ddd', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        style={paperBtnSm}
                       >
                         Open as copy
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleToggleHidden(entry); }}
-                        style={{ background: entry.hidden ? '#2d6a4f' : '#3a3a1a', border: '1px solid #5a5a2a', borderRadius: 3, color: entry.hidden ? '#bdf5cd' : '#e0d27a', fontSize: 11, padding: '3px 8px', cursor: 'pointer', marginLeft: 'auto' }}
+                        style={{ ...(entry.hidden ? actionBtnSm(COLORS.green) : actionBtnSm(COLORS.yellow, COLORS.ink)), marginLeft: 'auto' }}
                         title={entry.hidden ? 'Show in hosting flows' : 'Hide from hosting flows (stays editable here)'}
                       >
                         {entry.hidden ? 'Unhide' : 'Hide'}
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleUnpublishBuiltin(entry); }}
-                        style={{ background: '#6b0000', border: 'none', borderRadius: 3, color: '#faa', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                        style={actionBtnSm(COLORS.danger)}
                         title={`Delete ${entry.file} from the repo`}
                       >
                         Unpublish
                       </button>
                     </div>
                   ) : (
-                    <div style={{ color: '#888', fontSize: 11, marginTop: 2 }}>Opens as copy</div>
+                    <div style={{ color: COLORS.inkFaint, fontSize: 11, marginTop: 2 }}>Opens as copy</div>
                   )}
                 </div>
               );
@@ -709,6 +728,7 @@ export default function Editor() {
           </div>
 
         </div>
+        {showCampaign && <CampaignEditor onClose={() => setShowCampaign(false)} />}
       </div>
     );
   }
@@ -720,8 +740,8 @@ export default function Editor() {
   // --- Editing phase ---
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', background: '#16213e', borderBottom: '1px solid #333' }}>
-        <button onClick={handleBackToList} style={{ padding: '6px 12px', fontSize: 13 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', background: COLORS.paper, borderBottom: '3px solid #0a0612' }}>
+        <button onClick={handleBackToList} style={paperBtnSm}>
           Back
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
@@ -755,11 +775,11 @@ export default function Editor() {
                   padding: '1px 6px',
                   borderRadius: 3,
                   background: enabled ? LEVEL_TYPE_COLORS[lt] + '44' : 'transparent',
-                  color: enabled ? LEVEL_TYPE_COLORS[lt] : (disabled ? '#555' : '#888'),
+                  color: enabled ? LEVEL_TYPE_COLORS[lt] : (disabled ? COLORS.inkFaint : COLORS.inkDim),
                   fontWeight: 600,
                   border: enabled
-                    ? (showWarn ? '1px solid #ff5555' : `1px solid ${LEVEL_TYPE_COLORS[lt]}`)
-                    : (disabled ? '1px dashed #333' : '1px dashed #666'),
+                    ? (showWarn ? '1px solid ' + COLORS.danger : `1px solid ${LEVEL_TYPE_COLORS[lt]}`)
+                    : (disabled ? '1px dashed ' + HAIRLINE : '1px dashed ' + COLORS.inkDim),
                   cursor: (disabled || wouldRemoveLast) ? 'not-allowed' : 'pointer',
                   opacity: disabled ? 0.55 : 1,
                   textAlign: 'left',
@@ -776,22 +796,22 @@ export default function Editor() {
           <EditorToolbar state={editorState} onUpdate={forceUpdate} onTestPlay={handleTestPlay} steamAvailable={steamReady} />
         </div>
         {DEV_MAPS && (
-          <button
-            onClick={() => setShowPublishGame(true)}
-            style={{ padding: '6px 12px', fontSize: 12, background: '#c77dff', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
-            title="Write this map into public/levels so it ships with the game"
-          >
-            {editorState.builtinId ? `Publish ▸ ${editorState.builtinId}` : 'Publish to Game'}
-          </button>
-        )}
-        {DEV_MAPS && (
-          <button
-            onClick={() => setShowCampaign(true)}
-            style={{ padding: '6px 12px', fontSize: 12, background: '#5a189a', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
-            title="Define the order of levels in the single-player Play campaign"
-          >
-            Campaign
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginRight: 8 }}>
+            <button
+              onClick={() => setShowPublishGame(true)}
+              style={actionBtnSm(COLORS.lavender, COLORS.ink)}
+              title="Write this map into public/levels so it ships with the game"
+            >
+              {editorState.builtinId ? `Publish ▸ ${editorState.builtinId}` : 'Publish to Game'}
+            </button>
+            <button
+              onClick={() => setShowCampaign(true)}
+              style={actionBtnSm(COLORS.purple)}
+              title="Define the order of levels in the single-player Play campaign"
+            >
+              Campaign
+            </button>
+          </div>
         )}
         <SaveStatusBadge status={saveStatus} />
       </div>

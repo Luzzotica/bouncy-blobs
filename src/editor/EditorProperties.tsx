@@ -1,5 +1,6 @@
 import React from 'react';
 import { EditorState, SPRING_SIZE_PRESETS } from './EditorState';
+import { COLORS, HAIRLINE, paperPanel, paperBtnSm, actionBtnSm, inputSm, pickerLabel } from '../theme/uiTheme';
 import type { HullPreset } from '../physics/slimeBlob';
 import { allSprites } from '../assets/spriteRegistry';
 
@@ -45,14 +46,14 @@ function RotationActionsSection({
   }
   if (matches.length === 0) return null;
   return (
-    <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
-      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Rotation animations</div>
+    <div style={{ marginTop: 10, borderTop: '1px solid ' + HAIRLINE, paddingTop: 8 }}>
+      <div style={{ ...pickerLabel, marginBottom: 4 }}>Rotation animations</div>
       {matches.map(({ action, target, idx }) => {
         // Display the DELTA from rest pose so the number matches what the
         // action will actually animate (this matches the canvas badge).
-        // shapePoint targets are filtered out upstream, so the only kinds
-        // here are 'platform' and 'rotateShape'.
-        if (target.kind === 'shapePoint') return null;
+        // This section only lists platform + rotateShape entities; the other
+        // kinds (incl. spike, handled in the action panel) are filtered out.
+        if (target.kind === 'shapePoint' || target.kind === 'moveShape' || target.kind === 'spike') return null;
         let restRot = 0;
         if (target.kind === 'platform') {
           const plat = state.level.platforms.find(p => p.id === target.platformId);
@@ -69,10 +70,10 @@ function RotationActionsSection({
               style={{
                 flex: 1, textAlign: 'left',
                 background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-                color: '#bbb', fontSize: 11,
+                color: COLORS.ink, fontSize: 11,
               }}
             >
-              {action.id} <span style={{ color: '#666' }}>({action.mode})</span>
+              {action.id} <span style={{ color: COLORS.inkFaint }}>({action.mode})</span>
             </button>
             <input
               type="number"
@@ -83,9 +84,9 @@ function RotationActionsSection({
                 state.setActionTargetEndRotation(action.id, idx, restRot + degToRad(newDeltaDeg));
                 onUpdate();
               }}
-              style={{ background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '2px 4px', fontSize: 11, width: 60 }}
+              style={{ ...inputSm, padding: '2px 4px', fontSize: 11, width: 60 }}
             />
-            <span style={{ color: '#666', fontSize: 10 }}>°</span>
+            <span style={{ color: COLORS.inkFaint, fontSize: 10 }}>°</span>
           </div>
         );
       })}
@@ -101,7 +102,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Group · {groupSize} items</h3>
-        <p style={{ color: '#888', fontSize: 11, margin: '0 0 8px' }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 11, margin: '0 0 8px' }}>
           Shift-click items to add to the group. Click empty space to clear.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -117,11 +118,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           <button onClick={() => { state.align('x'); onUpdate(); }} style={actionStyle}>
             Align X (to first)
           </button>
-          <button onClick={() => { state.clearMultiSelect(); onUpdate(); }} style={{ ...actionStyle, background: '#3a3a3a', marginTop: 8 }}>
+          <button onClick={() => { state.clearMultiSelect(); onUpdate(); }} style={{ ...duplicateStyle, flex: undefined, marginTop: 8 }}>
             Clear group
           </button>
         </div>
-        <p style={{ color: '#666', fontSize: 10, marginTop: 12 }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 12 }}>
           Distribute requires 3+ items. Align uses the first-selected item as the anchor.
         </p>
       </div>
@@ -139,13 +140,51 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         </div>
       );
     }
+    if (state.selectedTool === 'action') {
+      return (
+        <div style={panelStyle}>
+          <h3 style={titleStyle}>Action</h3>
+          <p style={{ color: COLORS.inkFaint, fontSize: 11, lineHeight: 1.5, margin: '0 0 10px' }}>
+            Click a soft-body shape to make the <b style={{ color: COLORS.ink }}>whole shape</b> move, or a platform.
+            Drag the dashed ghost to set where it travels. Alt-click to rotate instead. Enter commits, Esc cancels.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: COLORS.ink, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={state.actionPerVertex}
+              onChange={() => { state.toggleActionPerVertex(); onUpdate(); }}
+            />
+            <span>Move individual points (per-vertex)</span>
+          </label>
+          {state.draftAction && (
+            <p style={{ color: COLORS.inkFaint, fontSize: 11, marginTop: 10 }}>
+              Draft: {state.draftAction.targets.length} target{state.draftAction.targets.length === 1 ? '' : 's'}
+            </p>
+          )}
+        </div>
+      );
+    }
     return (
       <div style={panelStyle}>
-        <h3 style={{ margin: '0 0 8px', fontSize: 14, color: '#888' }}>Properties</h3>
-        <p style={{ color: '#666', fontSize: 13 }}>Select an element to edit</p>
-        <div style={{ marginTop: 16, borderTop: '1px solid #333', paddingTop: 12 }}>
-          <p style={{ color: '#555', fontSize: 11, lineHeight: 1.5 }}>
-            <b style={{ color: '#888' }}>Hotkeys</b><br />
+        <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 900, color: COLORS.ink }}>Properties</h3>
+        <p style={{ color: COLORS.inkFaint, fontSize: 13 }}>Select an element to edit</p>
+        <div style={{ marginTop: 16, borderTop: '1px solid ' + HAIRLINE, paddingTop: 12 }}>
+          <p style={{ color: COLORS.ink, fontSize: 11, fontWeight: 700, margin: '0 0 8px' }}>Level</p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: COLORS.ink, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={state.level.showLava ?? true}
+              onChange={() => { state.setShowLava(!(state.level.showLava ?? true)); onUpdate(); }}
+            />
+            <span>Show lava (death zone)</span>
+          </label>
+          <p style={{ color: COLORS.inkFaint, fontSize: 10, lineHeight: 1.4, margin: '6px 0 0' }}>
+            The fall-off-the-map kill plane stays active either way — this just toggles the lava visual.
+          </p>
+        </div>
+        <div style={{ marginTop: 16, borderTop: '1px solid ' + HAIRLINE, paddingTop: 12 }}>
+          <p style={{ color: COLORS.inkFaint, fontSize: 11, lineHeight: 1.5 }}>
+            <b style={{ color: COLORS.ink }}>Hotkeys</b><br />
             1-9: Switch tools<br />
             R / Shift+R: Rotate 15&deg;<br />
             Del: Delete selected<br />
@@ -171,11 +210,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
       <div style={panelStyle}>
         <h3 style={titleStyle}>Sprite Instance</h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Asset</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Asset</label>
           <select
             value={inst.spriteId}
             onChange={e => { state.updateProperty('spriteId', e.target.value); onUpdate(); }}
-            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+            style={{ flex: 1, background: COLORS.paperInput, color: COLORS.ink, border: '2px solid #0a0612', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}
           >
             {sprites.length === 0 && <option value={inst.spriteId}>{inst.spriteId}</option>}
             {sprites.map(s => (
@@ -190,11 +229,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Scale" value={inst.scale ?? 1} step={0.1}
           onChange={v => { state.updateProperty('scale', Math.max(0.1, v)); onUpdate(); }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Material</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Material</label>
           <select
             value={inst.material ?? 'default'}
             onChange={e => { state.updateProperty('material', e.target.value); onUpdate(); }}
-            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+            style={{ flex: 1, background: COLORS.paperInput, color: COLORS.ink, border: '2px solid #0a0612', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}
           >
             <option value="default">Default</option>
             <option value="ice">Ice</option>
@@ -202,7 +241,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
             <option value="bouncy">Bouncy</option>
           </select>
         </div>
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
           Material only applies to polygon/circle hulls. Point-shape props (pencil) flex regardless.
         </p>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -225,12 +264,12 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Width" value={sp.width} onChange={v => { state.updateProperty('width', Math.max(40, v)); onUpdate(); }} />
         <NumInput label="Height" value={sp.height} onChange={v => { state.updateProperty('height', Math.max(20, v)); onUpdate(); }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Anchors</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Anchors</label>
           <select
             value={anchorsValue}
             disabled={anchorsValue === 'custom'}
             onChange={e => { state.updateProperty('anchors', e.target.value); onUpdate(); }}
-            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+            style={{ flex: 1, background: COLORS.paperInput, color: COLORS.ink, border: '2px solid #0a0612', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}
           >
             <option value="corners">Corners</option>
             <option value="ends">Ends</option>
@@ -245,19 +284,19 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Segments W" value={sp.segW ?? 8} step={1} onChange={v => { state.updateProperty('segW', Math.max(2, Math.floor(v))); onUpdate(); }} />
         <NumInput label="Segments H" value={sp.segH ?? 1} step={1} onChange={v => { state.updateProperty('segH', Math.max(1, Math.floor(v))); onUpdate(); }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Pinned</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Pinned</label>
           <input type="checkbox" checked={!!sp.pinned}
             onChange={e => { state.updateProperty('pinned', e.target.checked); onUpdate(); }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Frame lock</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Frame lock</label>
           <input type="checkbox" checked={!!sp.frameLocked}
             onChange={e => { state.updateProperty('frameLocked', e.target.checked); onUpdate(); }} />
         </div>
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to its rest position (jelly). Frame lock = whole body wobbles on a global spring (rigid platform feel). Combinable.</p>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to its rest position (jelly). Frame lock = whole body wobbles on a global spring (rigid platform feel). Combinable.</p>
         <button
           onClick={() => { state.convertSoftPlatformToPointShape(sp.id); onUpdate(); }}
-          style={{ ...actionStyle, marginTop: 6, background: '#3a4a6a' }}
+          style={{ ...actionStyle, ...actionBtnSm(COLORS.green), padding: '6px 10px', fontSize: 12, marginTop: 6 }}
           title="Bake into an editable point-shape (per-vertex control)."
         >
           Convert to Point Shape
@@ -307,11 +346,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
                 key={p.label}
                 onClick={() => { state.setSpringSize(s.id, i); onUpdate(); }}
                 style={{
-                  flex: 1, padding: '4px 6px', fontSize: 11,
-                  background: i === activeIdx ? '#7b68ee' : '#1a2240',
-                  border: `1px solid ${i === activeIdx ? '#9b88ff' : '#2a3a5a'}`,
+                  flex: 1, padding: '4px 6px', fontSize: 11, fontWeight: 700,
+                  background: i === activeIdx ? COLORS.purple : COLORS.paperInput,
+                  border: '2px solid #0a0612',
                   borderRadius: 4,
-                  color: i === activeIdx ? '#fff' : '#bbb',
+                  color: i === activeIdx ? COLORS.paper : COLORS.ink,
                   cursor: 'pointer',
                 }}
               >
@@ -319,11 +358,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
               </button>
             ))}
           </div>
-          <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Press S to cycle size.</p>
+          <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>Press S to cycle size.</p>
         </div>
         <NumInput label="Rotation" value={radToDeg(s.rotation)} step={15} onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
         <NumInput label="Fire speed" value={s.fireSpeed ?? 1100} step={100} onChange={v => { state.updateProperty('fireSpeed', Math.max(500, Math.min(2500, v))); onUpdate(); }} />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>0°=right, -90°=up, 90°=down · fire speed 500–2500</p>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>0°=right, -90°=up, 90°=down · fire speed 500–2500</p>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
@@ -343,7 +382,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Width" value={s.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
         <NumInput label="Height" value={s.height} onChange={v => { state.updateProperty('height', Math.max(10, v)); onUpdate(); }} />
         <NumInput label="Rotation" value={radToDeg(s.rotation)} step={15} onChange={v => { state.updateProperty('rotation', degToRad(v)); onUpdate(); }} suffix="°" />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Teeth point "up" at 0°</p>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>Teeth point "up" at 0°</p>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
@@ -373,6 +412,10 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
   if (sel.type === 'hillZone') {
     const z = (state.level.hillZones ?? []).find(z => z.id === sel.id);
     if (!z) return null;
+    const hillCount = (state.level.hillZones ?? []).length;
+    const rot = state.level.hillRotation;
+    // Effective interval: the explicit config, or the engine's 2+-hill default.
+    const eff = rot ?? { minSeconds: 8, maxSeconds: 13 };
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Hill Zone</h3>
@@ -384,6 +427,35 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           <button onClick={() => { state.duplicateSelected(); onUpdate(); }} style={duplicateStyle}>Duplicate</button>
           <button onClick={() => { state.deleteSelected(); onUpdate(); }} style={deleteStyle}>Delete</button>
         </div>
+
+        <div style={{ marginTop: 10, borderTop: '1px solid ' + HAIRLINE, paddingTop: 8 }}>
+          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 4 }}>Moving hill (KOTH)</div>
+          {hillCount < 2 ? (
+            <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
+              Add {2 - hillCount} more hill zone{hillCount === 1 ? '' : 's'} to make the hill move. With 2+ hills it jumps to a random other zone every few seconds.
+            </p>
+          ) : (
+            <>
+              <NumInput
+                label="Min"
+                value={eff.minSeconds}
+                step={1}
+                suffix="s"
+                onChange={v => { state.setHillRotation({ minSeconds: Math.max(0.5, v), maxSeconds: Math.max(Math.max(0.5, v), eff.maxSeconds) }); onUpdate(); }}
+              />
+              <NumInput
+                label="Max"
+                value={eff.maxSeconds}
+                step={1}
+                suffix="s"
+                onChange={v => { state.setHillRotation({ minSeconds: eff.minSeconds, maxSeconds: Math.max(eff.minSeconds, v) }); onUpdate(); }}
+              />
+              <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
+                {hillCount} hills — the active hill jumps to a random other zone every Min–Max seconds{rot ? '' : ' (default 8–13s)'}.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -394,7 +466,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Death Zone</h3>
-        <p style={{ color: '#ff8080', fontSize: 11, margin: '0 0 8px' }}>Any blob whose center enters this zone dies instantly.</p>
+        <p style={{ color: COLORS.danger, fontSize: 11, margin: '0 0 8px' }}>Any blob whose center enters this zone dies instantly.</p>
         <NumInput label="X" value={z.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
         <NumInput label="Y" value={z.y} onChange={v => { state.updateProperty('y', v); onUpdate(); }} />
         <NumInput label="Width" value={z.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
@@ -414,7 +486,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Gravity Zone</h3>
-        <p style={{ color: '#888', fontSize: 11, margin: '0 0 8px' }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 11, margin: '0 0 8px' }}>
           Overrides gravity for any blob whose centroid enters this zone.
         </p>
         <NumInput label="X" value={z.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
@@ -422,11 +494,11 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Width" value={z.width} onChange={v => { state.updateProperty('width', Math.max(20, v)); onUpdate(); }} />
         <NumInput label="Height" value={z.height} onChange={v => { state.updateProperty('height', Math.max(20, v)); onUpdate(); }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, marginBottom: 4 }}>
-          <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Field</label>
+          <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Field</label>
           <select
             value={f.kind}
             onChange={e => { state.setGravityFieldType(z.id, e.target.value as 'uniform' | 'point'); onUpdate(); }}
-            style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+            style={{ flex: 1, background: COLORS.paperInput, color: COLORS.ink, border: '2px solid #0a0612', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}
           >
             <option value="uniform">Uniform (direction + strength)</option>
             <option value="point">Point (pull toward centre)</option>
@@ -446,7 +518,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
               step={50}
               onChange={v => { state.setGravityUniformVector(z.id, f.vector.x, v); onUpdate(); }}
             />
-            <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+            <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
               Positive Y = down. (0, 0) = zero-G. Default game gravity is ~+Y.
             </p>
           </>
@@ -459,17 +531,17 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
               onChange={v => { state.setGravityPointParams(z.id, v, f.falloff); onUpdate(); }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, marginBottom: 4 }}>
-              <label style={{ color: '#aaa', fontSize: 12, width: 70 }}>Falloff</label>
+              <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Falloff</label>
               <select
                 value={f.falloff}
                 onChange={e => { state.setGravityPointParams(z.id, f.strength, e.target.value as 'linear' | 'inverseSquare'); onUpdate(); }}
-                style={{ flex: 1, background: '#1a2240', color: '#ddd', border: '1px solid #333', padding: '3px 6px', fontSize: 12 }}
+                style={{ flex: 1, background: COLORS.paperInput, color: COLORS.ink, border: '2px solid #0a0612', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}
               >
                 <option value="linear">Linear</option>
                 <option value="inverseSquare">Inverse-square (gravity-like)</option>
               </select>
             </div>
-            <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+            <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
               Center auto-tracks the zone's position. Negative strength = push outward.
             </p>
           </>
@@ -558,7 +630,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Trigger</h3>
-        <p style={{ color: '#888', fontSize: 11, margin: '0 0 6px' }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 11, margin: '0 0 6px' }}>
           Area that detects blobs. Tick an action below to make this trigger fire it.
         </p>
         <NumInput label="X" value={trig.x} onChange={v => { state.updateProperty('x', v); onUpdate(); }} />
@@ -573,7 +645,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           suffix="s"
           onChange={v => { state.updateProperty('chargeSeconds', Math.max(0, v)); onUpdate(); }}
         />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
           0 = instant. With charge &gt; 0, blob must stay continuously for that long.
         </p>
         <div style={rowStyle}>
@@ -584,20 +656,20 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
             onChange={e => { state.updateProperty('ignoreNpcs', e.target.checked); onUpdate(); }}
           />
         </div>
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>
           When on, only player blobs can press this trigger.
         </p>
-        <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8 }}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Fires actions</div>
+        <div style={{ marginTop: 10, borderTop: '1px solid ' + HAIRLINE, paddingTop: 8 }}>
+          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 4 }}>Fires actions</div>
           {allActions.length === 0 ? (
-            <p style={{ color: '#555', fontSize: 11 }}>No actions in level yet — place one with the Action tool</p>
+            <p style={{ color: COLORS.inkFaint, fontSize: 11 }}>No actions in level yet — place one with the Action tool</p>
           ) : (
             allActions.map(a => {
               const linked = a.sourceTriggerIds.includes(trig.id);
               return (
                 <label
                   key={a.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: '#bbb', cursor: 'pointer' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: COLORS.ink, cursor: 'pointer' }}
                 >
                   <input
                     type="checkbox"
@@ -605,7 +677,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
                     onChange={() => { state.toggleActionSourceTrigger(a.id, trig.id); onUpdate(); }}
                   />
                   <span>{a.id}</span>
-                  <span style={{ color: '#666' }}>({a.mode}, {a.targets.length} target{a.targets.length === 1 ? '' : 's'})</span>
+                  <span style={{ color: COLORS.inkFaint }}>({a.mode}, {a.targets.length} target{a.targets.length === 1 ? '' : 's'})</span>
                 </label>
               );
             })
@@ -625,7 +697,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Point Shape</h3>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 6 }}>
           {shape.points.length} points, {shape.edges.length}{shape.closed ? '+1' : ''} edges
         </div>
         <div style={rowStyle}>
@@ -640,14 +712,14 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         </div>
         <NumInput label="Stiffness" value={shape.stiffness ?? 1.0} step={0.1}
           onChange={v => { state.updateProperty('stiffness', Math.max(0.1, v)); onUpdate(); }} />
-        <p style={{ color: '#666', fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to rest (jelly). Frame lock = whole body wobbles on a global spring. Higher stiffness = more rigid.</p>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 4 }}>Pinned = each vertex springs to rest (jelly). Frame lock = whole body wobbles on a global spring. Higher stiffness = more rigid.</p>
         <RotationActionsSection state={state} entityKind="rotateShape" entityId={shape.id} onUpdate={onUpdate} />
-        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
+        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto', borderTop: '1px solid ' + HAIRLINE, paddingTop: 6 }}>
           {shape.points.map((pt, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, fontSize: 11 }}>
-              <span style={{ color: '#888', width: 22 }}>#{i}</span>
-              <span style={{ color: '#aaa', flex: 1 }}>({Math.round(pt.x)},{Math.round(pt.y)})</span>
-              <label style={{ color: pt.anchored ? '#ffcc55' : '#666', cursor: 'pointer' }}>
+              <span style={{ color: COLORS.inkFaint, width: 22 }}>#{i}</span>
+              <span style={{ color: COLORS.inkDim, flex: 1 }}>({Math.round(pt.x)},{Math.round(pt.y)})</span>
+              <label style={{ color: pt.anchored ? COLORS.pink : COLORS.inkFaint, cursor: 'pointer' }}>
                 <input type="checkbox" checked={pt.anchored}
                   onChange={() => { state.togglePointAnchored(shape.id, i); onUpdate(); }}
                   style={{ marginRight: 2 }} />
@@ -671,7 +743,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Vertex #{sel.pointIndex}</h3>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>of shape {shape.id}</div>
+        <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 6 }}>of shape {shape.id}</div>
         <NumInput label="X" value={pt.x} onChange={v => { pt.x = v; onUpdate(); }} />
         <NumInput label="Y" value={pt.y} onChange={v => { pt.y = v; onUpdate(); }} />
         <NumInput label="Mass" value={pt.mass ?? 1} step={0.1}
@@ -697,7 +769,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Action</h3>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>{action.id}</div>
+        <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 6 }}>{action.id}</div>
 
         <div style={rowStyle}>
           <label style={labelStyle}>Mode</label>
@@ -707,7 +779,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
             {modes.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
-        <p style={{ color: '#666', fontSize: 10, marginTop: 0, marginBottom: 6 }}>
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, marginTop: 0, marginBottom: 6 }}>
           {action.mode === 'continuous' && 'Open while pressed, close on release.'}
           {action.mode === 'switch' && 'Press to toggle. Press again to flip back.'}
           {action.mode === 'oneShot' && 'Fire once on first press, then deaf forever.'}
@@ -739,16 +811,16 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           </select>
         </div>
 
-        <div style={{ marginTop: 10, borderTop: '1px solid #2a3a5a', paddingTop: 8, opacity: action.mode === 'timer' ? 0.4 : 1 }}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+        <div style={{ marginTop: 10, borderTop: '1px solid ' + HAIRLINE, paddingTop: 8, opacity: action.mode === 'timer' ? 0.4 : 1 }}>
+          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 4 }}>
             Source triggers
-            {action.mode === 'timer' && <span style={{ color: '#666', marginLeft: 6 }}>(ignored in timer mode)</span>}
+            {action.mode === 'timer' && <span style={{ color: COLORS.inkFaint, marginLeft: 6 }}>(ignored in timer mode)</span>}
           </div>
           {allTriggers.length === 0 ? (
-            <p style={{ color: '#555', fontSize: 11 }}>No triggers in level yet</p>
+            <p style={{ color: COLORS.inkFaint, fontSize: 11 }}>No triggers in level yet</p>
           ) : (
             allTriggers.map(t => (
-              <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: '#bbb', cursor: 'pointer' }}>
+              <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: 11, color: COLORS.ink, cursor: 'pointer' }}>
                 <input type="checkbox" checked={action.sourceTriggerIds.includes(t.id)}
                   onChange={() => { state.toggleActionSourceTrigger(action.id, t.id); onUpdate(); }} />
                 {t.id}
@@ -768,17 +840,19 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
           )}
         </div>
 
-        <div style={{ marginTop: 10, fontSize: 11, color: '#888' }}>Targets</div>
-        <div style={{ color: '#666', fontSize: 10, marginBottom: 4 }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: COLORS.inkFaint }}>Targets</div>
+        <div style={{ color: COLORS.inkFaint, fontSize: 10, marginBottom: 4 }}>
           Drag a target's dashed ghost on the canvas, or edit values below. Platforms can rotate too.
         </div>
-        <div style={{ maxHeight: 220, overflowY: 'auto', borderTop: '1px solid #2a3a5a', paddingTop: 6 }}>
+        <div style={{ maxHeight: 220, overflowY: 'auto', borderTop: '1px solid ' + HAIRLINE, paddingTop: 6 }}>
           {action.targets.map((t, i) => (
-            <div key={i} style={{ marginBottom: 8, fontSize: 11, color: '#bbb' }}>
-              <div style={{ color: '#888' }}>
+            <div key={i} style={{ marginBottom: 8, fontSize: 11, color: COLORS.ink }}>
+              <div style={{ color: COLORS.inkFaint }}>
                 {t.kind === 'shapePoint' && `${t.shapeId} · #${t.pointIndex}`}
                 {t.kind === 'platform' && `${t.platformId} (platform)`}
+                {t.kind === 'spike' && `${t.spikeId} (spike)`}
                 {t.kind === 'rotateShape' && `${t.shapeId} (rotate hull)`}
+                {t.kind === 'moveShape' && `${t.shapeId} (move whole shape)`}
               </div>
               {t.kind !== 'rotateShape' && (
                 <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
@@ -788,7 +862,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
                     onChange={e => { state.setActionTargetEnd(action.id, i, t.endX, parseFloat(e.target.value) || 0); onUpdate(); }} />
                 </div>
               )}
-              {(t.kind === 'platform' || t.kind === 'rotateShape') && (() => {
+              {(t.kind === 'platform' || t.kind === 'spike' || t.kind === 'rotateShape') && (() => {
                 // End rot is shown + stored as the DELTA from the entity's
                 // closed-pose rotation. Matches the canvas badge and the
                 // entity-side RotationActionsSection so the same number
@@ -797,11 +871,13 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
                 // exactly the platform's closed-pose rotation.)
                 const restRot = t.kind === 'platform'
                   ? (state.level.platforms.find(p => p.id === t.platformId)?.rotation ?? 0)
-                  : 0;
-                const endRot = t.kind === 'platform' ? (t.endRotation ?? restRot) : t.endRotation;
+                  : t.kind === 'spike'
+                    ? ((state.level.spikes ?? []).find(s => s.id === t.spikeId)?.rotation ?? 0)
+                    : 0;
+                const endRot = (t.kind === 'platform' || t.kind === 'spike') ? (t.endRotation ?? restRot) : t.endRotation;
                 return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                    <label style={{ color: '#999', fontSize: 10, width: 60 }}>End rot</label>
+                    <label style={{ color: COLORS.inkDim, fontSize: 10, width: 60 }}>End rot</label>
                     <input
                       type="number"
                       step={15}
@@ -813,7 +889,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
                         onUpdate();
                       }}
                     />
-                    <span style={{ color: '#666', fontSize: 10 }}>°</span>
+                    <span style={{ color: COLORS.inkFaint, fontSize: 10 }}>°</span>
                   </div>
                 );
               })()}
@@ -837,8 +913,8 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
     return (
       <div style={panelStyle}>
         <h3 style={titleStyle}>Chain</h3>
-        <div style={{ fontSize: 11, color: '#bbb', marginBottom: 4 }}>End A: {describeAnchor(chain.endpointA)}</div>
-        <div style={{ fontSize: 11, color: '#bbb', marginBottom: 8 }}>End B: {describeAnchor(chain.endpointB)}</div>
+        <div style={{ fontSize: 11, color: COLORS.ink, marginBottom: 4 }}>End A: {describeAnchor(chain.endpointA)}</div>
+        <div style={{ fontSize: 11, color: COLORS.ink, marginBottom: 8 }}>End B: {describeAnchor(chain.endpointB)}</div>
         <NumInput label="Total length" value={chain.totalLength} step={10}
           onChange={v => { state.updateProperty('totalLength', Math.max(50, v)); onUpdate(); }} />
         <NumInput label="Max segment len" value={chain.maxSegmentLength ?? 25} step={1}
@@ -876,20 +952,20 @@ function NumInput({ label, value, onChange, step, suffix }: {
         onChange={e => onChange(parseFloat(e.target.value) || 0)}
         style={inputStyle}
       />
-      {suffix && <span style={{ color: '#666', fontSize: 11 }}>{suffix}</span>}
+      {suffix && <span style={{ color: COLORS.inkFaint, fontSize: 11 }}>{suffix}</span>}
     </div>
   );
 }
 
 const panelStyle: React.CSSProperties = {
+  ...paperPanel,
   padding: 12,
-  background: '#16213e',
-  borderLeft: '1px solid #333',
+  borderLeft: '3px solid #0a0612',
   width: 220,
   overflowY: 'auto',
 };
 
-const titleStyle: React.CSSProperties = { margin: '0 0 12px', fontSize: 14, color: '#ccc' };
+const titleStyle: React.CSSProperties = { margin: '0 0 12px', fontSize: 14, fontWeight: 900, color: COLORS.ink };
 
 const rowStyle: React.CSSProperties = {
   display: 'flex',
@@ -898,49 +974,34 @@ const rowStyle: React.CSSProperties = {
   marginBottom: 8,
 };
 
-const labelStyle: React.CSSProperties = { fontSize: 12, color: '#999', width: 50, flexShrink: 0 };
+const labelStyle: React.CSSProperties = { fontSize: 12, color: COLORS.inkDim, width: 50, flexShrink: 0 };
 
 const inputStyle: React.CSSProperties = {
+  ...inputSm,
   flex: 1,
   padding: '4px 6px',
   fontSize: 12,
-  background: '#1a1a2e',
-  border: '1px solid #333',
-  borderRadius: 4,
-  color: '#e0e0e0',
 };
 
 const deleteStyle: React.CSSProperties = {
+  ...actionBtnSm(COLORS.danger),
   flex: 1,
   marginTop: 0,
   padding: '6px',
   fontSize: 12,
-  background: '#8b0000',
-  border: 'none',
-  borderRadius: 4,
-  color: '#fff',
-  cursor: 'pointer',
 };
 
 const actionStyle: React.CSSProperties = {
+  ...actionBtnSm(COLORS.purple),
   padding: '6px 10px',
   fontSize: 12,
-  background: '#2a3a5a',
-  border: '1px solid #3a4a6a',
-  borderRadius: 4,
-  color: '#ddd',
-  cursor: 'pointer',
 };
 
 const duplicateStyle: React.CSSProperties = {
+  ...paperBtnSm,
   flex: 1,
   padding: '6px',
   fontSize: 12,
-  background: '#2a4a8a',
-  border: 'none',
-  borderRadius: 4,
-  color: '#fff',
-  cursor: 'pointer',
 };
 
 /** Thumbnail grid of every sprite the registry has loaded. Click one to make
@@ -950,10 +1011,10 @@ function SpritePicker({ state, onUpdate }: { state: EditorState; onUpdate: () =>
   const sprites = allSprites();
   if (sprites.length === 0) {
     return (
-      <div style={{ color: '#888', fontSize: 12, lineHeight: 1.4 }}>
+      <div style={{ color: COLORS.inkFaint, fontSize: 12, lineHeight: 1.4 }}>
         No sprites loaded yet.<br />
-        <span style={{ color: '#666' }}>
-          Run <code style={{ color: '#aaa' }}>./scripts/generate-all-art.sh</code> to generate them.
+        <span style={{ color: COLORS.inkFaint }}>
+          Run <code style={{ color: COLORS.inkDim }}>./scripts/generate-all-art.sh</code> to generate them.
         </span>
       </div>
     );
@@ -970,8 +1031,8 @@ function SpritePicker({ state, onUpdate }: { state: EditorState; onUpdate: () =>
             title={s.def.id}
             style={{
               padding: 6,
-              background: selected ? '#2a4a8a' : '#1a2240',
-              border: selected ? '2px solid #5a8aff' : '1px solid #333',
+              background: selected ? COLORS.lavender : COLORS.paperInput,
+              border: selected ? '2px solid #0a0612' : '2px solid ' + HAIRLINE,
               borderRadius: 4,
               cursor: 'pointer',
               display: 'flex',
@@ -985,7 +1046,7 @@ function SpritePicker({ state, onUpdate }: { state: EditorState; onUpdate: () =>
               alt={s.def.id}
               style={{ width: '100%', maxHeight: 64, objectFit: 'contain', imageRendering: 'auto' }}
             />
-            <span style={{ fontSize: 10, color: '#bbb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+            <span style={{ fontSize: 10, color: COLORS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
               {s.def.id}
             </span>
           </button>

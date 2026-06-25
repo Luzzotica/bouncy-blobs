@@ -3,6 +3,17 @@ import { EditorState } from './EditorState';
 import { getLevelTypes, type LevelType } from '../levels/types';
 import { publishMapToGame, slugifyMapId } from '../lib/devMaps';
 import { invalidateBuiltinCache } from '../levels/levelRegistry';
+import {
+  COLORS,
+  HAIRLINE,
+  modalBackdrop,
+  modalCard,
+  modalTape,
+  paperBtnSm,
+  actionBtnSm,
+  inputSm,
+  pickerLabel,
+} from '../theme/uiTheme';
 
 interface Props {
   state: EditorState;
@@ -16,7 +27,7 @@ const ALL_TYPES: LevelType[] = ['solo_racing', 'koth', 'team_racing', 'party'];
 const TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
   koth: 'King of the Hill',
-  team_racing: 'Chained Climb',
+  team_racing: 'Chained Together',
   party: 'Party',
 };
 
@@ -63,12 +74,13 @@ export default function PublishToGameDialog({ state, existingIds, onClose, onPub
   return (
     <div style={overlay}>
       <div style={panel}>
+        <span style={modalTape} />
         <div style={header}>
-          <span style={{ color: '#ddd', fontSize: 14, fontWeight: 600 }}>Publish to Game (dev)</span>
+          <span style={{ color: COLORS.ink, fontSize: 14, fontWeight: 900, textShadow: '2px 2px 0 #c77dff' }}>Publish to Game (dev)</span>
           <button onClick={onClose} style={closeBtn}>×</button>
         </div>
 
-        <p style={{ color: '#8aa', fontSize: 11, margin: '0 0 12px' }}>
+        <p style={{ color: COLORS.inkDim, fontSize: 11, margin: '0 0 12px' }}>
           Writes <code style={code}>public/levels/{idValid ? id : '<id>'}.json</code> and updates the
           manifest so this map ships with the game. Commit the change to deploy it.
         </p>
@@ -80,11 +92,11 @@ export default function PublishToGameDialog({ state, existingIds, onClose, onPub
         <input
           value={id}
           onChange={e => setId(e.target.value)}
-          style={{ ...input, borderColor: idValid ? '#2a3a5a' : '#ff5555' }}
+          style={{ ...input, borderColor: idValid ? undefined : COLORS.danger }}
         />
-        {!idValid && <div style={{ color: '#ff6666', fontSize: 11, marginTop: 4 }}>Lowercase letters, numbers and dashes only.</div>}
+        {!idValid && <div style={{ color: COLORS.danger, fontSize: 11, marginTop: 4 }}>Lowercase letters, numbers and dashes only.</div>}
         {idValid && overwrites && (
-          <div style={{ color: '#e0b04a', fontSize: 11, marginTop: 4 }}>⚠ Overwrites the existing "{id}" map.</div>
+          <div style={{ color: COLORS.danger, fontSize: 11, marginTop: 4 }}>⚠ Overwrites the existing "{id}" map.</div>
         )}
 
         <label style={label}>Modes</label>
@@ -96,8 +108,8 @@ export default function PublishToGameDialog({ state, existingIds, onClose, onPub
                 key={t}
                 onClick={() => toggleType(t)}
                 style={{
-                  ...input, width: 'auto', flex: '0 0 auto', cursor: 'pointer',
-                  background: on ? '#7b68ee' : '#2a3a5a', color: '#fff',
+                  ...(on ? actionBtnSm(COLORS.lavender, COLORS.ink) : paperBtnSm),
+                  width: 'auto', flex: '0 0 auto',
                 }}
               >{TYPE_LABELS[t]}</button>
             );
@@ -109,14 +121,14 @@ export default function PublishToGameDialog({ state, existingIds, onClose, onPub
           Hidden (dev/test scaffolding — won't show in hosting flows)
         </label>
 
-        {err && <div style={{ color: '#ff6666', fontSize: 12, marginTop: 8 }}>{err}</div>}
+        {err && <div style={{ color: COLORS.danger, fontSize: 12, marginTop: 8 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ ...btn, background: '#444' }}>Cancel</button>
+          <button onClick={onClose} style={paperBtnSm}>Cancel</button>
           <button
             onClick={submit}
             disabled={busy || !idValid || types.length === 0}
-            style={{ ...btn, background: busy || !idValid || types.length === 0 ? '#555' : '#c77dff' }}
+            style={actionBtnSm(COLORS.lavender, COLORS.ink)}
           >
             {busy ? 'Writing…' : overwrites ? 'Overwrite & Publish' : 'Publish'}
           </button>
@@ -126,29 +138,21 @@ export default function PublishToGameDialog({ state, existingIds, onClose, onPub
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
-};
+const overlay: React.CSSProperties = { ...modalBackdrop };
 const panel: React.CSSProperties = {
-  width: 460, background: '#1a2240', border: '1px solid #444', borderRadius: 8,
-  padding: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+  ...modalCard, position: 'relative', width: 460,
 };
 const header: React.CSSProperties = {
   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-  marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid #333',
+  marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid ' + HAIRLINE,
 };
 const closeBtn: React.CSSProperties = {
-  background: 'none', border: 'none', color: '#888', fontSize: 22, cursor: 'pointer', lineHeight: 1,
+  background: 'transparent', border: 'none', color: COLORS.ink, fontSize: 22, cursor: 'pointer', lineHeight: 1,
 };
 const label: React.CSSProperties = {
-  display: 'block', color: '#aaa', fontSize: 11, marginTop: 10, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5,
+  ...pickerLabel, display: 'block', marginTop: 10, marginBottom: 4,
 };
 const input: React.CSSProperties = {
-  width: '100%', padding: '8px 10px', fontSize: 13, background: '#0f1629',
-  border: '1px solid #2a3a5a', borderRadius: 4, color: '#ddd', boxSizing: 'border-box',
+  ...inputSm, width: '100%',
 };
-const btn: React.CSSProperties = {
-  padding: '8px 18px', fontSize: 13, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer',
-};
-const code: React.CSSProperties = { color: '#c7a7ff', background: '#0f1629', padding: '1px 4px', borderRadius: 3 };
+const code: React.CSSProperties = { color: COLORS.purple, background: COLORS.paperInput, border: '1px solid ' + HAIRLINE, padding: '1px 4px', borderRadius: 3 };

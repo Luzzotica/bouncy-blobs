@@ -73,11 +73,19 @@ function ease(t: number, kind: ActionEasing): number {
   }
 }
 
+/** Narrow interface the action system needs to drive a moving spike. Backed
+ *  by SpikeManager — kept minimal so ActionManager stays decoupled. */
+export interface SpikePoser {
+  getSpikeBasePose(spikeId: string): { x: number; y: number; rotation: number } | null;
+  setSpikePose(spikeId: string, x: number, y: number, rotation: number): void;
+}
+
 export class ActionManager {
   private world: SoftBodyEngine | null = null;
   private actions = new Map<string, ActionRuntime>();
   private shapeParticles = new Map<string, number[]>();
   private platformMover: PlatformMover | null = null;
+  private spikePoser: SpikePoser | null = null;
   private triggerMgr: TriggerManager | null = null;
   /** Manager-local clock in seconds. Advances each update(dt). */
   private clock = 0;
@@ -89,9 +97,11 @@ export class ActionManager {
     softPlatformStaticParticles: Map<string, number[]> | undefined,
     platformMover: PlatformMover | null,
     triggerMgr: TriggerManager | null,
+    spikePoser: SpikePoser | null = null,
   ): void {
     this.world = world;
     this.platformMover = platformMover;
+    this.spikePoser = spikePoser;
     this.triggerMgr = triggerMgr;
     this.clock = 0;
 
@@ -116,7 +126,11 @@ export class ActionManager {
           curRot: closed.rot, closedRot: closed.rot,
         });
         tweens.push(null);
-        rotateRest.push(t.kind === 'rotateShape' ? this.snapshotRotateRest(t.shapeId) : null);
+        // Both rotateShape and moveShape need the rest snapshot (centroid +
+        // per-particle offsets); moveShape translates it, rotateShape rotates it.
+        rotateRest.push(
+          t.kind === 'rotateShape' || t.kind === 'moveShape' ? this.snapshotRotateRest(t.shapeId) : null,
+        );
       }
       this.actions.set(def.id, {
         def,
@@ -147,6 +161,24 @@ export class ActionManager {
     }
     if (target.kind === 'rotateShape') {
       // Position is irrelevant; closed rotation is always 0.
+      return { x: 0, y: 0, rot: 0 };
+    }
+    if (target.kind === 'spike') {
+      const base = this.spikePoser?.getSpikeBasePose(target.spikeId);
+      return { x: base?.x ?? 0, y: base?.y ?? 0, rot: base?.rotation ?? 0 };
+    }
+    if (target.kind === 'moveShape') {
+      // Closed pose = rest centroid of the shape's particles.
+      const particleIds = this.shapeParticles.get(target.shapeId);
+      if (particleIds && particleIds.length > 0 && this.world) {
+        let sx = 0, sy = 0, count = 0;
+        for (const id of particleIds) {
+          const p = this.world.pos[id];
+          if (!p) continue;
+          sx += p.x; sy += p.y; count++;
+        }
+        if (count > 0) return { x: sx / count, y: sy / count, rot: 0 };
+      }
       return { x: 0, y: 0, rot: 0 };
     }
     // platform
@@ -274,9 +306,9 @@ export class ActionManager {
       // this is. rotateShape has no position, only rotation; platforms
       // can opt into rotation with their optional endRotation field.
       let openX = ts.closedX, openY = ts.closedY, openRot = ts.closedRot;
-      if (target.kind === 'shapePoint') {
+      if (target.kind === 'shapePoint' || target.kind === 'moveShape') {
         openX = target.endX; openY = target.endY;
-      } else if (target.kind === 'platform') {
+      } else if (target.kind === 'platform' || target.kind === 'spike') {
         openX = target.endX; openY = target.endY;
         openRot = target.endRotation ?? ts.closedRot;
       } else if (target.kind === 'rotateShape') {
@@ -370,6 +402,13 @@ export class ActionManager {
       this.platformMover?.setPose(target.platformId, ts.curX, ts.curY, ts.curRot, dt);
       return;
     }
+    if (target.kind === 'spike') {
+      // Spikes have no physics body — just drive the live pose SpikeManager
+      // reads for collision + render. No kinematic velocity needed (a spike
+      // kills on contact; there's no "carry the blob along" force).
+      this.spikePoser?.setSpikePose(target.spikeId, ts.curX, ts.curY, ts.curRot);
+      return;
+    }
     if (target.kind === 'rotateShape') {
       if (!rest || !this.world) return;
       const cos = Math.cos(ts.curRot);
@@ -381,6 +420,17 @@ export class ActionManager {
         const ty = rest.centroidY + off.x * sin + off.y * cos;
         const pid = rest.particleIds[i];
         this.applyParticleKinematic(pid, tx, ty, dt);
+      }
+      return;
+    }
+    if (target.kind === 'moveShape') {
+      // Rigid translation: every particle = its rest offset + the animated
+      // centroid (ts.curX/curY). Anchored particles stay pinned.
+      if (!rest || !this.world) return;
+      for (let i = 0; i < rest.particleIds.length; i++) {
+        if (rest.anchored[i]) continue;
+        const off = rest.offsets[i];
+        this.applyParticleKinematic(rest.particleIds[i], ts.curX + off.x, ts.curY + off.y, dt);
       }
       return;
     }

@@ -28,9 +28,9 @@ export interface MapOption {
 
 export const MODE_OPTIONS: { id: LevelType; label: string }[] = [
   { id: 'solo_racing', label: 'Racing' },
-  // Chained Climb is gated on the `chainedClimb` feature flag (hidden in demo
-  // builds). Party remains hidden until its mode is fixed up.
-  ...(features.chainedClimb ? [{ id: 'team_racing' as LevelType, label: 'Chained Climb' }] : []),
+  // Chained Together is gated on the `chainedClimb` feature flag (hidden in
+  // demo builds). Party remains hidden until its mode is fixed up.
+  ...(features.chainedClimb ? [{ id: 'team_racing' as LevelType, label: 'Chained Together' }] : []),
   { id: 'koth',        label: 'King of the Hill' },
 ];
 
@@ -80,18 +80,18 @@ export interface LobbyPanelProps {
 const panelStyle: React.CSSProperties = {
   width: 300,
   height: '100%',
-  background: '#181a24',
-  borderRight: '1px solid #2a2d3a',
+  background: '#fffae6',
+  borderRight: '4px solid #0a0612',
   display: 'flex',
   flexDirection: 'column',
   overflowY: 'auto',
   fontSize: 13,
-  color: '#ddd',
+  color: '#1a0f2e',
 };
 
 const sectionStyle: React.CSSProperties = {
   padding: '12px 14px',
-  borderBottom: '1px solid #232634',
+  borderBottom: '1px solid rgba(10,6,18,0.14)',
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
@@ -99,40 +99,47 @@ const sectionStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
-  color: '#888',
+  color: '#6b5e85',
+  fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: 0.5,
 };
 
 const selectStyle: React.CSSProperties = {
-  padding: '6px 8px',
+  padding: '7px 9px',
   fontSize: 13,
-  background: '#222536',
-  color: '#fff',
-  border: '1px solid #353a4c',
+  background: '#fffefb',
+  color: '#1a0f2e',
+  border: '2px solid #0a0612',
   borderRadius: 4,
+  fontFamily: 'inherit',
 };
 
 const buttonStyle: React.CSSProperties = {
-  padding: '6px 12px',
+  padding: '7px 12px',
   fontSize: 13,
-  background: '#2a2d3a',
-  color: '#fff',
-  border: '1px solid #353a4c',
+  fontWeight: 700,
+  background: '#fffefb',
+  color: '#1a0f2e',
+  border: '2px solid #0a0612',
   borderRadius: 4,
   cursor: 'pointer',
+  fontFamily: 'inherit',
 };
 
 const startButtonStyle: React.CSSProperties = {
   padding: '12px 16px',
   fontSize: 16,
-  fontWeight: 700,
-  background: '#2d6a4f',
-  color: '#fff',
-  border: 'none',
+  fontWeight: 800,
+  background: '#5ec27e',
+  color: '#0a2417',
+  border: '3px solid #0a0612',
   borderRadius: 6,
   cursor: 'pointer',
   width: '100%',
+  fontFamily: 'inherit',
+  letterSpacing: 0.5,
+  boxShadow: '0 5px 12px rgba(0,0,0,0.25)',
 };
 
 // ── Face swatch (canvas preview) ───────────────────────────────────────────
@@ -164,17 +171,19 @@ export default function LobbyPanel(props: LobbyPanelProps) {
     <div style={panelStyle} data-testid="lobby-panel">
       {/* Header */}
       <div style={sectionStyle}>
-        <Link to="/" style={{ color: '#888', fontSize: 12, textDecoration: 'none' }}>← Home</Link>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Bouncy Lobby</div>
+        <Link to="/" style={{ color: '#6b5e85', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>← Home</Link>
+        <div style={{ fontSize: 18, fontWeight: 900, color: '#1a0f2e' }}>Bouncy Lobby</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={labelStyle}>Join</span>
           <code data-testid="join-code" style={{
-            background: '#222',
+            background: '#fffefb',
             padding: '3px 8px',
             borderRadius: 4,
+            border: '2px solid #0a0612',
             fontSize: 14,
             letterSpacing: 2,
-            color: '#fff',
+            fontWeight: 800,
+            color: '#1a0f2e',
           }}>{joinCode || '…'}</code>
         </div>
       </div>
@@ -184,7 +193,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
         <div style={labelStyle}>Players ({players.length} / {maxPlayers})</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {players.length === 0 && (
-            <div style={{ color: '#666', fontStyle: 'italic', fontSize: 12 }}>
+            <div style={{ color: '#7a6e8c', fontStyle: 'italic', fontSize: 12 }}>
               No players yet — scan the QR code or add an AI bot.
             </div>
           )}
@@ -197,24 +206,26 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                 alignItems: 'center',
                 gap: 8,
                 padding: '4px 6px',
-                background: '#1f2230',
+                background: 'rgba(255,255,255,0.55)',
+                border: '1px solid rgba(10,6,18,0.15)',
                 borderRadius: 4,
               }}
             >
               <FaceSwatch faceId={p.faceId} color={p.color} size={24} />
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ flex: 1, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p.name}
               </span>
-              <span style={{ fontSize: 10, color: '#666' }}>{p.kind}</span>
+              <span style={{ fontSize: 10, color: '#8a7da6', textTransform: 'uppercase', letterSpacing: 0.4 }}>{p.kind}</span>
               {p.kind === 'bot' && (
                 <button
                   onClick={() => onRemoveBot(p.playerId)}
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#888',
+                    color: '#6b5e85',
                     cursor: 'pointer',
-                    fontSize: 14,
+                    fontSize: 16,
+                    fontWeight: 800,
                     padding: '0 4px',
                   }}
                   title="Remove bot"
@@ -235,13 +246,15 @@ export default function LobbyPanel(props: LobbyPanelProps) {
             style={{ ...selectStyle, width: 56 }}
           />
           <button
+            className="bb-hover-btn"
             data-testid="add-bot"
             onClick={() => onAddBot()}
             disabled={!canAddBot}
             style={{
               ...buttonStyle,
-              background: canAddBot ? '#5a189a' : '#333',
-              opacity: canAddBot ? 1 : 0.5,
+              background: canAddBot ? '#c77dff' : '#d8cfe2',
+              color: canAddBot ? '#1a0f2e' : '#7a6e8c',
+              opacity: canAddBot ? 1 : 0.7,
               cursor: canAddBot ? 'pointer' : 'not-allowed',
             }}
             title="Spawn a scripted AI bot"
@@ -273,13 +286,14 @@ export default function LobbyPanel(props: LobbyPanelProps) {
           const currentEntry = filtered.find((m) => m.id === selectedMapId) ?? filtered[0];
           if (filtered.length === 0) {
             return (
-              <div style={{ fontSize: 12, color: '#888', fontStyle: 'italic' }}>
+              <div style={{ fontSize: 12, color: '#7a6e8c', fontStyle: 'italic' }}>
                 No maps available for this mode.
               </div>
             );
           }
           return (
             <button
+              className="bb-hover-btn"
               data-testid="map-button"
               onClick={() => setMapPickerOpen(true)}
               style={{
@@ -300,14 +314,15 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                   <span style={{
                     fontSize: 9,
                     padding: '1px 5px',
-                    background: '#5a189a',
-                    color: '#fff',
+                    background: '#c77dff',
+                    color: '#1a0f2e',
+                    fontWeight: 800,
                     borderRadius: 8,
                     textTransform: 'uppercase',
                     letterSpacing: 0.4,
                   }}>Custom</span>
                 )}
-                <span style={{ color: '#888' }}>▾</span>
+                <span style={{ color: '#6b5e85' }}>▾</span>
               </span>
             </button>
           );
@@ -318,12 +333,13 @@ export default function LobbyPanel(props: LobbyPanelProps) {
       <div style={sectionStyle}>
         <label style={labelStyle}>Play from this laptop</label>
         <button
+          className="bb-hover-btn"
           data-testid="local-player-toggle"
           onClick={localPlayerJoined ? onLeaveLocal : onJoinLocal}
           style={{
             ...buttonStyle,
-            background: localPlayerJoined ? '#2d6a4f' : '#5dd6ff',
-            color: localPlayerJoined ? '#fff' : '#000',
+            background: localPlayerJoined ? '#5ec27e' : '#5dd6ff',
+            color: '#0a0612',
           }}
         >
           {localPlayerJoined ? '🎮 Leave' : '🎮 Join (WASD + Space)'}
@@ -346,7 +362,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                       height: 22,
                       borderRadius: '50%',
                       background: c,
-                      border: selected ? '2px solid #fff' : '1px solid #333',
+                      border: selected ? '3px solid #0a0612' : '1px solid rgba(10,6,18,0.35)',
                       opacity: taken ? 0.3 : 1,
                       cursor: taken ? 'not-allowed' : 'pointer',
                       padding: 0,
@@ -370,8 +386,8 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                       width: 30,
                       height: 30,
                       borderRadius: '50%',
-                      background: '#1f2230',
-                      border: selected ? '2px solid #fff' : '1px solid #333',
+                      background: '#fffefb',
+                      border: selected ? '3px solid #0a0612' : '1px solid rgba(10,6,18,0.3)',
                       opacity: taken ? 0.25 : 1,
                       cursor: taken ? 'not-allowed' : 'pointer',
                       padding: 0,
@@ -393,12 +409,14 @@ export default function LobbyPanel(props: LobbyPanelProps) {
       <div style={sectionStyle}>
         <label style={labelStyle}>Visibility</label>
         <button
+          className="bb-hover-btn"
           data-testid="toggle-public"
           onClick={onTogglePublic}
           disabled={visibilityBusy}
           style={{
             ...buttonStyle,
-            background: isPublic ? '#2d6a4f' : '#444',
+            background: isPublic ? '#5ec27e' : '#fffefb',
+            color: '#0a0612',
           }}
         >
           {isPublic ? '🌐 Public — anyone can find' : '🔒 Private — code only'}
@@ -408,20 +426,22 @@ export default function LobbyPanel(props: LobbyPanelProps) {
       {/* Start */}
       <div style={{ ...sectionStyle, marginTop: 'auto', borderBottom: 'none' }}>
         <button
+          className="bb-hover-btn"
           data-testid="start-game"
           onClick={onStart}
           disabled={!canStart}
           style={{
             ...startButtonStyle,
-            background: canStart ? '#2d6a4f' : '#333',
+            background: canStart ? '#5ec27e' : '#d8cfe2',
+            color: canStart ? '#0a2417' : '#7a6e8c',
             cursor: canStart ? 'pointer' : 'not-allowed',
-            opacity: canStart ? 1 : 0.5,
+            opacity: canStart ? 1 : 0.8,
           }}
         >
           ▶ START GAME
         </button>
         {!canStart && (
-          <div style={{ fontSize: 11, color: '#888', textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: '#7a6e8c', textAlign: 'center' }}>
             Add at least one player to start.
           </div>
         )}

@@ -44,6 +44,31 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Playful hover for the paper-themed buttons: a little rotate + a slight
+   brightness lift. Transform uses !important so it beats the per-button
+   inline base transform (e.g. the rotated Home button). */
+.bb-hover-btn {
+  transition: transform 0.12s ease-out, filter 0.12s ease-out;
+}
+.bb-hover-btn:hover:not(:disabled) {
+  transform: rotate(2deg) scale(1.04) !important;
+  /* Slight, visible colour shift on both cream and accent buttons:
+     a touch deeper + warmer/more saturated. */
+  filter: brightness(0.95) saturate(1.3);
+}
+.bb-hover-btn:active:not(:disabled) {
+  transform: rotate(1deg) scale(0.97) !important;
+}
+.bb-hover-btn:disabled {
+  filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bb-hover-btn:hover:not(:disabled),
+  .bb-hover-btn:active:not(:disabled) {
+    transform: none !important;
+  }
+}
+
 input {
   padding: 8px 12px;
   border: 1px solid #333;

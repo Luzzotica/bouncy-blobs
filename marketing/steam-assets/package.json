@@ -8,10 +8,10 @@
     "render:steam": "tsx render.ts",
     "render:steam:watch": "tsx render.ts --watch",
     "trailer:studio": "remotion studio remotion/index.ts",
-    "trailer:render": "remotion render remotion/index.ts Trailer output/trailer.mp4",
+    "trailer:render": "remotion render remotion/index.ts Trailer ../video/trailer.mp4",
     "copy:build": "tsx build-copy.ts",
     "icon:build": "tsx scripts/build-icon.ts",
-    "gen:art": "../../scripts/.venv/bin/python ../../scripts/generate_steam_assets.py"
+    "gen:art": "../../../scripts/.venv/bin/python ../../../scripts/generate_steam_assets.py"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -107,6 +107,9 @@ export class SlimeBlob {
   readonly centerIdx: number;
   readonly shapeIdx: number;
   readonly playerControlled: boolean;
+  /** True once destroy() has retired this blob from the physics world. Callers
+   *  (e.g. the renderer) skip destroyed blobs so a retired NPC stops drawing. */
+  destroyed = false;
 
   private world: SoftBodyEngine;
   private expandPressed = false;
@@ -198,6 +201,7 @@ export class SlimeBlob {
    * blob) but are tagged inactive so no physics pass touches them. */
   destroy(): void {
     this.world.removeBlob(this.blobId);
+    this.destroyed = true;
   }
 
   setInput(moveX: number, moveY: number, expand: boolean): void {
@@ -429,6 +433,11 @@ export class SlimeBlob {
     const rollNormal = cnorm ?? up;                          // points out of the surface, into the blob
     const rollTangent = vec2(-rollNormal.y, rollNormal.x);   // CCW tangent along the surface
     const surfaceSpeed = this.getHullVelocityAlong(rollTangent);
+    // Only roll when there's LEFT/RIGHT movement — either steering intent
+    // (A/D) or actual horizontal motion along the gravity-relative `right`
+    // axis. Vertical motion (falling, jumping, climbing a wall) no longer
+    // spins the wheel; the roll magnitude is still velocity-based as before.
+    const horizontalSpeed = this.getHullVelocityAlong(right);
     const steering = Math.abs(this.stickX) > 0.1;
     let tread: number;
     if (steering) {
@@ -439,8 +448,10 @@ export class SlimeBlob {
       const intentAlong = (right.x * rollTangent.x + right.y * rollTangent.y) * this.stickX;
       const dir = Math.sign(surfaceSpeed + intentAlong * DIR_INTENT_BIAS) || 1;
       tread = dir * (TREAD_STEER_BASE * Math.abs(this.stickX) + TREAD_ROLL_GAIN * Math.abs(surfaceSpeed));
-    } else if (Math.abs(surfaceSpeed) >= TREAD_MIN_SPEED) {
-      // Free-rolling (sliding / knocked back): follow actual motion.
+    } else if (Math.abs(surfaceSpeed) >= TREAD_MIN_SPEED && Math.abs(horizontalSpeed) >= TREAD_MIN_SPEED) {
+      // Free-rolling (sliding / knocked back): follow actual motion, but only
+      // when that motion is horizontal — gated on `horizontalSpeed` so purely
+      // vertical movement doesn't roll the wheel.
       tread = TREAD_ROLL_GAIN * surfaceSpeed;
     } else {
       tread = 0;
@@ -564,6 +575,24 @@ export class SlimeBlob {
   /** Hard reset to a position, zeroing velocity. Used to recover from large drift. */
   teleportTo(target: Vec2): void {
     this.world.teleportBlob(this.blobId, target);
+  }
+
+  /**
+   * Reset to a CLEAN rest pose at `center` (defaults to the current centroid):
+   * rebuild the hull at its undeformed rest shape, deflate the expand state,
+   * and zero velocity. Used on respawn.
+   *
+   * The hull rebuild + velocity clear happens in the Rust engine
+   * (`resetBlobToRest`) — physics lives in Rust. Here we only reset the
+   * TS-owned expand integrator so the blob doesn't come back oversized
+   * ("BIG mode").
+   */
+  respawnReset(center?: Vec2): void {
+    const c = center ?? this.getCentroid();
+    this.expandPressed = false;
+    this.expandWasPressed = false;
+    this.expandShapeScale = 1.0;
+    this.world.resetBlobToRest(this.blobId, c);
   }
 
   /**

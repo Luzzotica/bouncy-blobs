@@ -51,25 +51,22 @@ export class PlayerManager {
       return this.players.get(playerId)!;
     }
 
-    // Spawn point + jitter must be deterministic per-playerId — host and
+    // Spawn-slot selection must be deterministic per-playerId — host and
     // guests each call addPlayer at different times, so a counter-based
     // index (nextSpawnIndex) would assign DIFFERENT spawn points to the
-    // same player on each side. Derive both the spawn slot and the
-    // horizontal jitter from a hash of the playerId so every client
-    // independently agrees on where the blob spawns. `nextSpawnIndex` is
-    // still incremented for legacy single-player / sandbox callers that
-    // rely on round-robin spawn order.
+    // same player on each side. Derive the slot from a hash of the playerId
+    // so every client independently agrees on where the blob spawns.
+    // `nextSpawnIndex` is still incremented for legacy single-player /
+    // sandbox callers that rely on round-robin spawn order.
+    //
+    // We spawn EXACTLY on the chosen spawn point — no jitter. Levels are
+    // authored with enough spawn points, and two players landing on the same
+    // point (same hash slot) just bump apart, which is fine (and funny).
     const idHash = hashStringSeed(playerId);
     const spawnIdx = idHash % this.spawnPoints.length;
     const baseSpawn = this.spawnPoints[spawnIdx];
     this.nextSpawnIndex++;
-    // Top 16 bits of the hash drive jitter; using a different bit window
-    // than the spawn-index bits so jitter is uncorrelated with spawn slot.
-    const jitter = (((idHash >>> 16) & 0xffff) / 0xffff) - 0.5; // in [-0.5, 0.5)
-    const spawnPos = vec2(
-      baseSpawn.x + jitter * 400,
-      baseSpawn.y,
-    );
+    const spawnPos = vec2(baseSpawn.x, baseSpawn.y);
 
     const blob = new SlimeBlob(world, spawnPos, {
       playerControlled: true,

@@ -7,10 +7,10 @@ Scaffold for a single game's Steam store + library art and copy.
 ```bash
 pnpm install
 pnpm exec playwright install chromium   # only once
-pnpm render:steam all       # render every PNG to output/
+pnpm render:steam all       # render every PNG to ../marketing/{steam,social}/
 pnpm render:steam header    # render a single asset
 pnpm trailer:studio         # preview trailer in Remotion
-pnpm trailer:render         # output/trailer.mp4
+pnpm trailer:render         # ../marketing/video/trailer.mp4
 pnpm copy:build | pbcopy    # assemble Steam BBCode, copy to clipboard
 ```
 
@@ -23,7 +23,7 @@ pnpm copy:build | pbcopy    # assemble Steam BBCode, copy to clipboard
 - `render.ts` — Playwright orchestrator
 - `remotion/` — trailer composition
 - `copy/*.md` — every Steam text field, with character limits in HTML comments
-- `output/` — gitignored render targets
+- `../marketing/{steam,social}/` — gitignored render targets (per-asset `dir` in `_manifest.ts`)
 
 ## Adding a new asset
 

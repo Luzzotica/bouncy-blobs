@@ -4,6 +4,8 @@ import { PLATFORM_COLOR, PLATFORM_BORDER, BACKGROUND_COLOR } from '../renderer/c
 import { drawSpring, PLATE_THICKNESS, PLATE_WIDTH_SCALE } from '../game/springRenderer';
 import { getSprite } from '../assets/spriteRegistry';
 import { drawSprite } from '../renderer/spriteRenderer';
+import { drawLava } from '../renderer/lavaRenderer';
+import { computeLevelAABB, FALL_KILL_MARGIN } from '../game/mapBounds';
 import { BLOB_RADIUS, BLOB_EXPAND_MAX_SCALE, BLOB_SQUASH_X_AMOUNT, BLOB_SQUASH_Y_AMOUNT } from '../physics/slimeBlob';
 import type { SpringPadDef, ActionTarget } from '../levels/types';
 import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
@@ -33,6 +35,18 @@ function pointInPolygonPts(x: number, y: number, pts: { x: number; y: number }[]
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+/** Rotation-aware hit-test for a spike's bbox (anchored at the base bar; teeth
+ *  extend up so local y spans [-height, 4]). Used by the Action tool. */
+function hitSpikeForAction(
+  wx: number, wy: number,
+  s: { x: number; y: number; width: number; height: number; rotation: number },
+): boolean {
+  const dx = wx - s.x, dy = wy - s.y;
+  const cos = Math.cos(-s.rotation), sin = Math.sin(-s.rotation);
+  const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
+  return Math.abs(lx) <= s.width / 2 && ly >= -s.height && ly <= 4;
 }
 
 /** Local-space bounding box covering the full spring visual (coils + plate + back wall + arrow). */
@@ -93,6 +107,21 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
 
     // Grid
     drawGrid(ctx, state, w, h);
+
+    // Death-zone lava: the fall-off-the-map kill plane, at the same height the
+    // game kills (lowest geometry + FALL_KILL_MARGIN). Recomputed each frame so
+    // it tracks live edits. Drawn over the grid but under the geometry. The kill
+    // plane is always active; this visual is gated by the level's showLava flag.
+    if (state.level.showLava !== false) {
+      const aabb = computeLevelAABB(state.level);
+      const halfW = w / 2 / state.zoom;
+      const halfH = h / 2 / state.zoom;
+      const left = state.panX - halfW - 80;
+      const right = state.panX + halfW + 80;
+      const bottom = state.panY + halfH + 80;
+      const lavaY = aabb.maxY + FALL_KILL_MARGIN;
+      if (bottom > lavaY) drawLava(ctx, lavaY, left, right, bottom, performance.now() / 1000);
+    }
 
     // Walls
     for (const wall of state.level.walls) {
@@ -608,8 +637,12 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         const pt = shape?.points[t.pointIndex];
         return pt ? { x: pt.x, y: pt.y } : null;
       }
-      if (t.kind === 'rotateShape') {
+      if (t.kind === 'rotateShape' || t.kind === 'moveShape') {
         return shapeCentroid(t.shapeId);
+      }
+      if (t.kind === 'spike') {
+        const spike = (state.level.spikes ?? []).find(s => s.id === t.spikeId);
+        return spike ? { x: spike.x, y: spike.y } : null;
       }
       const plat = state.level.platforms.find(p => p.id === t.platformId);
       return plat ? { x: plat.x, y: plat.y } : null;
@@ -650,6 +683,29 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         ctx.fill();
         return;
       }
+      if (t.kind === 'moveShape') {
+        // Draw the rest hull translated to the open-pose centroid (endX/endY).
+        const shape = (state.level.pointShapes ?? []).find(s => s.id === t.shapeId);
+        const c = shapeCentroid(t.shapeId);
+        if (!shape || !c || shape.points.length < 2) return;
+        const ddx = t.endX - c.x, ddy = t.endY - c.y;
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        for (let i = 0; i < shape.points.length; i++) {
+          const wx = shape.points[i].x + ddx, wy = shape.points[i].y + ddy;
+          if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        // Solid dot at the destination centroid (the draggable handle).
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(t.endX, t.endY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
       if (t.kind === 'rotateShape') {
         // Draw the soft body's REST hull rotated by endRotation around its
         // centroid — visual preview of where the rotation will end up.
@@ -673,6 +729,33 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         ctx.globalAlpha = 1;
         ctx.restore();
         drawRotationBadge(c.x, c.y, t.endRotation);
+        return;
+      }
+      if (t.kind === 'spike') {
+        // Ghost of the spike teeth at the open pose (endX/endY = base).
+        const spike = (state.level.spikes ?? []).find(s => s.id === t.spikeId);
+        if (!spike) return;
+        const endRot = t.endRotation ?? spike.rotation;
+        const hw = spike.width / 2;
+        const numTeeth = Math.max(2, Math.floor(spike.width / 30));
+        const toothW = spike.width / numTeeth;
+        ctx.save();
+        ctx.translate(t.endX, t.endY);
+        ctx.rotate(endRot);
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        for (let i = 0; i < numTeeth; i++) {
+          const tx = -hw + i * toothW;
+          ctx.moveTo(tx, 0);
+          ctx.lineTo(tx + toothW, 0);
+          ctx.lineTo(tx + toothW / 2, -spike.height);
+          ctx.closePath();
+        }
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+        ctx.restore();
+        if (t.endRotation !== undefined) drawRotationBadge(t.endX, t.endY, t.endRotation - spike.rotation);
         return;
       }
       const plat = state.level.platforms.find(p => p.id === t.platformId);
@@ -1157,17 +1240,18 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     ctx.textBaseline = 'middle';
     const hasShapes = (state.level.pointShapes ?? []).length > 0;
     const hasPlatforms = state.level.platforms.length > 0;
+    const shapeAdd = state.actionPerVertex ? 'click vertices' : 'click a shape to move the whole thing';
     const actionHint = state.selectedTool === 'action' && !state.draftAction
       ? (hasShapes || hasPlatforms
-          ? ` | action: click a vertex/platform to add · ${ALT_LABEL}-click a soft body or platform to rotate it`
+          ? ` | action: ${shapeAdd} or a platform to add · ${ALT_LABEL}-click a soft body or platform to rotate it`
           : ` | action: needs a Shape or Platform first`)
       : '';
     const draftHint = state.draftPointShape
       ? ` | shape: ${state.draftPointShape.points.length} pts · Shift=15° snap · ${ALT_LABEL}=anchor · Enter/C: commit · Esc: cancel`
       : state.draftAction
         ? state.draftAction.phase === 'pickPoints'
-          ? ` | action: ${state.draftAction.targets.length} targets · click vertex/platform to add · ${ALT_LABEL}-click soft body/platform to rotate · Enter: next · Esc: cancel`
-          : ` | action: ${state.draftAction.targets.length} targets · drag ghosts to position · ${ALT_LABEL}-click soft body/platform to add rotation · panel: tune endRotation · Enter: commit · Esc: cancel`
+          ? ` | action: ${state.draftAction.targets.length} targets · ${shapeAdd}/platform to add · ${ALT_LABEL}-click to rotate · Enter: next · Esc: cancel`
+          : ` | action: ${state.draftAction.targets.length} targets · drag ghosts to position · ${ALT_LABEL}-click to add rotation · panel: tune end · Enter: commit · Esc: cancel`
         : actionHint;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(8, h - 28, Math.min(1100, 240 + draftHint.length * 6), 22);
@@ -1325,19 +1409,48 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
             return;
           }
         }
+        for (const s of state.level.spikes ?? []) {
+          if (hitSpikeForAction(wx, wy, s)) {
+            if (!state.draftAction) state.beginDraftAction();
+            state.appendActionTargetRotateSpike(s.id);
+            onUpdate();
+            return;
+          }
+        }
       }
-      // Pick a shape vertex or a platform to add as a target.
-      const vhit = state.hitTestPointShapeVertex(wx, wy);
-      if (vhit) {
-        if (!state.draftAction) state.beginDraftAction();
-        state.appendActionTargetAtVertex(vhit.shapeId, vhit.pointIndex);
-        onUpdate();
-        return;
+      // Add a SHAPE target. Default: click anywhere on a soft body to move the
+      // WHOLE shape (one moveShape target). Per-vertex mode: click individual
+      // vertices to add shapePoint targets (the old behavior).
+      if (state.actionPerVertex) {
+        const vhit = state.hitTestPointShapeVertex(wx, wy);
+        if (vhit) {
+          if (!state.draftAction) state.beginDraftAction();
+          state.appendActionTargetAtVertex(vhit.shapeId, vhit.pointIndex);
+          onUpdate();
+          return;
+        }
+      } else {
+        for (const ps of state.level.pointShapes ?? []) {
+          if (ps.points.length >= 3 && pointInPolygonPts(wx, wy, ps.points)) {
+            if (!state.draftAction) state.beginDraftAction();
+            state.appendActionTargetMoveShape(ps.id);
+            onUpdate();
+            return;
+          }
+        }
       }
       for (const plat of state.level.platforms) {
         if (Math.abs(wx - plat.x) <= plat.width / 2 && Math.abs(wy - plat.y) <= plat.height / 2) {
           if (!state.draftAction) state.beginDraftAction();
           state.appendActionTargetAtPlatform(plat.id);
+          onUpdate();
+          return;
+        }
+      }
+      for (const s of state.level.spikes ?? []) {
+        if (hitSpikeForAction(wx, wy, s)) {
+          if (!state.draftAction) state.beginDraftAction();
+          state.appendActionTargetAtSpike(s.id);
           onUpdate();
           return;
         }
@@ -1500,16 +1613,9 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       return;
     }
 
-    if (e.ctrlKey || e.metaKey) {
-      if (e.key === 'z') { state.undo(); onUpdate(); return; }
-      if (e.key === 'y') { state.redo(); onUpdate(); return; }
-      if (e.key === 'd' || e.key === 'D') {
-        e.preventDefault();
-        state.duplicateSelected();
-        onUpdate();
-        return;
-      }
-    }
+    // Undo / redo / duplicate (Ctrl/Cmd+Z, +Shift+Z or +Y, +D) are handled by a
+    // window-level listener below so they work without canvas focus.
+    if (e.ctrlKey || e.metaKey) return;
 
     // Toggle id labels with I.
     if (e.key === 'i' || e.key === 'I') {
@@ -1626,6 +1732,35 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         onUpdate();
       }
     }
+  }, [state, onUpdate]);
+
+  // Editor-wide shortcuts (undo / redo / duplicate) on `window`, so they work
+  // regardless of which element has focus. The canvas's own onKeyDown only
+  // fires while the canvas is focused, which is easy to lose (clicking the
+  // property panel, a toolbar button, etc.). Using `e.code` keeps these
+  // layout/locale-independent. Typing into a field is excluded.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || t?.isContentEditable) return;
+      if (e.code === 'KeyZ') {
+        e.preventDefault();
+        if (e.shiftKey) state.redo(); else state.undo();
+        onUpdate();
+      } else if (e.code === 'KeyY') {
+        e.preventDefault();
+        state.redo();
+        onUpdate();
+      } else if (e.code === 'KeyD') {
+        e.preventDefault();
+        state.duplicateSelected();
+        onUpdate();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [state, onUpdate]);
 
   const cursor = state.isPanning

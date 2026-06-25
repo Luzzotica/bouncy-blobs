@@ -327,6 +327,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
 
   nudgeBlob(blobId: number, dx: number, dy: number): void { this.h.nudgeBlob(blobId, dx, dy); }
   teleportBlob(blobId: number, target: Vec2): void { this.h.teleportBlob(blobId, target.x, target.y); }
+  resetBlobToRest(blobId: number, target: Vec2): void { this.h.resetBlobToRest(blobId, target.x, target.y); }
   zeroBlobVelocity(blobId: number): void { this.h.zeroBlobVelocity(blobId); }
   pinBlobToCurrentPose(blobId: number): void { this.h.pinBlobToCurrentPose(blobId); }
   unpinBlob(blobId: number): void { this.h.unpinBlob(blobId); }

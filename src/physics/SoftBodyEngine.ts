@@ -153,6 +153,9 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   // ---- per-blob mutation ----
   nudgeBlob(blobId: number, dx: number, dy: number): void;
   teleportBlob(blobId: number, target: Vec2): void;
+  /** Rebuild a blob at its undeformed rest pose centred on `target`, with zero
+   *  velocity and rest-scale reset to 1. Used for clean respawns. */
+  resetBlobToRest(blobId: number, target: Vec2): void;
   zeroBlobVelocity(blobId: number): void;
   pinBlobToCurrentPose(blobId: number): void;
   unpinBlob(blobId: number): void;

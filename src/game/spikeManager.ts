@@ -1,4 +1,5 @@
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
+import type { SlimeBlob } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
 import { SpikeDef, ZoneDef } from '../levels/types';
 import { PlayerManager } from './playerManager';
@@ -17,9 +18,16 @@ interface DeadPlayer {
 }
 
 interface RegisteredSpike {
+  /** Immutable authored definition — `def.x/y/rotation` is the CLOSED (base)
+   *  pose. Width/height never animate. */
   def: SpikeDef;
-  /** Precomputed spike tip points in world space for rendering */
-  worldPoints: Vec2[];
+  /** Live pose, read by collision + render. Starts at the def pose; an Action
+   *  targeting this spike drives it each tick (a moving spike trap). Kept
+   *  separate from `def` so reloading/replaying a level always starts from the
+   *  authored base, never a previously-animated position. */
+  x: number;
+  y: number;
+  rotation: number;
 }
 
 export class SpikeManager {
@@ -41,6 +49,10 @@ export class SpikeManager {
   private deathZones: ZoneDef[] = [];
   /** Y coordinate below which any blob is killed (fall-off-the-map). null = disabled. */
   private killBelowY: number | null = null;
+  /** NPC blobs (the multi-shape decorative/obstacle blobs). They aren't players,
+   *  so they have no respawn — they're simply retired (destroy()) when they fall
+   *  past the kill plane. */
+  private npcBlobs: SlimeBlob[] = [];
 
   setDeathZones(zones: ZoneDef[]): void {
     this.deathZones = zones;
@@ -50,33 +62,38 @@ export class SpikeManager {
     this.killBelowY = y;
   }
 
-  initialize(world: SoftBodyEngine, playerManager: PlayerManager, defs: SpikeDef[]): void {
+  initialize(
+    world: SoftBodyEngine,
+    playerManager: PlayerManager,
+    defs: SpikeDef[],
+    npcBlobs: SlimeBlob[] = [],
+  ): void {
     this.world = world;
     this.playerManager = playerManager;
+    this.npcBlobs = npcBlobs;
     this.spikes = [];
     this.invulnerable.clear();
 
     for (const def of defs) {
-      // Precompute spike tooth tip positions for collision & rendering
-      const numTeeth = Math.max(2, Math.floor(def.width / 30));
-      const worldPoints: Vec2[] = [];
-      const cos = Math.cos(def.rotation);
-      const sin = Math.sin(def.rotation);
-      const hw = def.width / 2;
-      const toothSpacing = def.width / numTeeth;
-
-      for (let i = 0; i < numTeeth; i++) {
-        // Local positions: teeth along x-axis, pointing up (-y)
-        const localX = -hw + toothSpacing * (i + 0.5);
-        const localY = -def.height;
-        // Rotate + translate to world
-        const wx = def.x + localX * cos - localY * sin;
-        const wy = def.y + localX * sin + localY * cos;
-        worldPoints.push(vec2(wx, wy));
-      }
-
-      this.spikes.push({ def, worldPoints });
+      this.spikes.push({ def, x: def.x, y: def.y, rotation: def.rotation });
     }
+  }
+
+  /** Closed (authored) pose of a spike — used by the action system as the
+   *  base to animate from. Null if the id is unknown. */
+  getSpikeBasePose(spikeId: string): { x: number; y: number; rotation: number } | null {
+    const s = this.spikes.find(sp => sp.def.id === spikeId);
+    return s ? { x: s.def.x, y: s.def.y, rotation: s.def.rotation } : null;
+  }
+
+  /** Set a spike's live pose (collision + render follow it next frame).
+   *  Driven by the action system; the authored `def` is left untouched. */
+  setSpikePose(spikeId: string, x: number, y: number, rotation: number): void {
+    const s = this.spikes.find(sp => sp.def.id === spikeId);
+    if (!s) return;
+    s.x = x;
+    s.y = y;
+    s.rotation = rotation;
   }
 
   update(dt: number): void {
@@ -117,7 +134,7 @@ export class SpikeManager {
       let killed = false;
       for (const spike of this.spikes) {
         for (const p of hull) {
-          if (this.isInsideSpikeZone(p, spike.def)) {
+          if (this.isInsideSpikeZone(p, spike)) {
             this.killPlayer(player.playerId);
             killed = true;
             break;
@@ -148,40 +165,41 @@ export class SpikeManager {
         this.killPlayer(player.playerId);
       }
     }
+
+    // NPC blobs fall off the map too. They have no respawn, so a fall past the
+    // kill plane simply retires them (destroy() → inactive in physics + skipped
+    // by the renderer). Centroid-based, same as the player fall-off check.
+    //
+    // Re-derived from world state every tick rather than gated on a JS flag:
+    // removeBlob() is idempotent and parks dead particles in a far-above
+    // graveyard (so the centroid check is naturally false afterwards), and the
+    // inactive state lives in the world snapshot. A latch the snapshot can't
+    // restore would resurrect-but-not-rekill an NPC after a rollback → desync.
+    if (this.killBelowY !== null) {
+      for (const npc of this.npcBlobs) {
+        if (npc.getCentroid().y > this.killBelowY) npc.destroy();
+      }
+    }
   }
 
-  private isInsideSpikeZone(point: Vec2, def: SpikeDef): boolean {
-    // Transform point into spike's local space
-    const dx = point.x - def.x;
-    const dy = point.y - def.y;
-    const cos = Math.cos(-def.rotation);
-    const sin = Math.sin(-def.rotation);
+  private isInsideSpikeZone(point: Vec2, spike: RegisteredSpike): boolean {
+    // Transform point into the spike's LIVE local space (live pose may be
+    // animated by an action; width/height come from the immutable def).
+    const dx = point.x - spike.x;
+    const dy = point.y - spike.y;
+    const cos = Math.cos(-spike.rotation);
+    const sin = Math.sin(-spike.rotation);
     const localX = dx * cos - dy * sin;
     const localY = dx * sin + dy * cos;
 
     // Check if inside the spike's bounding box (local space)
-    const hw = def.width / 2;
-    return localX >= -hw && localX <= hw && localY >= -def.height && localY <= 0;
+    const hw = spike.def.width / 2;
+    return localX >= -hw && localX <= hw && localY >= -spike.def.height && localY <= 0;
   }
 
   /** Add a spike at runtime (for party mode placement). */
   addSpike(def: SpikeDef, isPlayerPlaced = false): void {
-    const numTeeth = Math.max(2, Math.floor(def.width / 30));
-    const worldPoints: Vec2[] = [];
-    const cos = Math.cos(def.rotation);
-    const sin = Math.sin(def.rotation);
-    const hw = def.width / 2;
-    const toothSpacing = def.width / numTeeth;
-
-    for (let i = 0; i < numTeeth; i++) {
-      const localX = -hw + toothSpacing * (i + 0.5);
-      const localY = -def.height;
-      const wx = def.x + localX * cos - localY * sin;
-      const wy = def.y + localX * sin + localY * cos;
-      worldPoints.push(vec2(wx, wy));
-    }
-
-    this.spikes.push({ def, worldPoints });
+    this.spikes.push({ def, x: def.x, y: def.y, rotation: def.rotation });
     if (isPlayerPlaced) {
       this.playerPlacedSpikeIds.add(def.id);
     }
@@ -215,11 +233,16 @@ export class SpikeManager {
       const spawnPoints = this.playerManager.getSpawnPoints();
       const r = this.world.rng?.next() ?? Math.random();
       const spawnIdx = Math.floor(r * spawnPoints.length);
-      this.world.teleportBlob(player.blob.blobId, spawnPoints[spawnIdx]);
+      // respawnReset (not teleportBlob) so a blob that died DEFORMED — e.g.
+      // crushed, hull squeezed/spread — comes back as a clean rest-shaped
+      // blob. A translated-but-still-spread hull spans a huge AABB and makes
+      // every other softbody in the scene collide with it.
+      player.blob.respawnReset(spawnPoints[spawnIdx]);
       this.invulnerable.set(playerId, RESPAWN_INVULNERABILITY);
     } else {
-      // no_respawn or timer: move blob offscreen, track as dead
-      this.world.teleportBlob(player.blob.blobId, vec2(deathPos.x, DEAD_OFFSCREEN_Y));
+      // no_respawn or timer: move blob offscreen, track as dead. Still reset
+      // the shape — a deformed hull off-screen has the same giant-AABB problem.
+      player.blob.respawnReset(vec2(deathPos.x, DEAD_OFFSCREEN_Y));
       this.deadPlayers.set(playerId, {
         deathPosition: deathPos,
         respawnTimer: this.deathMode === 'timer' ? KOTH_RESPAWN_TIME : Infinity,
@@ -239,7 +262,9 @@ export class SpikeManager {
     const spawnPoints = this.playerManager.getSpawnPoints();
     const r = this.world.rng?.next() ?? Math.random();
     const spawnIdx = Math.floor(r * spawnPoints.length);
-    this.world.teleportBlob(player.blob.blobId, spawnPoints[spawnIdx]);
+    // Clean rest pose on respawn (see killPlayer for why a plain teleport
+    // would leave a crushed/deformed blob spread across the map).
+    player.blob.respawnReset(spawnPoints[spawnIdx]);
 
     this.deadPlayers.delete(playerId);
     this.invulnerable.set(playerId, RESPAWN_INVULNERABILITY);
@@ -283,8 +308,8 @@ export class SpikeManager {
       const { def } = spike;
 
       ctx.save();
-      ctx.translate(def.x, def.y);
-      ctx.rotate(def.rotation);
+      ctx.translate(spike.x, spike.y);
+      ctx.rotate(spike.rotation);
 
       const hw = def.width / 2;
       const numTeeth = Math.max(2, Math.floor(def.width / 30));

@@ -22,10 +22,12 @@ import GameCanvas from '../components/GameCanvas';
 import SettingsModal from '../components/SettingsModal';
 import { ChainRenderInfo } from '../renderer/canvasRenderer';
 import { EffectsBindings } from '../game/effectsBindings';
+import { computeMapAABB, STATIC_MAP_FIT_ZOOM, readStaticCamOverride, FALL_KILL_MARGIN, lavaKillPlaneY } from '../game/mapBounds';
 import { updateParticles, clearParticles } from '../renderer/particles';
 import { clearDecals, setDecalResolvers } from '../renderer/decals';
 import { preloadAll, SFX_NAMES, resumeAudio } from '../utils/audio';
 import { getPlayerColor, onAudioSettingsChange } from '../utils/audioSettings';
+import { COLORS, paperBtnSm, actionBtnSm } from '../theme/uiTheme';
 
 function renderPointShapesLive(
   ctx: CanvasRenderingContext2D,
@@ -160,6 +162,10 @@ export default function Sandbox() {
 
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
+    const mapBounds = computeMapAABB(
+      world, levelData, platformSurfaces, softPlatforms, pointShapes, playerSpawnPoints,
+    );
+
     // Use PlayerManager so SpikeManager can handle kills/respawns
     const playerManager = new PlayerManager(playerSpawnPoints);
     const managed = playerManager.addPlayer('sandbox-player', 'Player', world, 'circle16', getPlayerColor());
@@ -188,11 +194,17 @@ export default function Sandbox() {
     const hasDeathZones = (levelData.deathZones?.length ?? 0) > 0;
     if (hasSpikes || hasDeathZones || levelData.bounds) {
       spikeManager = new SpikeManager();
-      spikeManager.initialize(world, playerManager, levelData.spikes ?? []);
+      spikeManager.initialize(world, playerManager, levelData.spikes ?? [], npcBlobs);
       spikeManager.deathMode = 'instant';
       if (hasDeathZones) spikeManager.setDeathZones(levelData.deathZones ?? []);
-      if (levelData.bounds) spikeManager.setKillBelowY(levelData.bounds.height + 500);
+      // Kill anyone (players AND NPCs) who falls below the lowest map geometry (AABB).
+      spikeManager.setKillBelowY(mapBounds.maxY + FALL_KILL_MARGIN);
     }
+
+    // Physics crush events (Rust-detected): route a crushed blob through the
+    // normal death/respawn flow instead of letting the solver eject it.
+    const smForCrush = spikeManager;
+    world.onBlobCrushed = (blobId) => { smForCrush?.killPlayerByBlobId(blobId); };
 
     let springPadManager: SpringPadManager | null = null;
     if (levelData.springPads && levelData.springPads.length > 0) {
@@ -233,6 +245,7 @@ export default function Sandbox() {
       levelData.triggers ?? [],
       triggerShapeIdxToId,
       (blobId) => npcBlobIds.has(blobId),
+      (blobId) => playerManager.getPlayerByBlobId(blobId) !== undefined,
     );
 
     // Actions poll the triggers and animate their targets each frame.
@@ -244,10 +257,14 @@ export default function Sandbox() {
       softPlatformStaticParticles,
       platformMover,
       triggerManager,
+      spikeManager,
     );
 
+    // Same map-AABB framing as a real match: open on the whole arena, then the
+    // follow code below eases onto the players. Small maps stay static (KOTH).
+    const staticCamOverride = readStaticCamOverride();
     const camera = new Camera();
-    camera.snapTo(spawnPos, 0.7);
+    camera.snapToBounds(mapBounds.minX, mapBounds.minY, mapBounds.maxX, mapBounds.maxY, width, height);
 
     const input = new KeyboardInput();
     input.attach();
@@ -324,10 +341,21 @@ export default function Sandbox() {
       actionManager.update(dt);
       effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover);
       updateParticles(dt);
-      const followTargets = playerBlob2
-        ? [playerBlob.getCentroid(), playerBlob2.getCentroid()]
-        : [playerBlob.getCentroid()];
-      camera.followTargets(followTargets, state.canvasWidth, state.canvasHeight);
+      const { minX, minY, maxX, maxY } = mapBounds;
+      const canW = state.canvasWidth, canH = state.canvasHeight;
+      const watchWholeMap = canW > 0 && (
+        staticCamOverride !== null
+          ? staticCamOverride
+          : Camera.boundsFitZoom(minX, minY, maxX, maxY, canW, canH) >= STATIC_MAP_FIT_ZOOM
+      );
+      if (watchWholeMap) {
+        camera.watchBounds(minX, minY, maxX, maxY, canW, canH);
+      } else {
+        const followTargets = playerBlob2
+          ? [playerBlob.getCentroid(), playerBlob2.getCentroid()]
+          : [playerBlob.getCentroid()];
+        camera.followTargets(followTargets, canW, canH);
+      }
       camera.update(dt);
 
       const hasPointShapes = pointShapeParticles.size > 0;
@@ -369,7 +397,7 @@ export default function Sandbox() {
         });
       }
       const allChains = state.playerChain ? [...chains, state.playerChain] : chains;
-      render(ctx, world, camera, playerBlobs, npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay, playerData, [...softPlatforms, ...pointShapes], allChains);
+      render(ctx, world, camera, playerBlobs, npcBlobs, state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay, playerData, [...softPlatforms, ...pointShapes], allChains, lavaKillPlaneY(levelData, mapBounds));
 
       // Chain particle dots — drawn last so they sit on top of the rope
       // and any static geometry the rope is wrapping. `render()`'s
@@ -464,49 +492,28 @@ export default function Sandbox() {
       }}>
         {fromEditor ? (
           <Link to="/editor?restore=1">
-            <button style={{ padding: '6px 12px', fontSize: 14 }}>← Back to Editor</button>
+            <button className="bb-hover-btn" style={paperBtnSm}>← Back to Editor</button>
           </Link>
         ) : (
           <Link to="/">
-            <button style={{ padding: '6px 12px', fontSize: 14 }}>Home</button>
+            <button className="bb-hover-btn" style={paperBtnSm}>Home</button>
           </Link>
         )}
         <button
-          style={{
-            padding: '6px 12px',
-            fontSize: 14,
-            background: showPoints ? '#3b6ab8' : '#1f2a3f',
-            color: '#fff',
-            border: '1px solid #4f5874',
-            cursor: 'pointer',
-          }}
+          style={showPoints ? actionBtnSm(COLORS.blue) : paperBtnSm}
           onClick={() => setShowPoints(p => !p)}
         >
           Points: {showPoints ? 'ON' : 'OFF'}
         </button>
         <button
-          style={{
-            padding: '6px 12px',
-            fontSize: 14,
-            background: showTargets ? '#3b6ab8' : '#1f2a3f',
-            color: '#fff',
-            border: '1px solid #4f5874',
-            cursor: 'pointer',
-          }}
+          style={showTargets ? actionBtnSm(COLORS.blue) : paperBtnSm}
           onClick={() => setShowTargets(p => !p)}
           title="Draw the shape-match rest hull (dashed cyan), the frame centroid (magenta cross), and the center particle (yellow dot) for every blob"
         >
           Targets: {showTargets ? 'ON' : 'OFF'}
         </button>
         <button
-          style={{
-            padding: '6px 12px',
-            fontSize: 14,
-            background: showHull ? '#3b6ab8' : '#1f2a3f',
-            color: '#fff',
-            border: '1px solid #4f5874',
-            cursor: 'pointer',
-          }}
+          style={showHull ? actionBtnSm(COLORS.blue) : paperBtnSm}
           onClick={() => setShowHull(p => !p)}
           title="Draw each blob's hull perimeter polygon (green) and its hull points; the first hull point is yellow to show winding direction"
         >
@@ -514,15 +521,9 @@ export default function Sandbox() {
         </button>
         {fromEditor && (
           <button
-            style={{
-              padding: '6px 12px',
-              fontSize: 14,
-              background: playersChained ? '#3b6ab8' : '#1f2a3f',
-              color: '#fff',
-              border: '1px solid #4f5874',
-              cursor: playersChained ? 'default' : 'pointer',
-              opacity: playersChained ? 0.7 : 1,
-            }}
+            style={playersChained
+              ? { ...actionBtnSm(COLORS.blue), cursor: 'default', opacity: 0.7 }
+              : paperBtnSm}
             disabled={playersChained}
             onClick={() => {
               if (stateRef.current?.createPlayerChain()) {
@@ -535,14 +536,7 @@ export default function Sandbox() {
           </button>
         )}
         <button
-          style={{
-            padding: '6px 12px',
-            fontSize: 14,
-            background: '#1f2a3f',
-            color: '#fff',
-            border: '1px solid #4f5874',
-            cursor: 'pointer',
-          }}
+          style={paperBtnSm}
           onClick={() => setSettingsOpen(true)}
         >
           ⚙ Settings

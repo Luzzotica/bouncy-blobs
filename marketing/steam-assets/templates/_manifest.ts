@@ -14,6 +14,7 @@ import { BundleHeader } from "./BundleHeader";
 import { WorkshopBranding } from "./WorkshopBranding";
 import { EndCard } from "./EndCard";
 import { YoutubeBanner } from "./YoutubeBanner";
+import { LinkedInBanner, XBanner } from "./SocialBanners";
 
 export interface AssetSpec {
   component: ComponentType;
@@ -21,6 +22,9 @@ export interface AssetSpec {
   height: number;
   // omitBackground=true produces a transparent PNG (used by LibraryLogo)
   transparent?: boolean;
+  // Output subfolder under ../marketing/. Defaults to "steam" (capsules, icons,
+  // store art). Social profile/channel banners route to "social".
+  dir?: "steam" | "social";
   // Render scale. Steam upscales capsules on high-DPI displays — supplying
   // 2× pixels prevents blurry wordmarks. The React template stays sized at
   // (width, height); the renderer captures at deviceScaleFactor=scale so
@@ -52,5 +56,9 @@ export const ASSETS: Record<string, AssetSpec> = {
   endcard: { component: EndCard, width: 1080, height: 1920 },
 
   // YouTube channel banner (full TV size; key content in the 1235×338 safe band).
-  "youtube-banner": { component: YoutubeBanner, width: 2048, height: 1152 },
+  "youtube-banner": { component: YoutubeBanner, width: 2048, height: 1152, dir: "social" },
+
+  // Social profile banners (lockup right-biased, clear of lower-left avatar).
+  "linkedin-banner": { component: LinkedInBanner, width: 1584, height: 396, dir: "social" },
+  "x-banner": { component: XBanner, width: 1500, height: 500, dir: "social" },
 };

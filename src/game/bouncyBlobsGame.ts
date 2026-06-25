@@ -40,6 +40,7 @@ import { clearDecals } from '../renderer/decals';
 import { preloadAll, SFX_NAMES, resumeAudio } from '../utils/audio';
 import { getPacingConfig } from '../lib/pacingConfig';
 import { recordHash, type TickSummary } from '../lib/hashHistory';
+import { computeMapAABB, STATIC_MAP_FIT_ZOOM, readStaticCamOverride, FALL_KILL_MARGIN, lavaKillPlaneY } from './mapBounds';
 
 /** Per-tick PRE/POST hash trace logging. Spammy (every tick on host AND
  *  guest), only enable via `?detTrace=1` URL flag when bisecting a
@@ -77,6 +78,8 @@ const spectateCamEnabled = (() => {
     return new URLSearchParams(window.location.search).get('spectate') === '1';
   } catch { return false; }
 })();
+
+const staticCamOverride = readStaticCamOverride();
 
 // Tiny indirection so the closure captured by the GameLoop callbacks
 // reads the current pacing config every tick (overlay can toggle it
@@ -162,6 +165,10 @@ export interface BouncyBlobsGameState {
   gameTime: number;
   cameraFollower: CameraFollower;
   effects: EffectsBindings;
+  /** World-space AABB of the actual map geometry (platforms/walls/soft bodies),
+   *  computed at load. Drives the camera's whole-map framing and intro shot —
+   *  the real extent, not the declared `level.bounds` hint. */
+  mapBounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 export class BouncyBlobsGame implements Game {
@@ -231,6 +238,9 @@ export class BouncyBlobsGame implements Game {
    * host (laptop local player) and online guests so the view stays
    * centered on the player(s) controlled on THIS machine. */
   private localPlayerIds: Set<string> | null = null;
+  /** Last game phase the camera saw — to fire the round-start establishing
+   *  shot exactly once, on the transition INTO countdown. */
+  private lastCameraPhase: GamePhase | null = null;
   /** Drives the `?spectate=1` content camera (one-blob follow + auto cuts). */
   private spectatorDirector = new SpectatorDirector();
 
@@ -303,7 +313,13 @@ export class BouncyBlobsGame implements Game {
       triggerShapeIdxToId, softPlatformStaticParticles, platformSurfaces,
     } = loadLevel(world, level, getSpriteShape);
     const playerManager = new PlayerManager(playerSpawnPoints);
+    const mapBounds = computeMapAABB(
+      world, level, platformSurfaces, softPlatforms, pointShapes, playerSpawnPoints,
+    );
     const camera = new Camera();
+    // Open on the whole arena. The intro (see the camera block in onLogic) then
+    // zooms onto the players during the countdown. Canvas isn't sized yet here,
+    // so seed with the declared zoom; the first sized tick reframes correctly.
     camera.snapTo(playerSpawnPoints[0] ?? { x: 0, y: 400 }, 0.592);
 
     const renderOptions: RenderOptions = {
@@ -353,18 +369,22 @@ export class BouncyBlobsGame implements Game {
       springPadManager.onFire = (pos, dir) => effects.onSpringFire(pos, dir);
     }
 
-    // Create spike manager if level has spikes or if party mode
-    let spikeManager: SpikeManager | null = null;
-    if ((level.spikes && level.spikes.length > 0) || isPartyMode) {
-      spikeManager = new SpikeManager();
-      spikeManager.initialize(world, playerManager, level.spikes ?? []);
+    // Spike manager is always created: besides spikes it owns the death-zone
+    // and fall-off-the-map kill plane, which every mode needs so a blob that
+    // drops out of the world dies (and respawns per the mode's death mode).
+    const spikeManager: SpikeManager = new SpikeManager();
+    spikeManager.initialize(world, playerManager, level.spikes ?? [], npcBlobs);
+    if (level.deathZones?.length) spikeManager.setDeathZones(level.deathZones);
+    // Kill anyone (players AND NPCs) who falls FALL_KILL_MARGIN units below the
+    // lowest point of the actual map geometry (load-time AABB) — i.e. they've
+    // left the arena. The in-game lava is drawn at this same Y.
+    spikeManager.setKillBelowY(mapBounds.maxY + FALL_KILL_MARGIN);
 
-      // Set death mode based on game mode type
-      if (this.gameMode instanceof PartyMode) {
-        spikeManager.deathMode = 'no_respawn';
-      } else if (this.gameMode instanceof KingOfTheHillMode) {
-        spikeManager.deathMode = 'timer';
-      }
+    // Set death mode based on game mode type
+    if (this.gameMode instanceof PartyMode) {
+      spikeManager.deathMode = 'no_respawn';
+    } else if (this.gameMode instanceof KingOfTheHillMode) {
+      spikeManager.deathMode = 'timer';
     }
 
     // Create dynamic item manager. Originally party-mode-only, but
@@ -405,6 +425,7 @@ export class BouncyBlobsGame implements Game {
       level.triggers ?? [],
       triggerShapeIdxToId,
       (blobId) => npcBlobIds.has(blobId),
+      (blobId) => playerManager.getPlayerByBlobId(blobId) !== undefined,
     );
 
     const actionManager = new ActionManager();
@@ -415,6 +436,7 @@ export class BouncyBlobsGame implements Game {
       softPlatformStaticParticles,
       platformMover,
       triggerManager,
+      spikeManager,
     );
 
     // Wire party mode integrations
@@ -636,7 +658,37 @@ export class BouncyBlobsGame implements Game {
         }
       }
 
-      if (spectateCamEnabled && this.state.canvasWidth > 0) {
+      // --- Camera framing ----------------------------------------------------
+      // Everything keys off mapBounds: the world-space AABB of the actual map
+      // geometry (platforms/walls/soft bodies), computed at load.
+      const { mapBounds } = this.state;
+      const { minX, minY, maxX, maxY } = mapBounds;
+      const canW = this.state.canvasWidth;
+      const canH = this.state.canvasHeight;
+
+      // Round-start establishing shot: the moment a countdown begins, snap to
+      // the whole arena. The follow code below then eases onto the players over
+      // the countdown, so by "GO" the camera has zoomed in on the action.
+      const phase = modeManager?.getPhase() ?? null;
+      if (phase === 'countdown' && this.lastCameraPhase !== 'countdown' && canW > 0) {
+        camera.snapToBounds(minX, minY, maxX, maxY, canW, canH);
+      }
+      this.lastCameraPhase = phase;
+
+      // Small-map static camera: if the whole arena fits on screen at a
+      // comfortable zoom, stop following anyone and just watch the full map
+      // (KOTH-style). Decided every tick so it survives canvas resizes; takes
+      // precedence over every follow mode below.
+      const watchWholeMap = canW > 0 && (
+        staticCamOverride !== null
+          ? staticCamOverride
+          : Camera.boundsFitZoom(minX, minY, maxX, maxY, canW, canH) >= STATIC_MAP_FIT_ZOOM
+      );
+
+      if (watchWholeMap) {
+        camera.watchBounds(minX, minY, maxX, maxY, canW, canH);
+        camera.update(dt);
+      } else if (spectateCamEnabled && this.state.canvasWidth > 0) {
         // Spectator content camera: ignore the local-player filtering and
         // direct the shot from ALL blobs (bots have no local id). The
         // director picks one to follow and frames it tight.
@@ -760,6 +812,7 @@ export class BouncyBlobsGame implements Game {
           playerRenderData,
           [...softPlatforms, ...pointShapes],
           chains,
+          lavaKillPlaneY(this.state.level, this.state.mapBounds),
         );
       },
     });
@@ -792,6 +845,7 @@ export class BouncyBlobsGame implements Game {
       gameTime: 0,
       cameraFollower: new CameraFollower(),
       effects,
+      mapBounds,
     };
 
     return {};

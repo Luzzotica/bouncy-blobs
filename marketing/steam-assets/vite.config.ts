@@ -7,5 +7,5 @@ import { resolve } from "node:path";
 export default defineConfig({
   plugins: [react()],
   server: { port: 5183, strictPort: true },
-  publicDir: resolve(__dirname, "../public"),
+  publicDir: resolve(__dirname, "../../public"),
 });

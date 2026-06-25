@@ -58,6 +58,8 @@ import { WebRTCMessage } from '../types/webrtc';
 import GameCanvas from '../components/GameCanvas';
 import HostSetupModal, { type HostSetupResult } from '../components/HostSetupModal';
 import NetDebugOverlay from '../components/NetDebugOverlay';
+import GameMenu from '../components/GameMenu';
+import KothHud from '../components/KothHud';
 import type { Player } from '../types/database';
 import { GameMode, GamePhase } from '../game/gameModes/types';
 // Game mode registry
@@ -405,11 +407,18 @@ export default function GameMaster() {
     const taken = new Set(pm.getAllPlayers().map((p) => p.color));
     const presetColor = pickAvailableColor(pick, taken);
     const { playerId, name, color } = game.addAIPlayer(pick, { color: presetColor });
-    setBots((prev) => [...prev, { playerId, name, personality: pick, color }]);
+    const entry = { playerId, name, personality: pick, color };
+    // Keep the ref in sync SYNCHRONOUSLY (not just via the post-render effect)
+    // so the stale-player cleanup poller, which can fire before React commits
+    // setBots, still sees this bot as a bot and doesn't prune it. Without this
+    // the new bot flickers in then gets disconnected as a "phantom" player.
+    botsRef.current = [...botsRef.current, entry];
+    setBots((prev) => [...prev, entry]);
   }, [maxPlayers]);
 
   const removeBot = useCallback((playerId: string) => {
     gameRef.current?.removeAIPlayer(playerId);
+    botsRef.current = botsRef.current.filter((b) => b.playerId !== playerId);
     setBots((prev) => prev.filter((b) => b.playerId !== playerId));
   }, []);
 
@@ -873,6 +882,9 @@ export default function GameMaster() {
 
     const game = new BouncyBlobsGame();
     gameRef.current = game;
+    // Dev/e2e diagnostics hook: lets Playwright read live game state
+    // (e.g. the active KOTH hill). Gated to dev builds so production stays clean.
+    if (import.meta.env.DEV) (window as unknown as { __bbGame?: BouncyBlobsGame }).__bbGame = game;
     game.setRngSeed(sessionSeedRef.current);
     installHostBroadcastHook(game);
 
@@ -927,6 +939,9 @@ export default function GameMaster() {
 
     const game = new BouncyBlobsGame();
     gameRef.current = game;
+    // Dev/e2e diagnostics hook: lets Playwright read live game state
+    // (e.g. the active KOTH hill). Gated to dev builds so production stays clean.
+    if (import.meta.env.DEV) (window as unknown as { __bbGame?: BouncyBlobsGame }).__bbGame = game;
     game.setRngSeed(sessionSeedRef.current);
     installHostBroadcastHook(game);
 
@@ -2172,7 +2187,7 @@ export default function GameMaster() {
       const pm = game.getPlayerManager();
       if (!pm) return;
 
-      const botIds = new Set(bots.map((b) => b.playerId));
+      const botIds = new Set(botsRef.current.map((b) => b.playerId));
       const guestIds = new Set(guestPlayersRef.current.keys());
       const allPlayers = pm.getAllPlayers();
       // Ensure every current player has a slot before we serialize the
@@ -2231,7 +2246,7 @@ export default function GameMaster() {
     broadcast(); // initial fire so a peer that just connected gets it ASAP
     const interval = setInterval(broadcast, 500);
     return () => clearInterval(interval);
-  }, [roomReady, bots, selectedMapId, selectedModeId, maxPlayers, isPublic, mapOptions, phase]);
+  }, [roomReady, selectedMapId, selectedModeId, maxPlayers, isPublic, mapOptions, phase]);
 
   // Poll the room for new peers. Connects to each new one (phones get a
   // single ordered channel; screens get the state+input pair). Then derive
@@ -2294,7 +2309,7 @@ export default function GameMaster() {
         const game = gameRef.current;
         const ctx = contextRef.current;
         if (pm) {
-          const botIds = new Set(bots.map((b) => b.playerId));
+          const botIds = new Set(botsRef.current.map((b) => b.playerId));
           for (const p of pm.getAllPlayers()) {
             if (p.playerId === LOCAL_PLAYER_ID_CONST) continue;
             if (botIds.has(p.playerId)) continue;
@@ -2334,7 +2349,7 @@ export default function GameMaster() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [roomReady, sessionId, bots, handlePlayerDisconnect]);
+  }, [roomReady, sessionId, handlePlayerDisconnect]);
 
   // ── Feature: auto-end lobby when only AIs remain ─────────────────────────
   // Counts non-bot players (phones on this screen + local keyboard + guest
@@ -2604,8 +2619,8 @@ export default function GameMaster() {
               title="Open the Steam friend picker to invite friends"
               style={{
                 position: 'absolute',
-                bottom: 160,
-                right: 16,
+                bottom: 250,
+                right: 31,
                 fontSize: 14,
                 fontWeight: 800,
                 padding: '10px 18px 9px',
@@ -2638,129 +2653,74 @@ export default function GameMaster() {
           )}
 
           {/* Join QR — bottom-right, click to copy */}
-          {joinUrl && (
-            <div
-              onClick={() => {
-                if (navigator.clipboard?.writeText) {
-                  navigator.clipboard.writeText(joinUrl);
-                } else {
-                  const ta = document.createElement('textarea');
-                  ta.value = joinUrl;
-                  document.body.appendChild(ta);
-                  ta.select();
-                  document.execCommand('copy');
-                  document.body.removeChild(ta);
-                }
-              }}
-              style={{
-                position: 'absolute',
-                bottom: 16,
-                right: 16,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-                cursor: 'pointer',
-              }}
-              title="Click to copy join link"
-            >
-              <div style={{ padding: 8, background: '#fff', borderRadius: 10, lineHeight: 0 }}>
-                <QRCodeSVG value={joinUrl} size={110} />
-              </div>
-            </div>
-          )}
+          {joinUrl && <JoinQrBadge joinUrl={joinUrl} />}
         </div>
       </div>
     );
   }
 
-  // Playing phase — no join info, just game + home button + bot controls.
+  // Playing phase — clean play screen: just the canvas, a themed Menu
+  // popup, and the mode HUD. Bot/player setup lives in the lobby only.
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
       {showNetDebug && <NetDebugOverlay role="host" />}
-      <div style={{
+      <KothHud gameRef={gameRef} />
+      <GameMenu
+        onExit={() => navigate('/')}
+        onBackToLobby={endGame}
+      />
+    </div>
+  );
+}
+
+// Bottom-right join QR. Click copies the invite link; the caption swaps to a
+// hint on hover. Self-contained so it can own its hover state.
+function JoinQrBadge({ joinUrl }: { joinUrl: string }) {
+  const [hover, setHover] = useState(false);
+
+  const copy = () => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(joinUrl);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = joinUrl;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  };
+
+  return (
+    <div
+      onClick={copy}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
         position: 'absolute',
-        top: 12,
-        left: 12,
+        bottom: 31,
+        right: 31,
         display: 'flex',
         flexDirection: 'column',
+        alignItems: 'center',
         gap: 8,
-        alignItems: 'stretch',
-        maxWidth: 200,
-      }}>
-        <Link to="/">
-          <button style={{ padding: '6px 12px', fontSize: 13, width: '100%' }}>Home</button>
-        </Link>
-        <button
-          data-testid="end-game-button"
-          onClick={endGame}
-          style={{
-            padding: '6px 12px',
-            fontSize: 13,
-            background: '#7a1f2e',
-            color: '#fff',
-            fontWeight: 600,
-          }}
-          title="End this round and return everyone to the lobby"
-        >
-          End Game
-        </button>
-        <span style={{ color: '#888', fontSize: 13 }}>
-          Players: {gameRef.current?.getPlayerManager()?.getPlayerCount() ?? 0}
-        </span>
-        <button
-          data-testid="add-bot"
-          onClick={() => addBot()}
-          disabled={(gameRef.current?.getPlayerManager()?.getPlayerCount() ?? 0) >= maxPlayers}
-          style={{
-            padding: '6px 12px',
-            fontSize: 13,
-            background: (gameRef.current?.getPlayerManager()?.getPlayerCount() ?? 0) >= maxPlayers ? '#333' : '#5a189a',
-            opacity: (gameRef.current?.getPlayerManager()?.getPlayerCount() ?? 0) >= maxPlayers ? 0.5 : 1,
-          }}
-          title="Add a scripted AI bot"
-        >
-          + Add AI Bot
-        </button>
-        <button
-          data-testid="local-player-toggle"
-          onClick={localPlayerJoined ? leaveAsLocalPlayer : joinAsLocalPlayer}
-          style={{ padding: '6px 12px', fontSize: 13, background: localPlayerJoined ? '#2d6a4f' : '#5dd6ff', color: localPlayerJoined ? '#fff' : '#000' }}
-          title={localPlayerJoined ? 'Leave the game (free up the laptop slot)' : 'Join as a local player using WASD + Space'}
-        >
-          {localPlayerJoined ? '🎮 Leave (You)' : '🎮 Play from laptop'}
-        </button>
-        {bots.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {bots.map((b) => (
-              <span
-                key={b.playerId}
-                data-testid={`bot-chip-${b.personality}`}
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: 12,
-                  background: 'rgba(255,255,255,0.08)',
-                  fontSize: 12,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <span style={{
-                  display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: b.color,
-                }} />
-                {PERSONALITY_LABELS[b.personality]}
-                <button
-                  onClick={() => removeBot(b.playerId)}
-                  style={{ padding: '0 4px', background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
-                  title="Remove bot"
-                >×</button>
-              </span>
-            ))}
-          </div>
-        )}
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ padding: 10, background: '#fff', borderRadius: 12, lineHeight: 0 }}>
+        <QRCodeSVG value={joinUrl} size={150} />
       </div>
+      <span style={{
+        fontSize: 13,
+        fontWeight: 800,
+        color: '#fffae6',
+        letterSpacing: 0.3,
+        textShadow: '1px 1px 0 #0a0612, -1px -1px 0 #0a0612, 1px -1px 0 #0a0612, -1px 1px 0 #0a0612',
+        whiteSpace: 'nowrap',
+      }}>
+        {hover ? 'Click to copy invite link' : 'Scan to play from phone'}
+      </span>
     </div>
   );
 }

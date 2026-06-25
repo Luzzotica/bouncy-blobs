@@ -118,8 +118,22 @@
   "hillZones": [
     {
       "id": "hill_133",
-      "x": 80,
-      "y": -1050,
+      "x": 60,
+      "y": 50,
+      "width": 600,
+      "height": 380
+    },
+    {
+      "id": "hill_142",
+      "x": 220,
+      "y": -1020,
+      "width": 400,
+      "height": 360
+    },
+    {
+      "id": "hill_143",
+      "x": 980,
+      "y": 620,
       "width": 640,
       "height": 380
     }
@@ -136,11 +150,19 @@
   "spikes": [
     {
       "id": "spike_135",
-      "x": 940,
+      "x": 960,
       "y": 1220,
-      "width": 1040,
+      "width": 1080,
       "height": 40,
       "rotation": 0
+    },
+    {
+      "id": "spike_308",
+      "x": 410,
+      "y": -500,
+      "width": 540,
+      "height": 40,
+      "rotation": 1.5707963267948963
     }
   ],
   "pointShapes": [

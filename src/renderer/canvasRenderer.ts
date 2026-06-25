@@ -12,7 +12,12 @@ import { renderDecals } from './decals';
 import { drawGameBackground } from './backgroundRenderer';
 import { renderParticles } from './particles';
 import { impactsFor } from './blobImpacts';
+import { drawLava } from './lavaRenderer';
 import { Vec2 } from '../physics/vec2';
+
+/** Extra world-space margin so the lava reaches past the viewport edges and
+ *  its surface wave never reveals a seam at the screen border. */
+const WAVE_PAD = 80;
 
 // Render-only velocity tracker: per-blob {prevCentroid, prevTimeMs}. Used to
 // drive wind ripples + leading-edge perturbation. The physics engine has its
@@ -130,6 +135,7 @@ export function render(
   playerData?: PlayerRenderData[],
   softPlatforms: SoftPlatformRenderInfo[] = [],
   chains: ChainRenderInfo[] = [],
+  killPlaneY?: number,
 ): void {
   // Background image (or solid fallback color while it's still loading).
   drawGameBackground(ctx, camera, canvasWidth, canvasHeight, BACKGROUND_COLOR);
@@ -274,6 +280,17 @@ export function render(
   const nowMs = performance.now();
   const shineTime = nowMs / 1000;
 
+  // Goopy lava at the fall-off-the-map kill plane — under the blobs so a
+  // falling blob visibly sinks into it. Spans the full visible width and down
+  // to the bottom of the viewport (world-space; camera transform is active).
+  if (killPlaneY !== undefined) {
+    const halfW = canvasWidth / (2 * camera.zoom);
+    const left = camera.position.x - halfW - WAVE_PAD;
+    const right = camera.position.x + halfW + WAVE_PAD;
+    const bottom = camera.position.y + canvasHeight / (2 * camera.zoom) + WAVE_PAD;
+    if (bottom > killPlaneY) drawLava(ctx, killPlaneY, left, right, bottom, shineTime);
+  }
+
   // Chains/tethers — drawn BEHIND the blobs so the line tucks under them.
   for (const chain of chains) {
     drawChain(ctx, world, chain.particleIndices, chain.totalLength);
@@ -285,6 +302,7 @@ export function render(
   // shader on a stationary NPC).
   for (let i = 0; i < npcBlobs.length; i++) {
     const npc = npcBlobs[i];
+    if (npc.destroyed) continue; // retired NPC (e.g. fell off the map) — don't draw
     const hull = npc.getHullPolygon();
     const c = npc.getCentroid();
     const v = sampleBlobVelocity(npc, c, nowMs);

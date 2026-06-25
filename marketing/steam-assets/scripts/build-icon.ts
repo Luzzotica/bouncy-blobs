@@ -1,11 +1,12 @@
-/* Convert output/client-icon.png into a multi-res Windows .ico.
+/* Convert the rendered client-icon.png into a multi-res Windows .ico.
  * Requires ImageMagick `magick` on PATH. */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-const SRC = resolve(process.cwd(), "output", "client-icon.png");
-const OUT = resolve(process.cwd(), "output", "client-icon.ico");
+// client-icon renders to the sibling marketing/steam/ output folder.
+const SRC = resolve(process.cwd(), "..", "steam", "client-icon.png");
+const OUT = resolve(process.cwd(), "..", "steam", "client-icon.ico");
 
 if (!existsSync(SRC)) {
   console.error(`Missing ${SRC} — run \`pnpm render:steam client-icon\` first.`);

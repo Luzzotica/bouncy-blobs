@@ -30,16 +30,25 @@ export class TriggerManager {
    *  Defaults to "no blob is an NPC" so callers that don't supply one keep
    *  the previous behavior (everything can press). */
   private isNpcBlob: (blobId: number) => boolean = () => false;
+  /** Predicate identifying PLAYER blobs (humans + AI bots). Only players and
+   *  NPCs may ever press a trigger — structural softbodies (point shapes,
+   *  soft platforms, rope-chain segments) are blobs in the engine too, and
+   *  the engine emits enter/exit events for ALL of them, so without this
+   *  filter they'd trip triggers. Defaults to "every blob is a player" so
+   *  callers that don't supply one keep the previous (permissive) behavior. */
+  private isPlayerBlob: (blobId: number) => boolean = () => true;
 
   initialize(
     world: SoftBodyEngine,
     defs: TriggerDef[],
     shapeIdxToTriggerId: Map<number, string>,
     isNpcBlob?: (blobId: number) => boolean,
+    isPlayerBlob?: (blobId: number) => boolean,
   ): void {
     this.world = world;
     this.shapeIdxToTriggerId = shapeIdxToTriggerId;
     this.isNpcBlob = isNpcBlob ?? (() => false);
+    this.isPlayerBlob = isPlayerBlob ?? (() => true);
     this.triggers.clear();
     this.occupants.clear();
     for (const def of defs) {
@@ -69,7 +78,13 @@ export class TriggerManager {
     if (!triggerId) return;
     const trig = this.triggers.get(triggerId);
     if (!trig) return;
-    if (trig.def.ignoreNpcs && this.isNpcBlob(blobId)) return;
+    // Only players and NPCs may press triggers. Anything else reaching here is
+    // a structural softbody (point shape, soft platform, rope segment) — the
+    // engine fires enter events for every blob, so reject non-agents outright.
+    if (!this.isPlayerBlob(blobId)) {
+      if (!this.isNpcBlob(blobId)) return;        // structural softbody — never presses
+      if (trig.def.ignoreNpcs) return;            // an NPC, but this trigger ignores NPCs
+    }
     const occupants = this.occupants.get(triggerId);
     if (!occupants) return;
     const wasEmpty = occupants.size === 0;

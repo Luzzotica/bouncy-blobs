@@ -31,6 +31,8 @@ import { quantizeAxis } from "../lib/inputProtocol";
 import GameCanvas from "../components/GameCanvas";
 import GuestLobbyPanel from "../components/GuestLobbyPanel";
 import NetDebugOverlay from "../components/NetDebugOverlay";
+import GameMenu from "../components/GameMenu";
+import KothHud from "../components/KothHud";
 import { COLOR_PALETTE } from "../constants/customization";
 import { BouncyBlobsGame } from "../game/bouncyBlobsGame";
 import type { GameContext } from "../game/GameInterface";
@@ -1864,7 +1866,7 @@ export default function OnlineGuest() {
   // down WebRTC / Steam transports, then navigate. The component unmount
   // cleanup runs too but this kicks the network side off explicitly so the
   // host sees us leave even if React's effect ordering is unusual.
-  const leaveAndExit = () => {
+  const leaveAndExitTo = (dest: string) => {
     const manager = managerRef.current;
     try {
       if (manager && localPlayerJoined) {
@@ -1873,8 +1875,9 @@ export default function OnlineGuest() {
       }
     } catch { /* best-effort */ }
     void roomRef.current?.leaveRoom().catch(() => {});
-    navigate("/lobbies");
+    navigate(dest);
   };
+  const leaveAndExit = () => leaveAndExitTo("/lobbies");
 
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "row" }}>
@@ -1968,32 +1971,17 @@ export default function OnlineGuest() {
           <div style={{ position: "relative", flex: 1 }}>
             <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
             {showNetDebug && <NetDebugOverlay />}
-            {/* Always-visible Leave Game button during the playing phase,
-                so guests can return to the lobby list without waiting for
-                the host to end the round. Hidden during the lobby phase
-                (the panel already has a leave button there). */}
+            <KothHud gameRef={gameRef} />
+            {/* Themed Menu popup during the playing phase, so guests can drop
+                back to the lobby list or fully exit without waiting for the
+                host to end the round. Hidden during the lobby phase (the panel
+                already has a leave button there). */}
             {!showPanel && (
-              <button
-                data-testid="leave-game-button"
-                onClick={leaveAndExit}
-                title="Leave this game and return to the lobby list"
-                style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  padding: "8px 14px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  background: "#7a1f2e",
-                  color: "#fff",
-                  border: "2px solid #1a0a10",
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  zIndex: 10,
-                }}
-              >
-                ← Leave Game
-              </button>
+              <GameMenu
+                onExit={() => leaveAndExitTo('/')}
+                onBackToLobby={leaveAndExit}
+                backToLobbyLabel="Back to lobbies"
+              />
             )}
           </div>
         )}

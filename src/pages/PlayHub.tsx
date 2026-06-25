@@ -3,7 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { loadPlayCampaign, type CampaignLevelEntry } from '../lib/campaignRegistry';
 import { getBuiltinLevels } from '../levels/levelRegistry';
 import { getPlayProgress, isUnlocked, type PlayProgress } from '../lib/playProgress';
+import {
+  getPlayerColor, setPlayerColorSetting,
+  getPlayerFaceId, setPlayerFaceIdSetting,
+} from '../utils/audioSettings';
+import { hasChosenIdentity, markIdentityChosen } from '../utils/identityChosen';
 import HomeBackground from '../components/HomeBackground';
+import IdentityPicker from '../components/IdentityPicker';
+import {
+  COLORS, pageContent, headerRow, pageTitle, backBtn, cardTitle, paperCard,
+  tape, modalBackdrop, modalCard, modalTape, actionBtn,
+} from '../theme/uiTheme';
 
 function formatTime(ms: number | null): string {
   if (ms == null) return '—';
@@ -19,6 +29,14 @@ export default function PlayHub() {
   const [levels, setLevels] = useState<CampaignLevelEntry[] | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<PlayProgress>({});
+  const [blobColor, setBlobColor] = useState(() => getPlayerColor());
+  const [blobFace, setBlobFace] = useState(() => getPlayerFaceId());
+  // First-time players get a one-off "make your blob" prompt before the levels.
+  const [firstTime, setFirstTime] = useState(() => !hasChosenIdentity());
+
+  const chooseColor = (hex: string) => { setBlobColor(hex); setPlayerColorSetting(hex); };
+  const chooseFace = (id: string) => { setBlobFace(id); setPlayerFaceIdSetting(id); };
+  const finishFirstTime = () => { markIdentityChosen(); setFirstTime(false); };
 
   useEffect(() => {
     setProgress(getPlayProgress());
@@ -35,108 +53,131 @@ export default function PlayHub() {
 
   return (
     <HomeBackground>
-      <div style={content}>
-      <div style={topBar}>
-        <Link to="/"><button style={backBtn}>← Home</button></Link>
-        <h1 style={title}>Play</h1>
-        <div style={{ width: 90 }} />
+      <div style={pageContent}>
+        <div style={headerRow}>
+          <Link to="/"><button className="paper-btn bb-hover-btn" style={backBtn}>← Home</button></Link>
+          <h1 style={pageTitle}>Play</h1>
+        </div>
+
+        <div style={mainRow}>
+          {/* Left: live blob customization */}
+          <aside style={sidePanel}>
+            <h2 style={panelHeading}>Your Blob</h2>
+            <IdentityPicker
+              color={blobColor}
+              faceId={blobFace}
+              onColorChange={chooseColor}
+              onFaceChange={chooseFace}
+            />
+          </aside>
+
+          {/* Right: level select */}
+          <div style={levelsCol}>
+            {levels == null ? (
+              <span style={dim}>Loading…</span>
+            ) : levels.length === 0 ? (
+              <span style={dim}>No levels yet.</span>
+            ) : (
+              <div style={grid}>
+                {levels.map((lvl, i) => {
+                  const unlocked = isUnlocked(ids, i);
+                  const p = progress[lvl.id];
+                  const completed = !!p?.completed;
+                  const name = lvl.name || names[lvl.id] || lvl.id;
+                  return (
+                    <button
+                      key={lvl.id}
+                      className={unlocked ? 'paper-btn' : undefined}
+                      data-testid={`play-level-${lvl.id}`}
+                      disabled={!unlocked}
+                      onClick={() => unlocked && navigate(`/play/level?level=${encodeURIComponent(lvl.id)}`)}
+                      style={{
+                        ...card,
+                        cursor: unlocked ? 'pointer' : 'not-allowed',
+                        opacity: unlocked ? 1 : 0.5,
+                        filter: unlocked ? 'none' : 'grayscale(0.7)',
+                      }}
+                    >
+                      {completed && <span style={tape(COLORS.lavender)} />}
+                      <div style={cardNum}>{i + 1}</div>
+                      <div style={cardName}>{name}</div>
+                      <div style={cardMeta}>
+                        {!unlocked ? (
+                          <span>🔒 Locked</span>
+                        ) : completed ? (
+                          <>
+                            <span style={{ color: COLORS.green, fontWeight: 800 }}>✓ Cleared</span>
+                            <span style={metaDim}>Best {formatTime(p!.bestTimeMs)}</span>
+                            <span style={metaDim}><span style={{ fontSize: 40, lineHeight: 1 }}>☠</span> {p!.deaths}</span>
+                          </>
+                        ) : (
+                          <span style={{ color: COLORS.purple, fontWeight: 800 }}>▶ Play</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {levels == null ? (
-        <span style={{ color: '#888' }}>Loading…</span>
-      ) : levels.length === 0 ? (
-        <span style={{ color: '#888' }}>No levels yet.</span>
-      ) : (
-        <div style={grid}>
-          {levels.map((lvl, i) => {
-            const unlocked = isUnlocked(ids, i);
-            const p = progress[lvl.id];
-            const completed = !!p?.completed;
-            const name = lvl.name || names[lvl.id] || lvl.id;
-            return (
-              <button
-                key={lvl.id}
-                data-testid={`play-level-${lvl.id}`}
-                disabled={!unlocked}
-                onClick={() => unlocked && navigate(`/play/level?level=${encodeURIComponent(lvl.id)}`)}
-                style={{
-                  ...card,
-                  cursor: unlocked ? 'pointer' : 'not-allowed',
-                  opacity: unlocked ? 1 : 0.5,
-                  filter: unlocked ? 'none' : 'grayscale(0.7)',
-                }}
-              >
-                {completed && <span style={tape} />}
-                <div style={cardNum}>{i + 1}</div>
-                <div style={cardName}>{name}</div>
-                <div style={cardMeta}>
-                  {!unlocked ? (
-                    <span>🔒 Locked</span>
-                  ) : completed ? (
-                    <>
-                      <span style={{ color: '#2d6a4f', fontWeight: 800 }}>✓ Cleared</span>
-                      <span style={metaDim}>Best {formatTime(p!.bestTimeMs)}</span>
-                      <span style={metaDim}><span style={{ fontSize: 40, lineHeight: 1 }}>☠</span> {p!.deaths}</span>
-                    </>
-                  ) : (
-                    <span style={{ color: '#5a189a', fontWeight: 800 }}>▶ Play</span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+      {firstTime && (
+        <div style={modalBackdrop}>
+          <div style={firstTimeCard}>
+            <span style={modalTape} />
+            <h2 style={modalHeading}>Make your blob!</h2>
+            <p style={modalSub}>Pick a colour and some eyes. You can change these any time on this screen.</p>
+            <IdentityPicker
+              color={blobColor}
+              faceId={blobFace}
+              onColorChange={chooseColor}
+              onFaceChange={chooseFace}
+              previewSize={180}
+            />
+            <button className="paper-btn" style={modalGo} onClick={finishFirstTime}>Let's bounce →</button>
+          </div>
         </div>
       )}
-      </div>
     </HomeBackground>
   );
 }
 
-// Scrollable content layer over the shared HomeBackground (which supplies the
-// fixed hero bg + overlay).
-const content: React.CSSProperties = {
-  position: 'absolute', inset: 0,
-  display: 'flex', flexDirection: 'column', alignItems: 'center',
-  padding: '24px 32px 40px', overflowY: 'auto',
+// ─── styles (layout-specific; surfaces/buttons come from uiTheme) ───────────────
+
+const mainRow: React.CSSProperties = {
+  flex: 1, minHeight: 0, display: 'flex', gap: 20, alignItems: 'flex-start',
 };
 
-const topBar: React.CSSProperties = {
-  width: '100%', maxWidth: 1000, display: 'flex', alignItems: 'center',
-  justifyContent: 'space-between', marginBottom: 28,
+// Narrow, pinned customization panel — mirrors the multiplayer lobby's left column.
+const sidePanel: React.CSSProperties = {
+  ...paperCard,
+  flex: '0 0 clamp(240px, 26%, 320px)',
+  alignSelf: 'flex-start',
+  position: 'sticky',
+  top: 0,
 };
 
-const title: React.CSSProperties = {
-  margin: 0, fontSize: 44, fontWeight: 900, color: '#fffae6',
-  textShadow: '4px 4px 0 #c77dff, -2px -2px 0 #0a0612, 2px 2px 0 #0a0612',
-  transform: 'rotate(-1.5deg)',
-};
+const panelHeading: React.CSSProperties = { ...cardTitle, textAlign: 'center' };
 
-const backBtn: React.CSSProperties = {
-  padding: '8px 16px', fontSize: 14, background: '#fffae6', color: '#1a0f2e',
-  border: '3px solid #0a0612', borderRadius: 6, cursor: 'pointer', fontWeight: 700,
-};
+const levelsCol: React.CSSProperties = { flex: '1 1 0', minWidth: 0 };
 
 const grid: React.CSSProperties = {
-  width: '100%', maxWidth: 1000,
-  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 22,
+  width: '100%',
+  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 22,
 };
 
 const card: React.CSSProperties = {
   position: 'relative', textAlign: 'left',
-  background: '#fffae6', color: '#1a0f2e',
+  background: COLORS.paper, color: COLORS.ink,
   border: '4px solid #0a0612', borderRadius: 6, padding: '20px 20px 16px',
   boxShadow: '0 8px 20px rgba(0,0,0,0.35)', fontFamily: 'inherit',
   display: 'flex', flexDirection: 'column', gap: 8, minHeight: 120,
 };
 
-const tape: React.CSSProperties = {
-  position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%) rotate(-3deg)',
-  width: '55%', height: 14, background: '#c77dff',
-  border: '1px solid rgba(0,0,0,0.25)', opacity: 0.85, boxShadow: '0 2px 3px rgba(0,0,0,0.2)',
-};
-
 const cardNum: React.CSSProperties = {
-  fontSize: 13, fontWeight: 800, color: '#5a189a', letterSpacing: 1,
+  fontSize: 13, fontWeight: 800, color: COLORS.purple, letterSpacing: 1,
 };
 
 const cardName: React.CSSProperties = {
@@ -151,3 +192,22 @@ const cardMeta: React.CSSProperties = {
 const metaDim: React.CSSProperties = {
   color: '#555', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 };
+
+const dim: React.CSSProperties = { color: '#cbb8e0', fontWeight: 700 };
+
+// First-time picker modal — theme modal card + a scroll cap for the tall picker.
+const firstTimeCard: React.CSSProperties = {
+  ...modalCard, width: 360, maxHeight: '90vh', overflowY: 'auto',
+  display: 'flex', flexDirection: 'column',
+};
+
+const modalHeading: React.CSSProperties = {
+  margin: '0 0 6px', fontSize: 26, fontWeight: 900, textAlign: 'center',
+  textShadow: '2px 2px 0 #c77dff',
+};
+
+const modalSub: React.CSSProperties = {
+  margin: '0 0 18px', fontSize: 13, color: '#555', textAlign: 'center', fontWeight: 600,
+};
+
+const modalGo: React.CSSProperties = { ...actionBtn(COLORS.purple), width: '100%', marginTop: 20 };

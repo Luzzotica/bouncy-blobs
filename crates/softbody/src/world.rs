@@ -67,9 +67,12 @@ pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
 pub const CRUSH_AREA_MIN_RATIO: Fx = Fx::from_raw((1i64 << 32) / 15); // 0.0667
 
 // A squeeze must persist this many consecutive frames to count as a real crush.
-// A hard landing (even holding DOWN) bottoms out for only 1-2 frames; a genuine
-// pinch (wall vs moving platform) holds. Gates the crush EVENT only.
-pub const CRUSH_SUSTAIN_FRAMES: i32 = 6;
+// Kept low so we catch the pinch DURING the squeeze and reset/kill the blob
+// before the depenetration solver ejects it ("teleports it out"). A hard
+// landing never even reaches CRUSH_AREA_MIN_RATIO (it bottoms out ~1/10, above
+// the 1/15 threshold), so a couple of frames of true sub-threshold squeeze is
+// already a genuine crush, not a false positive.
+pub const CRUSH_SUSTAIN_FRAMES: i32 = 2;
 
 pub const CRUSH_MAX_COORD: Fx = Fx::from_raw(1_000_000i64 << 32);
 
@@ -887,26 +890,27 @@ impl SoftBodyWorld {
                 }
             }
 
-            // Collapse-to-centroid is the recovery for a BLOW-UP (hull sprawled
-            // across the screen): snap the particles back so the solver re-pulls
-            // a clean rest pose instead of leaving an exploded mess.
-            //
-            // Do NOT collapse a SQUEEZE (crushed_small). Collapsing zeroes the
-            // hull area, which (a) makes the blob VANISH leaving only the face
-            // rendered at the centroid, and (b) — since area 0 is always below
-            // the threshold — re-fires every frame so it never recovers. That's
-            // the "hard landing → blob disappears until I expand" bug. A
-            // squeezed blob re-inflates on its own via pressure + shape-match
-            // once the squeeze releases, so we leave it alone.
-            if blew_up {
+            // Recover by rebuilding a clean REST pose at the (clamped) centroid
+            // the instant a crush is detected — whether the hull blew up
+            // (sprawled across the screen) or was squeezed flat. Resetting to
+            // the rest shape (rather than the old collapse-to-a-single-point):
+            //   - de-explodes the hull NOW, so it never lingers as a
+            //     map-spanning shape whose giant AABB drags every other
+            //     softbody around (the "everything freaks out" bug);
+            //   - keeps the area at rest (not 0), so a squeeze doesn't re-fire
+            //     every frame and the blob doesn't VANISH.
+            // For a player, the death pipeline (onBlobCrushed → kill) moves it
+            // to spawn this same tick; an NPC simply recovers in place.
+            if blew_up || sustained_crush {
                 let cx = c.x.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
                 let cy = c.y.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
-                let collapse = FxVec2::new(cx, cy);
-                let rng = self.blob_ranges[bi].clone();
-                for i in rng.start..rng.end {
-                    let u = i as usize;
-                    self.pos[u] = collapse;
-                    self.vel[u] = FxVec2::ZERO;
+                let center = FxVec2::new(cx, cy);
+                self.pos[r.start as usize] = center;
+                self.vel[r.start as usize] = FxVec2::ZERO;
+                for (k, &h) in r.hull.iter().enumerate() {
+                    let local = sh.rest_local.get(k).copied().unwrap_or(FxVec2::ZERO);
+                    self.pos[h as usize] = center.add(local);
+                    self.vel[h as usize] = FxVec2::ZERO;
                 }
             }
         }
@@ -2528,6 +2532,35 @@ impl SoftBodyWorld {
             let u = i as usize;
             self.pos[u] = FxVec2::new(self.pos[u].x + dx, self.pos[u].y + dy);
             self.vel[u] = FxVec2::ZERO;
+        }
+    }
+
+    /// Rebuild a blob at its undeformed REST pose centred on `target`, with
+    /// zero velocity and shape-match rest-scale reset to 1. Unlike
+    /// `teleport_blob` (which only translates, so a deformed blob stays
+    /// deformed), this restores the rest shape — a clean respawn for a blob
+    /// that died crushed/stretched.
+    pub fn reset_blob_to_rest(&mut self, blob_id: BlobId, target: FxVec2) {
+        let bid = blob_id as usize;
+        if bid >= self.blob_ranges.len() { return; }
+        let (start, hull, si) = {
+            let r = &self.blob_ranges[bid];
+            (r.start, r.hull.clone(), r.shape_idx as usize)
+        };
+        if si >= self.shapes.len() { return; }
+        // Centre particle.
+        self.pos[start as usize] = target;
+        self.vel[start as usize] = FxVec2::ZERO;
+        // Hull particles ← undeformed rest hull placed around `target`.
+        for (k, &h) in hull.iter().enumerate() {
+            let local = self.shapes[si].rest_local.get(k).copied().unwrap_or(FxVec2::ZERO);
+            self.pos[h as usize] = target.add(local);
+            self.vel[h as usize] = FxVec2::ZERO;
+        }
+        // Deflate the rest target back to base scale; clear any crush counter.
+        self.shapes[si].shape_match_rest_scale = Fx::ONE;
+        if bid < self.blob_crush_frames.len() {
+            self.blob_crush_frames[bid] = 0;
         }
     }
 

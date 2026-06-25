@@ -2,9 +2,35 @@
   "id": "play",
   "name": "Play",
   "levels": [
-    { "id": "springy", "name": "Springy" },
-    { "id": "swervy", "name": "Swervy" },
-    { "id": "wall-climb", "name": "Wall Climb" },
-    { "id": "ceiling-crawl", "name": "Ceiling Crawl" }
+    {
+      "id": "jump"
+    },
+    {
+      "id": "springy"
+    },
+    {
+      "id": "platforms-be-movin"
+    },
+    {
+      "id": "squeeze-up"
+    },
+    {
+      "id": "squeeze-in"
+    },
+    {
+      "id": "cannon"
+    },
+    {
+      "id": "wall-climb"
+    },
+    {
+      "id": "ceiling-crawl"
+    },
+    {
+      "id": "swervy"
+    },
+    {
+      "id": "getting-crushed"
+    }
   ]
 }

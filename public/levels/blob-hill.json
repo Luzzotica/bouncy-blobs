@@ -11,10 +11,10 @@
   "platforms": [
     {
       "id": "plat_1",
-      "x": -1920,
+      "x": -1890,
       "y": 1400,
-      "width": 760,
-      "height": 520,
+      "width": 700,
+      "height": 480,
       "rotation": 0
     },
     {
@@ -27,9 +27,9 @@
     },
     {
       "id": "plat_3",
-      "x": 1670,
+      "x": 1610,
       "y": 980,
-      "width": 1380,
+      "width": 1260,
       "height": 280,
       "rotation": 0
     },
@@ -39,22 +39,6 @@
       "y": 210,
       "width": 960,
       "height": 140,
-      "rotation": 0
-    },
-    {
-      "id": "plat_9",
-      "x": -2430,
-      "y": 650,
-      "width": 420,
-      "height": 2660,
-      "rotation": 0
-    },
-    {
-      "id": "plat_10",
-      "x": 2470,
-      "y": 580,
-      "width": 540,
-      "height": 2720,
       "rotation": 0
     },
     {
@@ -343,34 +327,5 @@
       "mode": "continuous"
     }
   ],
-  "deathZones": [
-    {
-      "id": "death_39",
-      "x": 640,
-      "y": -3000,
-      "width": 9120,
-      "height": 960
-    },
-    {
-      "id": "death_40",
-      "x": 4680,
-      "y": 1480,
-      "width": 1000,
-      "height": 7960
-    },
-    {
-      "id": "death_41",
-      "x": -370,
-      "y": 4820,
-      "width": 9140,
-      "height": 1080
-    },
-    {
-      "id": "death_42",
-      "x": -4450,
-      "y": 390,
-      "width": 980,
-      "height": 7780
-    }
-  ]
+  "deathZones": []
 }

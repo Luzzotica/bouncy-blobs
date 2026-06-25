@@ -45,6 +45,10 @@ export interface LevelData {
   npcBlobs: NpcBlobDef[];
   goalZones?: ZoneDef[];
   hillZones?: ZoneDef[];
+  /** KOTH only: when set and 2+ `hillZones` exist, the active hill moves to a
+   *  random other zone after a random interval in [minSeconds, maxSeconds].
+   *  Absent (or with <2 hills) = the hill stays put on the first zone. */
+  hillRotation?: { minSeconds: number; maxSeconds: number };
   gravityZones?: GravityZoneDef[];
   powerupSpawns?: PowerupSpawnDef[];
   springPads?: SpringPadDef[];
@@ -65,6 +69,10 @@ export interface LevelData {
    * via the sprite registry, collision wiring is wired up per-asset as each
    * gets editor-tuned hulls. */
   sprites?: SpriteInstanceDef[];
+  /** Whether to draw the goopy lava visual at the fall-off-the-map kill plane.
+   * The kill plane itself is always active (a blob below it dies regardless) —
+   * this only toggles the lava render. Undefined = shown (default). */
+  showLava?: boolean;
 }
 
 /** An instance of a sprite from the registry placed in a level. The sprite
@@ -210,10 +218,19 @@ export type ActionTarget =
    *  `endRotation` (radians) gives the open-pose rotation — when absent
    *  the platform keeps its closed-pose rotation (translation-only). */
   | { kind: 'platform'; platformId: string; endX: number; endY: number; endRotation?: number }
+  /** Move (and optionally rotate) a spike. `endX/endY` give the open-pose
+   *  base position; optional `endRotation` (radians) the open-pose rotation.
+   *  Lets a trigger drive a moving spike trap. */
+  | { kind: 'spike'; spikeId: string; endX: number; endY: number; endRotation?: number }
   /** Rotate a whole point-shape hull around its REST centroid by
    *  `endRotation` radians. Lerped from 0 at closed pose. Anchored
    *  particles are skipped. */
-  | { kind: 'rotateShape'; shapeId: string; endRotation: number };
+  | { kind: 'rotateShape'; shapeId: string; endRotation: number }
+  /** Translate an ENTIRE point-shape hull rigidly. `endX/endY` give the
+   *  open-pose centroid; every (unanchored) vertex moves by the same delta
+   *  from the rest centroid. Lets one target move a whole soft body instead
+   *  of one shapePoint target per vertex. */
+  | { kind: 'moveShape'; shapeId: string; endX: number; endY: number };
 
 /** A movement effect. Subscribes to one or more Triggers via `sourceTriggerIds`
  *  and animates its targets between their closed (initial) and open (endX/endY)

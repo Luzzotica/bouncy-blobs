@@ -8,30 +8,22 @@ import { drawGoalZone } from '../../renderer/zoneRenderer';
 import { drawTimer } from '../../renderer/hudRenderer';
 import { drawChain } from '../../renderer/chainRenderer';
 
-// Total length of the rope between any two chained players. The rope is
-// only this long — when the bots are this far apart in rope-path terms
-// (not straight-line), they can't go further. No spring, no leash:
-// physics does it through the constraint chain alone.
-const CHAIN_TOTAL_LENGTH = 750;
-// Max distance between any two adjacent chain particles. Smaller = denser
-// rope, smoother visual, less clip-through, more compute. 25 against a
-// 750-unit rope gives ~30 segments.
-const CHAIN_MAX_SEGMENT_LEN = 25;
-// Mass close enough to a blob's that the PBD constraint solver actually
-// transmits force through the chain instead of dumping every correction
-// into the segment particles. Blob mass ≈ 5; 0.5 is a 10× ratio.
-const CHAIN_SEGMENT_MASS = 0.5;
-// Roughly 40% of MAX_SEGMENT_LEN so adjacent particles overlap visually —
-// thin walls can't fit between them, no rope-through-wall artefacts.
-const CHAIN_SEGMENT_RADIUS = 10;
-// Bi-directional sweeps per substep inside the chain-specific solver.
-const CHAIN_SOLVER_ITERS = 12;
+// Phase 1 leash: a unilateral distance constraint between two blobs, applied
+// in the Rust engine (`addBlobTether`). No rope particles, no weight — while
+// the blobs are within CHAIN_TOTAL_LENGTH it does nothing at all; past it, an
+// elastic pull is spread evenly across every hull particle of both blobs, so
+// each is translated as a whole toward the other (no single-point yank, never
+// drags you to the ground). The visual is just a line between the two
+// centroids that reddens as it goes taut. This is the same tether used in the
+// editor test mode (Sandbox) — the single chain implementation everywhere.
+const CHAIN_TOTAL_LENGTH = 700;
+const TETHER_STIFFNESS = 4;   // pull per world-unit past the slack budget
+const TETHER_MAX_FORCE = 560; // peak pull, in MOVE_FORCE (≈240) units
 
 interface ChainPair {
   pidA: string;
   pidB: string;
-  /** Full particle index list including both player centroids:
-   *  [centerIdxA, ...inner segments, centerIdxB]. */
+  /** Two endpoints for the rendered line: each blob's centre particle. */
   particleIndices: number[];
 }
 
@@ -116,37 +108,25 @@ export class ChainedMode implements GameMode {
     for (let i = 0; i < players.length - 1; i++) {
       const a = players[i];
       const b = players[i + 1];
-      const rope = world.addRopeChain(a.blob.centerIdx, b.blob.centerIdx, {
-        totalLength: CHAIN_TOTAL_LENGTH,
-        maxSegmentLength: CHAIN_MAX_SEGMENT_LEN,
-        segmentMass: CHAIN_SEGMENT_MASS,
-        segmentRadius: CHAIN_SEGMENT_RADIUS,
-        iterations: CHAIN_SOLVER_ITERS,
-      });
+      world.addBlobTether(
+        a.blob.blobId, b.blob.blobId,
+        CHAIN_TOTAL_LENGTH, TETHER_STIFFNESS, TETHER_MAX_FORCE,
+      );
       this.chainPairs.push({
         pidA: a.playerId,
         pidB: b.playerId,
-        particleIndices: [a.blob.centerIdx, ...rope.particleIndices, b.blob.centerIdx],
+        particleIndices: [a.blob.centerIdx, b.blob.centerIdx],
       });
     }
   }
 
-  checkWinCondition(state: GameModeState, playerManager: PlayerManager): string | null {
+  checkWinCondition(_state: GameModeState, playerManager: PlayerManager): string | null {
+    // Co-op: the team only wins if EVERYONE reaches the summit. If time runs
+    // out with anyone still short, nobody wins — everyone loses together (the
+    // results overlay shows "Everyone loses!"). No "closest player" winner.
     if (this.allReachedGoal) {
       const players = playerManager.getAllPlayers();
       return players[0]?.playerId ?? null;
-    }
-    if (state.timeRemaining !== null && state.timeRemaining <= 0) {
-      let bestId: string | null = null;
-      let bestY = Infinity;
-      for (const p of playerManager.getAllPlayers()) {
-        const c = p.blob.getCentroid();
-        if (c.y < bestY) {
-          bestY = c.y;
-          bestId = p.playerId;
-        }
-      }
-      return bestId;
     }
     return null;
   }

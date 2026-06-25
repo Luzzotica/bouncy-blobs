@@ -52,8 +52,11 @@ crates/softbody-wasm/pkg/
 .vercel
 .env*.local
 
-# weekly-music-video / trailer pipeline (large local-only assets)
-.music-video/
-
-# match-shorts pipeline run workspaces (videos, large local-only)
-.match-shorts/
+# Consolidated marketing folder. The toolchain (marketing/steam-assets/) is
+# tracked source; only the generated OUTPUT subfolders + pipeline workspaces
+# (local-only, often large) are ignored. Only public/ assets ship with the game.
+/marketing/steam/
+/marketing/social/
+/marketing/itch/
+/marketing/video/
+/marketing/shorts/

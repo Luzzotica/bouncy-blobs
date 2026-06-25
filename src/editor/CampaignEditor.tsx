@@ -2,6 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { fetchDevCampaign, saveDevCampaign, type CampaignSaveArgs } from '../lib/devMaps';
 import { getBuiltinLevels, invalidateBuiltinCache, type LevelManifestEntry } from '../levels/levelRegistry';
 import { invalidateCampaignCache } from '../lib/campaignRegistry';
+import {
+  COLORS,
+  HAIRLINE,
+  modalBackdrop,
+  modalCard,
+  modalTape,
+  paperBtnSm,
+  actionBtnSm,
+  inputSm,
+} from '../theme/uiTheme';
 
 interface Props {
   onClose: () => void;
@@ -20,6 +30,9 @@ export default function CampaignEditor({ onClose }: Props) {
   const [pool, setPool] = useState<LevelManifestEntry[]>([]);
   const [addId, setAddId] = useState('');
   const [status, setStatus] = useState<string>('Loading…');
+  // Drag-to-reorder gesture state.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const refresh = () => {
     invalidateBuiltinCache();
@@ -44,6 +57,14 @@ export default function CampaignEditor({ onClose }: Props) {
     [next[i], next[j]] = [next[j], next[i]];
     setRows(next);
   };
+  const reorder = (from: number, to: number) => {
+    if (from === to) return;
+    const next = rows.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    setRows(next);
+  };
+  const endDrag = () => { setDragIndex(null); setOverIndex(null); };
   const remove = (i: number) => setRows(rows.filter((_, k) => k !== i));
   const add = () => {
     if (!addId || inCampaign.has(addId)) return;
@@ -66,24 +87,42 @@ export default function CampaignEditor({ onClose }: Props) {
   return (
     <div style={backdrop} onClick={onClose}>
       <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <span style={modalTape} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Play campaign</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: COLORS.ink, textShadow: '2px 2px 0 #c77dff' }}>Play campaign</h2>
           <button style={iconBtn} onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <p style={hint}>Order of levels in the single-player Play menu. Level 1 is always unlocked; each clear unlocks the next.</p>
 
         <div style={list}>
-          {rows.length === 0 && <div style={{ color: '#888', padding: '8px 0' }}>No levels.</div>}
-          {rows.map((r, i) => (
-            <div key={r.id} style={listRow}>
-              <span style={{ color: '#7c89a8', width: 22 }}>{i + 1}.</span>
-              <span style={{ flex: 1 }}>{nameFor(r.id)} <span style={{ color: '#5b6680' }}>({r.id})</span></span>
-              <button style={miniBtn} disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
-              <button style={miniBtn} disabled={i === rows.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
-              <button style={{ ...miniBtn, color: '#e85d75' }} onClick={() => remove(i)} title="Remove">×</button>
-            </div>
-          ))}
+          {rows.length === 0 && <div style={{ color: COLORS.inkFaint, padding: '8px 0' }}>No levels.</div>}
+          {rows.map((r, i) => {
+            const isDragging = i === dragIndex;
+            const isDropTarget = i === overIndex && dragIndex !== null && overIndex !== dragIndex;
+            return (
+              <div
+                key={r.id}
+                style={{
+                  ...listRow,
+                  opacity: isDragging ? 0.4 : 1,
+                  boxShadow: isDropTarget ? `inset 0 2px 0 ${COLORS.lavender}` : 'none',
+                }}
+                draggable
+                onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); }}
+                onDragOver={(e) => { e.preventDefault(); if (overIndex !== i) setOverIndex(i); }}
+                onDrop={(e) => { e.preventDefault(); if (dragIndex !== null) reorder(dragIndex, i); endDrag(); }}
+                onDragEnd={endDrag}
+              >
+                <span style={grip} title="Drag to reorder">⠿</span>
+                <span style={{ color: COLORS.inkFaint, width: 22 }}>{i + 1}.</span>
+                <span style={{ flex: 1 }}>{nameFor(r.id)} <span style={{ color: COLORS.inkDim }}>({r.id})</span></span>
+                <button style={miniBtn} disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
+                <button style={miniBtn} disabled={i === rows.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
+                <button style={{ ...miniBtn, color: COLORS.danger }} onClick={() => remove(i)} title="Remove">×</button>
+              </div>
+            );
+          })}
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -98,42 +137,41 @@ export default function CampaignEditor({ onClose }: Props) {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-          <span style={{ fontSize: 12, color: '#9aa7c2' }}>{status}</span>
-          <button style={{ ...btn, background: '#c77dff', color: '#fff', fontWeight: 700 }} onClick={save}>Save campaign</button>
+          <span style={{ fontSize: 12, color: COLORS.inkDim }}>{status}</span>
+          <button style={actionBtnSm(COLORS.green)} onClick={save}>Save campaign</button>
         </div>
       </div>
     </div>
   );
 }
 
-const backdrop: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(5,8,16,0.7)', zIndex: 300,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-};
+const backdrop: React.CSSProperties = { ...modalBackdrop, zIndex: 300 };
 const modal: React.CSSProperties = {
-  width: 460, maxWidth: '90vw', background: '#16213e', color: '#e0e6f2',
-  border: '1px solid #2c3a5e', borderRadius: 8, padding: 20,
-  boxShadow: '0 16px 60px rgba(0,0,0,0.6)', fontSize: 14,
+  ...modalCard, position: 'relative', width: 680, maxWidth: '92vw',
+  padding: 28, fontSize: 15,
 };
-const hint: React.CSSProperties = { margin: '0 0 14px', fontSize: 12, color: '#9aa7c2', lineHeight: 1.4 };
+const hint: React.CSSProperties = { margin: '0 0 14px', fontSize: 12, color: COLORS.inkDim, lineHeight: 1.4 };
 const list: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 6,
-  maxHeight: 320, overflowY: 'auto',
-  border: '1px solid #2c3a5e', borderRadius: 6, padding: 8, background: '#101a30',
+  display: 'flex', flexDirection: 'column', gap: 8,
+  maxHeight: '55vh', overflowY: 'auto',
+  border: '1px solid ' + HAIRLINE, borderRadius: 4, padding: 10, background: COLORS.paperInput,
 };
-const listRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 };
+const listRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 8,
+  background: COLORS.paper, border: '1px solid ' + HAIRLINE, borderRadius: 4, padding: '8px 10px',
+};
+const grip: React.CSSProperties = {
+  cursor: 'grab', color: COLORS.inkFaint, fontSize: 14, lineHeight: 1, userSelect: 'none',
+};
 const select: React.CSSProperties = {
-  flex: 1, padding: '6px 8px', background: '#101a30', color: '#e0e6f2',
-  border: '1px solid #2c3a5e', borderRadius: 6,
+  ...inputSm, flex: 1,
 };
 const btn: React.CSSProperties = {
-  padding: '6px 12px', background: '#243352', color: '#e0e6f2',
-  border: '1px solid #3a4a72', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+  ...paperBtnSm,
 };
 const miniBtn: React.CSSProperties = {
-  width: 26, height: 26, background: '#243352', color: '#e0e6f2',
-  border: '1px solid #3a4a72', borderRadius: 4, cursor: 'pointer', fontSize: 13,
+  ...paperBtnSm, width: 26, height: 26, padding: 0, fontSize: 13,
 };
 const iconBtn: React.CSSProperties = {
-  background: 'transparent', border: 'none', color: '#9aa7c2', fontSize: 24, cursor: 'pointer', lineHeight: 1,
+  background: 'transparent', border: 'none', color: COLORS.ink, fontSize: 24, cursor: 'pointer', lineHeight: 1,
 };

@@ -1,7 +1,7 @@
 import { LevelData } from './types';
 
 export const chainedLevel: LevelData = {
-  name: 'Chained Climb',
+  name: 'Chained Together',
   version: 1,
   levelType: 'team_racing',
   bounds: { width: 2200, height: 6000 },

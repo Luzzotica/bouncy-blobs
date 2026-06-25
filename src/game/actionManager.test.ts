@@ -20,6 +20,16 @@ function asTriggerMgr(stub: StubTriggerMgr): TriggerManager {
   return stub as unknown as TriggerManager;
 }
 
+/** Stub spike poser (the SpikePoser interface SpikeManager implements). */
+class StubSpikePoser {
+  base = { x: 0, y: 0, rotation: 0 };
+  pose = { x: 0, y: 0, rotation: 0 };
+  getSpikeBasePose(id: string) { return id === 'sp1' ? { ...this.base } : null; }
+  setSpikePose(id: string, x: number, y: number, rotation: number) {
+    if (id === 'sp1') this.pose = { x, y, rotation };
+  }
+}
+
 function setupWorldWithAnchor() {
   const world = new SoftBodyWorldRust();
   // One anchored particle at the origin (mass 0 → invMass 0).
@@ -63,6 +73,28 @@ describe('ActionManager', () => {
     expect(world.pos[pid].x).toBeCloseTo(50, 5);
     mgr.update(0.5);
     expect(world.pos[pid].x).toBeCloseTo(100, 5);
+  });
+
+  it('spike target: firing the action drives the spike pose via setSpikePose', () => {
+    const { world, particles } = setupWorldWithAnchor();
+    const stub = new StubTriggerMgr();
+    const spikes = new StubSpikePoser();
+    const mgr = new ActionManager();
+    const action = buildAction({
+      targets: [{ kind: 'spike', spikeId: 'sp1', endX: 300, endY: 0 }],
+    });
+    mgr.initialize(world, [action], particles, undefined, null, asTriggerMgr(stub), spikes as any);
+
+    // At rest the spike is held at its closed/base pose.
+    mgr.update(0.1);
+    expect(spikes.pose.x).toBeCloseTo(0, 5);
+
+    // Fire → tween toward endX.
+    stub.press('t1');
+    mgr.update(0.5);
+    expect(spikes.pose.x).toBeCloseTo(150, 5);
+    mgr.update(0.5);
+    expect(spikes.pose.x).toBeCloseTo(300, 5);
   });
 
   it('switch mode: second press tweens back to the closed (initial) position', () => {

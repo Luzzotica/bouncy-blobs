@@ -645,6 +645,11 @@ impl SoftBodyWorldHandle {
         self.inner.teleport_blob(blob_id, fv(x, y));
     }
 
+    #[wasm_bindgen(js_name = resetBlobToRest)]
+    pub fn reset_blob_to_rest(&mut self, blob_id: u32, x: f64, y: f64) {
+        self.inner.reset_blob_to_rest(blob_id, fv(x, y));
+    }
+
     #[wasm_bindgen(js_name = pinBlobToCurrentPose)]
     pub fn pin_blob_to_current_pose(&mut self, blob_id: u32) {
         self.inner.pin_blob_to_current_pose(blob_id);

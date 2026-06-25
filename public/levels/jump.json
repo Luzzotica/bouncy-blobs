@@ -1,0 +1,125 @@
+{
+  "name": "Jump",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_154",
+      "x": -390,
+      "y": 1480,
+      "width": 3140,
+      "height": 760,
+      "rotation": 0
+    },
+    {
+      "id": "plat_155",
+      "x": -460,
+      "y": 930,
+      "width": 720,
+      "height": 340,
+      "rotation": 0
+    },
+    {
+      "id": "plat_165",
+      "x": -2340,
+      "y": 950,
+      "width": 800,
+      "height": 1860,
+      "rotation": 0
+    },
+    {
+      "id": "plat_166",
+      "x": -540,
+      "y": -310,
+      "width": 4400,
+      "height": 660,
+      "rotation": 0
+    },
+    {
+      "id": "plat_167",
+      "x": 1420,
+      "y": 940,
+      "width": 480,
+      "height": 1840,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": -1880,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_156",
+      "x": -1760,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_157",
+      "x": -1640,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_158",
+      "x": -1520,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_159",
+      "x": -1380,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_160",
+      "x": -1240,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_161",
+      "x": -1080,
+      "y": 1000,
+      "type": "player"
+    },
+    {
+      "id": "sp_162",
+      "x": -920,
+      "y": 1000,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    {
+      "id": "goal_163",
+      "x": 840,
+      "y": 830,
+      "width": 680,
+      "height": 540
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_164",
+      "x": -460,
+      "y": 560,
+      "width": 720,
+      "height": 400
+    }
+  ]
+}

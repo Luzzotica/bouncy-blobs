@@ -10,6 +10,7 @@ import { GameLoop } from '../game/gameLoop';
 import { KeyboardInput } from '../game/keyboardInput';
 import { PlayerManager } from '../game/playerManager';
 import { SpikeManager } from '../game/spikeManager';
+import { computeMapAABB, FALL_KILL_MARGIN, lavaKillPlaneY } from '../game/mapBounds';
 import { SpringPadManager } from '../game/springPadManager';
 import { TriggerManager } from '../game/triggerManager';
 import { ActionManager } from '../game/actionManager';
@@ -21,11 +22,12 @@ import { loadBuiltinLevel } from '../levels/levelRegistry';
 import { LevelData, ZoneDef } from '../levels/types';
 import GameCanvas from '../components/GameCanvas';
 import SettingsModal from '../components/SettingsModal';
+import PauseMenu from '../components/PauseMenu';
 import { EffectsBindings } from '../game/effectsBindings';
 import { updateParticles, clearParticles } from '../renderer/particles';
 import { clearDecals, setDecalResolvers } from '../renderer/decals';
 import { preloadAll, SFX_NAMES, resumeAudio, playSfx } from '../utils/audio';
-import { getPlayerColor, onAudioSettingsChange } from '../utils/audioSettings';
+import { getPlayerColor, getPlayerFaceId, onAudioSettingsChange } from '../utils/audioSettings';
 import { loadPlayCampaign } from '../lib/campaignRegistry';
 import { getLevelProgress, recordCompletion, recordDeaths } from '../lib/playProgress';
 
@@ -53,6 +55,8 @@ interface RunnerState {
   elapsedMs: number;
   runDeaths: number;
   finished: boolean;
+  /** True while the pause menu is open — freezes the sim + run clock. */
+  paused: boolean;
 }
 
 /** mm:ss.mmm */
@@ -71,6 +75,7 @@ export default function PlayLevel() {
 
   const [levelData, setLevelData] = useState<LevelData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [pauseOpen, setPauseOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Bumped to force a clean remount of the engine (Replay).
   const [runKey, setRunKey] = useState(0);
@@ -169,10 +174,17 @@ export default function PlayLevel() {
     const spawnPos = playerSpawnPoints[0] ?? { x: 0, y: 380 };
 
     const playerManager = new PlayerManager(playerSpawnPoints);
-    const managed = playerManager.addPlayer('play-player', 'Player', world, 'circle16', getPlayerColor());
+    const managed = playerManager.addPlayer('play-player', 'Player', world, 'circle16', getPlayerColor(), getPlayerFaceId());
     const playerBlob = managed.blob;
-    const unsubColor = onAudioSettingsChange(() => { managed.color = getPlayerColor(); });
+    const unsubColor = onAudioSettingsChange(() => {
+      managed.color = getPlayerColor();
+      managed.faceId = getPlayerFaceId();
+    });
     world.teleportBlob(playerBlob.blobId, spawnPos);
+
+    const mapBounds = computeMapAABB(
+      world, levelData, platformSurfaces, softPlatforms, pointShapes, playerSpawnPoints,
+    );
 
     // Hazards: spikes, death zones, fall-off-the-bottom — all respawn the blob
     // at spawn (deathMode 'instant'). We just tally deaths on top.
@@ -181,11 +193,17 @@ export default function PlayLevel() {
     const hasDeathZones = (levelData.deathZones?.length ?? 0) > 0;
     if (hasSpikes || hasDeathZones || levelData.bounds) {
       spikeManager = new SpikeManager();
-      spikeManager.initialize(world, playerManager, levelData.spikes ?? []);
+      spikeManager.initialize(world, playerManager, levelData.spikes ?? [], npcBlobs);
       spikeManager.deathMode = 'instant';
       if (hasDeathZones) spikeManager.setDeathZones(levelData.deathZones ?? []);
-      if (levelData.bounds) spikeManager.setKillBelowY(levelData.bounds.height + 500);
+      // Kill anyone (players AND NPCs) who falls below the lowest map geometry (AABB).
+      spikeManager.setKillBelowY(mapBounds.maxY + FALL_KILL_MARGIN);
     }
+
+    // Physics crush events (Rust-detected): route a crushed blob through the
+    // normal death/respawn flow instead of letting the solver eject it.
+    const smForCrush = spikeManager;
+    world.onBlobCrushed = (blobId) => { smForCrush?.killPlayerByBlobId(blobId); };
 
     let springPadManager: SpringPadManager | null = null;
     if (levelData.springPads && levelData.springPads.length > 0) {
@@ -221,6 +239,7 @@ export default function PlayLevel() {
       levelData.triggers ?? [],
       triggerShapeIdxToId,
       (blobId) => npcBlobIds.has(blobId),
+      (blobId) => playerManager.getPlayerByBlobId(blobId) !== undefined,
     );
 
     const actionManager = new ActionManager();
@@ -231,6 +250,7 @@ export default function PlayLevel() {
       softPlatformStaticParticles,
       platformMover,
       triggerManager,
+      spikeManager,
     );
 
     const camera = new Camera();
@@ -254,7 +274,7 @@ export default function PlayLevel() {
       ctx, canvasWidth: width, canvasHeight: height, renderOptions,
       spikeManager, springPadManager, triggerManager, actionManager, platformMover,
       effects, unsubColor, goal,
-      elapsedMs: 0, runDeaths: 0, finished: false,
+      elapsedMs: 0, runDeaths: 0, finished: false, paused: false,
     };
 
     const insideGoal = (z: ZoneDef): boolean => {
@@ -263,28 +283,44 @@ export default function PlayLevel() {
     };
 
     const loop = new GameLoop((dt) => {
-      playerBlob.setInput(input.getMoveX(1), input.getMoveY(1), input.isExpanding(1));
-      playerBlob.update(dt);
-      world.step(dt);
-      springPadManager?.update(dt);
-      spikeManager?.update(dt);
-      triggerManager.update(dt);
-      actionManager.update(dt);
-      effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover);
-      updateParticles(dt);
-      camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
-      camera.update(dt);
+      // While the pause menu is open we freeze the whole simulation (and the
+      // run clock) but keep rendering the static frame beneath the overlay.
+      if (!state.paused) {
+        const moveX = input.getMoveX(1);
+        const moveY = input.getMoveY(1);
+        playerBlob.setInput(moveX, moveY, input.isExpanding(1));
+        playerBlob.update(dt);
 
-      // Run clock + goal check (only while the level is still in progress).
-      if (!state.finished) {
-        state.elapsedMs += dt * 1000;
-        if (state.goal && insideGoal(state.goal)) {
-          state.finished = true;
-          const prevBest = getLevelProgress(levelId).bestTimeMs;
-          const isBest = prevBest == null || state.elapsedMs < prevBest;
-          recordCompletion(levelId, state.elapsedMs, state.runDeaths);
-          playSfx('ui-modal-open', { volume: 0.6 });
-          setComplete({ timeMs: state.elapsedMs, deaths: state.runDeaths, isBest });
+        // Ease the gaze toward the movement direction so the eyes look where the
+        // blob is heading (mirrors playerManager.applyInputsAndStep in netplay).
+        const mag = Math.hypot(moveX, moveY);
+        const tx = mag > 0.01 ? moveX / mag : 0;
+        const ty = mag > 0.01 ? moveY / mag : 0;
+        const a = 1 - Math.exp(-12 * dt);
+        managed.gazeX += (tx - managed.gazeX) * a;
+        managed.gazeY += (ty - managed.gazeY) * a;
+
+        world.step(dt);
+        springPadManager?.update(dt);
+        spikeManager?.update(dt);
+        triggerManager.update(dt);
+        actionManager.update(dt);
+        effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover);
+        updateParticles(dt);
+        camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
+        camera.update(dt);
+
+        // Run clock + goal check (only while the level is still in progress).
+        if (!state.finished) {
+          state.elapsedMs += dt * 1000;
+          if (state.goal && insideGoal(state.goal)) {
+            state.finished = true;
+            const prevBest = getLevelProgress(levelId).bestTimeMs;
+            const isBest = prevBest == null || state.elapsedMs < prevBest;
+            recordCompletion(levelId, state.elapsedMs, state.runDeaths);
+            playSfx('ui-modal-open', { volume: 0.6 });
+            setComplete({ timeMs: state.elapsedMs, deaths: state.runDeaths, isBest });
+          }
         }
       }
 
@@ -297,8 +333,8 @@ export default function PlayLevel() {
           if (hasTriggers) triggerManager.render(rctx);
           if (state.goal) drawGoalZone(rctx, state.goal, state.elapsedMs / 1000);
         },
-        renderHUD: (hctx: CanvasRenderingContext2D) => {
-          drawRunHud(hctx, state.elapsedMs, state.runDeaths);
+        renderHUD: (hctx: CanvasRenderingContext2D, w: number) => {
+          drawRunHud(hctx, w, state.elapsedMs);
         },
       };
 
@@ -315,6 +351,7 @@ export default function PlayLevel() {
         ctx, world, camera, [playerBlob], npcBlobs,
         state.canvasWidth, state.canvasHeight, renderOptions, modeOverlay,
         playerData, [...softPlatforms, ...pointShapes], chains,
+        lavaKillPlaneY(levelData, mapBounds),
       );
     });
 
@@ -332,6 +369,27 @@ export default function PlayLevel() {
 
   // Tear down on unmount.
   useEffect(() => () => teardown(), [teardown]);
+
+  // The pause menu or the settings modal both freeze the sim + run clock.
+  useEffect(() => {
+    if (stateRef.current) stateRef.current.paused = pauseOpen || settingsOpen;
+  }, [pauseOpen, settingsOpen]);
+
+  // Escape: close settings back to the pause menu, otherwise toggle the pause menu.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        setPauseOpen(true);
+      } else {
+        setPauseOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen]);
 
   const idx = orderedIds.indexOf(levelId);
   const nextId = idx >= 0 && idx + 1 < orderedIds.length ? orderedIds[idx + 1] : null;
@@ -370,17 +428,8 @@ export default function PlayLevel() {
 
       {/* Top-left controls */}
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-        <Link to="/play">
-          <button style={chipBtn}>← Levels</button>
-        </Link>
-        <button style={chipBtn} onClick={() => setSettingsOpen(true)}>⚙ Settings</button>
-        <span style={{ color: '#b9a9d8', fontSize: 13 }}>WASD: Move · Space: Expand</span>
+        <button className="bb-hover-btn" style={chipBtn} onClick={() => setPauseOpen(true)}>Pause</button>
       </div>
-
-      {/* Level name, top-center */}
-      {levelName && (
-        <div style={levelTitle}>{levelName}</div>
-      )}
 
       {complete && (
         <div style={completeBackdrop}>
@@ -401,15 +450,24 @@ export default function PlayLevel() {
         </div>
       )}
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PauseMenu
+        open={pauseOpen}
+        onResume={() => setPauseOpen(false)}
+        onSettings={() => { setPauseOpen(false); setSettingsOpen(true); }}
+        onQuit={() => navigate('/play')}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => { setSettingsOpen(false); setPauseOpen(true); }}
+      />
     </div>
   );
 }
 
-/** Cream "paper chip" timer + deaths counter, drawn in screen space. */
-function drawRunHud(ctx: CanvasRenderingContext2D, elapsedMs: number, deaths: number): void {
+/** Cream "paper chip" run timer, centered at top of screen. */
+function drawRunHud(ctx: CanvasRenderingContext2D, canvasWidth: number, elapsedMs: number): void {
   const timeStr = formatTime(elapsedMs);
-  const deathStr = `☠ ${deaths}`;
   ctx.save();
   ctx.font = 'bold 22px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.textBaseline = 'middle';
@@ -417,24 +475,18 @@ function drawRunHud(ctx: CanvasRenderingContext2D, elapsedMs: number, deaths: nu
 
   const pad = 12;
   const chipH = 34;
-  const top = 54;
-  const left = 12;
+  const top = 12;
 
-  const drawChip = (text: string, x: number): number => {
-    const w = ctx.measureText(text).width + pad * 2;
-    ctx.fillStyle = '#fffae6';
-    ctx.strokeStyle = '#0a0612';
-    ctx.lineWidth = 3;
-    roundRect(ctx, x, top, w, chipH, 6);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#1a0f2e';
-    ctx.fillText(text, x + pad, top + chipH / 2 + 1);
-    return w;
-  };
-
-  const tw = drawChip(timeStr, left);
-  drawChip(deathStr, left + tw + 8);
+  const timeW = ctx.measureText(timeStr).width + pad * 2;
+  const x = Math.round((canvasWidth - timeW) / 2);
+  ctx.fillStyle = '#fffae6';
+  ctx.strokeStyle = '#0a0612';
+  ctx.lineWidth = 3;
+  roundRect(ctx, x, top, timeW, chipH, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#1a0f2e';
+  ctx.fillText(timeStr, x + pad, top + chipH / 2 + 1);
   ctx.restore();
 }
 
@@ -455,7 +507,8 @@ const centerShell: React.CSSProperties = {
 
 const chipBtn: React.CSSProperties = {
   padding: '6px 12px', fontSize: 14, background: '#fffae6', color: '#1a0f2e',
-  border: '3px solid #0a0612', borderRadius: 6, cursor: 'pointer', fontWeight: 700,
+  border: '3px solid #0a0612', borderRadius: 4, cursor: 'pointer', fontWeight: 700,
+  transform: 'rotate(-2deg)',
 };
 
 const overlayBtn: React.CSSProperties = { ...chipBtn, padding: '10px 18px' };

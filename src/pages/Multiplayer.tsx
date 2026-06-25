@@ -11,48 +11,83 @@ import {
   resolveDefaultDisplayName,
 } from "../lib/userProfile";
 
-// Combined Host + Browse screen. Left column hosts a new game; right column
-// browses + joins existing lobbies. Shares the home hero background.
+// Combined Host + Browse screen. Left column: one name card + host-a-game.
+// Right column browses + joins existing lobbies. Shares the home hero
+// background and the paper-and-tape sticky-note styling of the rest of the
+// game. The display name lives here (single source) and feeds both columns.
 export default function Multiplayer() {
+  const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
+
+  // Resolve a sensible default (Steam persona / stored) once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    if (getStoredDisplayName()) return;
+    void resolveDefaultDisplayName().then((n) => {
+      if (!cancelled && n) {
+        setDisplayName(n);
+        setStoredDisplayName(n);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const changeName = (v: string) => {
+    setDisplayName(v);
+    setStoredDisplayName(v);
+  };
+
   return (
     <HomeBackground>
       <div style={content}>
         <div style={headerRow}>
+          <Link to="/"><button className="bb-hover-btn" style={homeBtn}>← Home</button></Link>
           <h1 style={pageTitle}>Multiplayer</h1>
-          <Link to="/"><button style={homeBtn}>← Home</button></Link>
         </div>
         <div style={columns}>
-          <div style={leftCol}><HostPanel /></div>
-          <div style={rightCol}><LobbyList /></div>
+          <div style={leftCol}>
+            <NameCard name={displayName} onChange={changeName} />
+            <HostPanel displayName={displayName} />
+          </div>
+          <div style={rightCol}><LobbyList displayName={displayName} /></div>
         </div>
       </div>
     </HomeBackground>
   );
 }
 
+// ─── Name (left column, top) ──────────────────────────────────────────────────
+function NameCard({ name, onChange }: { name: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ ...paperCard, transform: "rotate(-0.6deg)" }}>
+      <h2 style={cardTitle}>Your Name</h2>
+      <input
+        data-testid="display-name"
+        type="text"
+        value={name}
+        maxLength={32}
+        placeholder="Enter your display name"
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      />
+    </div>
+  );
+}
+
 // ─── Host (left column) ───────────────────────────────────────────────────────
 // Collects the same fields as HostSetupModal, stashes the result, and routes
 // to /game (GameMaster consumes `pendingHostSetup` and skips its own modal).
-function HostPanel() {
+function HostPanel({ displayName }: { displayName: string }) {
   const navigate = useNavigate();
-  const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
   const [roomName, setRoomName] = useState("Bouncy Lobby");
   const [isPublic, setIsPublic] = useState(false);
   const [password, setPassword] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(8);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const name = await resolveDefaultDisplayName();
-      const prefs = getStoredRoomPrefs();
-      if (cancelled) return;
-      if (name && !getStoredDisplayName()) setDisplayName(name);
-      if (prefs.roomName) setRoomName(prefs.roomName);
-      setIsPublic(prefs.isPublic);
-      setMaxPlayers(prefs.maxPlayers);
-    })();
-    return () => { cancelled = true; };
+    const prefs = getStoredRoomPrefs();
+    if (prefs.roomName) setRoomName(prefs.roomName);
+    setIsPublic(prefs.isPublic);
+    setMaxPlayers(prefs.maxPlayers);
   }, []);
 
   const canCreate = displayName.trim().length > 0 && roomName.trim().length > 0;
@@ -76,21 +111,8 @@ function HostPanel() {
   }
 
   return (
-    <form style={panel} onSubmit={createGame}>
-      <h2 style={{ fontSize: 22, margin: 0, color: "#fffae6" }}>Host a Game</h2>
-
-      <label style={field}>
-        <span style={fieldLabel}>Your name</span>
-        <input
-          data-testid="host-display-name"
-          type="text"
-          value={displayName}
-          maxLength={32}
-          placeholder="Enter your display name"
-          onChange={(e) => setDisplayName(e.target.value)}
-          style={inputStyle}
-        />
-      </label>
+    <form style={{ ...paperCard, transform: "rotate(0.5deg)" }} onSubmit={createGame}>
+      <h2 style={cardTitle}>Host a Game</h2>
 
       <label style={field}>
         <span style={fieldLabel}>Room name</span>
@@ -107,14 +129,7 @@ function HostPanel() {
 
       <label style={field}>
         <span style={fieldLabel}>Max players: {maxPlayers}</span>
-        <input
-          type="range"
-          min={2}
-          max={8}
-          value={maxPlayers}
-          onChange={(e) => setMaxPlayers(Number(e.target.value))}
-          style={{ width: "100%" }}
-        />
+        <RangeSlider min={2} max={8} value={maxPlayers} onChange={setMaxPlayers} />
       </label>
 
       <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -122,6 +137,7 @@ function HostPanel() {
           type="checkbox"
           checked={isPublic}
           onChange={(e) => setIsPublic(e.target.checked)}
+          style={{ accentColor: "#c77dff", width: 16, height: 16 }}
         />
         <span style={{ ...fieldLabel, marginBottom: 0 }}>
           List publicly (others can find it without a code)
@@ -144,17 +160,46 @@ function HostPanel() {
 
       <button
         type="submit"
+        className="bb-hover-btn"
         data-testid="create-game-button"
         disabled={!canCreate}
         style={{
           ...createBtn,
-          background: canCreate ? "#c77dff" : "#555",
+          background: canCreate ? "#c77dff" : "#d8cfe2",
+          color: canCreate ? "#1a0f2e" : "#7a6e8c",
           cursor: canCreate ? "pointer" : "not-allowed",
         }}
       >
         Create Game →
       </button>
     </form>
+  );
+}
+
+// ─── Themed range slider ──────────────────────────────────────────────────────
+// Native <input type=range> never lets its fill reach the very edges (the thumb
+// is inset by half its width). This draws an explicit fill track from 0→100% so
+// the bar visually spans the full width at min/max, with the real input layered
+// transparently on top for interaction + keyboard support.
+function RangeSlider({ min, max, value, onChange }: {
+  min: number; max: number; value: number; onChange: (v: number) => void;
+}) {
+  const pct = ((value - min) / (max - min)) * 100;
+  return (
+    <div style={sliderWrap}>
+      <div style={sliderTrack}>
+        <div style={{ ...sliderFill, width: `${pct}%` }} />
+      </div>
+      <div style={{ ...sliderThumb, left: `${pct}%` }} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={sliderInput}
+      />
+    </div>
   );
 }
 
@@ -172,8 +217,9 @@ const content: React.CSSProperties = {
 
 const headerRow: React.CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
+  justifyContent: "flex-start",
   alignItems: "center",
+  gap: 20,
   flexShrink: 0,
 };
 
@@ -190,6 +236,16 @@ const pageTitle: React.CSSProperties = {
 const homeBtn: React.CSSProperties = {
   padding: "10px 18px",
   fontSize: 15,
+  fontWeight: 800,
+  background: "#fffae6",
+  color: "#1a0f2e",
+  border: "3px solid #0a0612",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  letterSpacing: 0.4,
+  boxShadow: "0 5px 12px rgba(0,0,0,0.3)",
+  transform: "rotate(-2deg)",
 };
 
 const columns: React.CSSProperties = {
@@ -208,6 +264,8 @@ const leftCol: React.CSSProperties = {
   position: "sticky",
   top: 0,
   display: "flex",
+  flexDirection: "column",
+  gap: 18,
 };
 
 // Right: the remaining ~3/4, stretched to full height for the scrollable list.
@@ -217,17 +275,26 @@ const rightCol: React.CSSProperties = {
   display: "flex",
 };
 
-const panel: React.CSSProperties = {
+// Cream paper sticky-note card — matches the Home menu buttons.
+const paperCard: React.CSSProperties = {
+  position: "relative",
   width: "100%",
   display: "flex",
   flexDirection: "column",
   gap: 14,
-  padding: 20,
-  borderRadius: 12,
-  background: "rgba(15, 10, 24, 0.82)",
-  border: "1px solid rgba(199,125,255,0.25)",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-  backdropFilter: "blur(4px)",
+  padding: "24px 20px 20px",
+  borderRadius: 6,
+  background: "#fffae6",
+  border: "4px solid #0a0612",
+  boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+};
+
+const cardTitle: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 900,
+  margin: 0,
+  color: "#1a0f2e",
+  letterSpacing: 0.3,
 };
 
 const field: React.CSSProperties = {
@@ -238,25 +305,78 @@ const field: React.CSSProperties = {
 
 const fieldLabel: React.CSSProperties = {
   fontSize: 13,
-  color: "#cbb8e6",
+  fontWeight: 700,
+  color: "#5a4a72",
   marginBottom: 0,
 };
 
 const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
+  padding: "9px 11px",
   fontSize: 15,
-  borderRadius: 6,
-  border: "1px solid #444",
-  background: "#0f0a18",
-  color: "#fff",
+  borderRadius: 4,
+  border: "2px solid #0a0612",
+  background: "#fffefb",
+  color: "#1a0f2e",
+  fontFamily: "inherit",
 };
 
 const createBtn: React.CSSProperties = {
+  position: "relative",
   marginTop: 4,
   padding: "14px 20px",
   fontSize: 18,
-  fontWeight: 700,
-  color: "#0a0612",
-  border: "none",
-  borderRadius: 8,
+  fontWeight: 800,
+  border: "3px solid #0a0612",
+  borderRadius: 4,
+  fontFamily: "inherit",
+  letterSpacing: 0.4,
+  boxShadow: "0 5px 12px rgba(0,0,0,0.3)",
+};
+
+// Themed slider pieces.
+const sliderWrap: React.CSSProperties = {
+  position: "relative",
+  height: 22,
+  display: "flex",
+  alignItems: "center",
+};
+
+const sliderTrack: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  height: 10,
+  borderRadius: 999,
+  background: "#e7ddc4",
+  border: "2px solid #0a0612",
+  overflow: "hidden",
+};
+
+const sliderFill: React.CSSProperties = {
+  height: "100%",
+  background: "#c77dff",
+};
+
+const sliderThumb: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  width: 20,
+  height: 20,
+  borderRadius: "50%",
+  background: "#fffae6",
+  border: "3px solid #0a0612",
+  transform: "translate(-50%, -50%)",
+  boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
+  pointerEvents: "none",
+};
+
+const sliderInput: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  width: "100%",
+  margin: 0,
+  height: 22,
+  opacity: 0,
+  cursor: "pointer",
 };

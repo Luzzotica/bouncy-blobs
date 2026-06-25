@@ -42,13 +42,16 @@ export function drawHillZone(
   zone: ZoneDef,
   time: number,
   ownerColor: string | null,
+  /** 0..1 spawn-flash intensity — 1 right after the hill moves, fading to 0.
+   *  Brightens the fill/border so a relocated hill reads as "new". */
+  flash = 0,
 ): void {
   const hw = zone.width / 2;
   const hh = zone.height / 2;
   const x = zone.x - hw;
   const y = zone.y - hh;
 
-  const pulse = 0.12 + 0.08 * Math.sin(time * 2.5);
+  const pulse = 0.12 + 0.08 * Math.sin(time * 2.5) + 0.35 * flash;
   const color = ownerColor ?? 'rgba(255, 215, 0';
 
   ctx.save();
@@ -63,7 +66,7 @@ export function drawHillZone(
 
   // Border
   ctx.strokeStyle = `rgba(255, 215, 0, ${pulse + 0.3})`;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 + 4 * flash;
   ctx.strokeRect(x, y, zone.width, zone.height);
 
   // Crown icon

@@ -189,6 +189,7 @@ export class SoftBodyWorldHandle {
     removeBlob(blob_id: number): void;
     removeStaticSurface(idx: number): void;
     resetBlobMassScale(blob_id: number): void;
+    resetBlobToRest(blob_id: number, x: number, y: number): void;
     /**
      * Restore state from a buffer produced by `serializeState`. Returns
      * true on success; false if the buffer is malformed or world layout
@@ -376,6 +377,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_removeBlob: (a: number, b: number) => void;
     readonly softbodyworldhandle_removeStaticSurface: (a: number, b: number) => void;
     readonly softbodyworldhandle_resetBlobMassScale: (a: number, b: number) => void;
+    readonly softbodyworldhandle_resetBlobToRest: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_restoreState: (a: number, b: number, c: number) => number;
     readonly softbodyworldhandle_rngNextUnit: (a: number) => number;
     readonly softbodyworldhandle_rngState: (a: number) => number;

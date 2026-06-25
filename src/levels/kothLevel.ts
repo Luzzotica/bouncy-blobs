@@ -45,8 +45,14 @@ export const kothLevel: LevelData = {
     { id: 'npc1', x: 1600, y: 1100, hullPreset: 'star' },
   ],
   hillZones: [
+    // Center hill (the main contested area) plus two flanking hills. With
+    // `hillRotation` set, the active hill jumps between these during a match.
     { id: 'hill-zone', x: 1600, y: 1100, width: 500, height: 250 },
+    { id: 'hill-left', x: 800, y: 900, width: 360, height: 220 },
+    { id: 'hill-right', x: 2400, y: 900, width: 360, height: 220 },
   ],
+  // Move the hill to a random other zone every 10–18 seconds.
+  hillRotation: { minSeconds: 10, maxSeconds: 18 },
   powerupSpawns: [
     { id: 'pu1', x: 800, y: 900 },
     { id: 'pu2', x: 2400, y: 900 },

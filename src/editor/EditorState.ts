@@ -225,6 +225,10 @@ export class EditorState {
    *  from `draggingActionTarget` (which is draft-only) so the two drag
    *  states don't tangle. */
   draggingCommittedActionTarget: { actionId: string; index: number } | null = null;
+  /** Action-tool preference: when false (default), clicking a soft-body shape
+   *  adds ONE 'moveShape' target (translates the whole shape). When true,
+   *  clicking individual vertices adds per-vertex 'shapePoint' targets. */
+  actionPerVertex = false;
 
   // Local + Workshop tracking
   /** Local file id (uuid) once saved to disk. Null for unsaved levels. */
@@ -721,6 +725,54 @@ export class EditorState {
     this.onChange?.();
   }
 
+  /** Click a spike with the Action tool: add a target that MOVES the spike
+   *  (a moving spike trap). endX/endY default to a spot to the right. */
+  appendActionTargetAtSpike(spikeId: string): void {
+    const spike = (this.level.spikes ?? []).find(s => s.id === spikeId);
+    if (!spike) return;
+    if (!this.draftAction) this.beginDraftAction();
+    const draft = this.draftAction!;
+    if (draft.targets.some(t => t.kind === 'spike' && t.spikeId === spikeId)) return;
+    draft.targets.push({
+      kind: 'spike',
+      spikeId,
+      endX: spike.x + 200, endY: spike.y,
+    });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
+    this.onChange?.();
+  }
+
+  /** Alt/Option/Ctrl-click a spike: add (or augment) a target that rotates the
+   *  spike 90° from its closed pose. Mirrors the platform-rotate behaviour. */
+  appendActionTargetRotateSpike(spikeId: string): void {
+    const spike = (this.level.spikes ?? []).find(s => s.id === spikeId);
+    if (!spike) return;
+    if (!this.draftAction) this.beginDraftAction();
+    const draft = this.draftAction!;
+    const defaultEndRotation = spike.rotation + Math.PI / 2;
+    const existingIdx = draft.targets.findIndex(t => t.kind === 'spike' && t.spikeId === spikeId);
+    if (existingIdx >= 0) {
+      const t = draft.targets[existingIdx];
+      if (t.kind === 'spike') t.endRotation = defaultEndRotation;
+      if (draft.phase === 'pickPoints') draft.phase = 'placeEnds';
+      this.onChange?.();
+      return;
+    }
+    draft.targets.push({
+      kind: 'spike',
+      spikeId,
+      endX: spike.x,
+      endY: spike.y,
+      endRotation: defaultEndRotation,
+    });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
+    this.onChange?.();
+  }
+
   /** Alt/Option/Ctrl-click on a static platform: add a target that rotates
    *  the platform by 90° from its closed pose (no translation). If a
    *  translation target for this platform already exists in the draft,
@@ -751,6 +803,41 @@ export class EditorState {
     if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
       draft.phase = 'placeEnds';
     }
+    this.onChange?.();
+  }
+
+  /** Centroid of a point-shape's authored vertices (editor-space). */
+  private shapeCentroidById(shapeId: string): { x: number; y: number } | null {
+    const shape = (this.level.pointShapes ?? []).find(p => p.id === shapeId);
+    if (!shape || shape.points.length === 0) return null;
+    let sx = 0, sy = 0;
+    for (const p of shape.points) { sx += p.x; sy += p.y; }
+    return { x: sx / shape.points.length, y: sy / shape.points.length };
+  }
+
+  /** Add a target that moves an ENTIRE shape rigidly. endX/endY = open-pose
+   *  centroid; the runtime translates every vertex by the same delta. This is
+   *  the default when clicking a soft body (vs per-vertex shapePoint targets). */
+  appendActionTargetMoveShape(shapeId: string): void {
+    const c = this.shapeCentroidById(shapeId);
+    if (!c) return;
+    if (!this.draftAction) this.beginDraftAction();
+    const draft = this.draftAction!;
+    if (draft.targets.some(t => t.kind === 'moveShape' && t.shapeId === shapeId)) return;
+    draft.targets.push({
+      kind: 'moveShape',
+      shapeId,
+      endX: this.snap(c.x), endY: this.snap(c.y - 150),
+    });
+    if (draft.phase === 'pickPoints' && draft.targets.length >= 1) {
+      draft.phase = 'placeEnds';
+    }
+    this.onChange?.();
+  }
+
+  /** Flip the action-tool per-vertex preference (whole-shape vs per-point). */
+  toggleActionPerVertex(): void {
+    this.actionPerVertex = !this.actionPerVertex;
     this.onChange?.();
   }
 
@@ -963,12 +1050,12 @@ export class EditorState {
     if (!action) return;
     const t = action.targets[index];
     if (!t) return;
-    if (t.kind === 'platform') {
+    if (t.kind === 'platform' || t.kind === 'spike') {
       (t as { endRotation?: number }).endRotation = rotation;
     } else if (t.kind === 'rotateShape') {
       t.endRotation = rotation;
     } else {
-      return; // shapePoint has no rotation
+      return; // shapePoint / moveShape have no rotation
     }
     this.onChange?.();
   }
@@ -1526,6 +1613,31 @@ export class EditorState {
         if (dx * dx + dy * dy < POINT_HIT_RADIUS_SQ) return i;
         continue;
       }
+      if (t.kind === 'moveShape') {
+        // Hit-test the translated ghost hull (whole shape is the grab target).
+        const shape = (this.level.pointShapes ?? []).find(p => p.id === t.shapeId);
+        const c = this.shapeCentroidById(t.shapeId);
+        if (!shape || !c || shape.points.length < 3) continue;
+        const ddx = t.endX - c.x, ddy = t.endY - c.y;
+        const moved = shape.points.map(p => ({ x: p.x + ddx, y: p.y + ddy }));
+        if (pointInPolygon(worldX, worldY, moved)) return i;
+        continue;
+      }
+      if (t.kind === 'spike') {
+        // Hit-test the spike's bbox ghost at (endX, endY). Spikes anchor at
+        // the base: local y spans [-height, 4] (teeth point up).
+        const spike = (this.level.spikes ?? []).find(s => s.id === t.spikeId);
+        if (!spike) continue;
+        const endRot = t.endRotation ?? spike.rotation;
+        const dx = worldX - t.endX;
+        const dy = worldY - t.endY;
+        const cos = Math.cos(-endRot);
+        const sin = Math.sin(-endRot);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        if (Math.abs(lx) <= spike.width / 2 && ly >= -spike.height && ly <= 4) return i;
+        continue;
+      }
       // platform: hit-test the full rotated rect at (endX, endY)
       const plat = this.level.platforms.find(p => p.id === t.platformId);
       if (!plat) continue;
@@ -1670,6 +1782,11 @@ export class EditorState {
       return pt ? { x: pt.x, y: pt.y } : null;
     }
     if (t.kind === 'rotateShape') return null; // no arrow drawn
+    if (t.kind === 'moveShape') return this.shapeCentroidById(t.shapeId);
+    if (t.kind === 'spike') {
+      const spike = (this.level.spikes ?? []).find(s => s.id === t.spikeId);
+      return spike ? { x: spike.x, y: spike.y } : null;
+    }
     const plat = this.level.platforms.find(p => p.id === t.platformId);
     return plat ? { x: plat.x, y: plat.y } : null;
   }
@@ -1741,6 +1858,22 @@ export class EditorState {
     if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
       this.syncGravityCenterIfPoint(data);
     }
+    this.onChange?.();
+  }
+
+  /** Set (or clear) the KOTH hill-rotation config. Passing null disables it. */
+  setHillRotation(rotation: { minSeconds: number; maxSeconds: number } | null): void {
+    this.pushUndo();
+    if (rotation) this.level.hillRotation = rotation;
+    else delete this.level.hillRotation;
+    this.onChange?.();
+  }
+
+  /** Toggle the goopy-lava visual at the fall-off-the-map kill plane. The kill
+   *  plane itself is unaffected — this only controls the lava render. */
+  setShowLava(show: boolean): void {
+    this.pushUndo();
+    this.level.showLava = show;
     this.onChange?.();
   }
 

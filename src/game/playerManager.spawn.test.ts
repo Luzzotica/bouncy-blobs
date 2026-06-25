@@ -39,7 +39,7 @@ describe('PlayerManager — guest-spawn regression', () => {
     expect(world.getBlobCount()).toBe(1);
     expect(mp.blob.blobId).toBe(0);
     // Spawn position should be inside the configured spawn-point grid
-    // (one of the three spawns, ± per-id jitter).
+    // (exactly on one of the three spawns — no jitter).
     const c = mp.blob.getCentroid();
     expect(c.x).toBeGreaterThan(-500);
     expect(c.x).toBeLessThan(500);
@@ -67,16 +67,19 @@ describe('PlayerManager — guest-spawn regression', () => {
     expect(cb.y).toBeCloseTo(ca.y, 6);
   });
 
-  it('different playerIds spawn at different positions (no collision spawn)', () => {
+  it('spawns players EXACTLY on an authored spawn point (no jitter; collisions allowed)', () => {
+    // Players spawn dead-on a spawn point now — no per-id horizontal jitter
+    // (which used to shove them up to ±200u sideways, sometimes into walls).
+    // Two players may hash to the same point and overlap; that's intended.
     const world = new SoftBodyWorldRust({ rngSeed: 1 });
     const pm = new PlayerManager(SPAWN_POINTS);
-    const a = pm.addPlayer('alpha', 'A', world);
-    const b = pm.addPlayer('beta', 'B', world);
-    const ca = a.blob.getCentroid();
-    const cb = b.blob.getCentroid();
-    // Different playerIds should hash to different spawn slots / jitters.
-    const dist = Math.hypot(ca.x - cb.x, ca.y - cb.y);
-    expect(dist).toBeGreaterThan(1);
+    for (const id of ['alpha', 'beta', 'gamma', 'delta']) {
+      const c = pm.addPlayer(id, id, world).blob.getCentroid();
+      const onAPoint = SPAWN_POINTS.some(
+        (sp) => Math.abs(c.x - sp.x) < 1 && Math.abs(c.y - sp.y) < 1,
+      );
+      expect(onAPoint).toBe(true);
+    }
   });
 
   it('spawn-order independence: host adds {a,b}, guest adds {b,a} — same blob positions', () => {

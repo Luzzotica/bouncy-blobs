@@ -662,6 +662,14 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_resetBlobMassScale(this.__wbg_ptr, blob_id);
     }
     /**
+     * @param {number} blob_id
+     * @param {number} x
+     * @param {number} y
+     */
+    resetBlobToRest(blob_id, x, y) {
+        wasm.softbodyworldhandle_resetBlobToRest(this.__wbg_ptr, blob_id, x, y);
+    }
+    /**
      * Restore state from a buffer produced by `serializeState`. Returns
      * true on success; false if the buffer is malformed or world layout
      * (particle/blob/shape/static-surface counts) doesn't match.

@@ -1,40 +1,45 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RoomService } from "../lib/party";
 import type { RoomSummary } from "../lib/party";
 import { roomConfig, GAME_ID } from "../lib/partyConfig";
-import {
-  getStoredDisplayName,
-  setStoredDisplayName,
-  resolveDefaultDisplayName,
-} from "../lib/userProfile";
+import { setStoredDisplayName } from "../lib/userProfile";
 import { setPendingJoin } from "../lib/pendingJoin";
 
-// Browse + join joinable online lobbies. Self-contained (fetches its own
-// list, owns the display-name + password prompt) and fills its parent
-// container, so it can drop into the Multiplayer page's right column. On
-// join it stashes the pending join and navigates to /online-guest.
-export default function LobbyList() {
+// Browse + join joinable online lobbies. Fetches its own list and owns the
+// password prompt, but the display name is supplied by the parent (single
+// source of truth on the Multiplayer page). Fills its parent container so it
+// can drop into the Multiplayer page's right column. On join it stashes the
+// pending join and navigates to /online-guest.
+export default function LobbyList({ displayName }: { displayName: string }) {
   const navigate = useNavigate();
   const [lobbies, setLobbies] = useState<RoomSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
-  // Single source of truth for the guest's display name. Pre-filled from
-  // localStorage (or Steam persona under Steam); persisted on every change.
-  const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
   const [joinTarget, setJoinTarget] = useState<RoomSummary | null>(null);
   const [joinPassword, setJoinPassword] = useState("");
+  const [codeModalOpen, setCodeModalOpen] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  // Drives the drop-in / rip-off paper animation shared by both modals (only
+  // one is ever open at a time). `closing` flips the active modal to its
+  // rip-off animation; the pending action runs once that animation ends.
+  const [closing, setClosing] = useState(false);
+  const pendingCloseRef = useRef<null | (() => void)>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (displayName) return;
-    void resolveDefaultDisplayName().then((n) => {
-      if (!cancelled && n) setDisplayName(n);
-    });
-    return () => { cancelled = true; };
-  }, [displayName]);
+  function beginClose(after: () => void) {
+    pendingCloseRef.current = after;
+    setClosing(true);
+  }
+  function handleAnimEnd() {
+    if (closing && pendingCloseRef.current) {
+      const fn = pendingCloseRef.current;
+      pendingCloseRef.current = null;
+      setClosing(false);
+      fn();
+    }
+  }
 
   useEffect(() => {
     const room = new RoomService(roomConfig);
@@ -61,6 +66,7 @@ export default function LobbyList() {
       return;
     }
     if (lobby.is_password_protected) {
+      setClosing(false);
       setJoinTarget(lobby);
       setJoinPassword("");
       return;
@@ -83,12 +89,19 @@ export default function LobbyList() {
     }
   }
 
-  async function joinByCode() {
+  function openCodeModal() {
     if (!displayName.trim()) {
       setError("Enter a display name first");
       return;
     }
-    const raw = window.prompt("Enter the room code to join:")?.trim();
+    setError(null);
+    setCodeInput("");
+    setClosing(false);
+    setCodeModalOpen(true);
+  }
+
+  async function submitCode() {
+    const raw = codeInput.trim();
     if (!raw) return;
     setError(null);
     setBusy(true);
@@ -111,69 +124,55 @@ export default function LobbyList() {
   return (
     <div style={panel}>
       <div style={headerRow}>
-        <h2 style={{ fontSize: 22, margin: 0, color: "#fffae6" }}>Lobbies</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: "#1a0f2e" }}>Lobbies</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button
+            className="bb-hover-btn"
             data-testid="refresh-lobbies-button"
             onClick={() => setRefreshTick((t) => t + 1)}
             disabled={busy || refreshing}
             style={smallBtn}
             title="Refresh lobby list"
           >
-            {refreshing ? "⏳" : "🔄"}
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
           <button
+            className="bb-hover-btn"
             data-testid="enter-room-code-button"
-            onClick={joinByCode}
+            onClick={openCodeModal}
             disabled={busy}
-            style={{ ...smallBtn, background: "#5dd6ff", color: "#0a0612", fontWeight: 600 }}
+            style={{ ...smallBtn, background: "#5dd6ff", color: "#0a0612", fontWeight: 700 }}
             title="Join a private lobby by typing its join code"
           >
-            🔑 Code
+            Enter Game Code
           </button>
         </div>
       </div>
 
-      {error && <div style={{ color: "#ff9a9a", fontSize: 13 }}>{error}</div>}
-
-      <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <span style={{ fontSize: 13, color: "#cbb8e6" }}>Your name</span>
-        <input
-          data-testid="lobby-display-name"
-          type="text"
-          value={displayName}
-          maxLength={32}
-          placeholder="Enter your display name"
-          onChange={(e) => {
-            const v = e.target.value;
-            setDisplayName(v);
-            setStoredDisplayName(v);
-          }}
-          style={inputStyle}
-        />
-      </label>
+      {error && <div style={{ color: "#b3261e", fontSize: 13, fontWeight: 600 }}>{error}</div>}
 
       <div data-testid="lobby-list" style={listBox}>
         {lobbies.length === 0 && (
-          <div style={{ padding: 24, textAlign: "center", color: "#9b8bb5", fontSize: 14 }}>
+          <div style={{ padding: 24, textAlign: "center", color: "#7a6e8c", fontSize: 14, fontWeight: 600 }}>
             No public lobbies yet — host one on the left!
           </div>
         )}
         {lobbies.map((l) => (
           <div key={l.room_id} data-testid={`lobby-row-${l.join_code}`} style={lobbyRow}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#fffae6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a0f2e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {l.is_password_protected && <span title="Password protected" style={{ marginRight: 6 }}>🔒</span>}
                 {l.display_name || "Untitled lobby"}
               </div>
-              <div style={{ color: "#9b8bb5", fontSize: 12 }}>
+              <div style={{ color: "#6b5e85", fontSize: 12, fontWeight: 600 }}>
                 {l.peer_count}/{l.max_peers} · code {l.join_code}
               </div>
             </div>
             <button
+              className="bb-hover-btn"
               onClick={() => beginJoin(l)}
               disabled={busy || l.peer_count >= l.max_peers}
-              style={{ ...joinBtn, background: l.peer_count >= l.max_peers ? "#555" : "#c77dff" }}
+              style={{ ...joinBtn, background: l.peer_count >= l.max_peers ? "#d8cfe2" : "#c77dff", color: l.peer_count >= l.max_peers ? "#7a6e8c" : "#1a0f2e" }}
             >
               {l.peer_count >= l.max_peers ? "Full" : "Join"}
             </button>
@@ -184,27 +183,23 @@ export default function LobbyList() {
       {joinTarget && (
         <div
           data-testid="join-password-backdrop"
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-          }}
-          onClick={() => setJoinTarget(null)}
+          style={{ ...modalBackdrop, opacity: closing ? 0 : 1, transition: "opacity 0.25s ease-out" }}
+          onClick={() => beginClose(() => setJoinTarget(null))}
         >
           <form
             onClick={(e) => e.stopPropagation()}
+            onAnimationEnd={handleAnimEnd}
+            className={closing ? "modal-paper rip" : "modal-paper slam"}
             onSubmit={(e) => {
               e.preventDefault();
               const tgt = joinTarget;
-              setJoinTarget(null);
-              void commitJoin(tgt, joinPassword);
+              beginClose(() => { setJoinTarget(null); void commitJoin(tgt, joinPassword); });
             }}
-            style={{
-              background: "#1a1525", color: "#fff", padding: 24, borderRadius: 12,
-              minWidth: 320, display: "flex", flexDirection: "column", gap: 14,
-            }}
+            style={modalCard}
           >
-            <h3 style={{ margin: 0 }}>Password required</h3>
-            <div style={{ color: "#bbb", fontSize: 13 }}>
+            <div style={modalTape} />
+            <h3 style={modalTitle}>Password required</h3>
+            <div style={{ color: "#6b5e85", fontSize: 13, fontWeight: 600 }}>
               {joinTarget.display_name || "Untitled lobby"}
             </div>
             <input
@@ -217,21 +212,76 @@ export default function LobbyList() {
               style={inputStyle}
             />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setJoinTarget(null)} style={smallBtn}>
+              <button className="bb-hover-btn" type="button" onClick={() => beginClose(() => setJoinTarget(null))} style={smallBtn}>
                 Cancel
               </button>
               <button
+                className="bb-hover-btn"
                 type="submit"
                 disabled={!joinPassword}
                 style={{
                   ...joinBtn,
-                  background: joinPassword ? "#c77dff" : "#555",
+                  background: joinPassword ? "#c77dff" : "#d8cfe2",
+                  color: joinPassword ? "#1a0f2e" : "#7a6e8c",
                   cursor: joinPassword ? "pointer" : "not-allowed",
                 }}
               >
                 Join
               </button>
             </div>
+            <ModalAnimStyle />
+          </form>
+        </div>
+      )}
+
+      {codeModalOpen && (
+        <div
+          data-testid="code-modal-backdrop"
+          style={{ ...modalBackdrop, opacity: closing ? 0 : 1, transition: "opacity 0.25s ease-out" }}
+          onClick={() => beginClose(() => setCodeModalOpen(false))}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onAnimationEnd={handleAnimEnd}
+            className={closing ? "modal-paper rip" : "modal-paper slam"}
+            onSubmit={(e) => { e.preventDefault(); if (codeInput.trim()) beginClose(() => { setCodeModalOpen(false); void submitCode(); }); }}
+            style={modalCard}
+          >
+            <div style={modalTape} />
+            <h3 style={modalTitle}>Enter Game Code</h3>
+            <div style={{ color: "#6b5e85", fontSize: 13, fontWeight: 600 }}>
+              Type the join code shared by the host.
+            </div>
+            <input
+              data-testid="code-input"
+              type="text"
+              autoFocus
+              value={codeInput}
+              maxLength={12}
+              onChange={(e) => setCodeInput(e.target.value)}
+              placeholder="e.g. ABCD"
+              style={{ ...inputStyle, textTransform: "uppercase", letterSpacing: 2, fontWeight: 700 }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="bb-hover-btn" type="button" onClick={() => beginClose(() => setCodeModalOpen(false))} style={smallBtn}>
+                Cancel
+              </button>
+              <button
+                className="bb-hover-btn"
+                type="submit"
+                data-testid="code-submit"
+                disabled={!codeInput.trim()}
+                style={{
+                  ...joinBtn,
+                  background: codeInput.trim() ? "#c77dff" : "#d8cfe2",
+                  color: codeInput.trim() ? "#1a0f2e" : "#7a6e8c",
+                  cursor: codeInput.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                Join
+              </button>
+            </div>
+            <ModalAnimStyle />
           </form>
         </div>
       )}
@@ -239,18 +289,89 @@ export default function LobbyList() {
   );
 }
 
+// Shared drop-in / rip-off paper animation, matching HostSetupModal.
+function ModalAnimStyle() {
+  return (
+    <style>{`
+      @keyframes modal-slam-in {
+        0%   { transform: translateY(-160vh) rotate(-9deg); opacity: 0; }
+        55%  { transform: translateY(24px) rotate(3deg);    opacity: 1; }
+        72%  { transform: translateY(-10px) rotate(-1.8deg); }
+        86%  { transform: translateY(5px) rotate(0.6deg);    }
+        100% { transform: translateY(0) rotate(0deg);        }
+      }
+      @keyframes modal-rip-off {
+        0%   { transform: translateY(0) rotate(0deg) skewX(0deg);     opacity: 1; }
+        20%  { transform: translateY(-24px) rotate(5deg) skewX(-2deg); opacity: 1; }
+        100% { transform: translateY(-160vh) rotate(14deg) skewX(-4deg); opacity: 0; }
+      }
+      .modal-paper { transform-origin: 50% 0%; }
+      .modal-paper.slam { animation: modal-slam-in 0.55s cubic-bezier(0.34, 1.56, 0.5, 1) both; }
+      .modal-paper.rip  { animation: modal-rip-off 0.35s cubic-bezier(0.5, 0, 0.75, 0) both; }
+      @media (prefers-reduced-motion: reduce) {
+        .modal-paper.slam { animation: none; }
+        .modal-paper.rip  { animation: none; opacity: 0; }
+      }
+    `}</style>
+  );
+}
+
+const modalBackdrop: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(10,6,18,0.6)",
+  backdropFilter: "blur(2px)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
+};
+
+const modalCard: React.CSSProperties = {
+  position: "relative",
+  background: "#fffae6",
+  color: "#1a0f2e",
+  padding: "30px 24px 24px",
+  borderRadius: 6,
+  border: "4px solid #0a0612",
+  boxShadow: "0 18px 40px rgba(0,0,0,0.5)",
+  minWidth: 320,
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const modalTape: React.CSSProperties = {
+  position: "absolute",
+  top: -14,
+  left: "50%",
+  transform: "translateX(-50%) rotate(-2deg)",
+  width: 160,
+  height: 28,
+  background: "rgba(200, 180, 120, 0.78)",
+  border: "1px solid rgba(120, 100, 60, 0.4)",
+  boxShadow: "0 3px 6px rgba(0,0,0,0.2)",
+};
+
+const modalTitle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+  fontWeight: 900,
+  color: "#1a0f2e",
+};
+
 const panel: React.CSSProperties = {
+  position: "relative",
   height: "100%",
   width: "100%",
   display: "flex",
   flexDirection: "column",
   gap: 12,
-  padding: 20,
-  borderRadius: 12,
-  background: "rgba(15, 10, 24, 0.82)",
-  border: "1px solid rgba(199,125,255,0.25)",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-  backdropFilter: "blur(4px)",
+  padding: "24px 20px 20px",
+  borderRadius: 6,
+  background: "#fffae6",
+  border: "4px solid #0a0612",
+  boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
   minHeight: 0,
 };
 
@@ -261,20 +382,22 @@ const headerRow: React.CSSProperties = {
 };
 
 const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
+  padding: "9px 11px",
   fontSize: 15,
-  borderRadius: 6,
-  border: "1px solid #444",
-  background: "#0f0a18",
-  color: "#fff",
+  borderRadius: 4,
+  border: "2px solid #0a0612",
+  background: "#fffefb",
+  color: "#1a0f2e",
+  fontFamily: "inherit",
 };
 
 const listBox: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflowY: "auto",
-  borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 4,
+  border: "2px solid rgba(10,6,18,0.25)",
+  background: "rgba(255,255,255,0.35)",
 };
 
 const lobbyRow: React.CSSProperties = {
@@ -283,18 +406,29 @@ const lobbyRow: React.CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   gap: 10,
-  borderTop: "1px solid rgba(255,255,255,0.06)",
+  borderTop: "1px solid rgba(10,6,18,0.12)",
 };
 
 const smallBtn: React.CSSProperties = {
   padding: "8px 14px",
   fontSize: 14,
+  fontWeight: 700,
+  background: "#fffefb",
+  color: "#1a0f2e",
+  border: "2px solid #0a0612",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontFamily: "inherit",
 };
 
 const joinBtn: React.CSSProperties = {
   padding: "10px 20px",
   background: "#c77dff",
-  color: "#0a0612",
-  fontWeight: 600,
+  color: "#1a0f2e",
+  fontWeight: 800,
+  border: "2px solid #0a0612",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontFamily: "inherit",
   flexShrink: 0,
 };

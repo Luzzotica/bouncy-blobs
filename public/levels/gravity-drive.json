@@ -113,11 +113,41 @@
   "hillZones": [
     {
       "id": "hill_105",
-      "x": 120,
-      "y": -1020,
-      "width": 760,
-      "height": 800
+      "x": -380,
+      "y": -1000,
+      "width": 400,
+      "height": 520
+    },
+    {
+      "id": "hill_144",
+      "x": 600,
+      "y": -1000,
+      "width": 400,
+      "height": 520
+    },
+    {
+      "id": "hill_145",
+      "x": 110,
+      "y": -580,
+      "width": 580,
+      "height": 320
+    },
+    {
+      "id": "hill_146",
+      "x": 110,
+      "y": -1420,
+      "width": 580,
+      "height": 320
     }
   ],
-  "softPlatforms": []
+  "softPlatforms": [],
+  "deathZones": [
+    {
+      "id": "death_147",
+      "x": 860,
+      "y": 2980,
+      "width": 21160,
+      "height": 1640
+    }
+  ]
 }

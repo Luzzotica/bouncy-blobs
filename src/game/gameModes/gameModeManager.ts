@@ -153,6 +153,18 @@ export class GameModeManager {
         // Voting results — show the selected level
         ctx.fillStyle = '#c77dff';
         ctx.fillText('Level Selected!', width / 2, height / 2 - 20);
+      } else if (this.mode.config.id === 'chained') {
+        // Co-op: the whole team wins or the whole team loses — no individual.
+        if (winner) {
+          ctx.fillStyle = '#ffd700';
+          ctx.fillText('Everyone wins!', width / 2, height / 2 - 30);
+        } else {
+          ctx.fillStyle = '#ff6b6b';
+          ctx.fillText('Everyone loses!', width / 2, height / 2 - 30);
+        }
+        ctx.font = '20px sans-serif';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText('Next round...', width / 2, height / 2 + 30);
       } else {
         ctx.fillStyle = '#ffd700';
         ctx.fillText(winnerName ? `${winnerName} wins!` : 'Time\'s up!', width / 2, height / 2 - 30);

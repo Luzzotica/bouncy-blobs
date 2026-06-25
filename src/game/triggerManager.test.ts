@@ -73,3 +73,94 @@ describe('TriggerManager (area)', () => {
     expect(mgr.isPressed('t1')).toBe(true);
   });
 });
+
+// ── Regression: structural softbodies must never press triggers ─────────────
+// Point shapes, soft platforms and rope-chain segments are all blobs in the
+// engine, and the engine emits trigger enter/exit events for EVERY blob. A
+// trigger must only respond to player blobs (and NPCs, unless it ignores
+// them). These tests build a real engine, park a STATIC softbody shape inside
+// a trigger area, step the sim so the engine runs its own occupancy detection,
+// and check what actually presses.
+describe('TriggerManager — softbody shapes must not press triggers', () => {
+  function softbodyInsideTrigger() {
+    const world = new SoftBodyWorldRust();
+    const def: TriggerDef = { id: 't1', x: 0, y: 100, width: 80, height: 40, rotation: 0 };
+    // Trigger area: an 80×40 box centred on (0, 100).
+    const shapeIdx = world.registerTriggerPolygon([
+      vec2(-40, 80), vec2(40, 80), vec2(40, 120), vec2(-40, 120),
+    ]);
+    const shapeIdxToId = new Map<number, string>([[shapeIdx, def.id]]);
+
+    // A small, fully-static softbody shape (like a point shape / soft platform)
+    // parked squarely inside the trigger area. Every particle is pinned so it
+    // can't drift out under gravity during the steps below.
+    const blob = world.addBlobFromHull({
+      hullRestLocal: [
+        { x: -10, y: -10 }, { x: 10, y: -10 }, { x: 10, y: 10 }, { x: -10, y: 10 },
+      ],
+      centerLocal: { x: 0, y: 0 },
+      centerMass: 1, hullMass: 1,
+      springK: 200, springDamp: 5,
+      radialK: 200, radialDamp: 5,
+      pressureK: 0,
+      shapeMatchK: 200, shapeMatchDamp: 5,
+      worldOrigin: vec2(0, 100),
+      sortKey: 'pointshape:test',
+      staticHullIndices: [0, 1, 2, 3],
+      staticCenter: true,
+      pinFrame: true,
+    });
+
+    return { world, def, shapeIdxToId, softbodyBlobId: blob.blobId };
+  }
+
+  // Records which blob ids the ENGINE reports entering the trigger, while
+  // still letting the manager's own handler run.
+  function recordEngineEnters(world: SoftBodyWorldRust): number[] {
+    const seen: number[] = [];
+    const prior = world.onTriggerEntered;
+    world.onTriggerEntered = (s, b) => { seen.push(b); prior?.(s, b); };
+    return seen;
+  }
+
+  it('reproduces the bug: an unfiltered trigger IS pressed by a softbody shape', () => {
+    const { world, def, shapeIdxToId, softbodyBlobId } = softbodyInsideTrigger();
+    const mgr = new TriggerManager();
+    // No player/NPC predicates → old permissive behavior (everything presses).
+    mgr.initialize(world, [def], shapeIdxToId);
+    const engineEnters = recordEngineEnters(world);
+
+    for (let i = 0; i < 3; i++) world.step(1 / 60);
+
+    // The engine reports the softbody shape overlapping the trigger area...
+    expect(engineEnters).toContain(softbodyBlobId);
+    // ...and without filtering it wrongly presses the trigger. THIS is the bug.
+    expect(mgr.isPressed('t1')).toBe(true);
+  });
+
+  it('fix: with player/NPC filtering, a softbody shape does NOT press the trigger', () => {
+    const { world, def, shapeIdxToId, softbodyBlobId } = softbodyInsideTrigger();
+    const mgr = new TriggerManager();
+    // Realistic wiring: this blob is neither a player nor an NPC.
+    mgr.initialize(world, [def], shapeIdxToId, () => false, () => false);
+    const engineEnters = recordEngineEnters(world);
+
+    for (let i = 0; i < 3; i++) world.step(1 / 60);
+
+    // The engine still reports the softbody overlapping the trigger area...
+    expect(engineEnters).toContain(softbodyBlobId);
+    // ...but the TriggerManager now refuses to let a non-agent press it.
+    expect(mgr.isPressed('t1')).toBe(false);
+  });
+
+  it('a player blob still presses the trigger', () => {
+    const { world, def, shapeIdxToId, softbodyBlobId } = softbodyInsideTrigger();
+    const mgr = new TriggerManager();
+    // Treat the blob as a player — legitimate presses must still work.
+    mgr.initialize(world, [def], shapeIdxToId, () => false, (id) => id === softbodyBlobId);
+
+    for (let i = 0; i < 3; i++) world.step(1 / 60);
+
+    expect(mgr.isPressed('t1')).toBe(true);
+  });
+});

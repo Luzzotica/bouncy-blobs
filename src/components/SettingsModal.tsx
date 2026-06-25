@@ -4,8 +4,6 @@ import {
   setMusicVolumeSetting,
   getSfxVolume,
   setSfxVolumeSetting,
-  getPlayerColor,
-  setPlayerColorSetting,
 } from '../utils/audioSettings'
 import { playSfx } from '../utils/audio'
 import { assetUrl } from '../utils/assetUrl'
@@ -19,7 +17,6 @@ interface Props {
 export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
   const [musicV, setMusicV] = useState(() => getMusicVolume())
   const [sfxV, setSfxV] = useState(() => getSfxVolume())
-  const [color, setColor] = useState(() => getPlayerColor())
   // visible drives whether we render the DOM at all; closing flips the
   // animation to the rip-off keyframes before we unmount.
   const [visible, setVisible] = useState(open)
@@ -33,7 +30,6 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
       setClosing(false)
       setMusicV(getMusicVolume())
       setSfxV(getSfxVolume())
-      setColor(getPlayerColor())
       if (!wasOpenRef.current) playSfx('ui-modal-open', { volume: 0.6 })
     } else if (visible) {
       setClosing(true)
@@ -62,12 +58,6 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
     const v = parseInt(e.target.value, 10) / 100
     setSfxV(v)
     setSfxVolumeSetting(v)
-  }
-
-  function handleColorChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const v = e.target.value
-    setColor(v)
-    setPlayerColorSetting(v)
   }
 
   function handleSfxPreview() {
@@ -138,18 +128,6 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
         </label>
 
         <p style={hint}>Release the SFX slider to hear a preview.</p>
-
-        <label style={row}>
-          <span style={label}>Blob colour</span>
-          <input
-            type="color"
-            value={color}
-            onChange={handleColorChange}
-            style={colorSwatch}
-            aria-label="Player blob colour"
-          />
-          <span style={valueText}>{color.toUpperCase()}</span>
-        </label>
 
         {onReplayIntro && (
           <button onClick={handleReplay} style={replayBtn}>
@@ -264,16 +242,6 @@ const slider: React.CSSProperties = {
   cursor: 'pointer',
 }
 
-const colorSwatch: React.CSSProperties = {
-  width: '100%',
-  height: 28,
-  padding: 0,
-  border: '2px solid #0a0612',
-  borderRadius: 4,
-  cursor: 'pointer',
-  background: 'transparent',
-}
-
 const valueText: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: 13,
@@ -303,3 +271,4 @@ const replayBtn: React.CSSProperties = {
   cursor: 'pointer',
   boxShadow: '0 4px 0 #0a0612, 0 6px 14px rgba(0,0,0,0.3)',
 }
+

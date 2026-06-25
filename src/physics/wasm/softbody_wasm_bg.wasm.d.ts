@@ -63,6 +63,7 @@ export const softbodyworldhandle_registerTriggerPolygon: (a: number, b: number, 
 export const softbodyworldhandle_removeBlob: (a: number, b: number) => void;
 export const softbodyworldhandle_removeStaticSurface: (a: number, b: number) => void;
 export const softbodyworldhandle_resetBlobMassScale: (a: number, b: number) => void;
+export const softbodyworldhandle_resetBlobToRest: (a: number, b: number, c: number, d: number) => void;
 export const softbodyworldhandle_restoreState: (a: number, b: number, c: number) => number;
 export const softbodyworldhandle_rngNextUnit: (a: number) => number;
 export const softbodyworldhandle_rngState: (a: number) => number;

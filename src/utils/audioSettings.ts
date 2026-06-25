@@ -5,9 +5,11 @@
 const MUSIC_KEY = 'bb_music_volume'
 const SFX_KEY = 'bb_sfx_volume'
 const COLOR_KEY = 'bb_player_color'
+const FACE_KEY = 'bb_player_face'
 const DEFAULT_MUSIC = 0.34
 const DEFAULT_SFX = 0.85
 const DEFAULT_COLOR = '#4ea1ff'
+const DEFAULT_FACE = 'default'
 
 type Listener = () => void
 const listeners = new Set<Listener>()
@@ -69,5 +71,20 @@ export function getPlayerColor(): string {
 export function setPlayerColorSetting(hex: string): void {
   if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return
   try { localStorage.setItem(COLOR_KEY, hex.toLowerCase()) } catch {}
+  for (const l of listeners) l()
+}
+
+/** Player blob face/eyes preference (a faceId from faceRenderer's presets).
+ * Mirrors the colour preference: single source of truth, subscribable. */
+export function getPlayerFaceId(): string {
+  try {
+    const raw = localStorage.getItem(FACE_KEY)
+    if (raw) return raw
+  } catch {}
+  return DEFAULT_FACE
+}
+
+export function setPlayerFaceIdSetting(faceId: string): void {
+  try { localStorage.setItem(FACE_KEY, faceId) } catch {}
   for (const l of listeners) l()
 }

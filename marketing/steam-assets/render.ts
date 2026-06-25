@@ -1,7 +1,11 @@
-/* Renders each Steam asset to output/<name>.png by:
+/* Renders each asset to ../marketing/<dir>/<name>.png by:
  *   1) starting Vite dev server
  *   2) opening chromium at /?asset=<name> with the asset's exact viewport
  *   3) screenshotting #root
+ *
+ * <dir> comes from the asset's manifest `dir` ("steam" default, "social" for
+ * profile/channel banners), so every deliverable lands in the consolidated
+ * per-game marketing/ folder.
  */
 import { chromium, type Browser } from "playwright";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -9,7 +13,9 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { ASSETS } from "./templates/_manifest";
 
-const OUTPUT = resolve(process.cwd(), "output");
+// The parent marketing/ folder (this project lives at marketing/steam-assets,
+// cwd when run via pnpm), so outputs land in sibling marketing/<dir> folders.
+const MARKETING = resolve(process.cwd(), "..");
 const HOST = "http://localhost:5183";
 
 function startVite(): Promise<ChildProcess> {
@@ -42,7 +48,9 @@ async function renderOne(browser: Browser, name: string) {
   await page.goto(`${HOST}/?asset=${name}`, { waitUntil: "networkidle" });
   const el = await page.locator("#root > *").first();
   await el.waitFor({ state: "visible" });
-  const file = resolve(OUTPUT, `${name}.png`);
+  const outDir = resolve(MARKETING, spec.dir ?? "steam");
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+  const file = resolve(outDir, `${name}.png`);
   await el.screenshot({ path: file, omitBackground: !!spec.transparent });
   await ctx.close();
   const outW = spec.width * scale;
@@ -51,7 +59,7 @@ async function renderOne(browser: Browser, name: string) {
 }
 
 async function main() {
-  if (!existsSync(OUTPUT)) mkdirSync(OUTPUT, { recursive: true });
+  if (!existsSync(MARKETING)) mkdirSync(MARKETING, { recursive: true });
 
   const args = process.argv.slice(2);
   const target = args[0] ?? "all";

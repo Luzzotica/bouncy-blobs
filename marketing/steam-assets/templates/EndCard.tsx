@@ -78,7 +78,7 @@ export function EndCard() {
             textAlign: "center",
           }}
         >
-          Link in description 👇
+          Linkie in bio
         </div>
       </div>
     </Frame>

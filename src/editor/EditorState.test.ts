@@ -84,6 +84,85 @@ describe('EditorState — PointShape tool', () => {
     expect(state.level.pointShapes ?? []).toHaveLength(0);
   });
 
+  // Build a committed closed shape with a known centroid for the action tests.
+  function makeShape(): string {
+    state.beginDraftPointShape();
+    state.appendDraftPoint(0, 0, false);
+    state.appendDraftPoint(100, 0, false);
+    state.appendDraftPoint(100, 100, false);
+    state.appendDraftPoint(0, 100, false);
+    state.commitDraftPointShape(true);
+    return state.level.pointShapes![0].id; // centroid = (50, 50)
+  }
+
+  it('appendActionTargetMoveShape adds ONE whole-shape target (default mode)', () => {
+    const id = makeShape();
+    state.appendActionTargetMoveShape(id);
+    state.commitDraftAction();
+    const action = state.level.actions!.at(-1)!;
+    expect(action.targets).toHaveLength(1);
+    const t = action.targets[0];
+    expect(t.kind).toBe('moveShape');
+    if (t.kind === 'moveShape') {
+      expect(t.shapeId).toBe(id);
+      // default open-pose centroid = rest centroid (50,50) offset up by 150
+      expect(t).toMatchObject({ endX: 50, endY: -100 });
+    }
+  });
+
+  it('appendActionTargetMoveShape is idempotent per shape (no duplicate target)', () => {
+    const id = makeShape();
+    state.appendActionTargetMoveShape(id);
+    state.appendActionTargetMoveShape(id);
+    expect(state.draftAction!.targets).toHaveLength(1);
+  });
+
+  it('per-vertex mode still adds individual shapePoint targets', () => {
+    const id = makeShape();
+    state.appendActionTargetAtVertex(id, 0);
+    state.appendActionTargetAtVertex(id, 2);
+    state.commitDraftAction();
+    const action = state.level.actions!.at(-1)!;
+    expect(action.targets.map(t => t.kind)).toEqual(['shapePoint', 'shapePoint']);
+  });
+
+  it('appendActionTargetAtSpike adds a single spike move target', () => {
+    state.addSpike(100, 200);
+    const id = state.level.spikes![0].id;
+    state.appendActionTargetAtSpike(id);
+    state.appendActionTargetAtSpike(id); // idempotent
+    state.commitDraftAction();
+    const action = state.level.actions!.at(-1)!;
+    expect(action.targets).toHaveLength(1);
+    expect(action.targets[0].kind).toBe('spike');
+    if (action.targets[0].kind === 'spike') expect(action.targets[0].spikeId).toBe(id);
+  });
+
+  it('appendActionTargetRotateSpike adds an endRotation to the spike target', () => {
+    state.addSpike(100, 200);
+    const id = state.level.spikes![0].id;
+    state.appendActionTargetRotateSpike(id);
+    const t = state.draftAction!.targets[0];
+    expect(t.kind).toBe('spike');
+    if (t.kind === 'spike') expect(typeof t.endRotation).toBe('number');
+  });
+
+  it('toggleActionPerVertex flips the preference', () => {
+    expect(state.actionPerVertex).toBe(false);
+    state.toggleActionPerVertex();
+    expect(state.actionPerVertex).toBe(true);
+    state.toggleActionPerVertex();
+    expect(state.actionPerVertex).toBe(false);
+  });
+
+  it('dragging a moveShape ghost updates its open-pose centroid', () => {
+    const id = makeShape();
+    state.appendActionTargetMoveShape(id); // phase auto-advances to placeEnds
+    state.setDraftActionTargetEnd(0, 300, 400);
+    const t = state.draftAction!.targets[0];
+    expect(t).toMatchObject({ kind: 'moveShape', endX: 300, endY: 400 });
+  });
+
   it('togglePointAnchored flips a vertex anchored flag', () => {
     state.beginDraftPointShape();
     state.appendDraftPoint(0, 0, false);

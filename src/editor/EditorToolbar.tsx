@@ -5,6 +5,7 @@ import { writeLocalMap } from '../lib/mapsStore';
 import { exportLocalMap, importLocalMap, readLocalMap } from '../lib/localMaps';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { isTauri } from '../lib/runtime';
+import { COLORS, paperPanel, paperBtnSm, actionBtnSm } from '../theme/uiTheme';
 
 interface EditorToolbarProps {
   state: EditorState;
@@ -95,12 +96,12 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
   return (
     <>
       <div style={{
+        ...paperPanel,
         display: 'flex',
         alignItems: 'center',
         gap: 4,
         padding: '8px 12px',
-        background: '#16213e',
-        borderBottom: '1px solid #333',
+        borderBottom: '3px solid #0a0612',
         flexWrap: 'wrap',
       }}>
         {tools.map(t => (
@@ -118,13 +119,10 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
             }}
             title={`${t.label} (${t.hotkey})`}
             style={{
+              ...(state.selectedTool === t.id ? actionBtnSm(COLORS.purple) : paperBtnSm),
               padding: '5px 10px',
               fontSize: 12,
-              background: state.selectedTool === t.id ? '#7b68ee' : '#2a3a5a',
-              border: state.selectedTool === t.id ? '1px solid #9b88ff' : '1px solid #3a4a6a',
               borderRadius: 4,
-              color: state.selectedTool === t.id ? '#fff' : '#bbb',
-              cursor: 'pointer',
             }}
           >
             <span>{t.label}</span>
@@ -132,23 +130,44 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           </button>
         ))}
 
-        <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
+        <div style={{ width: 2, height: 20, background: '#0a0612', margin: '0 4px' }} />
+
+        <button
+          onClick={() => { state.undo(); onUpdate(); }}
+          disabled={state.undoStack.length === 0}
+          title="Undo (⌘/Ctrl+Z)"
+          style={disableable(actionBtnStyle(), state.undoStack.length === 0)}
+        >
+          ↶ Undo
+        </button>
+        <button
+          onClick={() => { state.redo(); onUpdate(); }}
+          disabled={state.redoStack.length === 0}
+          title="Redo (⌘/Ctrl+Shift+Z)"
+          style={disableable(actionBtnStyle(), state.redoStack.length === 0)}
+        >
+          ↷ Redo
+        </button>
+
+        <div style={{ width: 2, height: 20, background: '#0a0612', margin: '0 4px' }} />
 
         <button onClick={() => { state.newLevel(); state.localId = null; state.workshopId = null; onUpdate(); }}
-          style={actionBtnStyle('#8b4513')}>
+          style={actionBtnStyle()}>
           New
         </button>
-        <button onClick={handleSaveNow} style={actionBtnStyle('#1a6aaa')}>Save</button>
-        {isTauri() && <button onClick={handleImport} style={actionBtnStyle('#2d6a4f')}>Import</button>}
-        {isTauri() && <button onClick={handleExport} style={actionBtnStyle('#2d6a4f')}>Export</button>}
+        <button onClick={handleSaveNow} style={actionBtnStyle(COLORS.blue)}>Save</button>
+        {isTauri() && <button onClick={handleImport} style={actionBtnStyle(COLORS.green)}>Import</button>}
+        {isTauri() && <button onClick={handleExport} style={actionBtnStyle(COLORS.green)}>Export</button>}
 
-        <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
+        <div style={{ width: 2, height: 20, background: '#0a0612', margin: '0 4px' }} />
 
         <button
           onClick={() => setPublishOpen(true)}
           disabled={!steamAvailable}
           title={steamAvailable ? 'Publish to Steam Workshop' : 'Steam is not running'}
-          style={actionBtnStyle(steamAvailable ? (state.workshopId ? '#2d8a4f' : '#c77dff') : '#444')}
+          style={steamAvailable
+            ? (state.workshopId ? actionBtnStyle(COLORS.green) : actionBtnStyle(COLORS.lavender, COLORS.ink))
+            : { ...actionBtnStyle(), opacity: 0.5, cursor: 'not-allowed' }}
         >
           {state.workshopId ? 'Update Workshop' : 'Publish to Workshop'}
         </button>
@@ -158,11 +177,11 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
         <button
           onClick={() => { state.showIds = !state.showIds; onUpdate(); }}
           title="Toggle id labels on every entity (I)"
-          style={actionBtnStyle(state.showIds ? '#5a8aff' : '#333')}
+          style={state.showIds ? actionBtnStyle(COLORS.blue) : actionBtnStyle()}
         >
           {state.showIds ? 'Labels ON' : 'Labels OFF'}
         </button>
-        <button onClick={onTestPlay} style={actionBtnStyle('#c77dff')}>Test Play</button>
+        <button onClick={onTestPlay} style={actionBtnStyle(COLORS.green)}>Test Play</button>
       </div>
 
       {publishOpen && (
@@ -176,6 +195,11 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
   );
 }
 
-function actionBtnStyle(bg: string): React.CSSProperties {
-  return { padding: '5px 12px', fontSize: 12, background: bg, border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer' };
+function actionBtnStyle(bg?: string, fg: string = COLORS.paper): React.CSSProperties {
+  const base = bg ? actionBtnSm(bg, fg) : paperBtnSm;
+  return { ...base, padding: '5px 12px', fontSize: 12, borderRadius: 4 };
+}
+
+function disableable(base: React.CSSProperties, disabled: boolean): React.CSSProperties {
+  return disabled ? { ...base, opacity: 0.4, cursor: 'not-allowed' } : base;
 }
