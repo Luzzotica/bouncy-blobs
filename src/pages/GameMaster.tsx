@@ -2014,8 +2014,11 @@ export default function GameMaster() {
         localHumanIds: () => [...localPlayerIdsRef.current],
         botIds: () => botsRef.current.map((b) => b.playerId),
         readHumanInput: (pid) => {
+          // Read the LIVE human intent — NOT mp.moveX/Y/expanding, which the
+          // netcode overwrites every tick with the input-delayed value (that made
+          // held keys/joystick decay → oscillation + weak movement + no expand).
           const mp = game.getPlayerManager()?.getPlayer(pid);
-          return mp ? { moveX: mp.moveX, moveY: mp.moveY, expanding: mp.expanding } : { moveX: 0, moveY: 0, expanding: false };
+          return mp ? { ...mp.liveInput } : { moveX: 0, moveY: 0, expanding: false };
         },
         slotOf,
         idOfSlot,

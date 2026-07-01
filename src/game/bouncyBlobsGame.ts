@@ -1165,11 +1165,18 @@ export class BouncyBlobsGame implements Game {
     const player = this.state.playerManager.getPlayer(playerId);
     if (!player) return;
 
+    // Write BOTH the live intent (read by the netcode's readHumanInput, and held
+    // between events) AND moveX/Y/expanding (single-player reads these directly;
+    // under netcode they're overwritten each tick by the authoritative value, so
+    // reading them back for input would make a held key decay to neutral).
     if (inputEvent.type === 'continuous' && inputEvent.inputType === 'joystick_left') {
       player.moveX = inputEvent.value.x;
       player.moveY = inputEvent.value.y ?? 0;
+      player.liveInput.moveX = inputEvent.value.x;
+      player.liveInput.moveY = inputEvent.value.y ?? 0;
     } else if (inputEvent.type === 'discrete' && inputEvent.inputType === 'button_right') {
       player.expanding = inputEvent.value.pressed;
+      player.liveInput.expanding = inputEvent.value.pressed;
     }
   }
 

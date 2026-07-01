@@ -18,6 +18,13 @@ export interface ManagedPlayer {
   moveX: number;
   moveY: number;
   expanding: boolean;
+  /** The LIVE human intent (keyboard/phone), written by onPlayerInput on each
+   *  input event and held between events. Read by the netcode's readHumanInput.
+   *  Kept SEPARATE from moveX/moveY/expanding because the rollback netcode
+   *  overwrites those every tick with the input-delayed authoritative value —
+   *  reading them back would make a held key decay to neutral (movement/expand
+   *  flicker). Not sim state (input source only) — never snapshotted/hashed. */
+  liveInput: { moveX: number; moveY: number; expanding: boolean };
   /** Smoothed gaze direction (unit-ish vector). Eases toward normalized input
    * each frame and drifts back to (0,0) when input is zero. Consumed by the
    * face renderer to offset pupils. */
@@ -96,6 +103,7 @@ export class PlayerManager {
       moveX: 0,
       moveY: 0,
       expanding: false,
+      liveInput: { moveX: 0, moveY: 0, expanding: false },
       gazeX: 0,
       gazeY: 0,
       inputSource: 'remote',
