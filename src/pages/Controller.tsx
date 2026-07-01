@@ -414,6 +414,9 @@ export default function Controller() {
   navigateRef.current = navigate;
 
   const [phase, setPhase] = useState<ControllerPhase>('joining');
+  // Mirror so the WebRTC callbacks (captured once) can read the CURRENT phase.
+  const phaseRef = useRef<ControllerPhase>('joining');
+  phaseRef.current = phase;
   const [playerName, setPlayerName] = useState('');
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -561,10 +564,19 @@ export default function Controller() {
           }
         },
         onPeerDisconnected: () => {
-          // Host closed — navigate back to lobby selector
-          navigateRef.current('/join');
+          addPhase('disconnected', 'link dropped / timed out');
+          // If we never finished connecting (still on connecting / info screen),
+          // STAY on an error screen with the copyable flow — don't bounce to /join.
+          if (phaseRef.current === 'joining' || phaseRef.current === 'waiting' || phaseRef.current === 'established') {
+            setErrorMsg('Connection lost before it was ready.');
+            setPhase('error');
+          } else {
+            // We were actually playing and the host closed — back to the lobby.
+            navigateRef.current('/join');
+          }
         },
         onError: (err) => {
+          addPhase('error', err.message);
           setErrorMsg(err.message);
           setPhase('error');
         },
