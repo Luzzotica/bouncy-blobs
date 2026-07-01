@@ -213,6 +213,24 @@ impl SoftBodyWorld {
         // cooldown). Geometry / kinematic surface immutable.
         crate::spring_pads::serialize_spring_pads(&self.spring_pads, &mut w);
 
+        // Phase 6: trigger charge/pressed machines.
+        crate::triggers::serialize_game_triggers(&self.game_triggers, &mut w);
+        w.u32(self.pending_trigger_pressed.len() as u32);
+        for id in &self.pending_trigger_pressed { w.u32(*id); }
+        w.u32(self.pending_trigger_released.len() as u32);
+        for id in &self.pending_trigger_released { w.u32(*id); }
+
+        // Phase 7: action tween state machines (+ global clock).
+        crate::actions::serialize_game_actions(&self.game_actions, self.action_clock, &mut w);
+        w.u32(self.pending_action_fires.len() as u32);
+        for id in &self.pending_action_fires { w.u32(*id); }
+
+        // Phase 8: spikes / invuln / dead players / kill events.
+        crate::spikes::serialize_spikes(&mut w, self);
+
+        // Phase 9: game-mode rules.
+        crate::game_mode::serialize_game_mode(&self.game_mode, &mut w);
+
         w.finish()
     }
 
@@ -357,6 +375,24 @@ impl SoftBodyWorld {
 
         // Phase 5: restore spring-pad mutable state.
         crate::spring_pads::restore_spring_pads(&mut self.spring_pads, &mut r)?;
+
+        // Phase 6: trigger charge/pressed machines.
+        crate::triggers::restore_game_triggers(&mut self.game_triggers, &mut r)?;
+        let np = r.u32()? as usize; self.pending_trigger_pressed.clear();
+        for _ in 0..np { self.pending_trigger_pressed.push(r.u32()?); }
+        let nr = r.u32()? as usize; self.pending_trigger_released.clear();
+        for _ in 0..nr { self.pending_trigger_released.push(r.u32()?); }
+
+        // Phase 7: action tween machines (+ clock).
+        self.action_clock = crate::actions::restore_game_actions(&mut self.game_actions, &mut r)?;
+        let nf = r.u32()? as usize; self.pending_action_fires.clear();
+        for _ in 0..nf { self.pending_action_fires.push(r.u32()?); }
+
+        // Phase 8: spikes / invuln / dead players / kill events.
+        crate::spikes::restore_spikes(&mut r, self)?;
+
+        // Phase 9: game-mode rules.
+        crate::game_mode::restore_game_mode(&mut self.game_mode, &mut r)?;
 
         Ok(())
     }

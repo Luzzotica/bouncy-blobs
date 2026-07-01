@@ -78,8 +78,12 @@ export interface PacingConfig {
 }
 
 const config: PacingConfig = {
-  inputDelayTicks: 2,
-  bufferTarget: 3,
+  // 3-frame input delay (spec): each peer tags its own input 3 ticks ahead so
+  // it arrives before the tick it applies at, under typical jitter.
+  inputDelayTicks: 3,
+  // Ride the razor's edge — keep ~1-2 buffered inputs to play out. The host
+  // pacing controller nudges clients toward this depth.
+  bufferTarget: 2,
   // 0 = NO periodic keyframes. The sim is deterministic (Rust integer
   // engine) and runs off the host-stamped input stream, so a periodic
   // full-state resync is unnecessary — and it visibly glitched the guest
@@ -87,16 +91,19 @@ const config: PacingConfig = {
   // (forceKeyframeRef). Re-enable a safety cadence with `?keyframe=N`.
   keyframeIntervalTicks: 0,
   stallPredictThreshold: 3,
-  // Default to OFF so 2-tab desync diagnostics can verify whether
-  // prediction is the cause. Flip to true to re-enable Phase 3
-  // local-player prediction.
-  clientPrediction: false,
+  // ON by default — the guest applies its OWN input locally the instant a key
+  // fires (writeLocalIntent) and the rollback reconcile skips the local player
+  // so its prediction is never rubber-banded to the host's delayed echo. This
+  // is what makes the guest's own actions feel instant. `?prediction=off`
+  // (which also disables usePrediction) reverts to pure lockstep.
+  clientPrediction: true,
   paused: false,
-  // OFF by default — pure host-authoritative lockstep (host stamps each
-  // input at the tick it arrives, guests apply in strict lockstep). No
-  // late inputs to reconcile, so no rollback needed. `?rollback=1` opts
-  // into the client-prediction + rollback experiment. See field doc above.
-  enableRollback: false,
+  // ON by default — symmetric Overwatch-style rollback. The deterministic
+  // Rust+wasm engine makes restore→replay bit-identical, so both the guest
+  // (reconciling predicted vs authoritative inputs) and the host (reconciling
+  // late guest inputs) can roll back cleanly. `?rollback=0` falls back to the
+  // old pure-lockstep path for A/B diagnostics. See field doc above.
+  enableRollback: true,
 };
 
 const listeners = new Set<(c: PacingConfig) => void>();
@@ -138,10 +145,10 @@ export function initPacingFromUrl(search: string = window.location.search): void
   if (Object.keys(patch).length > 0) setPacingConfig(patch);
 }
 
-/** How many ticks of inputs each broadcast carries. K=60 (1 s) covers any
- *  plausible network gap before the guest's predict-on-stall path kicks in,
- *  and at 60Hz broadcast each specific tick appears in 60 consecutive
- *  packets — even 25%/packet loss leaves ~45 redundant copies of each tick
- *  on average. Compact v2 format keeps the packet at ~1.5 KB for 5 players
- *  (2 SCTP fragments at typical WebRTC MTU). */
-export const REDUNDANCY_TICKS = 60;
+/** How many ticks of inputs each broadcast carries (spec: "send last 16
+ *  frames of input, compressed"). At 60Hz broadcast each specific tick appears
+ *  in 16 consecutive packets, so even ~25%/packet loss leaves ~12 redundant
+ *  copies — enough to cover the ≤7-frame rollback window before a gap would
+ *  force a stall. Smaller than the old K=60 so the per-peer single-slot stream
+ *  stays tiny at 8 players. Compact v2 format ≈ 4 bytes per player-tick. */
+export const REDUNDANCY_TICKS = 16;

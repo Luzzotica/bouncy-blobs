@@ -16,7 +16,7 @@
 // side rounds to Fx via `Fx::from_f64` (canonical round-half-to-even).
 
 import type {
-  AddBlobFromHullParams, EngineRng, GroundContact, RopeChainOpts,
+  AddBlobFromHullParams, CrushDebug, EngineRng, GroundContact, RopeChainOpts,
   RopeChainResult, SoftBodyEngine, StickyContact,
 } from './SoftBodyEngine';
 import {
@@ -231,6 +231,13 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
    *  vertices directly each frame; this call pushes those mutations
    *  across the boundary. Looking up `surface` is O(N) over registered
    *  surfaces — fine because N is small (a handful per level). */
+  /** wasm index of a registered static surface (-1 if unknown). Used by the
+   *  action loader to bind a platform target to its engine surface. */
+  staticSurfaceIndex(surface: StaticSurface): number {
+    const entry = this.surfaceMap.find(e => e.surface === surface);
+    return entry ? entry.wasmIdx : -1;
+  }
+
   commitStaticSurface(surface: StaticSurface): void {
     const entry = this.surfaceMap.find(e => e.surface === surface);
     if (!entry) return;
@@ -403,6 +410,69 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   springPadOffset(idx: number): number { return this.h.springPadOffset(idx); }
   takeSpringPadFireEvents(): Uint32Array { return this.h.takeSpringPadFireEvents(); }
 
+  // ---- Phase 6: blob roles + trigger charge machines ----
+  setBlobRole(blobId: number, role: number, gameplayId: number): void { this.h.setBlobRole(blobId, role, gameplayId); }
+  addGameTrigger(id: number, shapeIdx: number, chargeSeconds: number, ignoreNpcs: boolean): number { return this.h.addGameTrigger(id, shapeIdx, chargeSeconds, ignoreNpcs); }
+  clearGameTriggers(): void { this.h.clearGameTriggers(); }
+  triggerPressed(idx: number): boolean { return this.h.triggerPressed(idx); }
+  triggerChargeProgress(idx: number): number { return this.h.triggerChargeProgress(idx); }
+  triggerPressedById(id: number): boolean { return this.h.triggerPressedById(id); }
+  takeTriggerPressedEvents(): Uint32Array { return this.h.takeTriggerPressedEvents(); }
+  takeTriggerReleasedEvents(): Uint32Array { return this.h.takeTriggerReleasedEvents(); }
+
+  // ---- Phase 7: actions ----
+  addGameAction(id: number, mode: number, requireAll: boolean, easing: number, delay: number, duration: number, interval: number, sourceTriggerIds: Uint32Array | number[]): number {
+    return this.h.addGameAction(id, mode, requireAll, easing, delay, duration, interval, Uint32Array.from(sourceTriggerIds));
+  }
+  actionAddTargetShapePoint(actionIdx: number, particle: number, endX: number, endY: number): void { this.h.actionAddTargetShapePoint(actionIdx, particle, endX, endY); }
+  actionAddTargetMoveShape(actionIdx: number, particleIds: Uint32Array | number[], endX: number, endY: number): void { this.h.actionAddTargetMoveShape(actionIdx, Uint32Array.from(particleIds), endX, endY); }
+  actionAddTargetRotateShape(actionIdx: number, particleIds: Uint32Array | number[], endRotation: number): void { this.h.actionAddTargetRotateShape(actionIdx, Uint32Array.from(particleIds), endRotation); }
+  actionAddTargetPlatform(actionIdx: number, staticIdx: number, baseX: number, baseY: number, baseRot: number, localPoly: number[], endX: number, endY: number, endRot: number): void {
+    this.h.actionAddTargetPlatform(actionIdx, staticIdx, baseX, baseY, baseRot, Float64Array.from(localPoly), endX, endY, endRot);
+  }
+  actionAddTargetSpike(actionIdx: number, spikeId: number, baseX: number, baseY: number, baseRot: number, endX: number, endY: number, endRot: number): void {
+    this.h.actionAddTargetSpike(actionIdx, spikeId, baseX, baseY, baseRot, endX, endY, endRot);
+  }
+  clearGameActions(): void { this.h.clearGameActions(); }
+  gameActionState(idx: number): number { return this.h.gameActionState(idx); }
+  gameActionTargetPose(actionIdx: number, targetIdx: number): Float64Array { return this.h.gameActionTargetPose(actionIdx, targetIdx); }
+  takeActionFireEvents(): Uint32Array { return this.h.takeActionFireEvents(); }
+
+  // ---- Phase 8: spikes / death / respawn ----
+  setDeathMode(mode: number): void { this.h.setDeathMode(mode); }
+  addSpike(id: number, x: number, y: number, rot: number, w: number, h: number): number { return this.h.addSpike(id, x, y, rot, w, h); }
+  addDeathZone(x: number, y: number, w: number, h: number): void { this.h.addDeathZone(x, y, w, h); }
+  setKillBelowY(y: number, enabled: boolean): void { this.h.setKillBelowY(y, enabled); }
+  setSpawnPoints(flat: number[]): void { this.h.setSpawnPoints(Float64Array.from(flat)); }
+  setSpikePose(spikeId: number, x: number, y: number, rot: number): void { this.h.setSpikePose(spikeId, x, y, rot); }
+  respawnAll(): void { this.h.respawnAll(); }
+  killPlayerByBlobId(blobId: number): void { this.h.killPlayerByBlobId(blobId); }
+  clearSpikes(): void { this.h.clearSpikes(); }
+  takeKillEvents(): Float64Array { return this.h.takeKillEvents(); }
+  isInvulnerable(gameplayId: number): boolean { return this.h.isInvulnerable(gameplayId); }
+  isDead(gameplayId: number): boolean { return this.h.isDead(gameplayId); }
+  deadPlayerRespawnTimer(gameplayId: number): number { return this.h.deadPlayerRespawnTimer(gameplayId); }
+  deadPlayerDeathPos(gameplayId: number): Float64Array { return this.h.deadPlayerDeathPos(gameplayId); }
+  spikeLivePose(idx: number): Float64Array { return this.h.spikeLivePose(idx); }
+
+  // ---- Phase 9: game-mode rules ----
+  setGameMode(kind: number, timeLimit: number, targetScore: number): void { this.h.setGameMode(kind, timeLimit, targetScore); }
+  setGoalZone(x: number, y: number, w: number, h: number): void { this.h.setGoalZone(x, y, w, h); }
+  addHillZone(x: number, y: number, w: number, h: number): void { this.h.addHillZone(x, y, w, h); }
+  setHillRotation(min: number, max: number): void { this.h.setHillRotation(min, max); }
+  setModePlaying(playing: boolean): void { this.h.setModePlaying(playing); }
+  resetModeForRound(): void { this.h.resetModeForRound(); }
+  modeWinner(): number { return Number(this.h.modeWinner()); }
+  modeDecided(): boolean { return this.h.modeDecided(); }
+  modeGameTime(): number { return this.h.modeGameTime(); }
+  modeTimeRemaining(): number { return this.h.modeTimeRemaining(); }
+  modeScore(gameplayId: number): number { return this.h.modeScore(gameplayId); }
+  modeScores(): Float64Array { return this.h.modeScores(); }
+  kothActiveHill(): Float64Array { return this.h.kothActiveHill(); }
+  kothLastMoveTime(): number { return this.h.kothLastMoveTime(); }
+  kothKingId(): number { return Number(this.h.kothKingId()); }
+  chainedAllReached(): boolean { return this.h.chainedAllReached(); }
+
   /**
    * Pump (expand) impulse on a blob's hull edges. Computed JS-side from
    * the hull polygon + a single iteration: cheaper than crossing the
@@ -475,6 +545,20 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   }
   getBlobParticleContacts(blobId: number): Uint8Array {
     return this.h.getBlobParticleContacts(blobId);
+  }
+  getBlobParticleStaticContacts(blobId: number): Uint8Array {
+    return this.h.getBlobParticleStaticContacts(blobId);
+  }
+  getBlobCrushDebug(blobId: number): CrushDebug {
+    const v = this.h.getBlobCrushDebug(blobId);
+    return {
+      sandwiched: v[0] !== 0,
+      compressed: v[1] !== 0,
+      staticContacts: v[2],
+      minDot: v[3],
+      areaRatio: v[4],
+      violations: v[5],
+    };
   }
   getBlobEffectiveGravity(blobId: number): Vec2 {
     const buf = this.h.getBlobEffectiveGravity(blobId);

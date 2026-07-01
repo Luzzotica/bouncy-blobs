@@ -27,6 +27,9 @@ const LINEUP = (process.env.AI_LINEUP ?? 'chaser,fleer,wanderer,bouncer')
   .map((s) => s.trim())
   .filter(Boolean);
 const MATCH_SECONDS = Number(process.env.MATCH_SECONDS ?? 90);
+// Seconds to keep recording after the win is declared, so the clip lingers on
+// the finish before cutting (but stops before the next round restarts).
+const WIN_LINGER_SECONDS = Number(process.env.WIN_LINGER_SECONDS ?? 4);
 
 test('record AI match for content', async ({ page }) => {
   test.setTimeout((MATCH_SECONDS + 60) * 1000);
@@ -40,13 +43,41 @@ test('record AI match for content', async ({ page }) => {
   void lineupParam; // (kept for clarity — params already encoded above)
   await page.goto(`/game?${params.toString()}`);
 
-  // Wait until the bots are spawned so the visible video starts on a populated lobby.
-  await page.waitForSelector('[data-testid="add-bot"]', { timeout: 30_000 });
-  for (const personality of LINEUP) {
-    await page.waitForSelector(`[data-testid="bot-chip-${personality}"]`, { timeout: 10_000 });
-  }
+  // Offline mode drops straight into the running arena (no lobby step) and the
+  // ?ai= param spawns the bots programmatically. The game installs the
+  // __bbDebug bridge once it's live, so wait on that instead of lobby chrome,
+  // then let the bots spawn + the match kick off before recording in earnest.
+  await page.waitForFunction(
+    () => !!(window as unknown as { __bbDebug?: unknown }).__bbDebug,
+    null,
+    { timeout: 30_000 },
+  );
+  await page.waitForTimeout(2_500);
 
-  await page.waitForTimeout(MATCH_SECONDS * 1000);
+  // Hide all DOM chrome (the in-game Menu button etc.) — the HUD lives INSIDE
+  // the canvas, so blanket-hiding DOM and re-showing the canvas leaves pure
+  // gameplay on screen.
+  await page.addStyleTag({
+    content: 'body * { visibility: hidden !important; } canvas { visibility: visible !important; }',
+  });
+
+  // End the recording at the FIRST decisive result instead of always running
+  // the full MATCH_SECONDS. The mode loops playing → results ("Next round…") →
+  // playing; recording past the first win both pads the clip with dead time and
+  // catches the round-restart camera glitch. So poll for the `win` match-event
+  // (fires on game-over via onGameOver), linger a beat on the win, then stop.
+  // MATCH_SECONDS stays as an upper bound for matches that never resolve.
+  const deadline = Date.now() + MATCH_SECONDS * 1000;
+  let won = false;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(1000);
+    won = await page.evaluate(() => {
+      const dbg = (window as unknown as { __bbDebug?: { getMatchEvents: () => Array<{ type: string }> } }).__bbDebug;
+      return dbg?.getMatchEvents().some((e) => e.type === 'win') ?? false;
+    });
+    if (won) break;
+  }
+  if (won) await page.waitForTimeout(WIN_LINGER_SECONDS * 1000);
 
   // Output dir per run.
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');

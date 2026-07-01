@@ -78,6 +78,16 @@ function renderPointShapesLive(
   }
 }
 
+/** Shoelace area of a closed polygon (absolute value, px²). */
+function polygonArea(pts: { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const p = pts[i], q = pts[(i + 1) % n];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
+}
+
 export default function Sandbox() {
   const [searchParams] = useSearchParams();
   const fromEditor = searchParams.get('from') === 'editor';
@@ -85,8 +95,32 @@ export default function Sandbox() {
   const [showPoints, setShowPoints] = useState(true);
   const [showTargets, setShowTargets] = useState(false);
   const [showHull, setShowHull] = useState(false);
+  const [showArea, setShowArea] = useState(true);
+  const showAreaRef = useRef(true);
+  showAreaRef.current = showArea;
+  // Cached unexpanded rest area per blob (captured the first time we see it, at
+  // spawn — undeformed, scale 1). Current area / this = the % the crush reads.
+  const baseAreasRef = useRef(new Map<number, number>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playersChained, setPlayersChained] = useState(false);
+  // Slow-motion / pause / single-step debug controls. The loop reads
+  // `timeControlRef` every tick; the React state mirrors it for the UI.
+  const [timeScale, setTimeScale] = useState(1);
+  const [paused, setPaused] = useState(false);
+  const timeControlRef = useRef({ divisor: 1, paused: false, stepRequested: false, stepBackRequested: false, slowTick: 0 });
+  // Ring buffer of per-sim-tick world snapshots (serializeState bytes) so we can
+  // step BACKWARD. `cursor` is the currently-displayed frame within the buffer.
+  const historyRef = useRef<{ buffer: Uint8Array[]; cursor: number }>({ buffer: [], cursor: -1 });
+  const setSpeed = useCallback((scale: number) => {
+    timeControlRef.current.divisor = Math.max(1, Math.round(1 / scale));
+    timeControlRef.current.slowTick = 0;
+    setTimeScale(scale);
+  }, []);
+  const togglePause = useCallback(() => {
+    setPaused(p => { const next = !p; timeControlRef.current.paused = next; return next; });
+  }, []);
+  const stepOnce = useCallback(() => { timeControlRef.current.stepRequested = true; }, []);
+  const stepBack = useCallback(() => { timeControlRef.current.stepBackRequested = true; }, []);
   const stateRef = useRef<{
     world: SoftBodyEngine;
     camera: Camera;
@@ -235,6 +269,7 @@ export default function Sandbox() {
       getPlatformLivePos: (id) => platformMover.getLivePosition(id),
       getPlatformLivePoly: (id) => platformMover.getLivePoly(id),
       getParticlePos: (idx) => world.pos[idx] ?? null,
+      getSpringLivePos: (id) => springPadManager?.getSpringLivePosition(id) ?? null,
     });
 
     // Trigger areas detect blobs and expose isPressed() to actions.
@@ -326,21 +361,72 @@ export default function Sandbox() {
     };
 
     const loop = new GameLoop((dt) => {
-      playerBlob.setInput(input.getMoveX(1), input.getMoveY(1), input.isExpanding(1));
-      playerBlob.update(dt);
-      if (playerBlob2) {
-        playerBlob2.setInput(input.getMoveX(2), input.getMoveY(2), input.isExpanding(2));
-        playerBlob2.update(dt);
+      // Time control + history scrubbing. A per-sim-tick snapshot ring buffer
+      // lets us step BACKWARD; `cursor` is the currently-displayed frame within
+      // it. Camera + render below always run so the (paused / slow / scrubbed)
+      // state stays live on screen.
+      const tc = timeControlRef.current;
+      const hist = historyRef.current;
+      const MAX_HISTORY = 600; // ~10s of sim time
+
+      if (tc.stepBackRequested) {
+        // Rewind one recorded frame — restoreState rewinds blobs AND platforms.
+        tc.stepBackRequested = false;
+        if (hist.cursor > 0) {
+          hist.cursor--;
+          world.restoreState(hist.buffer[hist.cursor]);
+          clearParticles(); // transient dust isn't snapshotted; drop it on rewind
+        }
+      } else {
+        // Should we advance one frame this tick? (paused → only on a step
+        // request; slow-mo → every Nth tick; otherwise every tick.)
+        let advance: boolean;
+        if (tc.paused) {
+          advance = tc.stepRequested;
+          tc.stepRequested = false;
+        } else if (tc.divisor > 1) {
+          tc.slowTick = (tc.slowTick + 1) % tc.divisor;
+          advance = tc.slowTick === 0;
+        } else {
+          advance = true;
+        }
+
+        if (advance) {
+          if (hist.cursor < hist.buffer.length - 1) {
+            // Scrubbed back: replay the next recorded frame (display only — no
+            // managers, no step — so the managers stay in sync at the live edge).
+            hist.cursor++;
+            world.restoreState(hist.buffer[hist.cursor]);
+            clearParticles();
+          } else {
+            // Live edge: simulate a fresh tick, then record it.
+            playerBlob.setInput(input.getMoveX(1), input.getMoveY(1), input.isExpanding(1));
+            playerBlob.update(dt);
+            if (playerBlob2) {
+              playerBlob2.setInput(input.getMoveX(2), input.getMoveY(2), input.isExpanding(2));
+              playerBlob2.update(dt);
+            }
+            // Move kinematic platforms BEFORE stepping the physics, so collisions
+            // resolve against where the platform actually is this tick. Previously
+            // actions ran AFTER world.step, so a descending crusher slid into the
+            // just-resolved hull and left the blob embedded a frame — and never
+            // got fully crushed. Triggers flip `pressed` from (last tick's)
+            // occupancy; actions poll them and tween the platform's live pose +
+            // surface velocity, which world.step's collisions then read.
+            triggerManager.update(dt);
+            actionManager.update(dt);
+            world.step(dt);
+            springPadManager?.update(dt);
+            spikeManager?.update(dt);
+            effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover, undefined, springPadManager ?? undefined);
+            updateParticles(dt);
+
+            hist.buffer.push(world.serializeState());
+            if (hist.buffer.length > MAX_HISTORY) hist.buffer.shift();
+            hist.cursor = hist.buffer.length - 1;
+          }
+        }
       }
-      world.step(dt);
-      springPadManager?.update(dt);
-      spikeManager?.update(dt);
-      // Trigger areas first: they flip `pressed` flags based on occupancy.
-      triggerManager.update(dt);
-      // Then actions poll the trigger states and tween their targets.
-      actionManager.update(dt);
-      effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover);
-      updateParticles(dt);
       const { minX, minY, maxX, maxY } = mapBounds;
       const canW = state.canvasWidth, canH = state.canvasHeight;
       const watchWholeMap = canW > 0 && (
@@ -421,6 +507,87 @@ export default function Sandbox() {
         }
         ctx.restore();
       }
+
+      // Per-blob hull-area % overlay — the live "underlying data" the crush
+      // detector reads (current hull area / unexpanded rest area). Red once it
+      // dips under the crush threshold so you can see exactly when it should die.
+      if (showAreaRef.current) {
+        const baseAreas = baseAreasRef.current;
+        const crushPct = 20; // mirrors INTEGRITY_CRUSH_AREA_RATIO (0.2)
+        ctx.save();
+        ctx.font = 'bold 13px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3;
+        const toScreenX = (wx: number) => state.canvasWidth / 2 + (wx - camera.position.x) * camera.zoom;
+        const toScreenY = (wy: number) => state.canvasHeight / 2 + (wy - camera.position.y) * camera.zoom;
+        for (const blob of [...playerBlobs, ...npcBlobs]) {
+          const hull = blob.getHullPolygon();
+          const area = polygonArea(hull);
+          let base = baseAreas.get(blob.blobId);
+          if (base === undefined || base <= 0) { base = area; baseAreas.set(blob.blobId, area); }
+          const pct = base > 0 ? (area / base) * 100 : 100;
+          const c = blob.getCentroid();
+
+          // Per-hull-point contact, ordered to match getHullPolygon(). Two
+          // bitmaps: ANY contact (static or another blob) and STATIC-only (the
+          // kind the crush/sandwich check counts). Dot color:
+          //   red    = touching STATIC geometry
+          //   orange = touching only another blob/softbody
+          //   faint  = free
+          const contacts = world.getBlobParticleContacts(blob.blobId);
+          const staticContacts = world.getBlobParticleStaticContacts(blob.blobId);
+          let contactCount = 0, staticCount = 0;
+          for (let i = 0; i < hull.length; i++) {
+            const anyTouch = i < contacts.length && contacts[i] !== 0;
+            const stat = i < staticContacts.length && staticContacts[i] !== 0;
+            if (anyTouch) contactCount++;
+            if (stat) staticCount++;
+            ctx.beginPath();
+            ctx.arc(toScreenX(hull[i].x), toScreenY(hull[i].y), 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = stat ? '#ff3b3b' : anyTouch ? '#ffaa33' : 'rgba(120,200,255,0.45)';
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+          }
+
+          // Collision + crush-check state read straight from the engine.
+          const sticky = world.getBlobStickyContact(blob.blobId);
+          const ground = world.getBlobGroundContacts(blob.blobId);
+          const pinned = (blob as { isPinned?: boolean }).isPinned ?? false;
+          const dbg = world.getBlobCrushDebug(blob.blobId);
+
+          // Sit the label block just under the blob's lowest hull point, clear of the face.
+          let maxY = -Infinity;
+          for (const pt of hull) if (pt.y > maxY) maxY = pt.y;
+          const sx = toScreenX(c.x);
+          let sy = toScreenY(maxY) + 12;
+
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+          const drawLine = (text: string, color: string) => {
+            ctx.fillStyle = color;
+            ctx.strokeText(text, sx, sy);
+            ctx.fillText(text, sx, sy);
+            sy += 15;
+          };
+          drawLine(`${pct.toFixed(0)}%`, pct <= crushPct ? '#ff5555' : pct <= 50 ? '#ffcc55' : '#ffffff');
+          drawLine(`Pinned: ${pinned ? 'True' : 'False'}`, pinned ? '#ff5555' : '#9fe6a0');
+          drawLine(`Contacts: ${contactCount}/${hull.length}  Static: ${staticCount}`, staticCount > 0 ? '#ffcc55' : '#ffffff');
+          drawLine(`Sticky: ${sticky.count}  Ground: ${ground}`, sticky.count > 0 ? '#ffcc55' : '#ffffff');
+          // The crush detector's own verdict: it needs Sand AND Comp to kill.
+          drawLine(
+            `Sand: ${dbg.sandwiched ? 'T' : 'F'}  Comp: ${dbg.compressed ? 'T' : 'F'}  Viol: ${dbg.violations}`,
+            dbg.sandwiched && dbg.compressed ? '#ff5555' : dbg.sandwiched || dbg.compressed ? '#ffcc55' : '#9fe6a0',
+          );
+          drawLine(`minDot: ${dbg.minDot.toFixed(2)} (crush < -0.50)`, dbg.minDot < -0.5 ? '#ff5555' : '#ffffff');
+          // The engine's OWN area ratio — what Comp thresholds (< 20%). May differ
+          // from the % above (that uses the first-seen area as its base).
+          drawLine(`engArea: ${(dbg.areaRatio * 100).toFixed(0)}% (crush < 20%)`, dbg.areaRatio < 0.2 ? '#ff5555' : '#ffffff');
+        }
+        ctx.restore();
+      }
     });
 
     state.loop = loop;
@@ -434,6 +601,18 @@ export default function Sandbox() {
       stateRef.current.canvasHeight = height;
     }
   }, []);
+
+  // Debug keys: "." advances one tick, "," steps back one tick, "p" toggles
+  // pause. (None are player-input keys, so they don't collide with WASD/Space/arrows.)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '.') { e.preventDefault(); stepOnce(); }
+      else if (e.key === ',') { e.preventDefault(); stepBack(); }
+      else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePause(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stepOnce, stepBack, togglePause]);
 
   useEffect(() => {
     return () => {
@@ -519,6 +698,13 @@ export default function Sandbox() {
         >
           Hull: {showHull ? 'ON' : 'OFF'}
         </button>
+        <button
+          style={showArea ? actionBtnSm(COLORS.blue) : paperBtnSm}
+          onClick={() => setShowArea(p => !p)}
+          title="Draw each blob's live hull area as a % of its rest size — the value the crush detector reads (red below the ~20% crush threshold)"
+        >
+          Area %: {showArea ? 'ON' : 'OFF'}
+        </button>
         {fromEditor && (
           <button
             style={playersChained
@@ -546,6 +732,55 @@ export default function Sandbox() {
             ? 'P1: WASD + Space | P2: Arrows + Shift'
             : 'WASD: Move | Space: Expand'}
         </span>
+      </div>
+      {/* Time controls — slow-mo / pause / single-step for frame-by-frame debugging */}
+      <div style={{
+        position: 'absolute',
+        bottom: 14,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        background: 'rgba(15, 22, 41, 0.82)',
+        padding: '6px 10px',
+        borderRadius: 10,
+      }}>
+        <span style={{ color: '#9fb3d1', fontSize: 12, marginRight: 2 }}>Speed</span>
+        {[1, 0.5, 0.25, 0.1, 0.05].map(s => (
+          <button
+            key={s}
+            style={timeScale === s ? actionBtnSm(COLORS.blue) : paperBtnSm}
+            onClick={() => setSpeed(s)}
+            title={`Run the sim at ${s}× speed`}
+          >
+            {s === 1 ? '1×' : `${s}×`}
+          </button>
+        ))}
+        <div style={{ width: 1, height: 22, background: '#3a4a66', margin: '0 4px', opacity: 0.6 }} />
+        <button
+          style={paused ? actionBtnSm(COLORS.blue) : paperBtnSm}
+          onClick={togglePause}
+          title="Pause / resume the simulation (rendering keeps running)"
+        >
+          {paused ? '▶ Play' : '⏸ Pause'}
+        </button>
+        <button
+          style={paused ? paperBtnSm : { ...paperBtnSm, opacity: 0.4, cursor: 'default' }}
+          disabled={!paused}
+          onClick={stepBack}
+          title="Rewind one logic tick (1/60s) — pause first. Key: ,"
+        >
+          ⏮ Back
+        </button>
+        <button
+          style={paused ? paperBtnSm : { ...paperBtnSm, opacity: 0.4, cursor: 'default' }}
+          disabled={!paused}
+          onClick={stepOnce}
+          title="Advance exactly one logic tick (1/60s) — pause first. Key: ."
+        >
+          ⏭ Step
+        </button>
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>

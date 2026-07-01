@@ -61,6 +61,65 @@ export class SoftBodyWorldHandle {
         wasm.__wbg_softbodyworldhandle_free(ptr, 0);
     }
     /**
+     * @param {number} action_idx
+     * @param {Uint32Array} particle_ids
+     * @param {number} end_x
+     * @param {number} end_y
+     */
+    actionAddTargetMoveShape(action_idx, particle_ids, end_x, end_y) {
+        const ptr0 = passArray32ToWasm0(particle_ids, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_actionAddTargetMoveShape(this.__wbg_ptr, action_idx, ptr0, len0, end_x, end_y);
+    }
+    /**
+     * @param {number} action_idx
+     * @param {number} static_idx
+     * @param {number} base_x
+     * @param {number} base_y
+     * @param {number} base_rot
+     * @param {Float64Array} local_poly
+     * @param {number} end_x
+     * @param {number} end_y
+     * @param {number} end_rot
+     */
+    actionAddTargetPlatform(action_idx, static_idx, base_x, base_y, base_rot, local_poly, end_x, end_y, end_rot) {
+        const ptr0 = passArrayF64ToWasm0(local_poly, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_actionAddTargetPlatform(this.__wbg_ptr, action_idx, static_idx, base_x, base_y, base_rot, ptr0, len0, end_x, end_y, end_rot);
+    }
+    /**
+     * @param {number} action_idx
+     * @param {Uint32Array} particle_ids
+     * @param {number} end_rotation
+     */
+    actionAddTargetRotateShape(action_idx, particle_ids, end_rotation) {
+        const ptr0 = passArray32ToWasm0(particle_ids, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_actionAddTargetRotateShape(this.__wbg_ptr, action_idx, ptr0, len0, end_rotation);
+    }
+    /**
+     * @param {number} action_idx
+     * @param {number} particle
+     * @param {number} end_x
+     * @param {number} end_y
+     */
+    actionAddTargetShapePoint(action_idx, particle, end_x, end_y) {
+        wasm.softbodyworldhandle_actionAddTargetShapePoint(this.__wbg_ptr, action_idx, particle, end_x, end_y);
+    }
+    /**
+     * @param {number} action_idx
+     * @param {number} spike_id
+     * @param {number} base_x
+     * @param {number} base_y
+     * @param {number} base_rot
+     * @param {number} end_x
+     * @param {number} end_y
+     * @param {number} end_rot
+     */
+    actionAddTargetSpike(action_idx, spike_id, base_x, base_y, base_rot, end_x, end_y, end_rot) {
+        wasm.softbodyworldhandle_actionAddTargetSpike(this.__wbg_ptr, action_idx, spike_id, base_x, base_y, base_rot, end_x, end_y, end_rot);
+    }
+    /**
      * Add a blob from a hull (flat x,y,x,y,... rest-local coords).
      * `static_hull_indices` lists hull-local indices that should be
      * anchored (mass=0, immovable) — used by soft platforms to fix
@@ -158,6 +217,15 @@ export class SoftBodyWorldHandle {
         return ret >>> 0;
     }
     /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     */
+    addDeathZone(x, y, w, h) {
+        wasm.softbodyworldhandle_addDeathZone(this.__wbg_ptr, x, y, w, h);
+    }
+    /**
      * Hard max-distance constraint between two particles. Solved in
      * step 7 alongside welds and anchors, repeated `constraint_iters`
      * times. Use this for a real "rope length" cap that doesn't depend
@@ -181,6 +249,34 @@ export class SoftBodyWorldHandle {
     }
     /**
      * @param {number} id
+     * @param {number} mode
+     * @param {boolean} require_all
+     * @param {number} easing
+     * @param {number} delay
+     * @param {number} duration
+     * @param {number} interval
+     * @param {Uint32Array} source_trigger_ids
+     * @returns {number}
+     */
+    addGameAction(id, mode, require_all, easing, delay, duration, interval, source_trigger_ids) {
+        const ptr0 = passArray32ToWasm0(source_trigger_ids, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.softbodyworldhandle_addGameAction(this.__wbg_ptr, id, mode, require_all, easing, delay, duration, interval, ptr0, len0);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
+     * @param {number} shape_idx
+     * @param {number} charge_seconds
+     * @param {boolean} ignore_npcs
+     * @returns {number}
+     */
+    addGameTrigger(id, shape_idx, charge_seconds, ignore_npcs) {
+        const ret = wasm.softbodyworldhandle_addGameTrigger(this.__wbg_ptr, id, shape_idx, charge_seconds, ignore_npcs);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} id
      * @param {number} x
      * @param {number} y
      * @param {number} w
@@ -190,6 +286,15 @@ export class SoftBodyWorldHandle {
     addGravityFlipper(id, x, y, w, h) {
         const ret = wasm.softbodyworldhandle_addGravityFlipper(this.__wbg_ptr, id, x, y, w, h);
         return ret >>> 0;
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     */
+    addHillZone(x, y, w, h) {
+        wasm.softbodyworldhandle_addHillZone(this.__wbg_ptr, x, y, w, h);
     }
     /**
      * @param {number} idx
@@ -234,6 +339,19 @@ export class SoftBodyWorldHandle {
     addRopeChain(idx_a, idx_b, total_length, max_segment_length, segment_mass, segment_radius, layer, mask, iterations) {
         const ret = wasm.softbodyworldhandle_addRopeChain(this.__wbg_ptr, idx_a, idx_b, total_length, max_segment_length, segment_mass, segment_radius, layer, mask, iterations);
         return takeObject(ret);
+    }
+    /**
+     * @param {number} id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} rot
+     * @param {number} w
+     * @param {number} h
+     * @returns {number}
+     */
+    addSpike(id, x, y, rot, w, h) {
+        const ret = wasm.softbodyworldhandle_addSpike(this.__wbg_ptr, id, x, y, rot, w, h);
+        return ret >>> 0;
     }
     /**
      * Register a spring pad. The engine creates a kinematic
@@ -404,14 +522,55 @@ export class SoftBodyWorldHandle {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
+    /**
+     * @returns {boolean}
+     */
+    chainedAllReached() {
+        const ret = wasm.softbodyworldhandle_chainedAllReached(this.__wbg_ptr);
+        return ret !== 0;
+    }
     clearDynamicItems() {
         wasm.softbodyworldhandle_clearDynamicItems(this.__wbg_ptr);
+    }
+    clearGameActions() {
+        wasm.softbodyworldhandle_clearGameActions(this.__wbg_ptr);
+    }
+    clearGameTriggers() {
+        wasm.softbodyworldhandle_clearGameTriggers(this.__wbg_ptr);
+    }
+    clearSpikes() {
+        wasm.softbodyworldhandle_clearSpikes(this.__wbg_ptr);
     }
     clearSpringPads() {
         wasm.softbodyworldhandle_clearSpringPads(this.__wbg_ptr);
     }
     clearStaticPolygons() {
         wasm.softbodyworldhandle_clearStaticPolygons(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} gameplay_id
+     * @returns {Float64Array}
+     */
+    deadPlayerDeathPos(gameplay_id) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_deadPlayerDeathPos(retptr, this.__wbg_ptr, gameplay_id);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @param {number} gameplay_id
+     * @returns {number}
+     */
+    deadPlayerRespawnTimer(gameplay_id) {
+        const ret = wasm.softbodyworldhandle_deadPlayerRespawnTimer(this.__wbg_ptr, gameplay_id);
+        return ret;
     }
     /**
      * Read the visual `active` flag for item index `idx` — used by
@@ -430,6 +589,42 @@ export class SoftBodyWorldHandle {
     dynamicItemCount() {
         const ret = wasm.softbodyworldhandle_dynamicItemCount(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    gameActionState(idx) {
+        const ret = wasm.softbodyworldhandle_gameActionState(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} action_idx
+     * @param {number} target_idx
+     * @returns {Float64Array}
+     */
+    gameActionTargetPose(action_idx, target_idx) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_gameActionTargetPose(retptr, this.__wbg_ptr, action_idx, target_idx);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Debug readout of the crush check:
+     * [sandwiched, compressed, staticContactCount, minOpposingDot, integrityViolations].
+     * @param {number} blob_id
+     * @returns {Float64Array}
+     */
+    getBlobCrushDebug(blob_id) {
+        const ret = wasm.softbodyworldhandle_getBlobCrushDebug(this.__wbg_ptr, blob_id);
+        return takeObject(ret);
     }
     /**
      * @param {number} blob_id
@@ -472,6 +667,16 @@ export class SoftBodyWorldHandle {
      */
     getBlobParticleContacts(blob_id) {
         const ret = wasm.softbodyworldhandle_getBlobParticleContacts(this.__wbg_ptr, blob_id);
+        return takeObject(ret);
+    }
+    /**
+     * STATIC-only per-particle "touched solid this step" bitmap, hull order.
+     * The contact kind the crush/sandwich check actually counts.
+     * @param {number} blob_id
+     * @returns {Uint8Array}
+     */
+    getBlobParticleStaticContacts(blob_id) {
+        const ret = wasm.softbodyworldhandle_getBlobParticleStaticContacts(this.__wbg_ptr, blob_id);
         return takeObject(ret);
     }
     /**
@@ -561,6 +766,110 @@ export class SoftBodyWorldHandle {
     getVelocities() {
         const ret = wasm.softbodyworldhandle_getVelocities(this.__wbg_ptr);
         return takeObject(ret);
+    }
+    /**
+     * @param {number} gameplay_id
+     * @returns {boolean}
+     */
+    isDead(gameplay_id) {
+        const ret = wasm.softbodyworldhandle_isDead(this.__wbg_ptr, gameplay_id);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} gameplay_id
+     * @returns {boolean}
+     */
+    isInvulnerable(gameplay_id) {
+        const ret = wasm.softbodyworldhandle_isInvulnerable(this.__wbg_ptr, gameplay_id);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} blob_id
+     */
+    killPlayerByBlobId(blob_id) {
+        wasm.softbodyworldhandle_killPlayerByBlobId(this.__wbg_ptr, blob_id);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    kothActiveHill() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_kothActiveHill(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {bigint}
+     */
+    kothKingId() {
+        const ret = wasm.softbodyworldhandle_kothKingId(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    kothLastMoveTime() {
+        const ret = wasm.softbodyworldhandle_kothLastMoveTime(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {boolean}
+     */
+    modeDecided() {
+        const ret = wasm.softbodyworldhandle_modeDecided(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    modeGameTime() {
+        const ret = wasm.softbodyworldhandle_modeGameTime(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} gameplay_id
+     * @returns {number}
+     */
+    modeScore(gameplay_id) {
+        const ret = wasm.softbodyworldhandle_modeScore(this.__wbg_ptr, gameplay_id);
+        return ret;
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    modeScores() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_modeScores(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    modeTimeRemaining() {
+        const ret = wasm.softbodyworldhandle_modeTimeRemaining(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {bigint}
+     */
+    modeWinner() {
+        const ret = wasm.softbodyworldhandle_modeWinner(this.__wbg_ptr);
+        return ret;
     }
     /**
      * Construct a new world.
@@ -669,6 +978,12 @@ export class SoftBodyWorldHandle {
     resetBlobToRest(blob_id, x, y) {
         wasm.softbodyworldhandle_resetBlobToRest(this.__wbg_ptr, blob_id, x, y);
     }
+    resetModeForRound() {
+        wasm.softbodyworldhandle_resetModeForRound(this.__wbg_ptr);
+    }
+    respawnAll() {
+        wasm.softbodyworldhandle_respawnAll(this.__wbg_ptr);
+    }
     /**
      * Restore state from a buffer produced by `serializeState`. Returns
      * true on success; false if the buffer is malformed or world layout
@@ -741,6 +1056,14 @@ export class SoftBodyWorldHandle {
     }
     /**
      * @param {number} blob_id
+     * @param {number} role
+     * @param {number} gameplay_id
+     */
+    setBlobRole(blob_id, role, gameplay_id) {
+        wasm.softbodyworldhandle_setBlobRole(this.__wbg_ptr, blob_id, role, gameplay_id);
+    }
+    /**
+     * @param {number} blob_id
      * @param {number} s
      */
     setBlobShapeMatchRestScale(blob_id, s) {
@@ -775,6 +1098,49 @@ export class SoftBodyWorldHandle {
      */
     setBlobTread(blob_id, strength) {
         wasm.softbodyworldhandle_setBlobTread(this.__wbg_ptr, blob_id, strength);
+    }
+    /**
+     * @param {number} mode
+     */
+    setDeathMode(mode) {
+        wasm.softbodyworldhandle_setDeathMode(this.__wbg_ptr, mode);
+    }
+    /**
+     * @param {number} kind
+     * @param {number} time_limit
+     * @param {number} target_score
+     */
+    setGameMode(kind, time_limit, target_score) {
+        wasm.softbodyworldhandle_setGameMode(this.__wbg_ptr, kind, time_limit, target_score);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     */
+    setGoalZone(x, y, w, h) {
+        wasm.softbodyworldhandle_setGoalZone(this.__wbg_ptr, x, y, w, h);
+    }
+    /**
+     * @param {number} min
+     * @param {number} max
+     */
+    setHillRotation(min, max) {
+        wasm.softbodyworldhandle_setHillRotation(this.__wbg_ptr, min, max);
+    }
+    /**
+     * @param {number} y
+     * @param {boolean} enabled
+     */
+    setKillBelowY(y, enabled) {
+        wasm.softbodyworldhandle_setKillBelowY(this.__wbg_ptr, y, enabled);
+    }
+    /**
+     * @param {boolean} playing
+     */
+    setModePlaying(playing) {
+        wasm.softbodyworldhandle_setModePlaying(this.__wbg_ptr, playing);
     }
     /**
      * @param {number} i
@@ -818,6 +1184,23 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_setRngState(this.__wbg_ptr, s);
     }
     /**
+     * @param {Float64Array} flat
+     */
+    setSpawnPoints(flat) {
+        const ptr0 = passArrayF64ToWasm0(flat, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.softbodyworldhandle_setSpawnPoints(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @param {number} spike_id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} rot
+     */
+    setSpikePose(spike_id, x, y, rot) {
+        wasm.softbodyworldhandle_setSpikePose(this.__wbg_ptr, spike_id, x, y, rot);
+    }
+    /**
      * Override the logical tick — used by the guest's keyframe restore
      * path to align local sim time with the host's authoritative tick.
      * @param {number} t
@@ -846,6 +1229,23 @@ export class SoftBodyWorldHandle {
     shapesSnapshot(include_triggers) {
         const ret = wasm.softbodyworldhandle_shapesSnapshot(this.__wbg_ptr, include_triggers);
         return takeObject(ret);
+    }
+    /**
+     * @param {number} idx
+     * @returns {Float64Array}
+     */
+    spikeLivePose(idx) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_spikeLivePose(retptr, this.__wbg_ptr, idx);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * @returns {number}
@@ -901,6 +1301,22 @@ export class SoftBodyWorldHandle {
         wasm.softbodyworldhandle_step(this.__wbg_ptr, delta_seconds);
     }
     /**
+     * @returns {Uint32Array}
+     */
+    takeActionFireEvents() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_takeActionFireEvents(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Drain pending crush events. Returns a flat array of blob_ids
      * whose physics state exploded during the most recent `step()` —
      * typically a blob crushed between a moving platform and static
@@ -910,6 +1326,22 @@ export class SoftBodyWorldHandle {
     takeCrushEvents() {
         const ret = wasm.softbodyworldhandle_takeCrushEvents(this.__wbg_ptr);
         return takeObject(ret);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    takeKillEvents() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_takeKillEvents(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Drain pending fire events (gameplay IDs of pads that
@@ -946,6 +1378,38 @@ export class SoftBodyWorldHandle {
         return takeObject(ret);
     }
     /**
+     * @returns {Uint32Array}
+     */
+    takeTriggerPressedEvents() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_takeTriggerPressedEvents(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    takeTriggerReleasedEvents() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.softbodyworldhandle_takeTriggerReleasedEvents(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * @param {number} blob_id
      * @param {number} x
      * @param {number} y
@@ -960,6 +1424,30 @@ export class SoftBodyWorldHandle {
     get tick() {
         const ret = wasm.softbodyworldhandle_tick(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    triggerChargeProgress(idx) {
+        const ret = wasm.softbodyworldhandle_triggerChargeProgress(this.__wbg_ptr, idx);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {boolean}
+     */
+    triggerPressed(idx) {
+        const ret = wasm.softbodyworldhandle_triggerPressed(this.__wbg_ptr, idx);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} id
+     * @returns {boolean}
+     */
+    triggerPressedById(id) {
+        const ret = wasm.softbodyworldhandle_triggerPressedById(this.__wbg_ptr, id);
+        return ret !== 0;
     }
     /**
      * @param {number} blob_id

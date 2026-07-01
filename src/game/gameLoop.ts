@@ -34,6 +34,8 @@ const MAX_STEPS_PER_FRAME = 5;
 // framerate drops without an obvious culprit.
 // ---------------------------------------------------------------------------
 
+import { getSimSpeed } from '../lib/frameStep';
+
 const PROFILE_RING_SIZE = 600; // ~10s @ 60Hz
 
 export interface FrameSample {
@@ -105,6 +107,13 @@ export interface GameLoopCallbacks {
    * buffer is over-deep) so a stalled RAF doesn't trigger a multi-step
    * burst that visibly fast-forwards the sim. */
   getMaxSteps?: () => number;
+  /** Optional per-RAF clock adjustment in SECONDS, added to the accumulator
+   * each frame (clamped to ±FIXED_DT). This is the netcode time-sync knob: a
+   * guest running behind the host returns a small positive value to advance its
+   * sim slightly faster (catch up); too far ahead returns negative to slow down.
+   * Keeps the guest's tick clock aligned with the host so its tick-tagged inputs
+   * arrive just-in-time and the host never has to roll them back. */
+  getClockAdjust?: () => number;
 }
 
 export class GameLoop {
@@ -112,9 +121,11 @@ export class GameLoop {
   private rafId = 0;
   private lastTime = 0;
   private accumulator = 0;
+  private renderErrored = false;
   private readonly onLogic: (dt: number) => boolean | void;
   private readonly onRender?: (alpha: number) => void;
   private readonly getMaxSteps?: () => number;
+  private readonly getClockAdjust?: () => number;
 
   constructor(callbacks: GameLoopCallbacks | ((dt: number) => void)) {
     if (typeof callbacks === 'function') {
@@ -124,6 +135,7 @@ export class GameLoop {
       this.onLogic = callbacks.onLogic;
       this.onRender = callbacks.onRender;
       this.getMaxSteps = callbacks.getMaxSteps;
+      this.getClockAdjust = callbacks.getClockAdjust;
     }
   }
 
@@ -150,7 +162,16 @@ export class GameLoop {
     const real = Math.min((now - this.lastTime) / 1000, 0.25);
     const frameMs = (now - this.lastTime);
     this.lastTime = now;
-    this.accumulator += real;
+    // Slow-motion debug knob: scale real elapsed time so the sim runs slower
+    // (synced across host + clients via the sim_speed event).
+    this.accumulator += real * getSimSpeed();
+    // Netcode time-sync nudge: speed up / slow down the sim slightly to keep the
+    // guest's tick clock aligned with the host (clamped to ±one tick/frame so it
+    // can never burst or freeze).
+    if (this.getClockAdjust) {
+      const adj = this.getClockAdjust();
+      if (adj) this.accumulator += Math.max(-FIXED_DT, Math.min(FIXED_DT, adj));
+    }
 
     const logicStart = performance.now();
     let steps = 0;
@@ -175,7 +196,13 @@ export class GameLoop {
     const logicMs = performance.now() - logicStart;
 
     const renderStart = performance.now();
-    this.onRender?.(this.accumulator / FIXED_DT);
+    // A render error must NOT kill the loop — otherwise one bad frame freezes the
+    // whole sim (it never reaches the requestAnimationFrame below). Log once.
+    try {
+      this.onRender?.(this.accumulator / FIXED_DT);
+    } catch (err) {
+      if (!this.renderErrored) { this.renderErrored = true; console.error('[GameLoop] onRender threw (loop continues):', err); }
+    }
     const renderMs = performance.now() - renderStart;
 
     frameProfileRing.push({ ts: now, frameMs, logicMs, renderMs, logicSteps: steps, gated, phases: takePhaseAccum() });

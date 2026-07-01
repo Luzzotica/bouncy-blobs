@@ -14,6 +14,7 @@ import JoinLobby from './pages/JoinLobby'
 import Multiplayer from './pages/Multiplayer'
 import OnlineGuest from './pages/OnlineGuest'
 import Intro from './pages/Intro'
+import NetcodeHarness from './pages/NetcodeHarness'
 
 export default function App() {
   const navigate = useNavigate()
@@ -56,6 +57,7 @@ export default function App() {
       {/* Old Browse route — folded into Multiplayer; redirect stale links. */}
       <Route path="/lobbies" element={<Navigate to="/multiplayer" replace />} />
       <Route path="/online-guest" element={<OnlineGuest />} />
+      <Route path="/netcode-harness" element={<NetcodeHarness />} />
       <Route path="/intro" element={<Intro />} />
     </Routes>
   )

@@ -113,6 +113,15 @@ pub struct BlobRange {
     pub spring_damp_scale: Fx,
     pub sort_key: String,
     pub inactive: bool,
+    /// Gameplay role: 0 = structural softbody (point shape / soft platform /
+    /// rope segment), 1 = player, 2 = npc. Immutable post-spawn (set via
+    /// `set_blob_role`), so NOT snapshotted. Triggers/spikes/modes use it to
+    /// tell agents from structural blobs without a TS-side predicate.
+    pub role: u8,
+    /// Stable per-player slot id (deterministic across clients), distinct from
+    /// `id` (the blob_ranges index). Used by spikes/modes to key
+    /// death/score/respawn so host and guest agree. Immutable, not snapshotted.
+    pub gameplay_id: u32,
 }
 
 #[derive(Copy, Clone, Debug, Default)]

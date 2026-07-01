@@ -37,6 +37,7 @@ const lastPlayedAt = new Map<string, number>()
  * (the same one that starts music) should call resumeAudio(). */
 function getCtx(): AudioContext | null {
   if (ctx) return ctx
+  if (typeof window === 'undefined') return null // worker / SSR — no Web Audio
   const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext
   if (!Ctor) return null
   ctx = new Ctor() as AudioContext

@@ -21,7 +21,6 @@ import { Player } from '../types/database';
 import { GameModeManager } from './gameModes/gameModeManager';
 import { logMatchEvent } from '../lib/matchEvents';
 import { GameMode, GamePhase } from './gameModes/types';
-import { PartyMode } from './gameModes/partyMode';
 import { KingOfTheHillMode } from './gameModes/kingOfTheHillMode';
 import { drawScoreBoard, drawTimer } from '../renderer/hudRenderer';
 import { PowerupManager } from './powerups/powerupManager';
@@ -36,9 +35,10 @@ import { SpectatorDirector } from '../renderer/spectatorCamera';
 import { Vec2 } from '../physics/vec2';
 import { EffectsBindings } from './effectsBindings';
 import { updateParticles, clearParticles } from '../renderer/particles';
-import { clearDecals } from '../renderer/decals';
+import { clearDecals, setDecalBudget, setDecalResolvers } from '../renderer/decals';
 import { preloadAll, SFX_NAMES, resumeAudio } from '../utils/audio';
 import { getPacingConfig } from '../lib/pacingConfig';
+import { consumeStep } from '../lib/frameStep';
 import { recordHash, type TickSummary } from '../lib/hashHistory';
 import { computeMapAABB, STATIC_MAP_FIT_ZOOM, readStaticCamOverride, FALL_KILL_MARGIN, lavaKillPlaneY } from './mapBounds';
 
@@ -232,6 +232,19 @@ export class BouncyBlobsGame implements Game {
    * the sim from burst-fast-forwarding when an input-buffer arrival was
    * jittery. */
   private maxStepsGetter: (() => number) | null = null;
+  /** Optional replacement for the per-tick physics step. When set, onLogic
+   * calls this INSTEAD of stepOneTick — used by the NetPeer netcode path,
+   * which gathers local inputs, runs the symmetric tick-tagged rollback
+   * advance (apply + snapshot + step), and sends the tagged inputs. Returning
+   * false means "held" (speculation cap); the loop keeps the accumulator. */
+  private stepDriver: ((dt: number) => boolean) | null = null;
+  /** Per-RAF clock adjustment (seconds) for netcode time-sync — see GameLoop. */
+  private clockAdjustGetter: (() => number) | null = null;
+  /** Camera framing override. 'auto' = the default small-map-fit heuristic
+   *  (whole arena if it fits, else follow local players). 'follow-local' forces
+   *  following this client's own player(s) — multiplayer "watch my blob" view.
+   *  'fit-all' forces the whole-arena view (e.g. chained/co-op levels). */
+  private cameraMode: 'auto' | 'follow-local' | 'fit-all' = 'auto';
   /** Player IDs the camera should follow. If null, follows ALL players
    * (legacy behavior). When set, the camera tracks only these blobs and
    * uses a fixed-zoom view targeted at ~10% blob-on-screen. Used by the
@@ -243,6 +256,25 @@ export class BouncyBlobsGame implements Game {
   private lastCameraPhase: GamePhase | null = null;
   /** Drives the `?spectate=1` content camera (one-blob follow + auto cuts). */
   private spectatorDirector = new SpectatorDirector();
+
+  // ── Render-state separation (physics→render interpolation + smoothing) ──────
+  /** Optional external render-offset source — the page's DisplaySmoother. Its
+   *  PER-NODE offsets (post-rollback ease-in, incl. shape/expansion) are composed
+   *  with physics→render interpolation. `tick()` decays them once per frame. */
+  private renderOffsetSource: { tick: () => void; getNodeOffsets: (blobId: number) => { x: number; y: number }[] | null } | null = null;
+  /** Each blob's HULL NODES at the START of the most recent logic tick — the
+   *  "previous" endpoint for per-node interpolation (so SHAPE changes like
+   *  expansion lerp too, not just the centroid). Keyed by blobId. */
+  private prevHulls = new Map<number, { x: number; y: number }[]>();
+  /** Camera pose at the start of the most recent logic tick, so the camera can
+   *  interpolate in lockstep with the blobs (keeps world geometry and blobs
+   *  moving together — avoids the ghosting the old fixed-dt camera dodged). */
+  private prevCameraPos: { x: number; y: number } | null = null;
+  private prevCameraZoom = 1;
+  /** Debug: overlay each blob's RAW physics hull nodes (un-interpolated) so you
+   *  can see how detached the sim is from the smoothed visuals. */
+  private showPhysicsPoints = false;
+  setShowPhysicsPoints(on: boolean): void { this.showPhysicsPoints = on; }
 
   setLocalPlayerIds(ids: string[] | null): void {
     this.localPlayerIds = ids ? new Set(ids) : null;
@@ -262,6 +294,170 @@ export class BouncyBlobsGame implements Game {
 
   setMaxStepsPerFrame(fn: (() => number) | null): void {
     this.maxStepsGetter = fn;
+  }
+
+  /** Install/clear the NetPeer step driver (see field doc). When set it
+   *  replaces the default stepOneTick call inside onLogic. */
+  setStepDriver(fn: ((dt: number) => boolean) | null): void {
+    this.stepDriver = fn;
+  }
+
+  /** Install/clear the per-RAF clock-adjust getter (netcode time-sync). */
+  setClockAdjust(fn: (() => number) | null): void {
+    this.clockAdjustGetter = fn;
+  }
+
+  /** Override camera framing. See the `cameraMode` field doc. */
+  setCameraMode(mode: 'auto' | 'follow-local' | 'fit-all'): void {
+    this.cameraMode = mode;
+  }
+
+  /** Install/clear the external render-offset source (the page's
+   *  DisplaySmoother) so post-rollback corrections ease in instead of snapping.
+   *  Pure render concern — never affects the sim. */
+  setRenderOffsetSource(
+    src: { tick: () => void; getNodeOffsets: (blobId: number) => { x: number; y: number }[] | null } | null,
+  ): void {
+    this.renderOffsetSource = src;
+  }
+
+  /** Snapshot each blob's HULL NODES + camera pose at the START of a logic tick so
+   *  onRender can interpolate per-node from here to the post-step state by the
+   *  accumulator alpha. Per-node (not centroid) so SHAPE changes (expansion) lerp
+   *  too. Called once per live tick, before stepOneTick. */
+  private captureRenderPrev(): void {
+    const s = this.state;
+    if (!s) return;
+    this.prevHulls.clear();
+    for (const p of s.playerManager.getAllPlayers()) {
+      this.prevHulls.set(p.blob.blobId, p.blob.getHullPolygon().map((v) => ({ x: v.x, y: v.y })));
+    }
+    for (const b of s.npcBlobs) {
+      if (b.destroyed) continue;
+      this.prevHulls.set(b.blobId, b.getHullPolygon().map((v) => ({ x: v.x, y: v.y })));
+    }
+    this.prevCameraPos = { x: s.camera.position.x, y: s.camera.position.y };
+    this.prevCameraZoom = s.camera.zoom;
+  }
+
+  /** Build the per-blob INTERPOLATED HULL for this frame: per node,
+   *  lerp(prev, cur, alpha) + smoother offset (post-rollback ease-in). Renderers
+   *  draw this hull instead of the raw physics one, so both motion AND shape
+   *  (expansion/retraction) ease instead of snapping. */
+  private computeRenderHulls(alpha: number): Map<number, { x: number; y: number }[]> {
+    const out = new Map<number, { x: number; y: number }[]>();
+    const s = this.state;
+    if (!s) return out;
+    const back = 1 - alpha; // weight on the previous (start-of-tick) position
+    // Per-node jump beyond this is a teleport (respawn/park) → snap, don't streak.
+    const TELEPORT_SQ = 500 * 500;
+    const build = (blobId: number, cur: { x: number; y: number }[]) => {
+      const prev = this.prevHulls.get(blobId);
+      const ext = this.renderOffsetSource?.getNodeOffsets(blobId);
+      const usePrev = prev !== undefined && prev.length === cur.length;
+      if (!usePrev && !ext) return; // nothing to interpolate/smooth → renderer uses raw hull
+      const hull = cur.map((c, i) => {
+        let x = c.x, y = c.y;
+        if (usePrev) {
+          const dx = prev![i].x - c.x, dy = prev![i].y - c.y;
+          if (dx * dx + dy * dy <= TELEPORT_SQ) { x += dx * back; y += dy * back; }
+        }
+        if (ext && ext[i]) { x += ext[i].x; y += ext[i].y; }
+        return { x, y };
+      });
+      out.set(blobId, hull);
+    };
+    for (const p of s.playerManager.getAllPlayers()) build(p.blob.blobId, p.blob.getHullPolygon());
+    for (const b of s.npcBlobs) { if (!b.destroyed) build(b.blobId, b.getHullPolygon()); }
+    return out;
+  }
+
+  /** Typed accessor for the live sim state. Replaces the `as unknown as
+   *  { state }` casts the rollback replay paths used to reach into the
+   *  managers. Returns null before init / after teardown. */
+  getSimState(): BouncyBlobsGameState | null {
+    return this.state;
+  }
+
+  /** Advance the simulation by exactly one fixed logic step.
+   *
+   *  THE single source of truth for "step the sim once" — driven by both the
+   *  live game loop (`onLogic`, below) and rollback replay (RollbackController's
+   *  `stepOne`). Keeping them on one code path is what makes forward sim and
+   *  restore→replay bit-identical; the old hand-copied replay sequence used
+   *  `updateAll` (re-deriving AI), skipped the trigger/action managers, and
+   *  truncated `effects.update`'s args — all silent replay-divergence sources.
+   *
+   *  Opts:
+   *   - `runAI` (default true): re-decide AI/bot inputs this tick. Replay passes
+   *     FALSE — bot inputs come from the recorded InputSet the controller
+   *     re-applies, so AI-controller internal state (timers etc., which are NOT
+   *     in the engine snapshot) is never advanced a second time during a rewind.
+   *   - `runPreTick` (default true): fire the host's `preTickHook` (input
+   *     scheduling + broadcast). Replay passes FALSE — re-broadcasting mid-rewind
+   *     would duplicate inputs on the wire.
+   *
+   *  Does NOT advance `gameTime`, particles, camera, or the hash ring — those are
+   *  per-RAF / diagnostic concerns the callers own. */
+  stepOneTick(dt: number, opts?: { runPreTick?: boolean; runAI?: boolean }): void {
+    const s = this.state;
+    if (!s) return;
+    const runPreTick = opts?.runPreTick ?? true;
+    const runAI = opts?.runAI ?? true;
+    const {
+      world, playerManager, npcBlobs, powerupManager, springPadManager,
+      spikeManager, dynamicItemManager, triggerManager, actionManager, modeManager,
+    } = s;
+
+    let t0 = performance.now();
+    if (runAI) playerManager.tickAIInputs(dt, world);
+    if (runPreTick) this.preTickHook?.(world);
+    playerManager.applyInputsAndStep(dt);
+    // DETERMINISM DIAGNOSTIC (live path only — suppressed during replay so a
+    // rewind doesn't spam the trace). PRE = engine hash + per-player input
+    // after applyInputsAndStep but before world.step; POST (below) = hash after
+    // world.step. See the long-form note this block replaced for the full
+    // PRE/POST cross-tab divergence-bisection method.
+    if (runPreTick && detTraceEnabled) {
+      const nextTick = world.tick + 1;
+      const parts: string[] = [];
+      for (const p of playerManager.getAllPlayers()) {
+        parts.push(`${p.playerId}:${p.moveX.toFixed(3)},${p.moveY.toFixed(3)},${p.expanding ? 1 : 0}`);
+      }
+      console.info(`[detTrace] PRE tick=${nextTick} hash=${world.stateHash()} inputs=[${parts.join(' | ')}]`);
+    }
+    recordPhaseTime('playerMgr', performance.now() - t0);
+
+    t0 = performance.now();
+    world.step(dt);
+    if (runPreTick && detTraceEnabled) {
+      console.info(`[detTrace] POST tick=${world.tick} hash=${world.stateHash()}`);
+    }
+    recordPhaseTime('worldStep', performance.now() - t0);
+
+    t0 = performance.now();
+    powerupManager?.update(dt, playerManager);
+    springPadManager?.update(dt);
+    spikeManager?.update(dt);
+    dynamicItemManager?.update(dt);
+    // Trigger/action managers run only in mode-managed play (they're null in
+    // sandbox). Gating on modeManager reproduces the original onLogic branch
+    // split while letting both branches share this one method.
+    if (modeManager) {
+      triggerManager?.update(dt);
+      actionManager?.update(dt);
+    }
+    recordPhaseTime('managers', performance.now() - t0);
+
+    t0 = performance.now();
+    s.effects.update(
+      dt, playerManager, npcBlobs, world,
+      [...s.softPlatforms, ...s.pointShapes],
+      s.platformMover ?? undefined,
+      s.spikeManager ? (playerId) => s.spikeManager!.isDead(playerId) : undefined,
+      s.springPadManager ?? undefined,
+    );
+    recordPhaseTime('effects', performance.now() - t0);
   }
 
   setGameMode(mode: GameMode): void {
@@ -337,6 +533,9 @@ export class BouncyBlobsGame implements Game {
         onPhaseChange: (phase) => {
           // Wipe the round's slime splats whenever the round itself ends.
           if (phase !== 'playing') clearDecals();
+          // Size the decal budget to the round's roster — more players paint
+          // more, so they get a larger splat budget (capped inside setDecalBudget).
+          else setDecalBudget(playerManager.getPlayerCount());
           logMatchEvent('phase', { phase });
           effects.onPhaseChange(phase);
           this.onPhaseChange?.(phase);
@@ -360,10 +559,9 @@ export class BouncyBlobsGame implements Game {
       };
     }
 
-    // Create spring pad manager if level has spring pads or if party mode (items may be placed)
-    const isPartyMode = this.gameMode instanceof PartyMode;
+    // Create spring pad manager if the level has spring pads.
     let springPadManager: SpringPadManager | null = null;
-    if ((level.springPads && level.springPads.length > 0) || isPartyMode) {
+    if (level.springPads && level.springPads.length > 0) {
       springPadManager = new SpringPadManager();
       springPadManager.initialize(world, level.springPads ?? []);
       springPadManager.onFire = (pos, dir) => effects.onSpringFire(pos, dir);
@@ -381,9 +579,7 @@ export class BouncyBlobsGame implements Game {
     spikeManager.setKillBelowY(mapBounds.maxY + FALL_KILL_MARGIN);
 
     // Set death mode based on game mode type
-    if (this.gameMode instanceof PartyMode) {
-      spikeManager.deathMode = 'no_respawn';
-    } else if (this.gameMode instanceof KingOfTheHillMode) {
+    if (this.gameMode instanceof KingOfTheHillMode) {
       spikeManager.deathMode = 'timer';
     }
 
@@ -393,7 +589,7 @@ export class BouncyBlobsGame implements Game {
     // declares items OR party mode is active.
     let dynamicItemManager: DynamicItemManager | null = null;
     const levelDynamicItems = (level as unknown as { dynamicItems?: Array<{ id: string; type: string; x: number; y: number; width: number; height: number; rotation: number }> }).dynamicItems ?? [];
-    if (isPartyMode || levelDynamicItems.length > 0) {
+    if (levelDynamicItems.length > 0) {
       dynamicItemManager = new DynamicItemManager();
       dynamicItemManager.initialize(world, playerManager);
       // Auto-register items from level data. Party mode adds items
@@ -418,6 +614,16 @@ export class BouncyBlobsGame implements Game {
     const platformMover = new PlatformMover();
     platformMover.initialize(level.platforms, platformSurfaces, world);
 
+    // Wire the decal renderer's anchor resolvers so splats on moving platforms,
+    // spring plates, and soft bodies follow those surfaces as they move. (This
+    // is the game path — Sandbox/PlayLevel wire their own equivalents.)
+    setDecalResolvers({
+      getPlatformLivePos: (id) => platformMover.getLivePosition(id),
+      getPlatformLivePoly: (id) => platformMover.getLivePoly(id),
+      getParticlePos: (idx) => world.pos[idx] ?? null,
+      getSpringLivePos: (id) => springPadManager?.getSpringLivePosition(id) ?? null,
+    });
+
     const npcBlobIds = new Set(npcBlobs.map(b => b.blobId));
     const triggerManager = new TriggerManager();
     triggerManager.initialize(
@@ -439,15 +645,8 @@ export class BouncyBlobsGame implements Game {
       spikeManager,
     );
 
-    // Wire party mode integrations
-    if (this.gameMode instanceof PartyMode) {
-      const partyMode = this.gameMode;
-      partyMode.setManagers(spikeManager, springPadManager, dynamicItemManager);
-    }
-
-    // Universal spike-kill SFX/VFX, chained with the mode's own handler.
+    // Universal spike-kill SFX/VFX.
     if (spikeManager) {
-      const partyMode = this.gameMode instanceof PartyMode ? this.gameMode : null;
       spikeManager.onKill = (killedPlayerId, deathPos) => {
         const player = playerManager.getPlayer(killedPlayerId);
         if (player) effects.onSpikeKill(player, deathPos);
@@ -457,7 +656,6 @@ export class BouncyBlobsGame implements Game {
           x: deathPos.x,
           y: deathPos.y,
         });
-        partyMode?.handleSpikeKill(killedPlayerId);
       };
     }
 
@@ -522,6 +720,7 @@ export class BouncyBlobsGame implements Game {
 
     const loop = new GameLoop({
       getMaxSteps: () => this.maxStepsGetter?.() ?? 5,
+      getClockAdjust: () => this.clockAdjustGetter?.() ?? 0,
       onLogic: (dt) => {
       if (!this.state) return false;
 
@@ -529,7 +728,9 @@ export class BouncyBlobsGame implements Game {
       // compare-hashes diagnostic so we can freeze both sides and
       // inspect per-tick state without the sim moving under us. Reads
       // pacingConfig.paused live; toggleable from the debug overlay.
-      if (pausedFlagRef()) return false;
+      // Paused: normally skip the tick — UNLESS a manual single-step was
+      // requested (debug frame-stepping), in which case run exactly one tick.
+      if (pausedFlagRef() && !consumeStep()) return false;
 
       // Pre-tick gate: a lockstep guest pauses its sim here while
       // waiting for the host's authoritative inputs for the next tick.
@@ -537,88 +738,32 @@ export class BouncyBlobsGame implements Game {
       // we'll try again on the next RAF.
       if (this.logicGate && !this.logicGate(this.state.world)) return false;
 
+      // Snapshot pre-step centroids + camera so onRender can interpolate between
+      // this tick and the next by the accumulator alpha (render-state vs
+      // physics-state separation).
+      this.captureRenderPrev();
+
       const { modeManager } = this.state;
 
       if (modeManager) {
-        // Game mode controls when physics runs
+        // Game mode controls when physics runs.
         const shouldRunPhysics = modeManager.update(dt, playerManager, world);
         sampleScores(modeManager, dt);
         if (shouldRunPhysics) {
-          let t0 = performance.now();
-          playerManager.tickAIInputs(dt, world);
-          this.preTickHook?.(world);
-          playerManager.applyInputsAndStep(dt);
-          // DETERMINISM DIAGNOSTIC. Three observations per tick:
-          //   PRE = engine hash + per-player input AFTER applyInputsAndStep
-          //         but BEFORE world.step. If host's PRE ≠ guest's PRE at
-          //         the same tick, the JS calls between the previous step
-          //         and this step wrote different values into the engine.
-          //   POST = engine hash AFTER world.step. If PRE matches across
-          //          tabs but POST diverges, the wasm step itself is the
-          //          source — and that'd be a cross-instance wasm bug.
-          // The next tick's PRE compared with this tick's POST then tells
-          // us whether the post-step managers (powerup/spring/spike/etc.)
-          // wrote different values.
-          if (detTraceEnabled) {
-            const nextTick = world.tick + 1;
-            const parts: string[] = [];
-            for (const p of playerManager.getAllPlayers()) {
-              parts.push(`${p.playerId}:${p.moveX.toFixed(3)},${p.moveY.toFixed(3)},${p.expanding ? 1 : 0}`);
-            }
-            const preHash = world.stateHash();
-            console.info(`[detTrace] PRE tick=${nextTick} hash=${preHash} inputs=[${parts.join(' | ')}]`);
-          }
-          recordPhaseTime('playerMgr', performance.now() - t0);
-          t0 = performance.now();
-          world.step(dt);
-          if (detTraceEnabled) {
-            const tick = world.tick;
-            console.info(`[detTrace] POST tick=${tick} hash=${world.stateHash()}`);
-          }
-          recordPhaseTime('worldStep', performance.now() - t0);
-          t0 = performance.now();
-          powerupManager?.update(dt, playerManager);
-          springPadManager?.update(dt);
-          spikeManager?.update(dt);
-          dynamicItemManager?.update(dt);
-          triggerManager.update(dt);
-          actionManager.update(dt);
-          recordPhaseTime('managers', performance.now() - t0);
-          t0 = performance.now();
-          this.state.effects.update(
-            dt, playerManager, npcBlobs, world,
-            [...this.state.softPlatforms, ...this.state.pointShapes],
-          );
-          recordPhaseTime('effects', performance.now() - t0);
+          // NetPeer path drives the step (gather inputs → tick-tagged rollback
+          // advance → send); otherwise the default single-source-of-truth step.
+          if (this.stepDriver) this.stepDriver(dt);
+          else this.stepOneTick(dt, { runPreTick: true, runAI: true });
         }
         // Countdown ticks fire even though physics is frozen.
         if (modeManager.getPhase() === 'countdown') {
           this.state.effects.onCountdownTimer(modeManager.getState().phaseTimer);
         }
       } else {
-        // Sandbox mode — always run.
-        // Per-phase timing — folded into the frame profile so we can
-        // see which inner sub-system dominates a slow tick.
-        let t0 = performance.now();
-        playerManager.tickAIInputs(dt, world);
-        this.preTickHook?.(world);
-        playerManager.applyInputsAndStep(dt);
-        recordPhaseTime('playerMgr', performance.now() - t0);
-        t0 = performance.now();
-        world.step(dt);
-        recordPhaseTime('worldStep', performance.now() - t0);
-        t0 = performance.now();
-        powerupManager?.update(dt, playerManager);
-        springPadManager?.update(dt);
-        spikeManager?.update(dt);
-        dynamicItemManager?.update(dt);
-        recordPhaseTime('managers', performance.now() - t0);
-        t0 = performance.now();
-        this.state.effects.update(
-          dt, playerManager, npcBlobs, world,
-          [...this.state.softPlatforms, ...this.state.pointShapes],
-        );
-        recordPhaseTime('effects', performance.now() - t0);
+        // Sandbox mode — always run. Same shared step (modeManager is null, so
+        // stepOneTick skips the trigger/action managers, as this branch did).
+        if (this.stepDriver) this.stepDriver(dt);
+        else this.stepOneTick(dt, { runPreTick: true, runAI: true });
       }
 
       // Particles tick every frame regardless of physics — so a dying frame
@@ -679,10 +824,14 @@ export class BouncyBlobsGame implements Game {
       // comfortable zoom, stop following anyone and just watch the full map
       // (KOTH-style). Decided every tick so it survives canvas resizes; takes
       // precedence over every follow mode below.
+      // Camera-mode override (multiplayer "watch my blob" vs co-op "fit all")
+      // takes precedence over the auto small-map-fit heuristic.
       const watchWholeMap = canW > 0 && (
-        staticCamOverride !== null
-          ? staticCamOverride
-          : Camera.boundsFitZoom(minX, minY, maxX, maxY, canW, canH) >= STATIC_MAP_FIT_ZOOM
+        this.cameraMode === 'follow-local' ? false
+          : this.cameraMode === 'fit-all' ? true
+          : staticCamOverride !== null
+            ? staticCamOverride
+            : Camera.boundsFitZoom(minX, minY, maxX, maxY, canW, canH) >= STATIC_MAP_FIT_ZOOM
       );
 
       if (watchWholeMap) {
@@ -769,12 +918,48 @@ export class BouncyBlobsGame implements Game {
 
       return true;
       },
-      onRender: () => {
+      onRender: (alphaRaw: number) => {
         if (!this.state || !this.state.ctx) return;
 
-        const allPlayers = playerManager.getAllPlayers();
+        // INTERPOLATE only — never EXTRAPOLATE. When the sim is paused or a RAF
+        // ran no logic step, the loop's accumulator overruns and alpha climbs
+        // past 1; without clamping, the blob/camera interpolation would project
+        // past the current position and the whole view drifts off ("float off
+        // when paused"). Clamp to [0,1] so a frozen sim renders frozen.
+        const alpha = Math.max(0, Math.min(1, alphaRaw));
+
+        // Decay the external smoother (post-rollback ease-in) once per frame.
+        this.renderOffsetSource?.tick();
+        // Per-blob INTERPOLATED HULLS: per-node physics→render interp + smoothing
+        // (so expansion/shape eases, not just position).
+        const renderHulls = this.computeRenderHulls(alpha);
+
+        // Interpolate the camera by the SAME alpha so world geometry and blobs
+        // move together (else the static world steps at tick rate while blobs
+        // glide). Mutate camera pose for the draw, then restore so the next
+        // tick's follow logic sees the true post-step pose.
+        const savedCamX = camera.position.x;
+        const savedCamY = camera.position.y;
+        const savedCamZoom = camera.zoom;
+        if (this.prevCameraPos) {
+          const back = 1 - alpha;
+          camera.position.x = savedCamX + (this.prevCameraPos.x - savedCamX) * back;
+          camera.position.y = savedCamY + (this.prevCameraPos.y - savedCamY) * back;
+          camera.zoom = savedCamZoom + (this.prevCameraZoom - savedCamZoom) * back;
+        }
+
+        // Dead players are hidden entirely while their respawn countdown runs —
+        // the engine parks the blob off-screen (y = -9999) and SpikeManager draws
+        // the ghost-X + timer in its place, so rendering the blob here would only
+        // produce the death-frame "teleport up" interpolation artifact. Filter
+        // once and derive BOTH the blob list and playerRenderData from it so the
+        // index correlation canvasRenderer relies on (playerBlobs[i] ↔ data[i])
+        // is preserved. isDead() is a safe no-op without a spike/death mode.
+        const alivePlayers = playerManager
+          .getAllPlayers()
+          .filter(p => !spikeManager?.isDead(p.playerId));
         // Build player render data for faces and custom colors
-        const playerRenderData: PlayerRenderData[] = allPlayers.map(p => ({
+        const playerRenderData: PlayerRenderData[] = alivePlayers.map(p => ({
           name: p.name,
           color: p.color,
           faceId: p.faceId,
@@ -787,7 +972,7 @@ export class BouncyBlobsGame implements Game {
           this.state.ctx,
           world,
           camera,
-          playerManager.getPlayerBlobs(),
+          alivePlayers.map(p => p.blob),
           npcBlobs,
           this.state.canvasWidth,
           this.state.canvasHeight,
@@ -813,7 +998,14 @@ export class BouncyBlobsGame implements Game {
           [...softPlatforms, ...pointShapes],
           chains,
           lavaKillPlaneY(this.state.level, this.state.mapBounds),
+          renderHulls,
+          this.showPhysicsPoints,
         );
+
+        // Restore the true post-step camera pose for the next tick's follow math.
+        camera.position.x = savedCamX;
+        camera.position.y = savedCamY;
+        camera.zoom = savedCamZoom;
       },
     });
 
@@ -1057,10 +1249,10 @@ export class BouncyBlobsGame implements Game {
     return {
       gameTime: s.gameTime,
       slimeBlobs: allBlobs.map(b => ({ blobId: b.blobId, state: b.dumpState() })),
-      actionManager: s.actionManager?.dumpState?.(),
-      triggerManager: s.triggerManager?.dumpState?.(),
+      // Triggers + actions now live in the engine snapshot (serializeState),
+      // so they're no longer dumped TS-side.
       springPadManager: s.springPadManager?.dumpState?.(),
-      spikeManager: s.spikeManager?.dumpState?.(),
+      // Spikes/death/respawn now live in the engine snapshot.
       powerupManager: s.powerupManager?.dumpState?.(),
       dynamicItemManager: s.dynamicItemManager?.dumpState?.(),
       platformMover: s.platformMover?.dumpState?.(),
@@ -1081,10 +1273,7 @@ export class BouncyBlobsGame implements Game {
         byId.get(entry.blobId)?.restoreState(entry.state as any);
       }
     }
-    if (snap.actionManager) s.actionManager?.restoreState?.(snap.actionManager as any);
-    if (snap.triggerManager) s.triggerManager?.restoreState?.(snap.triggerManager as any);
     if (snap.springPadManager) s.springPadManager?.restoreState?.(snap.springPadManager as any);
-    if (snap.spikeManager) s.spikeManager?.restoreState?.(snap.spikeManager as any);
     if (snap.powerupManager) s.powerupManager?.restoreState?.(snap.powerupManager as any);
     if (snap.dynamicItemManager) s.dynamicItemManager?.restoreState?.(snap.dynamicItemManager as any);
     if (snap.platformMover) s.platformMover?.restoreState?.(snap.platformMover as any);

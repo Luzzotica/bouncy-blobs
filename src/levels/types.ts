@@ -1,7 +1,7 @@
 import type { HullPreset } from '../physics/slimeBlob';
 import type { SurfaceMaterial, GravityField } from '../physics/types';
 
-export type LevelType = 'solo_racing' | 'team_racing' | 'party' | 'koth';
+export type LevelType = 'solo_racing' | 'team_racing' | 'koth';
 
 /** Normalize level mode(s) from either the new `levelTypes` array or legacy `levelType` field. */
 export function getLevelTypes(level: LevelData): LevelType[] {
@@ -24,9 +24,6 @@ export function validateLevelType(level: LevelData, type: LevelType): string | n
       return null;
     case 'koth':
       if ((level.hillZones?.length ?? 0) === 0) return 'needs a Hill zone';
-      if (level.spawnPoints.filter(sp => sp.type === 'player').length === 0) return 'needs a player Spawn';
-      return null;
-    case 'party':
       if (level.spawnPoints.filter(sp => sp.type === 'player').length === 0) return 'needs a player Spawn';
       return null;
   }

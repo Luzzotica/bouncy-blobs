@@ -1,4 +1,10 @@
 import { ZoneDef } from '../levels/types';
+import { isCave, CAVE_GOAL_RGB, CAVE_HILL_RGB } from './colors';
+
+// In the cave theme these overlays are dimmed to cooler tones so they sit in
+// the palette instead of glowing neon (still readable — they're gameplay).
+const GOAL_RGB = isCave ? `${CAVE_GOAL_RGB.r}, ${CAVE_GOAL_RGB.g}, ${CAVE_GOAL_RGB.b}` : '0, 255, 100';
+const HILL_RGB = isCave ? `${CAVE_HILL_RGB.r}, ${CAVE_HILL_RGB.g}, ${CAVE_HILL_RGB.b}` : '255, 215, 0';
 
 /** Draw a goal zone (green glow with FINISH label). */
 export function drawGoalZone(
@@ -17,11 +23,11 @@ export function drawGoalZone(
   ctx.save();
 
   // Filled zone
-  ctx.fillStyle = `rgba(0, 255, 100, ${pulse})`;
+  ctx.fillStyle = `rgba(${GOAL_RGB}, ${pulse})`;
   ctx.fillRect(x, y, zone.width, zone.height);
 
   // Border
-  ctx.strokeStyle = `rgba(0, 255, 100, ${pulse + 0.2})`;
+  ctx.strokeStyle = `rgba(${GOAL_RGB}, ${pulse + 0.2})`;
   ctx.lineWidth = 3;
   ctx.setLineDash([10, 6]);
   ctx.strokeRect(x, y, zone.width, zone.height);
@@ -30,7 +36,7 @@ export function drawGoalZone(
   ctx.font = 'bold 28px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = `rgba(0, 255, 100, ${pulse + 0.4})`;
+  ctx.fillStyle = `rgba(${GOAL_RGB}, ${pulse + 0.4})`;
   ctx.fillText('FINISH', zone.x, zone.y);
 
   ctx.restore();
@@ -52,7 +58,6 @@ export function drawHillZone(
   const y = zone.y - hh;
 
   const pulse = 0.12 + 0.08 * Math.sin(time * 2.5) + 0.35 * flash;
-  const color = ownerColor ?? 'rgba(255, 215, 0';
 
   ctx.save();
 
@@ -60,12 +65,12 @@ export function drawHillZone(
   if (ownerColor) {
     ctx.fillStyle = ownerColor.replace(')', `, ${pulse})`).replace('rgb(', 'rgba(');
   } else {
-    ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+    ctx.fillStyle = `rgba(${HILL_RGB}, ${pulse})`;
   }
   ctx.fillRect(x, y, zone.width, zone.height);
 
   // Border
-  ctx.strokeStyle = `rgba(255, 215, 0, ${pulse + 0.3})`;
+  ctx.strokeStyle = `rgba(${HILL_RGB}, ${pulse + 0.3})`;
   ctx.lineWidth = 3 + 4 * flash;
   ctx.strokeRect(x, y, zone.width, zone.height);
 
@@ -73,7 +78,7 @@ export function drawHillZone(
   ctx.font = 'bold 24px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = `rgba(255, 215, 0, ${pulse + 0.4})`;
+  ctx.fillStyle = `rgba(${HILL_RGB}, ${pulse + 0.4})`;
   ctx.fillText('HILL', zone.x, zone.y);
 
   ctx.restore();

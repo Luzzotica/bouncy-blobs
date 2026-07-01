@@ -1,4 +1,14 @@
 import { SpringPadDef } from '../levels/types';
+import { isCave } from '../renderer/colors';
+
+// Cave theme spring colors: near-black hardware with a dim cool accent on the
+// active plate so the launch-ready state is still readable against the cavern.
+const CAVE_COIL = '#1a2436';
+const CAVE_PLATE_READY = '#2f6f8a';
+const CAVE_PLATE_SPENT = '#10161f';
+const CAVE_PLATE_STROKE = '#0a0f16';
+const CAVE_WALL = '#05080e';
+const CAVE_WALL_STROKE = '#02040a';
 
 export const PLATE_THICKNESS = 72;
 export const PLATE_WIDTH_SCALE = 8;
@@ -36,7 +46,8 @@ export function drawSpring(
   const numZigs = 5;
   const zigStep = coilLen / numZigs;
 
-  ctx.strokeStyle = '#cccccc';
+  const ready = state === 'loaded' || state === 'idle';
+  ctx.strokeStyle = isCave ? CAVE_COIL : '#cccccc';
   ctx.lineWidth = 3.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -50,18 +61,22 @@ export function drawSpring(
   ctx.lineTo(coilEnd, 0);
   ctx.stroke();
 
-  ctx.fillStyle = state === 'loaded' || state === 'idle' ? '#ffe066' : '#e8e8e8';
   // 'idle' (editor) shows the cocked/ready look so users see the launch-ready visual at rest.
-  if (state === 'idle') ctx.fillStyle = '#ffe066';
-  ctx.strokeStyle = '#aaaaaa';
+  if (isCave) {
+    ctx.fillStyle = ready ? CAVE_PLATE_READY : CAVE_PLATE_SPENT;
+    ctx.strokeStyle = CAVE_PLATE_STROKE;
+  } else {
+    ctx.fillStyle = ready ? '#ffe066' : '#e8e8e8';
+    ctx.strokeStyle = '#aaaaaa';
+  }
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.roundRect(backX, -hh, PLATE_THICKNESS, hh * 2, 2);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#888888';
-  ctx.strokeStyle = '#666666';
+  ctx.fillStyle = isCave ? CAVE_WALL : '#888888';
+  ctx.strokeStyle = isCave ? CAVE_WALL_STROKE : '#666666';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.roundRect(wallX - 6, -hh * 1.2, 6, hh * 2.4, 1);
@@ -69,7 +84,9 @@ export function drawSpring(
   ctx.stroke();
 
   const arrowAlpha = state === 'idle' ? 0.9 : 0.4 + 0.5 * compress;
-  ctx.fillStyle = `rgba(255, 200, 50, ${arrowAlpha})`;
+  ctx.fillStyle = isCave
+    ? `rgba(90, 200, 230, ${arrowAlpha})`
+    : `rgba(255, 200, 50, ${arrowAlpha})`;
   ctx.beginPath();
   const arrowX = frontX + 8;
   ctx.moveTo(arrowX + 12, 0);

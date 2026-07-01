@@ -570,8 +570,8 @@ describe('EditorState — game-mode validation + setLevelTypes', () => {
   it('setLevelTypes replaces the array and clears legacy levelType', () => {
     const state = new EditorState(blankLevel());
     state.level.levelType = 'solo_racing'; // simulate legacy
-    state.setLevelTypes(['party', 'koth']);
-    expect(state.level.levelTypes).toEqual(['party', 'koth']);
+    state.setLevelTypes(['team_racing', 'koth']);
+    expect(state.level.levelTypes).toEqual(['team_racing', 'koth']);
     expect(state.level.levelType).toBeUndefined();
   });
 });

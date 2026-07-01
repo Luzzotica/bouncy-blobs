@@ -52,6 +52,19 @@ interface DebugBridgeShape {
   /** Sim-wide pause (host only). No-op on guests; their pause comes
    *  from the host's `set_paused` event. */
   togglePause: (paused: boolean) => void;
+  /** Advance N ticks on host + all guests while paused (host only). */
+  stepFrames: (n: number) => void;
+  /** Set the slow-motion multiplier on host + all guests (host only). */
+  setSimSpeed: (speed: number) => void;
+  /** Per-guest netcode health (host only): RTT, input buffer depth, pacing. */
+  getClientStats: () => ClientStatShape[] | null;
+}
+
+interface ClientStatShape {
+  peerId: string;
+  rttMs: number | null;
+  bufferDepth: number;
+  pacingBias: number;
 }
 
 function pct(values: number[], p: number): number {
@@ -275,14 +288,80 @@ function CompareHashesPanel() {
     }
   };
 
+  const onStep = (n: number) => {
+    const bridge: DebugBridgeShape | undefined = (window as unknown as { __bbDebug?: DebugBridgeShape }).__bbDebug;
+    bridge?.stepFrames(n);
+  };
+  const onSpeed = (s: number) => {
+    const bridge: DebugBridgeShape | undefined = (window as unknown as { __bbDebug?: DebugBridgeShape }).__bbDebug;
+    bridge?.setSimSpeed(s);
+  };
+
   return (
     <div style={controlsStyle} onMouseDown={(e) => e.stopPropagation()}>
-      <div style={controlsTitleStyle}>COMPARE</div>
+      <div style={controlsTitleStyle}>FRAME CONTROL</div>
       <div style={presetRowStyle}>
         <PresetButton label={paused ? 'resume' : 'pause both'} onClick={onTogglePause} />
         <PresetButton label={busy ? 'comparing…' : 'compare hashes'} onClick={busy ? () => {} : onCompare} />
       </div>
+      <div style={presetRowStyle}>
+        <PresetButton label={'step +1'} onClick={() => onStep(1)} />
+        <PresetButton label={'step +10'} onClick={() => onStep(10)} />
+      </div>
+      <div style={presetRowStyle}>
+        <PresetButton label={'1x'} onClick={() => onSpeed(1)} />
+        <PresetButton label={'¼x'} onClick={() => onSpeed(0.25)} />
+        <PresetButton label={'⅒x'} onClick={() => onSpeed(0.1)} />
+      </div>
+      {!paused && (
+        <div style={{ fontSize: 9, color: '#888', marginTop: 4 }}>
+          pause both, then step to advance host + all clients one tick at a time
+        </div>
+      )}
+      <ClientStatsPanel />
       {result && <CompareModal result={result} onClose={() => setResult(null)} />}
+    </div>
+  );
+}
+
+// Per-client netcode health (host only): RTT, input-buffer depth (how far ahead
+// of the host's tick that client's input is — negative = host rolling it back),
+// and the pacing bias the host last sent (+1 = "speed up", -1 = "slow down").
+function ClientStatsPanel() {
+  const [rows, setRows] = useState<ClientStatShape[]>([]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const bridge: DebugBridgeShape | undefined = (window as unknown as { __bbDebug?: DebugBridgeShape }).__bbDebug;
+      setRows(bridge?.getClientStats() ?? []);
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+  if (rows.length === 0) return null;
+  const depthColor = (d: number) => (d < 1 ? '#f77' : d > 4 ? '#fa3' : '#7f7');
+  const biasLabel = (b: number) => (b > 0 ? '▲ speed up' : b < 0 ? '▼ slow down' : '— steady');
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={controlsTitleStyle}>CLIENTS</div>
+      <table style={{ borderCollapse: 'collapse', fontSize: 10, fontVariantNumeric: 'tabular-nums', width: '100%' }}>
+        <thead>
+          <tr style={{ color: '#888' }}>
+            <th style={{ textAlign: 'left', paddingRight: 8 }}>peer</th>
+            <th style={{ textAlign: 'right', paddingRight: 8 }}>RTT</th>
+            <th style={{ textAlign: 'right', paddingRight: 8 }}>buf</th>
+            <th style={{ textAlign: 'left' }}>pacing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.peerId}>
+              <td style={{ paddingRight: 8 }}>{r.peerId.slice(0, 6)}</td>
+              <td style={{ textAlign: 'right', paddingRight: 8 }}>{r.rttMs === null ? '—' : `${Math.round(r.rttMs)}ms`}</td>
+              <td style={{ textAlign: 'right', paddingRight: 8, color: depthColor(r.bufferDepth) }}>{r.bufferDepth}</td>
+              <td style={{ color: r.pacingBias > 0 ? '#fa3' : r.pacingBias < 0 ? '#7af' : '#888' }}>{biasLabel(r.pacingBias)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

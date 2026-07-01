@@ -69,6 +69,22 @@ export interface StickyContact {
   normal: Vec2;
 }
 
+/** Debug-only snapshot of the per-substep crush check (`enforce_blob_integrity`). */
+export interface CrushDebug {
+  /** Touching opposing SOLID surfaces (static or soft); min normal·normal < -0.5. */
+  sandwiched: boolean;
+  /** Hull area below the crush ratio (< 20% of base). */
+  compressed: boolean;
+  /** Of the contacts, how many are with STATIC geometry (the rest are soft). */
+  staticContacts: number;
+  /** Most-opposing pair of contact normals (most negative dot; 1 = none opposing). */
+  minDot: number;
+  /** Engine's own cur_hull_area / base_rest_area — the value `compressed` thresholds (< 0.2). */
+  areaRatio: number;
+  /** Consecutive crushed substeps counted toward death. */
+  violations: number;
+}
+
 /** RNG draws routed through the engine — same stream visible to both
  *  the engine and game code (powerups, spike spawns, AI). Mirrors
  *  `SeededRng` in lib/rng.ts so existing callers don't need to change. */
@@ -119,6 +135,8 @@ export interface SoftBodyEngine extends BulkParticleSetter {
     opts?: { layer?: number; mask?: number }): StaticSurface;
   removeStaticSurface(surface: StaticSurface): void;
   clearStaticPolygons(): void;
+  /** wasm index of a registered static surface (-1 if unknown). */
+  staticSurfaceIndex(surface: StaticSurface): number;
 
   /** Push a static surface's mutated `poly` + `velocity` into the
    *  engine. No-op on the TS sim (the surface object IS the engine's
@@ -234,6 +252,64 @@ export interface SoftBodyEngine extends BulkParticleSetter {
    *  transitioned loaded→firing). Use for VFX/SFX. */
   takeSpringPadFireEvents(): Uint32Array;
 
+  // ---- Phase 6: blob roles + trigger charge machines ----
+  /** Tag a blob's gameplay role (0 structural / 1 player / 2 npc) + stable slot id. */
+  setBlobRole(blobId: number, role: number, gameplayId: number): void;
+  addGameTrigger(id: number, shapeIdx: number, chargeSeconds: number, ignoreNpcs: boolean): number;
+  clearGameTriggers(): void;
+  triggerPressed(idx: number): boolean;
+  triggerChargeProgress(idx: number): number;
+  triggerPressedById(id: number): boolean;
+  takeTriggerPressedEvents(): Uint32Array;
+  takeTriggerReleasedEvents(): Uint32Array;
+
+  // ---- Phase 7: actions ----
+  addGameAction(id: number, mode: number, requireAll: boolean, easing: number, delay: number, duration: number, interval: number, sourceTriggerIds: Uint32Array | number[]): number;
+  actionAddTargetShapePoint(actionIdx: number, particle: number, endX: number, endY: number): void;
+  actionAddTargetMoveShape(actionIdx: number, particleIds: Uint32Array | number[], endX: number, endY: number): void;
+  actionAddTargetRotateShape(actionIdx: number, particleIds: Uint32Array | number[], endRotation: number): void;
+  actionAddTargetPlatform(actionIdx: number, staticIdx: number, baseX: number, baseY: number, baseRot: number, localPoly: number[], endX: number, endY: number, endRot: number): void;
+  actionAddTargetSpike(actionIdx: number, spikeId: number, baseX: number, baseY: number, baseRot: number, endX: number, endY: number, endRot: number): void;
+  clearGameActions(): void;
+  gameActionState(idx: number): number;
+  gameActionTargetPose(actionIdx: number, targetIdx: number): Float64Array;
+  takeActionFireEvents(): Uint32Array;
+
+  // ---- Phase 8: spikes / death / respawn ----
+  setDeathMode(mode: number): void;
+  addSpike(id: number, x: number, y: number, rot: number, w: number, h: number): number;
+  addDeathZone(x: number, y: number, w: number, h: number): void;
+  setKillBelowY(y: number, enabled: boolean): void;
+  setSpawnPoints(flat: number[]): void;
+  setSpikePose(spikeId: number, x: number, y: number, rot: number): void;
+  respawnAll(): void;
+  killPlayerByBlobId(blobId: number): void;
+  clearSpikes(): void;
+  takeKillEvents(): Float64Array;
+  isInvulnerable(gameplayId: number): boolean;
+  isDead(gameplayId: number): boolean;
+  deadPlayerRespawnTimer(gameplayId: number): number;
+  deadPlayerDeathPos(gameplayId: number): Float64Array;
+  spikeLivePose(idx: number): Float64Array;
+
+  // ---- Phase 9: game-mode rules ----
+  setGameMode(kind: number, timeLimit: number, targetScore: number): void;
+  setGoalZone(x: number, y: number, w: number, h: number): void;
+  addHillZone(x: number, y: number, w: number, h: number): void;
+  setHillRotation(min: number, max: number): void;
+  setModePlaying(playing: boolean): void;
+  resetModeForRound(): void;
+  modeWinner(): number;
+  modeDecided(): boolean;
+  modeGameTime(): number;
+  modeTimeRemaining(): number;
+  modeScore(gameplayId: number): number;
+  modeScores(): Float64Array;
+  kothActiveHill(): Float64Array;
+  kothLastMoveTime(): number;
+  kothKingId(): number;
+  chainedAllReached(): boolean;
+
   // ---- network sync ----
   setBlobGroundContacts(blobId: number, count: number): void;
   getBlobGroundContacts(blobId: number): number;
@@ -242,6 +318,10 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   getBlobStickyContact(blobId: number): StickyContact;
   /** Per-hull-particle "touched a solid this step" bitmap, length = hull length, each entry 0|1. */
   getBlobParticleContacts(blobId: number): Uint8Array;
+  /** Like getBlobParticleContacts but STATIC-only — the contact kind the crush/sandwich check counts. */
+  getBlobParticleStaticContacts(blobId: number): Uint8Array;
+  /** Debug readout of the per-substep crush check for the diagnostics overlay. */
+  getBlobCrushDebug(blobId: number): CrushDebug;
   getBlobEffectiveGravity(blobId: number): Vec2;
   getBlobShapeMatchTargetHull(blobId: number): Vec2[];
 

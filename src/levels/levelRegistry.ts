@@ -127,7 +127,7 @@ export async function listAllLevels(): Promise<MergedLevel[]> {
         id: `workshop:${s.workshopId}`,
         name: `Workshop ${s.workshopId}`,
         source: 'workshop',
-        levelTypes: ['solo_racing', 'team_racing', 'party', 'koth'],
+        levelTypes: ['solo_racing', 'team_racing', 'koth'],
         workshopId: s.workshopId,
         workshopFile: `${s.installDir}/level.json`,
       });

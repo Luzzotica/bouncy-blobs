@@ -43,7 +43,6 @@ import {
 const LEVEL_TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
   team_racing: 'Chained Together',
-  party: 'Party',
   koth: 'King of the Hill',
 };
 
@@ -58,7 +57,6 @@ const EDITOR_LEVEL_TYPES: LevelType[] = [
 const LEVEL_TYPE_COLORS: Record<LevelType, string> = {
   solo_racing: '#4a9eff',
   team_racing: '#4ae04a',
-  party: '#ff6a9e',
   koth: '#ffa500',
 };
 
@@ -93,7 +91,6 @@ type EditorPhase = 'list' | 'new_level_type' | 'editing';
 const LEVEL_TYPE_DESCRIPTIONS: Record<LevelType, string> = {
   solo_racing: 'First to the finish wins',
   team_racing: 'Chained together — everyone climbs to the summit',
-  party: 'UCH-style rounds with item placement',
   koth: 'Control the hill to score points',
 };
 

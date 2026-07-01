@@ -230,6 +230,7 @@ export default function PlayLevel() {
       getPlatformLivePos: (id) => platformMover.getLivePosition(id),
       getPlatformLivePoly: (id) => platformMover.getLivePoly(id),
       getParticlePos: (idx) => world.pos[idx] ?? null,
+      getSpringLivePos: (id) => springPadManager?.getSpringLivePosition(id) ?? null,
     });
 
     const triggerManager = new TriggerManager();
@@ -305,7 +306,7 @@ export default function PlayLevel() {
         spikeManager?.update(dt);
         triggerManager.update(dt);
         actionManager.update(dt);
-        effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover);
+        effects.update(dt, playerManager, npcBlobs, world, [...softPlatforms, ...pointShapes], platformMover, undefined, springPadManager ?? undefined);
         updateParticles(dt);
         camera.followTargets([playerBlob.getCentroid()], state.canvasWidth, state.canvasHeight);
         camera.update(dt);

@@ -125,6 +125,25 @@ interface DebugBridge {
    *  stepOne() → snapshot/read hashes }. The pause flag prevents the
    *  RAF loop from racing this manual stepping. */
   stepOne: (dt?: number) => void;
+  /** Host: advance the sim by N ticks on EVERY peer at once (host + all guests)
+   *  while paused — the debug frame-stepper. Broadcasts a step command so all
+   *  sides advance the same tick together for hash comparison. No-op on guests. */
+  stepFrames: (n: number) => void;
+  /** Host: set the slow-motion multiplier (1 = realtime, 0.25 = quarter speed)
+   *  on host + all guests. No-op on guests. */
+  setSimSpeed: (speed: number) => void;
+  /** Host: per-connected-guest netcode health — round-trip time, how many of
+   *  that guest's inputs the host has buffered ahead of its current tick
+   *  (negative = the host is rolling that guest back), and the pacing bias the
+   *  host last told it (+1 speed up / -1 slow down). null on guests / no data. */
+  getClientStats: () => ClientStat[] | null;
+}
+
+export interface ClientStat {
+  peerId: string;
+  rttMs: number | null;
+  bufferDepth: number;
+  pacingBias: number;
 }
 
 let netDiagAccessor: (() => { bufferSize: number; latestHostTick: number; gap: number } | null) | null = null;
@@ -171,11 +190,24 @@ let installedGame: BouncyBlobsGame | null = null;
 let compareHashesAccessor: CompareHashesFn | null = null;
 let togglePauseAccessor: TogglePauseFn | null = null;
 
+let stepFramesAccessor: ((n: number) => void) | null = null;
+let clientStatsAccessor: (() => ClientStat[] | null) | null = null;
+let simSpeedAccessor: ((s: number) => void) | null = null;
+
 export function setCompareHashesAccessor(fn: CompareHashesFn | null): void {
   compareHashesAccessor = fn;
 }
 export function setTogglePauseAccessor(fn: TogglePauseFn | null): void {
   togglePauseAccessor = fn;
+}
+export function setStepFramesAccessor(fn: ((n: number) => void) | null): void {
+  stepFramesAccessor = fn;
+}
+export function setClientStatsAccessor(fn: (() => ClientStat[] | null) | null): void {
+  clientStatsAccessor = fn;
+}
+export function setSimSpeedAccessor(fn: ((s: number) => void) | null): void {
+  simSpeedAccessor = fn;
 }
 
 export function installDebugBridge(game: BouncyBlobsGame | null): void {
@@ -227,6 +259,9 @@ export function installDebugBridge(game: BouncyBlobsGame | null): void {
     togglePause: (paused: boolean) => {
       togglePauseAccessor?.(paused);
     },
+    stepFrames: (n: number) => stepFramesAccessor?.(n),
+    setSimSpeed: (s: number) => simSpeedAccessor?.(s),
+    getClientStats: () => (clientStatsAccessor ? clientStatsAccessor() : null),
     setPlayerInput: (playerId, moveX, moveY, expanding) => {
       const pm = installedGame?.getPlayerManager();
       const p = pm?.getPlayer(playerId);

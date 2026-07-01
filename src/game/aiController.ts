@@ -8,6 +8,7 @@ import {
   type PersonalityState,
 } from './aiPersonalities';
 import { Vec2, vec2 } from '../physics/vec2';
+import { createRng, type SeededRng } from '../lib/rng';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AIController
@@ -22,6 +23,10 @@ import { Vec2, vec2 } from '../physics/vec2';
 // my objective right now?" without coupling the AI to any specific mode.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Distinct seed per controller so each bot's wander/jitter differs, but
+ *  INDEPENDENT of the engine's world.rng. */
+let aiRngCounter = 0;
+
 export class AIController {
   public readonly personality: PersonalityName;
   private state: PersonalityState = { scratch: {} };
@@ -29,9 +34,17 @@ export class AIController {
     | ((self: ManagedPlayer) => { x: number; y: number; width: number; height: number } | null)
     | null = null;
   private hillCenterProvider: (() => Vec2 | null) | null = null;
+  /** The AI's OWN rng — deliberately NOT the engine's world.rng. Each peer runs
+   *  only the bots IT owns, so drawing from world.rng would advance it
+   *  differently per peer and desync the deterministic physics. The bot's input
+   *  is authoritative + broadcast, so its randomness needs no cross-peer
+   *  determinism; keeping it off world.rng is what keeps the engines identical. */
+  private readonly rng: SeededRng;
 
   constructor(personality: PersonalityName) {
     this.personality = personality;
+    // Seeded but independent of world.rng — distinct per controller.
+    this.rng = createRng(((aiRngCounter++ * 0x9e3779b1) ^ 0x85ebca6b) >>> 0);
   }
 
   /** The current target this bot should pursue (set by BouncyBlobsGame). */
@@ -81,7 +94,9 @@ export class AIController {
       hillCenter: this.hillCenterProvider?.() ?? null,
       dt,
       elapsed,
-      rng: physicsWorld?.rng,
+      // The controller's OWN rng — NOT physicsWorld.rng (see the `rng` field
+      // doc): drawing from world.rng here desyncs the engine across peers.
+      rng: this.rng,
     };
 
     return PERSONALITIES[this.personality](

@@ -193,6 +193,36 @@ export class SpringPadManager {
     return false;
   }
 
+  /** Spring id whose plate front face is near `point`, or null. Lets the decal
+   *  system attach splats to a spring so they ride the plate as it moves —
+   *  mirrors PlatformMover.findPlatformIdAtPoint. */
+  findSpringIdAtPoint(point: { x: number; y: number }, maxDist = 28): string | null {
+    for (const s of this.springs) {
+      const { def, launchDir, perpDir, offset } = s;
+      const hw = def.width / 2;
+      const hh = (def.height * PLATE_WIDTH_SCALE) / 2;
+      const frontLocalX = hw - offset; // plate retracts along launchDir by offset
+      const rx = point.x - def.x;
+      const ry = point.y - def.y;
+      const localX = launchDir.x * rx + launchDir.y * ry;
+      const localY = perpDir.x * rx + perpDir.y * ry;
+      if (Math.abs(localY) > hh + maxDist) continue;
+      const dx = localX - frontLocalX;
+      if (dx >= -(PLATE_THICKNESS + maxDist) && dx <= maxDist) return s.def.id;
+    }
+    return null;
+  }
+
+  /** Live reference point that translates with a spring's plate: the def origin
+   *  retracted along the launch direction by the current offset (the same
+   *  transform the plate corners use). A splat stores its position relative to
+   *  this, so it rides the plate as it compresses/fires. */
+  getSpringLivePosition(springId: string): { x: number; y: number } | null {
+    const s = this.springs.find((sp) => sp.def.id === springId);
+    if (!s) return null;
+    return { x: s.def.x - s.launchDir.x * s.offset, y: s.def.y - s.launchDir.y * s.offset };
+  }
+
   render(ctx: CanvasRenderingContext2D): void {
     for (const s of this.springs) {
       drawSpring(ctx, s.def, s.offset, s.maxCompress, s.state);

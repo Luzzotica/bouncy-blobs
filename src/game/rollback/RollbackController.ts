@@ -27,7 +27,16 @@
 // ring buffer. Cheap.
 
 import type { SoftBodyEngine } from '../../physics/SoftBodyEngine';
-import type { BouncyBlobsGame, GameStateSnapshot } from '../bouncyBlobsGame';
+import type { GameStateSnapshot } from '../bouncyBlobsGame';
+
+/** Structural interface the rollback ring needs to snapshot/restore the
+ *  TS-side game state alongside the engine. BouncyBlobsGame satisfies it; the
+ *  headless netcode core (NetPeer) and tests provide their own lightweight
+ *  implementation so the controller isn't coupled to the React game class. */
+export interface RollbackGame {
+  snapshotGameState(): GameStateSnapshot;
+  restoreGameState(snap: GameStateSnapshot): void;
+}
 
 export interface PlayerInput {
   moveX: number;
@@ -175,7 +184,7 @@ export class RollbackController {
    *
    *  Call this once per logic tick, in the game loop, AFTER you've
    *  applied the input set and BEFORE world.step(). */
-  recordTick(tick: number, inputs: InputSet, engine: SoftBodyEngine, game: BouncyBlobsGame): void {
+  recordTick(tick: number, inputs: InputSet, engine: SoftBodyEngine, game: RollbackGame): void {
     if (this.rewinding) return; // don't double-snapshot during replay
 
     const tStart = performance.now();
@@ -260,7 +269,7 @@ export class RollbackController {
   onAuthoritativeInputs(
     inputsByTick: Map<number, InputSet>,
     engine: SoftBodyEngine,
-    game: BouncyBlobsGame,
+    game: RollbackGame,
   ): number {
     const tStart = performance.now();
     const result = this.reconcileImpl(inputsByTick, engine, game);
@@ -271,7 +280,7 @@ export class RollbackController {
   private reconcileImpl(
     inputsByTick: Map<number, InputSet>,
     engine: SoftBodyEngine,
-    game: BouncyBlobsGame,
+    game: RollbackGame,
   ): number {
     // Update lastKnownInput from the freshest authoritative we got.
     let freshestTick = -1;

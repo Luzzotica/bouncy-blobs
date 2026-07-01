@@ -6,6 +6,8 @@
 // editing the primitives.
 
 import { Vec2 } from '../physics/vec2';
+import { isCave, CAVE_PLATFORM_FILL } from './colors';
+import { makeScratchCanvas } from './scratchCanvas';
 
 export interface CandyPalette {
   /** Solid base fill, fully opaque hex. Translucency comes from the
@@ -77,6 +79,22 @@ export const SPIKE_BASE_PALETTE: CandyPalette = {
   deep: '#5e3a14',
   highlight: 'rgba(255,235,200,0.55)',
   outline: '#3b1f08',
+};
+
+// Cave theme: black spike body. A separate red-tip glow (drawn in
+// spikeManager) supplies the warm warning cue, so these stay near-black.
+export const SPIKE_CRYSTAL_PALETTE_CAVE: CandyPalette = {
+  base: '#0a0a0c',
+  deep: '#000000',
+  highlight: 'rgba(255,80,100,0.10)',
+  outline: '#000000',
+};
+
+export const SPIKE_BASE_PALETTE_CAVE: CandyPalette = {
+  base: '#050507',
+  deep: '#000000',
+  highlight: 'rgba(120,160,200,0.06)',
+  outline: '#000000',
 };
 
 export const MATERIAL_SKINS: Record<string, MaterialSkin> = {
@@ -563,10 +581,9 @@ let sugarPattern: CanvasPattern | null = null;
 let sugarPatternCtx: CanvasRenderingContext2D | null = null;
 function getSugarPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   if (sugarPattern && sugarPatternCtx === ctx) return sugarPattern;
-  const c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
-  const pctx = c.getContext('2d');
-  if (!pctx) return null;
+  const scratch = makeScratchCanvas(64, 64);
+  if (!scratch) return null;
+  const pctx = scratch.ctx;
   pctx.clearRect(0, 0, 64, 64);
   // Deterministic grain so it doesn't flicker between rebuilds.
   let seed = 1337;
@@ -581,7 +598,7 @@ function getSugarPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
     pctx.fillStyle = `rgba(255,255,255,${(0.35 + rand() * 0.4).toFixed(3)})`;
     pctx.fillRect(x, y, r, r);
   }
-  sugarPattern = ctx.createPattern(c, 'repeat');
+  sugarPattern = ctx.createPattern(scratch.image, 'repeat');
   sugarPatternCtx = ctx;
   return sugarPattern;
 }
@@ -754,12 +771,35 @@ export function drawJellyCandy(
   ctx.restore();
 }
 
+// ── Flat fill (cave theme) ──────────────────────────────────────────────
+/** Draw a solid, flat-filled silhouette — no gradients, inclusions, rim or
+ * outline. Used by the cave theme to render every platform as pure black.
+ * `cornerRoundness` matches `drawJellyCandy`/`drawBlob` (0 = polygon corners,
+ * ~0.18 = soft-platform rounding). */
+export function drawFlatSurface(
+  ctx: CanvasRenderingContext2D,
+  poly: Vec2[],
+  fill = CAVE_PLATFORM_FILL,
+  cornerRoundness = 0,
+): void {
+  if (poly.length < 3) return;
+  ctx.save();
+  traceSmoothPoly(ctx, poly, cornerRoundness);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.restore();
+}
+
 // ── Dispatch ────────────────────────────────────────────────────────────
 export function drawCandySurface(
   ctx: CanvasRenderingContext2D,
   poly: Vec2[],
   material: string,
 ): void {
+  if (isCave) {
+    drawFlatSurface(ctx, poly, CAVE_PLATFORM_FILL, 0);
+    return;
+  }
   const skin = MATERIAL_SKINS[material] ?? MATERIAL_SKINS.default;
   if (skin.primitive === 'hard') {
     drawHardCandy(ctx, poly, skin.palette);

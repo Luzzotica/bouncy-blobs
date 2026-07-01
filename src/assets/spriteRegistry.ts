@@ -41,6 +41,7 @@ const cache = new Map<string, LoadedSprite>();
 let readyPromise: Promise<void> | null = null;
 
 export function preloadSprites(manifestUrl = assetUrl('/sprites/manifest.json')): Promise<void> {
+  if (typeof Image === 'undefined') return Promise.resolve(); // worker — no image decode/render
   if (readyPromise) return readyPromise;
   readyPromise = (async () => {
     let manifest: SpriteManifest;

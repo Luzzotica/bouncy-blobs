@@ -5,19 +5,16 @@ import { PlayerManager } from '../playerManager';
 import { LevelData, ZoneDef } from '../../levels/types';
 import { kothLevel } from '../../levels/kothLevel';
 import { drawHillZone } from '../../renderer/zoneRenderer';
-import { isPointInPolygon } from '../../physics/collision';
-import { vec2 } from '../../physics/vec2';
 
 const TARGET_SCORE = 50;
-const SOLE_OCCUPANT_RATE = 2; // pts/sec
-const CONTESTED_RATE = 1; // pts/sec
-
-/** Default move interval when a KOTH level has 2+ hills but no explicit
- *  `hillRotation`. Averages ~10s. Multiple hill zones are meaningless in KOTH
- *  *except* as rotation targets (only one hill is ever active), so 2+ hills
- *  rotate by default — a level pins a single static hill by defining just one. */
 const DEFAULT_HILL_ROTATION = { minSeconds: 8, maxSeconds: 13 };
 
+/**
+ * King of the Hill. Scoring (sole 2/s, contested 1/s), seeded hill rotation,
+ * and the win rule all run in the Rust engine (Phase 9). This class registers
+ * the hills + rotation, and reads the active hill / king / scores back for
+ * rendering. The React <KothHud> reads scores from `GameModeState`.
+ */
 export class KingOfTheHillMode implements GameMode {
   readonly config: GameModeConfig = {
     id: 'koth',
@@ -32,195 +29,60 @@ export class KingOfTheHillMode implements GameMode {
   };
 
   private levelData: LevelData;
-  private hillZone: ZoneDef | null = null;
-  private gameTime = 0;
-  private currentKingColor: string | null = null;
-  /** Index into `levelData.hillZones` of the currently-active hill. */
-  private currentHillIndex = 0;
-  /** `gameTime` (seconds) at which the hill next moves, or null until the
-   *  first interval is rolled. Only used when hill rotation is enabled. */
-  private nextMoveTime: number | null = null;
-  /** `gameTime` of the most recent hill move — drives the spawn-flash glow. */
-  private lastMoveTime = -999;
+  private world: SoftBodyEngine | null = null;
 
   constructor(levelData?: LevelData) {
     this.levelData = levelData ?? kothLevel;
   }
 
-  getLevel(): LevelData {
-    return this.levelData;
-  }
+  getLevel(): LevelData { return this.levelData; }
 
-  initialize(_world: SoftBodyEngine, _playerManager: PlayerManager): void {
-    this.currentHillIndex = 0;
-    this.hillZone = this.levelData.hillZones?.[0] ?? null;
-  }
-
-  onPhaseStart(phase: GamePhase, state: GameModeState): void {
-    if (phase === 'playing') {
-      state.scores.clear();
-      this.gameTime = 0;
-      this.currentHillIndex = 0;
-      this.hillZone = this.levelData.hillZones?.[0] ?? null;
-      this.nextMoveTime = null;
-      this.lastMoveTime = -999;
-      this.currentKingColor = null;
-    }
-  }
-
-  /** When hill rotation is configured and 2+ hills exist, move the active hill
-   *  to a random *other* zone after a random interval. All randomness is drawn
-   *  from `world.rng` (the Rust-owned, host/guest-shared stream) at the same
-   *  tick on every client, so the moving hill stays netcode-deterministic. */
-  private maybeRotateHill(world: SoftBodyEngine): void {
+  initialize(world: SoftBodyEngine, _playerManager: PlayerManager): void {
+    this.world = world;
+    world.setGameMode(1, this.config.timeLimitSec ?? 0, TARGET_SCORE);
     const zones = this.levelData.hillZones ?? [];
-    if (zones.length < 2) return;
-    // 2+ hills rotate by default; `hillRotation` only customizes the interval.
-    const rot = this.levelData.hillRotation ?? DEFAULT_HILL_ROTATION;
-
-    const lo = Math.max(0.5, rot.minSeconds);
-    const hi = Math.max(lo, rot.maxSeconds);
-
-    if (this.nextMoveTime === null) {
-      this.nextMoveTime = this.gameTime + world.rng.range(lo, hi);
-      return;
-    }
-    if (this.gameTime < this.nextMoveTime) return;
-
-    // Pick a uniform index among the OTHER zones (never repeat the current).
-    const n = zones.length;
-    let next = world.rng.int(0, n - 1); // 0 .. n-2
-    if (next >= this.currentHillIndex) next++;
-    this.currentHillIndex = next;
-    this.hillZone = zones[next];
-    this.lastMoveTime = this.gameTime;
-    this.nextMoveTime = this.gameTime + world.rng.range(lo, hi);
-  }
-
-  update(dt: number, state: GameModeState, playerManager: PlayerManager, world: SoftBodyEngine): void {
-    this.gameTime += dt;
-    this.maybeRotateHill(world);
-    if (!this.hillZone) return;
-
-    // Build hill polygon for point-in-polygon checks
-    const hz = this.hillZone;
-    const hw = hz.width / 2;
-    const hh = hz.height / 2;
-    const hillPoly = [
-      vec2(hz.x - hw, hz.y - hh),
-      vec2(hz.x + hw, hz.y - hh),
-      vec2(hz.x + hw, hz.y + hh),
-      vec2(hz.x - hw, hz.y + hh),
-    ];
-
-    // Check which players are on the hill
-    const onHill: string[] = [];
-    for (const p of playerManager.getAllPlayers()) {
-      const centroid = p.blob.getCentroid();
-      if (isPointInPolygon(centroid, hillPoly)) {
-        onHill.push(p.playerId);
-      }
-    }
-
-    // Score players on the hill
-    const rate = onHill.length === 1 ? SOLE_OCCUPANT_RATE : CONTESTED_RATE;
-    for (const pid of onHill) {
-      const prev = state.scores.get(pid) ?? 0;
-      state.scores.set(pid, prev + rate * dt);
-    }
-
-    // Track king color for rendering
-    if (onHill.length === 1) {
-      const king = playerManager.getPlayer(onHill[0]);
-      this.currentKingColor = king?.color ?? null;
-    } else {
-      this.currentKingColor = null;
+    for (const z of zones) world.addHillZone(z.x, z.y, z.width, z.height);
+    if (zones.length >= 2) {
+      const rot = this.levelData.hillRotation ?? DEFAULT_HILL_ROTATION;
+      world.setHillRotation(rot.minSeconds, rot.maxSeconds);
     }
   }
 
-  checkWinCondition(state: GameModeState, playerManager: PlayerManager): string | null {
-    // Check target score
-    for (const [pid, score] of state.scores) {
-      if (score >= TARGET_SCORE) return pid;
-    }
+  onPhaseStart(_phase: GamePhase, _state: GameModeState): void {}
 
-    // Time's up — highest score wins
-    if (state.timeRemaining !== null && state.timeRemaining <= 0) {
-      let bestId: string | null = null;
-      let bestScore = -1;
-      for (const [pid, score] of state.scores) {
-        if (score > bestScore) {
-          bestScore = score;
-          bestId = pid;
-        }
-      }
-      return bestId;
-    }
+  /** No-op: the engine advances scoring + hill rotation inside `world.step()`. */
+  update(_dt: number, _state: GameModeState, _playerManager: PlayerManager, _world: SoftBodyEngine): void {}
 
-    return null;
+  checkWinCondition(_state: GameModeState, playerManager: PlayerManager): string | null {
+    if (!this.world?.modeDecided()) return null;
+    const gid = this.world.modeWinner();
+    if (gid < 0) return null;
+    return playerManager.getPlayerByGameplayId(gid)?.playerId ?? null;
   }
 
-  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, _playerManager: PlayerManager): void {
-    if (this.hillZone) {
-      // Bright flash for ~0.6s after the hill jumps to a new zone.
-      const flash = Math.max(0, 1 - (this.gameTime - this.lastMoveTime) / 0.6);
-      drawHillZone(ctx, this.hillZone, this.gameTime, this.currentKingColor, flash);
-    }
+  renderWorld(ctx: CanvasRenderingContext2D, _camera: Camera, _state: GameModeState, playerManager: PlayerManager): void {
+    const hill = this.getActiveHill();
+    if (!hill || !this.world) return;
+    const gameTime = this.world.modeGameTime();
+    const flash = Math.max(0, 1 - (gameTime - this.world.kothLastMoveTime()) / 0.6);
+    const kingId = this.world.kothKingId();
+    const kingColor = kingId >= 0 ? (playerManager.getPlayerByGameplayId(kingId)?.color ?? null) : null;
+    drawHillZone(ctx, hill, gameTime, kingColor, flash);
   }
 
-  // Timer + scoreboard are rendered by the React <KothHud> overlay, not the
-  // canvas. The hill zone itself is still drawn in renderWorld above.
-  renderHUD(_ctx: CanvasRenderingContext2D, _width: number, _height: number, _state: GameModeState, _playerManager: PlayerManager): void {}
+  renderHUD(): void {}
 
-  cleanup(): void {
-    this.currentKingColor = null;
-  }
+  cleanup(): void { this.world = null; }
 
-  dumpState(): {
-    gameTime: number;
-    currentKingColor: string | null;
-    currentHillIndex: number;
-    nextMoveTime: number | null;
-    lastMoveTime: number;
-  } {
-    return {
-      gameTime: this.gameTime,
-      currentKingColor: this.currentKingColor,
-      currentHillIndex: this.currentHillIndex,
-      nextMoveTime: this.nextMoveTime,
-      lastMoveTime: this.lastMoveTime,
-    };
-  }
-  restoreState(state: {
-    gameTime: number;
-    currentKingColor: string | null;
-    currentHillIndex?: number;
-    nextMoveTime?: number | null;
-    lastMoveTime?: number;
-  }): void {
-    this.gameTime = state.gameTime;
-    this.currentKingColor = state.currentKingColor;
-    if (typeof state.currentHillIndex === 'number') {
-      this.currentHillIndex = state.currentHillIndex;
-      this.hillZone = this.levelData.hillZones?.[state.currentHillIndex] ?? this.hillZone;
-    }
-    if (state.nextMoveTime !== undefined) this.nextMoveTime = state.nextMoveTime;
-    if (typeof state.lastMoveTime === 'number') this.lastMoveTime = state.lastMoveTime;
-  }
-
-  /** The currently-active hill zone (changes over time when hill rotation is
-   *  enabled). Exposed for tests/diagnostics. */
   getActiveHill(): ZoneDef | null {
-    return this.hillZone;
+    const h = this.world?.kothActiveHill();
+    if (!h || h.length !== 4) return null;
+    return { id: 'hill', x: h[0], y: h[1], width: h[2], height: h[3] };
   }
 
   getGoalForBlob(): { x: number; y: number; width: number; height: number } | null {
-    if (!this.hillZone) return null;
-    return {
-      x: this.hillZone.x,
-      y: this.hillZone.y,
-      width: this.hillZone.width,
-      height: this.hillZone.height,
-    };
+    const h = this.getActiveHill();
+    if (!h) return null;
+    return { x: h.x, y: h.y, width: h.width, height: h.height };
   }
 }

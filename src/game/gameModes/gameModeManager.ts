@@ -6,6 +6,7 @@ import { PlayerManager } from '../playerManager';
 export class GameModeManager {
   private mode: GameMode;
   private state: GameModeState;
+  private world: SoftBodyEngine | null = null;
   private onPhaseChange?: (phase: GamePhase) => void;
   private onGameOver?: (winnerId: string | null, winnerName: string | null) => void;
 
@@ -42,6 +43,7 @@ export class GameModeManager {
   }
 
   initialize(world: SoftBodyEngine, playerManager: PlayerManager, triggerIndices?: Map<string, number>): void {
+    this.world = world;
     this.mode.initialize(world, playerManager, triggerIndices);
   }
 
@@ -72,8 +74,13 @@ export class GameModeManager {
         this.state.timeRemaining -= dt;
         if (this.state.timeRemaining <= 0) {
           this.state.timeRemaining = 0;
-          // Time's up — find winner by highest score or let mode decide
-          const winnerId = this.mode.checkWinCondition(this.state, playerManager);
+          // Time's up — let the mode decide first (target-score win), else fall
+          // back to the current points leader so a score mode (KOTH) ends on a
+          // named "X wins!" instead of an anticlimactic "Time's up!".
+          let winnerId = this.mode.checkWinCondition(this.state, playerManager);
+          if (!winnerId && this.mode.config.id !== 'chained') {
+            winnerId = this.leaderByScore(playerManager, world);
+          }
           if (winnerId) {
             const player = playerManager.getPlayer(winnerId);
             this.state.winner = winnerId;
@@ -85,8 +92,16 @@ export class GameModeManager {
         }
       }
 
-      // Let mode update (scoring, etc.)
+      // Let mode update (tether creation etc.) — scoring runs in the engine.
       this.mode.update(dt, this.state, playerManager, world);
+
+      // Mirror engine scores into the HUD state (gid → playerId).
+      const flat = world.modeScores();
+      this.state.scores.clear();
+      for (let i = 0; i + 1 < flat.length; i += 2) {
+        const player = playerManager.getPlayerByGameplayId(flat[i]);
+        if (player) this.state.scores.set(player.playerId, flat[i + 1]);
+      }
 
       // Check win condition
       const winnerId = this.mode.checkWinCondition(this.state, playerManager);
@@ -113,6 +128,25 @@ export class GameModeManager {
 
     // lobby
     return false;
+  }
+
+  /** Player id with the highest engine score right now (the points leader), or
+   *  null if nobody has scored. Read straight from the engine so it's current
+   *  at the buzzer. Ties resolve to the lowest gameplay id for determinism. */
+  private leaderByScore(playerManager: PlayerManager, world: SoftBodyEngine): string | null {
+    const flat = world.modeScores(); // [gid, score, gid, score, …]
+    let bestGid = -1;
+    let bestScore = 0; // require a positive score — all-zero stays "Time's up!"
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const gid = flat[i];
+      const score = flat[i + 1];
+      if (score > bestScore || (score === bestScore && bestGid >= 0 && gid < bestGid)) {
+        bestScore = score;
+        bestGid = gid;
+      }
+    }
+    if (bestGid < 0) return null;
+    return playerManager.getPlayerByGameplayId(bestGid)?.playerId ?? null;
   }
 
   renderWorld(ctx: CanvasRenderingContext2D, camera: Camera, playerManager: PlayerManager): void {
@@ -149,11 +183,7 @@ export class GameModeManager {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      if (this.mode.config.id === 'voting') {
-        // Voting results — show the selected level
-        ctx.fillStyle = '#c77dff';
-        ctx.fillText('Level Selected!', width / 2, height / 2 - 20);
-      } else if (this.mode.config.id === 'chained') {
+      if (this.mode.config.id === 'chained') {
         // Co-op: the whole team wins or the whole team loses — no individual.
         if (winner) {
           ctx.fillStyle = '#ffd700';
@@ -179,6 +209,14 @@ export class GameModeManager {
 
   private setPhase(phase: GamePhase): void {
     this.state.phase = phase;
+
+    // Engine mode timer/scoring only advances during 'playing'.
+    if (phase === 'playing') {
+      this.world?.resetModeForRound();
+      this.world?.setModePlaying(true);
+    } else {
+      this.world?.setModePlaying(false);
+    }
 
     if (phase === 'countdown') {
       this.state.phaseTimer = this.mode.config.countdownDuration;

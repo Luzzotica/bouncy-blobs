@@ -29,11 +29,6 @@ describe('validateLevelType', () => {
     expect(validateLevelType(l, 'koth')).toBeNull();
   });
 
-  it('party only needs a player spawn', () => {
-    const l = baseLevel();
-    expect(validateLevelType(l, 'party')).toBeNull();
-  });
-
   it('every mode requires at least one player spawn', () => {
     const l = baseLevel();
     l.spawnPoints = [];
@@ -41,6 +36,5 @@ describe('validateLevelType', () => {
     l.hillZones = [{ id: 'h1', x: 0, y: 0, width: 100, height: 100 }];
     expect(validateLevelType(l, 'solo_racing')).toMatch(/spawn/i);
     expect(validateLevelType(l, 'koth')).toMatch(/spawn/i);
-    expect(validateLevelType(l, 'party')).toMatch(/spawn/i);
   });
 });

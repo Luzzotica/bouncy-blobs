@@ -6,6 +6,8 @@ import { loadWasmForTests } from '../physics/testWasm';
 import { TriggerManager } from '../game/triggerManager';
 import { ActionManager } from '../game/actionManager';
 import { PlatformMover } from '../game/platformMover';
+import { SlimeBlob } from '../physics/slimeBlob';
+import { vec2 } from '../physics/vec2';
 import { loadLevel } from './levelLoader';
 import { LevelData } from './types';
 
@@ -92,7 +94,9 @@ describe('showcase level — covers every element type', () => {
   });
 
   it('loads cleanly into the runtime and a continuous action raises bridge points while the trigger is occupied', () => {
-    const world = new SoftBodyWorldRust();
+    // Zero gravity so the player blob stays parked on the trigger for the
+    // whole open tween (the engine recomputes occupancy from positions).
+    const world = new SoftBodyWorldRust({ gravity: { x: 0, y: 0 } });
     const loaded = loadLevel(world, level);
 
     // Sanity — every PointShape mapped to particles.
@@ -109,22 +113,26 @@ describe('showcase level — covers every element type', () => {
     const actionMgr = new ActionManager();
     actionMgr.initialize(world, level.actions ?? [], loaded.pointShapeParticles, undefined, platformMover, triggerMgr);
 
-    // Find the bridge trigger area's shape index.
-    let bridgeShapeIdx = -1;
-    for (const [idx, id] of loaded.triggerShapeIdxToId) {
-      if (id === 'plate-bridge') { bridgeShapeIdx = idx; break; }
-    }
-    expect(bridgeShapeIdx).toBeGreaterThanOrEqual(0);
+    // The bridge trigger's authored area.
+    const bridgeTrig = level.triggers!.find(t => t.id === 'plate-bridge')!;
+    expect(bridgeTrig).toBeTruthy();
 
     const bridgeIds = loaded.pointShapeParticles.get('rope-bridge')!;
     const anchorPid = bridgeIds[0];
     const startY = world.pos[anchorPid].y;
 
-    // Simulate a blob stepping on the trigger, then run a long update.
-    world.onTriggerEntered!(bridgeShapeIdx, 0);
-    // Drive several frames: triggerManager flips pressed; actionManager runs the tween.
+    // A player blob parked on the trigger → the engine charges/presses it and
+    // the continuous action's open tween runs inside world.step().
+    const player = new SlimeBlob(world, vec2(bridgeTrig.x, bridgeTrig.y), {
+      playerControlled: true,
+      hullPreset: 'circle16',
+      sortKey: 'player:test',
+    });
+    world.setBlobRole(player.blobId, 1, 0);
+
     for (let i = 0; i < 200; i++) {
-      triggerMgr.update(0.016);
+      world.step(0.016);
+      triggerMgr.update(0.016); // no-ops, but mirror the runtime call order
       actionMgr.update(0.016);
     }
 

@@ -14,8 +14,15 @@ pub mod rng;
 pub mod shape_matching;
 pub mod snapshot;
 pub mod spring_pads;
+pub mod triggers;
+pub mod actions;
+pub mod spikes;
+pub mod game_mode;
 pub mod tuning;
 pub mod types;
 pub mod world;
+
+#[cfg(test)]
+mod game_logic_tests;
 
 pub use fx::{Fx, FxVec2};

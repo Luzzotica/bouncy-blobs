@@ -1,180 +1,84 @@
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { TriggerDef } from '../levels/types';
-
-interface RegisteredTrigger {
-  def: TriggerDef;
-  /** True once chargeSeconds of continuous occupancy has elapsed. */
-  pressed: boolean;
-  /** Seconds of continuous occupancy accumulated so far. Reset to 0 when occupancy empties. */
-  chargeElapsed: number;
-  /** Brief visual flash after a state change. */
-  flashTimer: number;
-}
+import { hashStringId } from './idHash';
 
 /**
- * A Trigger is an area that detects blobs. Actions subscribe to triggers
- * (via `ActionDef.sourceTriggerIds`) and poll `isPressed()` each frame.
- *
- * Triggers support a `chargeSeconds` hold-up: they only flip to pressed
- * after a blob has occupied continuously for that long. The charge resets
- * the moment occupancy drops to zero.
+ * A Trigger is an area that detects blobs. The charge→pressed state machine now
+ * lives in the Rust engine (Phase 6 of the JS→Rust migration); this manager is
+ * a thin loader (registers each trigger via `addGameTrigger` at init) + renderer
+ * (reads `triggerPressed` / `triggerChargeProgress` from the engine). Actions
+ * poll `isPressed()` which forwards to the engine.
  */
 export class TriggerManager {
-  private triggers = new Map<string, RegisteredTrigger>();
-  /** physics-world trigger shape index → trigger id */
-  private shapeIdxToTriggerId = new Map<number, string>();
-  /** Active blob occupants per trigger. */
-  private occupants = new Map<string, Set<number>>();
   private world: SoftBodyEngine | null = null;
-  /** Predicate identifying NPC blobs; used to honor TriggerDef.ignoreNpcs.
-   *  Defaults to "no blob is an NPC" so callers that don't supply one keep
-   *  the previous behavior (everything can press). */
-  private isNpcBlob: (blobId: number) => boolean = () => false;
-  /** Predicate identifying PLAYER blobs (humans + AI bots). Only players and
-   *  NPCs may ever press a trigger — structural softbodies (point shapes,
-   *  soft platforms, rope-chain segments) are blobs in the engine too, and
-   *  the engine emits enter/exit events for ALL of them, so without this
-   *  filter they'd trip triggers. Defaults to "every blob is a player" so
-   *  callers that don't supply one keep the previous (permissive) behavior. */
-  private isPlayerBlob: (blobId: number) => boolean = () => true;
+  /** def by string id (for rendering geometry). */
+  private defs = new Map<string, TriggerDef>();
+  /** string id → engine registration index (for state queries). */
+  private idToIdx = new Map<string, number>();
 
   initialize(
     world: SoftBodyEngine,
     defs: TriggerDef[],
     shapeIdxToTriggerId: Map<number, string>,
-    isNpcBlob?: (blobId: number) => boolean,
-    isPlayerBlob?: (blobId: number) => boolean,
+    _isNpcBlob?: (blobId: number) => boolean,
+    _isPlayerBlob?: (blobId: number) => boolean,
   ): void {
     this.world = world;
-    this.shapeIdxToTriggerId = shapeIdxToTriggerId;
-    this.isNpcBlob = isNpcBlob ?? (() => false);
-    this.isPlayerBlob = isPlayerBlob ?? (() => true);
-    this.triggers.clear();
-    this.occupants.clear();
+    this.defs.clear();
+    this.idToIdx.clear();
+    // Invert shapeIdx→triggerId so we can find each trigger's polygon shape.
+    const triggerIdToShapeIdx = new Map<string, number>();
+    for (const [shapeIdx, triggerId] of shapeIdxToTriggerId) triggerIdToShapeIdx.set(triggerId, shapeIdx);
+
     for (const def of defs) {
-      this.triggers.set(def.id, {
-        def,
-        pressed: (def.chargeSeconds ?? 0) <= 0 ? false : false, // starts unpressed
-        chargeElapsed: 0,
-        flashTimer: 0,
-      });
-      this.occupants.set(def.id, new Set());
-    }
-
-    const priorEntered = world.onTriggerEntered;
-    const priorExited = world.onTriggerExited;
-    world.onTriggerEntered = (shapeIdx, blobId) => {
-      this.handleEnter(shapeIdx, blobId);
-      priorEntered?.(shapeIdx, blobId);
-    };
-    world.onTriggerExited = (shapeIdx, blobId) => {
-      this.handleExit(shapeIdx, blobId);
-      priorExited?.(shapeIdx, blobId);
-    };
-  }
-
-  private handleEnter(shapeIdx: number, blobId: number): void {
-    const triggerId = this.shapeIdxToTriggerId.get(shapeIdx);
-    if (!triggerId) return;
-    const trig = this.triggers.get(triggerId);
-    if (!trig) return;
-    // Only players and NPCs may press triggers. Anything else reaching here is
-    // a structural softbody (point shape, soft platform, rope segment) — the
-    // engine fires enter events for every blob, so reject non-agents outright.
-    if (!this.isPlayerBlob(blobId)) {
-      if (!this.isNpcBlob(blobId)) return;        // structural softbody — never presses
-      if (trig.def.ignoreNpcs) return;            // an NPC, but this trigger ignores NPCs
-    }
-    const occupants = this.occupants.get(triggerId);
-    if (!occupants) return;
-    const wasEmpty = occupants.size === 0;
-    occupants.add(blobId);
-    if (wasEmpty) {
-      // First blob to step on. If no charge required, flip pressed immediately.
-      const charge = trig.def.chargeSeconds ?? 0;
-      if (charge <= 0) {
-        trig.pressed = true;
-        trig.flashTimer = 0.4;
-      }
-      // Otherwise charging begins in update(dt).
+      const shapeIdx = triggerIdToShapeIdx.get(def.id);
+      if (shapeIdx === undefined) continue; // no registered polygon (defensive)
+      const idx = world.addGameTrigger(hashStringId(def.id), shapeIdx, def.chargeSeconds ?? 0, def.ignoreNpcs ?? false);
+      this.defs.set(def.id, def);
+      this.idToIdx.set(def.id, idx);
     }
   }
 
-  private handleExit(shapeIdx: number, blobId: number): void {
-    const triggerId = this.shapeIdxToTriggerId.get(shapeIdx);
-    if (!triggerId) return;
-    const occupants = this.occupants.get(triggerId);
-    const trig = this.triggers.get(triggerId);
-    if (!occupants || !trig) return;
-    occupants.delete(blobId);
-    if (occupants.size === 0) {
-      // Hard reset: charge progress is lost the moment the area is empty.
-      trig.chargeElapsed = 0;
-      if (trig.pressed) {
-        trig.pressed = false;
-        trig.flashTimer = 0.2;
-      }
-    }
-  }
+  /** No-op: the engine advances the charge machine inside `world.step()`. */
+  update(_dt: number): void {}
 
-  update(dt: number): void {
-    for (const trig of this.triggers.values()) {
-      if (trig.flashTimer > 0) trig.flashTimer = Math.max(0, trig.flashTimer - dt);
-      const occupants = this.occupants.get(trig.def.id);
-      if (!occupants || occupants.size === 0) continue;
-      const charge = trig.def.chargeSeconds ?? 0;
-      if (charge <= 0 || trig.pressed) continue;
-      trig.chargeElapsed = Math.min(charge, trig.chargeElapsed + dt);
-      if (trig.chargeElapsed >= charge) {
-        trig.pressed = true;
-        trig.flashTimer = 0.4;
-      }
-    }
-  }
-
-  /** Polled by `ActionManager` each frame. */
+  /** Polled by actions (and any TS consumer) — forwards to the engine. */
   isPressed(triggerId: string): boolean {
-    return this.triggers.get(triggerId)?.pressed ?? false;
+    return this.world?.triggerPressedById(hashStringId(triggerId)) ?? false;
   }
 
-  /** Charge progress in [0, 1]. Used by the renderer to draw a fill meter. */
+  /** Charge progress in [0,1] for the renderer's fill meter. */
   chargeProgress(triggerId: string): number {
-    const trig = this.triggers.get(triggerId);
-    if (!trig) return 0;
-    const charge = trig.def.chargeSeconds ?? 0;
-    if (charge <= 0) return trig.pressed ? 1 : 0;
-    return Math.min(1, trig.chargeElapsed / charge);
+    const idx = this.idToIdx.get(triggerId);
+    if (idx === undefined || !this.world) return 0;
+    return this.world.triggerChargeProgress(idx);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    for (const trig of this.triggers.values()) {
-      const { def } = trig;
+    if (!this.world) return;
+    for (const [id, def] of this.defs) {
+      const idx = this.idToIdx.get(id);
+      if (idx === undefined) continue;
+      const pressed = this.world.triggerPressed(idx);
+      const progress = this.world.triggerChargeProgress(idx);
+      const charging = !pressed && progress > 0 && progress < 1;
+
       ctx.save();
       ctx.translate(def.x, def.y);
       ctx.rotate(def.rotation);
       const hw = def.width / 2;
       const hh = def.height / 2;
 
-      const pressed = trig.pressed;
-      const flash = trig.flashTimer;
-      const progress = this.chargeProgress(def.id);
-      const charging = !pressed && progress > 0 && progress < 1;
-
-      // Empty zone — a faint translucent fill so the rectangle reads as a
-      // "stand here" area without competing with platforms. Slightly green
-      // tint when pressed; default ghostly white otherwise.
       let fillColor: string;
       let strokeColor: string;
       if (pressed) {
-        fillColor   = 'rgba(120, 240, 120, 0.16)';
+        fillColor = 'rgba(120, 240, 120, 0.16)';
         strokeColor = 'rgba(150, 255, 150, 0.95)';
       } else if (charging) {
-        // No background tint while charging — the progress fill below
-        // grows across the whole zone and IS the charging cue.
-        fillColor   = 'rgba(255, 255, 255, 0.04)';
+        fillColor = 'rgba(255, 255, 255, 0.04)';
         strokeColor = 'rgba(255, 215, 90, 0.85)';
       } else {
-        fillColor   = 'rgba(255, 255, 255, 0.06)';
+        fillColor = 'rgba(255, 255, 255, 0.06)';
         strokeColor = 'rgba(230, 230, 240, 0.7)';
       }
 
@@ -183,9 +87,6 @@ export class TriggerManager {
       ctx.roundRect(-hw, -hh, def.width, def.height, 4);
       ctx.fill();
 
-      // Charge progress — see-through yellow rect that grows across the
-      // whole zone (left → right) as charging completes. Clipped to the
-      // rounded-rect silhouette so the corners stay clean.
       if (charging) {
         ctx.save();
         ctx.beginPath();
@@ -196,11 +97,8 @@ export class TriggerManager {
         ctx.restore();
       }
 
-      // Dashed outline — the visual cue that this is a zone, not a solid
-      // platform. Pattern scales with platform size so tiny triggers don't
-      // look like a single solid line.
       const dashLen = Math.max(6, Math.min(14, def.width * 0.05));
-      const gapLen  = Math.max(4, dashLen * 0.6);
+      const gapLen = Math.max(4, dashLen * 0.6);
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2.5;
       ctx.setLineDash([dashLen, gapLen]);
@@ -208,66 +106,13 @@ export class TriggerManager {
       ctx.roundRect(-hw, -hh, def.width, def.height, 4);
       ctx.stroke();
       ctx.setLineDash([]);
-
-      // Flash on press — bright dashed ring outside the trigger.
-      if (flash > 0) {
-        ctx.globalAlpha = flash;
-        ctx.strokeStyle = pressed ? '#a0ffa0' : '#ff9090';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([dashLen, gapLen]);
-        ctx.beginPath();
-        ctx.roundRect(-hw - 3, -hh - 3, def.width + 6, def.height + 6, 6);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
       ctx.restore();
     }
   }
 
-  /** Serializable trigger state for network sync (keyframe replication).
-   * Captures the latch/charge/flash plus the blob-id occupant set. Occupant
-   * ids are deterministic across clients because blob ids are assigned by
-   * `addBlob` in spawn order — and PlayerManager spawns players in
-   * deterministic-id order on every client. */
-  dumpState(): Record<string, { pressed: boolean; chargeElapsed: number; flashTimer: number; occupants: number[] }> {
-    const out: Record<string, { pressed: boolean; chargeElapsed: number; flashTimer: number; occupants: number[] }> = {};
-    for (const [id, trig] of this.triggers) {
-      const occ = this.occupants.get(id);
-      // Occupant ids sorted so iteration order is deterministic regardless
-      // of insertion order on the local sim — a guest that observed enter
-      // events in a different order than the host would otherwise produce
-      // a different `occupants` array even after restoring.
-      const occupants = occ ? [...occ].sort((a, b) => a - b) : [];
-      out[id] = {
-        pressed: trig.pressed,
-        chargeElapsed: trig.chargeElapsed,
-        flashTimer: trig.flashTimer,
-        occupants,
-      };
-    }
-    return out;
-  }
-
-  restoreState(state: Record<string, { pressed: boolean; chargeElapsed: number; flashTimer: number; occupants: number[] }>): void {
-    for (const [id, v] of Object.entries(state)) {
-      const trig = this.triggers.get(id);
-      if (!trig) continue;
-      trig.pressed = v.pressed;
-      trig.chargeElapsed = v.chargeElapsed;
-      trig.flashTimer = v.flashTimer;
-      const occ = this.occupants.get(id);
-      if (occ) {
-        occ.clear();
-        for (const blobId of v.occupants) occ.add(blobId);
-      }
-    }
-  }
-
   cleanup(): void {
-    this.triggers.clear();
-    this.occupants.clear();
-    this.shapeIdxToTriggerId = new Map();
+    this.defs.clear();
+    this.idToIdx.clear();
     this.world = null;
   }
 }

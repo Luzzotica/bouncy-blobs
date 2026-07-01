@@ -90,6 +90,20 @@ export class PlatformMover {
     return { x: p.baseX, y: p.baseY };
   }
 
+  /** Everything the engine-side action loader needs to bind a platform target:
+   *  the static-surface wasm index, the closed pose, and the local (centred,
+   *  unrotated) rectangle the engine rebuilds the world poly from each tick.
+   *  Null if the platform isn't registered or the engine doesn't know it. */
+  getPlatformActionData(platformId: string): { staticIdx: number; baseX: number; baseY: number; baseRot: number; localPoly: number[] } | null {
+    const p = this.platforms.get(platformId);
+    if (!p || !this.engine) return null;
+    const staticIdx = this.engine.staticSurfaceIndex(p.surface);
+    if (staticIdx < 0) return null;
+    const localPoly: number[] = [];
+    for (const v of p.localPoly) { localPoly.push(v.x, v.y); }
+    return { staticIdx, baseX: p.baseX, baseY: p.baseY, baseRot: p.baseRotation, localPoly };
+  }
+
   /** Move the platform to (x, y) while keeping its closed-pose rotation.
    *  Back-compat shim around setPose for callers that don't animate rotation. */
   setPlatformPos(platformId: string, x: number, y: number, dt: number): void {
@@ -135,20 +149,26 @@ export class PlatformMover {
     return p.baseRotation;
   }
 
-  /** Live (x, y) for a platform — used by the renderer so visuals follow physics. */
+  /** Live (x, y) for a platform — centroid of the engine's live poly (the
+   *  engine now drives platform motion via actions, so the TS surface object is
+   *  stale; read the engine snapshot instead). */
   getLivePosition(platformId: string): { x: number; y: number } | null {
-    const p = this.platforms.get(platformId);
-    if (!p) return null;
-    return { x: p.baseX + p.lastOffsetX, y: p.baseY + p.lastOffsetY };
+    const poly = this.getLivePoly(platformId);
+    if (!poly || poly.length === 0) return null;
+    let sx = 0, sy = 0;
+    for (const v of poly) { sx += v.x; sy += v.y; }
+    return { x: sx / poly.length, y: sy / poly.length };
   }
 
-  /** Live world polygon for the named platform — the engine's collision poly,
-   *  mutated in place by setPlatformPos. Used by the decal renderer to clip
-   *  splats so they follow the platform's translation each frame. */
+  /** Live world polygon for the named platform — read from the engine's static
+   *  surface (the action system mutates the engine-side poly each tick). Used
+   *  by the decal renderer to clip splats so they follow the platform. */
   getLivePoly(platformId: string): { x: number; y: number }[] | null {
     const p = this.platforms.get(platformId);
-    if (!p) return null;
-    return p.surface.poly;
+    if (!p || !this.engine) return p?.surface.poly ?? null;
+    const idx = this.engine.staticSurfaceIndex(p.surface);
+    if (idx < 0) return p.surface.poly;
+    return this.engine.staticSurfaces[idx]?.poly ?? p.surface.poly;
   }
 
   /** Find the platform underneath / closest to `point`. Used when emitting

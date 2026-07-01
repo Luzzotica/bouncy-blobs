@@ -23,12 +23,11 @@ interface Props {
   onPublished: (id: string) => void;
 }
 
-const ALL_TYPES: LevelType[] = ['solo_racing', 'koth', 'team_racing', 'party'];
+const ALL_TYPES: LevelType[] = ['solo_racing', 'koth', 'team_racing'];
 const TYPE_LABELS: Record<LevelType, string> = {
   solo_racing: 'Solo Racing',
   koth: 'King of the Hill',
   team_racing: 'Chained Together',
-  party: 'Party',
 };
 
 /**

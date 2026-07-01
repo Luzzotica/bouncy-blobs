@@ -392,6 +392,151 @@ impl SoftBodyWorldHandle {
         self.inner.take_spring_pad_fire_events()
     }
 
+    // ---- Phase 6: blob roles + trigger charge machines ----
+    #[wasm_bindgen(js_name = setBlobRole)]
+    pub fn set_blob_role(&mut self, blob_id: u32, role: u8, gameplay_id: u32) {
+        self.inner.set_blob_role(blob_id, role, gameplay_id);
+    }
+    #[wasm_bindgen(js_name = addGameTrigger)]
+    pub fn add_game_trigger(&mut self, id: u32, shape_idx: u32, charge_seconds: f64, ignore_npcs: bool) -> u32 {
+        self.inner.add_game_trigger(id, shape_idx, Fx::from_f64(charge_seconds), ignore_npcs)
+    }
+    #[wasm_bindgen(js_name = clearGameTriggers)]
+    pub fn clear_game_triggers(&mut self) { self.inner.clear_game_triggers(); }
+    #[wasm_bindgen(js_name = triggerPressed)]
+    pub fn trigger_pressed(&self, idx: usize) -> bool { self.inner.game_trigger_pressed(idx) }
+    #[wasm_bindgen(js_name = triggerChargeProgress)]
+    pub fn trigger_charge_progress(&self, idx: usize) -> f64 { self.inner.game_trigger_charge_progress(idx) }
+    #[wasm_bindgen(js_name = triggerPressedById)]
+    pub fn trigger_pressed_by_id(&self, id: u32) -> bool { self.inner.game_trigger_pressed_by_id(id) }
+    #[wasm_bindgen(js_name = takeTriggerPressedEvents)]
+    pub fn take_trigger_pressed_events(&mut self) -> Vec<u32> { self.inner.take_trigger_pressed_events() }
+    #[wasm_bindgen(js_name = takeTriggerReleasedEvents)]
+    pub fn take_trigger_released_events(&mut self) -> Vec<u32> { self.inner.take_trigger_released_events() }
+
+    // ---- Phase 7: actions ----
+    #[wasm_bindgen(js_name = addGameAction)]
+    pub fn add_game_action(&mut self, id: u32, mode: u8, require_all: bool, easing: u8, delay: f64, duration: f64, interval: f64, source_trigger_ids: &[u32]) -> u32 {
+        self.inner.add_game_action(id, mode, require_all, easing, Fx::from_f64(delay), Fx::from_f64(duration), Fx::from_f64(interval), source_trigger_ids.to_vec())
+    }
+    #[wasm_bindgen(js_name = actionAddTargetShapePoint)]
+    pub fn action_add_target_shape_point(&mut self, action_idx: usize, particle: u32, end_x: f64, end_y: f64) {
+        self.inner.action_add_target_shape_point(action_idx, particle as usize, Fx::from_f64(end_x), Fx::from_f64(end_y));
+    }
+    #[wasm_bindgen(js_name = actionAddTargetMoveShape)]
+    pub fn action_add_target_move_shape(&mut self, action_idx: usize, particle_ids: &[u32], end_x: f64, end_y: f64) {
+        let ids: Vec<usize> = particle_ids.iter().map(|&i| i as usize).collect();
+        self.inner.action_add_target_move_shape(action_idx, ids, Fx::from_f64(end_x), Fx::from_f64(end_y));
+    }
+    #[wasm_bindgen(js_name = actionAddTargetRotateShape)]
+    pub fn action_add_target_rotate_shape(&mut self, action_idx: usize, particle_ids: &[u32], end_rotation: f64) {
+        let ids: Vec<usize> = particle_ids.iter().map(|&i| i as usize).collect();
+        self.inner.action_add_target_rotate_shape(action_idx, ids, Fx::from_f64(end_rotation));
+    }
+    #[wasm_bindgen(js_name = actionAddTargetPlatform)]
+    pub fn action_add_target_platform(&mut self, action_idx: usize, static_idx: u32, base_x: f64, base_y: f64, base_rot: f64, local_poly: &[f64], end_x: f64, end_y: f64, end_rot: f64) {
+        self.inner.action_add_target_platform(action_idx, static_idx as usize, Fx::from_f64(base_x), Fx::from_f64(base_y), Fx::from_f64(base_rot), poly_from_f64_pairs(local_poly), Fx::from_f64(end_x), Fx::from_f64(end_y), Fx::from_f64(end_rot));
+    }
+    #[wasm_bindgen(js_name = actionAddTargetSpike)]
+    pub fn action_add_target_spike(&mut self, action_idx: usize, spike_id: u32, base_x: f64, base_y: f64, base_rot: f64, end_x: f64, end_y: f64, end_rot: f64) {
+        self.inner.action_add_target_spike(action_idx, spike_id, Fx::from_f64(base_x), Fx::from_f64(base_y), Fx::from_f64(base_rot), Fx::from_f64(end_x), Fx::from_f64(end_y), Fx::from_f64(end_rot));
+    }
+    #[wasm_bindgen(js_name = clearGameActions)]
+    pub fn clear_game_actions(&mut self) { self.inner.clear_game_actions(); }
+    #[wasm_bindgen(js_name = gameActionState)]
+    pub fn game_action_state(&self, idx: usize) -> u32 { self.inner.game_action_state(idx) }
+    #[wasm_bindgen(js_name = gameActionTargetPose)]
+    pub fn game_action_target_pose(&self, action_idx: usize, target_idx: usize) -> Vec<f64> {
+        self.inner.game_action_target_pose(action_idx, target_idx).map(|p| p.to_vec()).unwrap_or_default()
+    }
+    #[wasm_bindgen(js_name = takeActionFireEvents)]
+    pub fn take_action_fire_events(&mut self) -> Vec<u32> { self.inner.take_action_fire_events() }
+
+    // ---- Phase 8: spikes / death / respawn ----
+    #[wasm_bindgen(js_name = setDeathMode)]
+    pub fn set_death_mode(&mut self, mode: u8) { self.inner.set_death_mode(mode); }
+    #[wasm_bindgen(js_name = addSpike)]
+    pub fn add_spike(&mut self, id: u32, x: f64, y: f64, rot: f64, w: f64, h: f64) -> u32 {
+        self.inner.add_spike(id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(rot), Fx::from_f64(w), Fx::from_f64(h))
+    }
+    #[wasm_bindgen(js_name = addDeathZone)]
+    pub fn add_death_zone(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.inner.add_death_zone(Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h));
+    }
+    #[wasm_bindgen(js_name = setKillBelowY)]
+    pub fn set_kill_below_y(&mut self, y: f64, enabled: bool) { self.inner.set_kill_below_y(Fx::from_f64(y), enabled); }
+    #[wasm_bindgen(js_name = setSpawnPoints)]
+    pub fn set_spawn_points(&mut self, flat: &[f64]) {
+        let v: Vec<Fx> = flat.iter().map(|&x| Fx::from_f64(x)).collect();
+        self.inner.set_spawn_points(&v);
+    }
+    #[wasm_bindgen(js_name = setSpikePose)]
+    pub fn set_spike_pose(&mut self, spike_id: u32, x: f64, y: f64, rot: f64) {
+        self.inner.set_spike_pose(spike_id, Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(rot));
+    }
+    #[wasm_bindgen(js_name = respawnAll)]
+    pub fn respawn_all(&mut self) { self.inner.respawn_all(); }
+    #[wasm_bindgen(js_name = killPlayerByBlobId)]
+    pub fn kill_player_by_blob_id(&mut self, blob_id: u32) { self.inner.kill_player_by_blob_id(blob_id); }
+    #[wasm_bindgen(js_name = clearSpikes)]
+    pub fn clear_spikes(&mut self) { self.inner.clear_spikes(); }
+    #[wasm_bindgen(js_name = takeKillEvents)]
+    pub fn take_kill_events(&mut self) -> Vec<f64> { self.inner.take_kill_events() }
+    #[wasm_bindgen(js_name = isInvulnerable)]
+    pub fn is_invulnerable(&self, gameplay_id: u32) -> bool { self.inner.is_invulnerable(gameplay_id) }
+    #[wasm_bindgen(js_name = isDead)]
+    pub fn is_dead(&self, gameplay_id: u32) -> bool { self.inner.is_dead(gameplay_id) }
+    #[wasm_bindgen(js_name = deadPlayerRespawnTimer)]
+    pub fn dead_player_respawn_timer(&self, gameplay_id: u32) -> f64 { self.inner.dead_player_respawn_timer(gameplay_id) }
+    #[wasm_bindgen(js_name = deadPlayerDeathPos)]
+    pub fn dead_player_death_pos(&self, gameplay_id: u32) -> Vec<f64> {
+        self.inner.dead_player_death_pos(gameplay_id).map(|p| p.to_vec()).unwrap_or_default()
+    }
+    #[wasm_bindgen(js_name = spikeLivePose)]
+    pub fn spike_live_pose(&self, idx: usize) -> Vec<f64> {
+        self.inner.spike_live_pose(idx).map(|p| p.to_vec()).unwrap_or_default()
+    }
+
+    // ---- Phase 9: game-mode rules ----
+    #[wasm_bindgen(js_name = setGameMode)]
+    pub fn set_game_mode(&mut self, kind: u8, time_limit: f64, target_score: f64) {
+        self.inner.set_game_mode(kind, Fx::from_f64(time_limit), Fx::from_f64(target_score));
+    }
+    #[wasm_bindgen(js_name = setGoalZone)]
+    pub fn set_goal_zone(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.inner.set_goal_zone(Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h));
+    }
+    #[wasm_bindgen(js_name = addHillZone)]
+    pub fn add_hill_zone(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.inner.add_hill_zone(Fx::from_f64(x), Fx::from_f64(y), Fx::from_f64(w), Fx::from_f64(h));
+    }
+    #[wasm_bindgen(js_name = setHillRotation)]
+    pub fn set_hill_rotation(&mut self, min: f64, max: f64) { self.inner.set_hill_rotation(Fx::from_f64(min), Fx::from_f64(max)); }
+    #[wasm_bindgen(js_name = setModePlaying)]
+    pub fn set_mode_playing(&mut self, playing: bool) { self.inner.set_mode_playing(playing); }
+    #[wasm_bindgen(js_name = resetModeForRound)]
+    pub fn reset_mode_for_round(&mut self) { self.inner.reset_mode_for_round(); }
+    #[wasm_bindgen(js_name = modeWinner)]
+    pub fn mode_winner(&self) -> i64 { self.inner.mode_winner() }
+    #[wasm_bindgen(js_name = modeDecided)]
+    pub fn mode_decided(&self) -> bool { self.inner.mode_decided() }
+    #[wasm_bindgen(js_name = modeGameTime)]
+    pub fn mode_game_time(&self) -> f64 { self.inner.mode_game_time() }
+    #[wasm_bindgen(js_name = modeTimeRemaining)]
+    pub fn mode_time_remaining(&self) -> f64 { self.inner.mode_time_remaining() }
+    #[wasm_bindgen(js_name = modeScore)]
+    pub fn mode_score(&self, gameplay_id: u32) -> f64 { self.inner.mode_score(gameplay_id) }
+    #[wasm_bindgen(js_name = modeScores)]
+    pub fn mode_scores(&self) -> Vec<f64> { self.inner.mode_scores() }
+    #[wasm_bindgen(js_name = kothActiveHill)]
+    pub fn koth_active_hill(&self) -> Vec<f64> { self.inner.koth_active_hill().map(|p| p.to_vec()).unwrap_or_default() }
+    #[wasm_bindgen(js_name = kothLastMoveTime)]
+    pub fn koth_last_move_time(&self) -> f64 { self.inner.koth_last_move_time() }
+    #[wasm_bindgen(js_name = kothKingId)]
+    pub fn koth_king_id(&self) -> i64 { self.inner.koth_king_id() }
+    #[wasm_bindgen(js_name = chainedAllReached)]
+    pub fn chained_all_reached(&self) -> bool { self.inner.chained_all_reached() }
+
     // ---- state readout (Float64Array — converted on demand from Fx) ----
 
     /// Flat (x0,y0,x1,y1,...) buffer of all particle positions.
@@ -707,6 +852,22 @@ impl SoftBodyWorldHandle {
     pub fn get_blob_particle_contacts(&self, blob_id: u32) -> js_sys::Uint8Array {
         let buf = self.inner.get_blob_particle_contacts(blob_id);
         js_sys::Uint8Array::from(&buf[..])
+    }
+
+    /// STATIC-only per-particle "touched solid this step" bitmap, hull order.
+    /// The contact kind the crush/sandwich check actually counts.
+    #[wasm_bindgen(js_name = getBlobParticleStaticContacts)]
+    pub fn get_blob_particle_static_contacts(&self, blob_id: u32) -> js_sys::Uint8Array {
+        let buf = self.inner.get_blob_particle_static_contacts(blob_id);
+        js_sys::Uint8Array::from(&buf[..])
+    }
+
+    /// Debug readout of the crush check:
+    /// [sandwiched, compressed, staticContactCount, minOpposingDot, integrityViolations].
+    #[wasm_bindgen(js_name = getBlobCrushDebug)]
+    pub fn get_blob_crush_debug(&self, blob_id: u32) -> Float64Array {
+        let v = self.inner.get_blob_crush_debug(blob_id);
+        Float64Array::from(&v[..])
     }
 
     /// Returns [count, normalX, normalY].

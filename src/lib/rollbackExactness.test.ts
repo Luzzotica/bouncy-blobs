@@ -36,7 +36,6 @@ import { SoftBodyWorldRust } from "../physics/softBodyWorldRust";
 import { PlayerManager } from "../game/playerManager";
 import { loadLevel } from "../levels/levelLoader";
 import { defaultLevel } from "../levels/defaultLevel";
-import { partyLevel } from "../levels/partyLevel";
 import { kothLevel } from "../levels/kothLevel";
 import { quantizeAxis } from "./inputProtocol";
 import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
@@ -274,9 +273,9 @@ describe("rollback exactness (Rust+wasm engine)", () => {
     expect(result.match).toBe(true);
   });
 
-  it("chaotic motion, partyLevel (with spring pads): exercises spring contact state", () => {
+  it("chaotic motion, kothLevel: exercises rollback determinism", () => {
     const result = runRoundTripScenario({
-      level: partyLevel,
+      level: kothLevel,
       script: scriptChaos,
       snapshotAtTick: 30,
       totalTicks: 120,

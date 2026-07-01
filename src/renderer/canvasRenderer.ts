@@ -2,14 +2,15 @@ import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Camera } from './camera';
 import { drawBlob, drawBlobShine, perturbHullForWind } from './blobRenderer';
-import { drawJellyCandy, SOFT_PLATFORM_PALETTE, setCandyParallax } from './candySkin';
+import { drawJellyCandy, drawFlatSurface, SOFT_PLATFORM_PALETTE, setCandyParallax } from './candySkin';
 import { drawStaticPolygon } from './levelRenderer';
 import { drawSprings, drawShapeMatchTargets, drawBlobPoints, drawBlobHulls } from './debugRenderer';
-import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR } from './colors';
+import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR, isCave, CAVE_PLATFORM_FILL, CAVE_GRAVITY_POINT_RGB, CAVE_GRAVITY_DIR_RGB } from './colors';
 import { drawBlobFace } from './faceRenderer';
 import { drawChain } from './chainRenderer';
 import { renderDecals } from './decals';
 import { drawGameBackground } from './backgroundRenderer';
+import { drawCaveForeground } from './caveForeground';
 import { renderParticles } from './particles';
 import { impactsFor } from './blobImpacts';
 import { drawLava } from './lavaRenderer';
@@ -122,6 +123,27 @@ export interface PlayerRenderData {
   gaze: { x: number; y: number };
 }
 
+// Gravity-zone overlay rgb prefixes — dimmed to cooler tones in the cave
+// theme. Zero-g zones are already cyan (cool) so they're left as-is.
+const GRAV_POINT_RGB = isCave
+  ? `${CAVE_GRAVITY_POINT_RGB.r}, ${CAVE_GRAVITY_POINT_RGB.g}, ${CAVE_GRAVITY_POINT_RGB.b}`
+  : '180, 60, 220';
+const GRAV_DIR_RGB = isCave
+  ? `${CAVE_GRAVITY_DIR_RGB.r}, ${CAVE_GRAVITY_DIR_RGB.g}, ${CAVE_GRAVITY_DIR_RGB.b}`
+  : '255, 160, 60';
+const GRAV_DIR_ARROW_RGB = isCave
+  ? `${CAVE_GRAVITY_DIR_RGB.r}, ${CAVE_GRAVITY_DIR_RGB.g}, ${CAVE_GRAVITY_DIR_RGB.b}`
+  : '255, 200, 100';
+
+/** Mean of a hull's nodes — the centroid of the (possibly interpolated) polygon
+ *  used to anchor the face + name tag so they follow the drawn shape. */
+function centroidOf(hull: { x: number; y: number }[]): { x: number; y: number } {
+  let x = 0, y = 0;
+  for (const p of hull) { x += p.x; y += p.y; }
+  const n = hull.length || 1;
+  return { x: x / n, y: y / n };
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   world: SoftBodyEngine,
@@ -136,6 +158,15 @@ export function render(
   softPlatforms: SoftPlatformRenderInfo[] = [],
   chains: ChainRenderInfo[] = [],
   killPlaneY?: number,
+  /** Per-blob INTERPOLATED HULL (blobId → world-space node positions). Composes
+   *  per-node physics→render interpolation (lerp between the last two ticks by the
+   *  accumulator alpha) with the post-rollback DisplaySmoother ease-in, so BOTH
+   *  motion and SHAPE (expansion) are decoupled from raw physics. The blob is drawn
+   *  from this hull instead of its live one — render-only, never touches the sim. */
+  renderHulls?: Map<number, { x: number; y: number }[]>,
+  /** Debug overlay: draw each blob's RAW physics hull nodes (un-interpolated) as
+   *  dots, to visualize how far the smoothed visuals lag the sim. */
+  showPhysicsPoints = false,
 ): void {
   // Background image (or solid fallback color while it's still loading).
   drawGameBackground(ctx, camera, canvasWidth, canvasHeight, BACKGROUND_COLOR);
@@ -165,7 +196,11 @@ export function render(
     if (sp.hullIndices.length < 3) continue;
     const positions = world.getPositions();
     const hull = sp.hullIndices.map(i => positions[i]);
-    drawJellyCandy(ctx, hull, SOFT_PLATFORM_PALETTE, 0.18, `soft-${sp.id}`);
+    if (isCave) {
+      drawFlatSurface(ctx, hull, CAVE_PLATFORM_FILL, 0.18);
+    } else {
+      drawJellyCandy(ctx, hull, SOFT_PLATFORM_PALETTE, 0.18, `soft-${sp.id}`);
+    }
     // Static-point highlights (yellow dots) — debug-only
     if (options.showPoints) {
       const staticSet = new Set(sp.staticHullIndices);
@@ -200,11 +235,11 @@ export function render(
         field.center.x, field.center.y, 5,
         field.center.x, field.center.y, 350,
       );
-      grad.addColorStop(0, 'rgba(180, 60, 220, 0.55)');
-      grad.addColorStop(1, 'rgba(180, 60, 220, 0)');
+      grad.addColorStop(0, `rgba(${GRAV_POINT_RGB}, 0.55)`);
+      grad.addColorStop(1, `rgba(${GRAV_POINT_RGB}, 0)`);
       ctx.fillStyle = grad;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(180, 60, 220, 0.6)';
+      ctx.strokeStyle = `rgba(${GRAV_POINT_RGB}, 0.6)`;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.stroke();
@@ -221,8 +256,8 @@ export function render(
         ctx.fillStyle = 'rgba(80, 220, 220, 0.18)';
         ctx.strokeStyle = 'rgba(80, 220, 220, 0.7)';
       } else {
-        ctx.fillStyle = 'rgba(255, 160, 60, 0.16)';
-        ctx.strokeStyle = 'rgba(255, 160, 60, 0.7)';
+        ctx.fillStyle = `rgba(${GRAV_DIR_RGB}, 0.16)`;
+        ctx.strokeStyle = `rgba(${GRAV_DIR_RGB}, 0.7)`;
       }
       ctx.fill();
       ctx.lineWidth = 1.5;
@@ -243,7 +278,7 @@ export function render(
         ctx.beginPath();
         ctx.moveTo(cxz - dx * arrowLen, cyz - dy * arrowLen);
         ctx.lineTo(ex, ey);
-        ctx.strokeStyle = 'rgba(255, 200, 100, 0.95)';
+        ctx.strokeStyle = `rgba(${GRAV_DIR_ARROW_RGB}, 0.95)`;
         ctx.lineWidth = 3;
         ctx.stroke();
         // Arrowhead
@@ -254,7 +289,7 @@ export function render(
         ctx.lineTo(ex - dx * ah + pX * ah * 0.5, ey - dy * ah + pY * ah * 0.5);
         ctx.lineTo(ex - dx * ah - pX * ah * 0.5, ey - dy * ah - pY * ah * 0.5);
         ctx.closePath();
-        ctx.fillStyle = 'rgba(255, 200, 100, 0.95)';
+        ctx.fillStyle = `rgba(${GRAV_DIR_ARROW_RGB}, 0.95)`;
         ctx.fill();
       }
     }
@@ -303,9 +338,9 @@ export function render(
   for (let i = 0; i < npcBlobs.length; i++) {
     const npc = npcBlobs[i];
     if (npc.destroyed) continue; // retired NPC (e.g. fell off the map) — don't draw
-    const hull = npc.getHullPolygon();
-    const c = npc.getCentroid();
-    const v = sampleBlobVelocity(npc, c, nowMs);
+    const hull = renderHulls?.get(npc.blobId) ?? npc.getHullPolygon();
+    const c = centroidOf(hull);
+    const v = sampleBlobVelocity(npc, npc.getCentroid(), nowMs);
     const hue = NPC_HUES[i % NPC_HUES.length];
     const fill = npcColor(hue);
     drawBlob(ctx, hull, fill, fill, 2.25);
@@ -315,12 +350,12 @@ export function render(
   // Player blobs
   for (let i = 0; i < playerBlobs.length; i++) {
     const blob = playerBlobs[i];
-    const rawHull = blob.getHullPolygon();
-    const c = blob.getCentroid();
-    const v = sampleBlobVelocity(blob, c, nowMs);
-    // Wind perturbation disabled — was flashing on idle/spawn. Re-enable
-    // once the velocity source is reworked to be wobble-free at rest.
-    const hull = rawHull;
+    // Draw from the interpolated/smoothed hull (motion + shape eased) when present,
+    // else the raw physics hull. The face/name follow this hull's centroid so the
+    // whole blob moves together.
+    const hull = renderHulls?.get(blob.blobId) ?? blob.getHullPolygon();
+    const c = centroidOf(hull);
+    const v = sampleBlobVelocity(blob, blob.getCentroid(), nowMs);
     const pd = playerData?.[i];
 
     // Use player's custom color or fall back to palette
@@ -337,15 +372,13 @@ export function render(
     drawBlob(ctx, hull, fill, stroke, 2.5);
     drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(blob.blobId));
 
-    // Draw face on blob
+    // Draw face at the interpolated centroid.
     if (pd) {
-      const centroid = playerBlobs[i].getCentroid();
-      drawBlobFace(ctx, centroid, pd.faceId, pd.expanding, pd.expandScale, pd.gaze);
+      drawBlobFace(ctx, c, pd.faceId, pd.expanding, pd.expandScale, pd.gaze);
     }
 
-    // Name tag above the blob — anchored to the hull's topmost vertex
-    // so it tracks expansion (the hull already incorporates expandScale)
-    // and always sits just above the player's current silhouette.
+    // Name tag above the blob — anchored to the (interpolated) hull's topmost
+    // vertex so it tracks expansion and sits just above the silhouette.
     if (pd?.name) {
       let topY = Infinity;
       for (let k = 0; k < hull.length; k++) {
@@ -353,6 +386,18 @@ export function render(
       }
       drawNameTag(ctx, pd.name, c.x, topY, pd.color);
     }
+  }
+
+  // Debug overlay: each blob's RAW physics hull nodes (un-interpolated) as dots,
+  // so the gap between the sim and the smoothed visuals is visible.
+  if (showPhysicsPoints) {
+    ctx.save();
+    ctx.fillStyle = '#ff2d5d';
+    for (const b of [...playerBlobs, ...npcBlobs]) {
+      if (b.destroyed) continue;
+      for (const n of b.getHullPolygon()) { ctx.beginPath(); ctx.arc(n.x, n.y, 2.5, 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.restore();
   }
 
   // Debug: hull perimeter + hull points (on top of blobs so they're visible)
@@ -412,6 +457,37 @@ export function render(
   renderParticles(ctx);
 
   ctx.restore();
+
+  // Cave foreground — craggy black rock surrounding the MAP. World-anchored so
+  // it only appears as the camera nears a map edge; never covers the open
+  // middle. Bounds computed here from the static geometry + soft-platform hulls.
+  if (isCave) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const surface of world.staticSurfaces) {
+      for (const p of surface.poly) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+    }
+    const positions = world.getPositions();
+    for (const sp of softPlatforms) {
+      for (const i of sp.hullIndices) {
+        const p = positions[i];
+        if (!p) continue;
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+    }
+    const bounds = Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+    const centers: Vec2[] = [];
+    for (const b of playerBlobs) centers.push(b.getCentroid());
+    for (const b of npcBlobs) centers.push(b.getCentroid());
+    drawCaveForeground(ctx, camera, canvasWidth, canvasHeight, bounds, centers);
+  }
 
   // Mode HUD overlay (screen-space)
   modeOverlay?.renderHUD(ctx, canvasWidth, canvasHeight);

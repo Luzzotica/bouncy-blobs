@@ -59,15 +59,34 @@ export interface PlatformLookup {
   getLivePosition(platformId: string): { x: number; y: number } | null
 }
 
+/** Duck-typed adapter for SpringPadManager — springs move (their plate
+ * compresses/fires), so splats that land on them must follow the plate rather
+ * than staying pinned in world space. */
+export interface SpringLookup {
+  findSpringIdAtPoint(point: { x: number; y: number }, maxDist?: number): string | null
+  getSpringLivePosition(springId: string): { x: number; y: number } | null
+}
+
 /** Build a splat anchor for a contact at `point` with surface `normal`.
- * If `platformLookup` knows of a platform under the contact, returns a
- * platform-anchored splat (which will follow the platform as it moves);
- * otherwise falls back to a world-pinned anchor. */
+ * If a spring or moving platform is under the contact, returns an anchor that
+ * follows it as it moves; otherwise falls back to a world-pinned anchor.
+ * Springs are checked first — they sit on top of platforms/ground, so a plate
+ * contact should ride the plate, not whatever it's mounted on. */
 function pickSurfaceAnchor(
   point: { x: number; y: number },
   normal: { x: number; y: number },
   platformLookup: PlatformLookup | undefined,
+  springLookup: SpringLookup | undefined,
 ): SplatAnchor {
+  // Splat rotation in local frame matches the static-surface convention.
+  const rot = Math.atan2(-normal.x, normal.y)
+
+  const springId = springLookup?.findSpringIdAtPoint(point) ?? null
+  if (springId) {
+    const pos = springLookup!.getSpringLivePosition(springId)
+    if (pos) return { kind: 'spring', springId, lx: point.x - pos.x, ly: point.y - pos.y, rot }
+  }
+
   if (!platformLookup) return { kind: 'world' }
   // Use the lookup's default slack (currently 28 px). Contact points sit
   // outside the surface by the engine's collision margin, so a tight slack
@@ -76,8 +95,6 @@ function pickSurfaceAnchor(
   if (!id) return { kind: 'world' }
   const pos = platformLookup.getLivePosition(id)
   if (!pos) return { kind: 'world' }
-  // Splat rotation in local frame matches the static-surface convention.
-  const rot = Math.atan2(-normal.x, normal.y)
   return {
     kind: 'platform',
     platformId: id,
@@ -156,6 +173,16 @@ export class EffectsBindings {
     return findNearestStaticPoly(point, this.worldSurfaces, 6)
   }
 
+  /** True when a contact landed on a real, paintable surface — either a static
+   * clip polygon was found near it, or its anchor rides a platform/spring. A
+   * mid-air blob-vs-blob bump resolves to NEITHER (the engine reports a contact
+   * point for blob-on-blob just like blob-on-wall), so painting there would
+   * leave a splat floating in space. Gating on this keeps the map from filling
+   * with drifting blob-collision decals while preserving all surface paint. */
+  private onPaintableSurface(clip: Vec2[] | null, anchor: SplatAnchor): boolean {
+    return clip !== null || anchor.kind !== 'world'
+  }
+
   /** Per-frame: detect rising-edge events on every player blob. Call after
    * physics has stepped this frame.
    *
@@ -168,6 +195,8 @@ export class EffectsBindings {
     world?: { staticSurfaces: readonly { poly: Vec2[] }[]; pos: readonly Vec2[] },
     softPlatforms: readonly { blobId: number; hullIndices: readonly number[] }[] = [],
     platformLookup?: PlatformLookup,
+    isDead?: (playerId: string) => boolean,
+    springLookup?: SpringLookup,
   ): void {
     this.elapsed += dt
     tickDecals(dt)
@@ -175,6 +204,13 @@ export class EffectsBindings {
     if (world) this.worldSurfaces = world.staticSurfaces
 
     for (const player of playerManager.getAllPlayers()) {
+      // Dead players are frozen off-screen with no physics — emit no effects
+      // and drop their track so respawn starts fresh (a stale centroid would
+      // otherwise read as a huge velocity and spawn a phantom landing splat).
+      if (isDead?.(player.playerId)) {
+        this.tracks.delete(player.playerId)
+        continue
+      }
       const c = player.blob.getCentroid()
       const grounded = player.blob.isGrounded()
       const expanding = player.blob.isExpanding()
@@ -242,8 +278,11 @@ export class EffectsBindings {
 
           if (speed >= LAND_DECAL_SPEED) {
             const size = 12 + t * 22
-            const anchor = pickSurfaceAnchor(origin, normal, platformLookup)
-            addSplat(origin, player.color, size, normal, this.resolveClipPoly(contact?.poly, origin), anchor)
+            const anchor = pickSurfaceAnchor(origin, normal, platformLookup, springLookup)
+            const clip = this.resolveClipPoly(contact?.poly, origin)
+            if (this.onPaintableSurface(clip, anchor)) {
+              addSplat(origin, player.color, size, normal, clip, anchor)
+            }
           }
           // Ring ripples through the blob from the contact point. Strength
           // maps from the same impact-speed envelope as the splat sound so
@@ -270,8 +309,11 @@ export class EffectsBindings {
           const size = 12 + t * 22
           const count = 6 + Math.floor(t * 10)
           emitBurst(impact.point, player.color, count, 220 + t * 280, impact.normal, 110)
-          const wallAnchor = pickSurfaceAnchor(impact.point, impact.normal, platformLookup)
-          addSplat(impact.point, player.color, size, impact.normal, this.resolveClipPoly(impact.poly, impact.point), wallAnchor)
+          const wallAnchor = pickSurfaceAnchor(impact.point, impact.normal, platformLookup, springLookup)
+          const wallClip = this.resolveClipPoly(impact.poly, impact.point)
+          if (this.onPaintableSurface(wallClip, wallAnchor)) {
+            addSplat(impact.point, player.color, size, impact.normal, wallClip, wallAnchor)
+          }
           addBlobImpact(player.blob.blobId, { x: impact.point.x - c.x, y: impact.point.y - c.y }, t)
           firedRingThisTick = true
           track.lastWallSplatAt = this.elapsed
@@ -288,9 +330,12 @@ export class EffectsBindings {
         if (contact) {
           const speedT = Math.min(1, (prevSpeed - TRAIL_MIN_SPEED) / 600)
           const size = 3 + speedT * 5
-          const trailAnchor = pickSurfaceAnchor(contact.point, contact.normal, platformLookup)
-          addTrailSplat(contact.point, player.color, size, contact.normal, this.resolveClipPoly(contact.poly, contact.point), trailAnchor)
-          track.lastTrailAt = this.elapsed
+          const trailAnchor = pickSurfaceAnchor(contact.point, contact.normal, platformLookup, springLookup)
+          const trailClip = this.resolveClipPoly(contact.poly, contact.point)
+          if (this.onPaintableSurface(trailClip, trailAnchor)) {
+            addTrailSplat(contact.point, player.color, size, contact.normal, trailClip, trailAnchor)
+            track.lastTrailAt = this.elapsed
+          }
         }
       }
 

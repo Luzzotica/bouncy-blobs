@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useUser } from '../contexts/UserContext';
@@ -34,8 +34,11 @@ import { setRollbackStatsAccessor } from '../lib/debugBridge';
 const LOCAL_PLAYER_ID_CONST = 'local-keyboard';
 const MAX_SLOT_CONST = MAX_SLOT;
 import { initPacingFromUrl, getPacingConfig, setPacingConfig, REDUNDANCY_TICKS } from '../lib/pacingConfig';
+import { BbNetSession } from '../game/net/bbNetSession';
+import { MAGIC_TAGGED_INPUTS } from '../lib/netcode/taggedInputCodec';
 import { getHashHistory, recordHash, resetHashHistory } from '../lib/hashHistory';
-import { installDebugBridge, setCompareHashesAccessor, setTogglePauseAccessor, type CompareHashesResult } from '../lib/debugBridge';
+import { installDebugBridge, setCompareHashesAccessor, setTogglePauseAccessor, setStepFramesAccessor, setClientStatsAccessor, setSimSpeedAccessor, type CompareHashesResult, type ClientStat } from '../lib/debugBridge';
+import { requestSteps, setSimSpeed } from '../lib/frameStep';
 import {
   DEFAULT_PERSONALITY,
   GOAL_SEEKER_PALETTE,
@@ -65,7 +68,6 @@ import { GameMode, GamePhase } from '../game/gameModes/types';
 // Game mode registry
 import { ClassicMode } from '../game/gameModes/classicMode';
 import { ChainedMode } from '../game/gameModes/chainedMode';
-import { PartyMode } from '../game/gameModes/partyMode';
 import { KingOfTheHillMode } from '../game/gameModes/kingOfTheHillMode';
 import { FreeplayMode } from '../game/gameModes/freeplayMode';
 
@@ -83,7 +85,6 @@ function createModeForLevel(levelData: LevelData, broadcastFn?: (msg: any) => vo
   const mode = overrideMode ?? fallback;
   switch (mode) {
     case 'team_racing': return new ChainedMode(levelData);
-    case 'party': return new PartyMode(levelData, broadcastFn);
     case 'koth': return new KingOfTheHillMode(levelData);
     case 'solo_racing':
     default:
@@ -301,6 +302,19 @@ export default function GameMaster() {
   // (managerRef + signalingRef + matchHostRef + matchMpRef) from when phone-
   // signaling and screen-signaling were separate systems.
   const managerRef = useRef<PeerManager | null>(null);
+  // `?netpeer=1` → symmetric tick-tagged rollback (NetPeer/BbNetSession). The
+  // host becomes a peer that predicts guests + rolls back on late input, rather
+  // than stamping inputs at arrival. Off by default while it stabilises.
+  const usePeerNet = useMemo(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('netpeer') === '0') return false;          // explicit opt-out
+    if (sp.get('netpeer') === '1') return true;
+    try { if (localStorage.getItem('netpeer') === '0') return false; } catch { /* ignore */ }
+    return true; // DEFAULT: symmetric tick-tagged rollback is now the shipping path
+  }, []);
+  const netSessionRef = useRef<import('../game/net/bbNetSession').BbNetSession | null>(null);
+  /** Per-guest measured round-trip time (ms), keyed by screen peer id. */
+  const clientRttRef = useRef<Map<string, number>>(new Map());
   const roomRef = useRef<RoomService | null>(null);
   // Expose `window.__rtcDebug()` for ICE-pair diagnostics. Idempotent.
   installRtcDebug(() => managerRef.current);
@@ -655,22 +669,6 @@ export default function GameMaster() {
   const connectedPlayersRef = useRef<Player[]>([]);
   connectedPlayersRef.current = connectedPlayers;
 
-  // Reference to the active party mode (if any) for routing party messages
-  const partyModeRef = useRef<PartyMode | null>(null);
-
-  const handlePartyMessage = useCallback((playerId: string, message: WebRTCMessage) => {
-    const partyMode = partyModeRef.current;
-    if (!partyMode) return;
-
-    if (message.type === 'item_select' && message.value) {
-      partyMode.handleItemSelect(playerId, message.value.itemIndex);
-    } else if (message.type === 'cursor_move' && message.value) {
-      partyMode.handleCursorMove(playerId, message.value.x, message.value.y);
-    } else if (message.type === 'placement_confirm') {
-      partyMode.handlePlacementConfirm(playerId);
-    }
-  }, []);
-
   /** Build taken lists excluding a specific player's own selections. */
   const getTakenExcluding = useCallback((excludePlayerId?: string) => {
     const takenColors: string[] = [];
@@ -953,7 +951,6 @@ export default function GameMaster() {
     const levelId = `level-${Date.now()}`;
     currentLevelRef.current = { levelId, levelData, levelType: resolvedType };
     game.setBroadcastToControllers(broadcastToControllers);
-    partyModeRef.current = mode instanceof PartyMode ? mode : null;
 
     game.setPhaseChangeCallback((gp) => {
       setGamePhase(gp);
@@ -961,7 +958,6 @@ export default function GameMaster() {
         setTimeout(() => {
           gameRef.current?.destroy();
           gameRef.current = null;
-          partyModeRef.current = null;
           setGamePhase(null);
           createPlaygroundGameRef.current?.(sid);
         }, (mode.config.resultsDuration + 0.5) * 1000);
@@ -1065,7 +1061,6 @@ export default function GameMaster() {
     if (!sessionId) return;
     gameRef.current?.destroy();
     gameRef.current = null;
-    partyModeRef.current = null;
     setGamePhase(null);
     createPlaygroundGameRef.current?.(sessionId);
   }, [sessionId]);
@@ -1216,6 +1211,15 @@ export default function GameMaster() {
                 );
                 hashesResponsesRef.current.push({ requestId: evt.requestId, peerId: peerKey, entries });
                 return;
+              } else if (evt.type === 'need_state') {
+                // Guest's prediction disagreed with a hash beacon → send it a full
+                // keyframe (unicast). Rare, so this stays cheap.
+                netSessionRef.current?.handleStateRequest(peerId);
+                return;
+              } else if (evt.type === 'pong' && typeof evt.ts === 'number') {
+                // RTT measurement: guest echoed our ping timestamp.
+                clientRttRef.current.set(peerId, performance.now() - evt.ts);
+                return;
               } else if (evt.type === 'customization' && typeof evt.playerId === 'string') {
                 // Guest pushed a color/face change for one of their players.
                 // Apply it to the live blob and update our tracking so the
@@ -1232,6 +1236,13 @@ export default function GameMaster() {
               console.warn('[room] bad reliable event from screen:', err);
             }
           } else if (channel === 'input') {
+            // Symmetric netcode: a guest's tagged-input packet (binary 0x03).
+            // Feed it to the host's NetPeer (which reconciles late inputs) and
+            // relay it to the other guests.
+            if (raw instanceof ArrayBuffer && new Uint8Array(raw)[0] === MAGIC_TAGGED_INPUTS) {
+              netSessionRef.current?.handleIncoming(raw, peerId);
+              return;
+            }
             try {
               const batch = JSON.parse(text);
               if (batch?.type !== 'input' || !Array.isArray(batch.frames)) return;
@@ -1403,12 +1414,7 @@ export default function GameMaster() {
                 }
                 broadcastCustomizationUpdate();
                 return;
-              }
-              if (message.type === 'item_select' || message.type === 'cursor_move' || message.type === 'placement_confirm') {
-                handlePartyMessage(peerId, message);
-                return;
-              }
-              inputManager.handleWebRTCMessage(message, peerId);
+              }              inputManager.handleWebRTCMessage(message, peerId);
             } catch (e) {
               console.error('Failed to parse WebRTC message:', e);
             }
@@ -1989,6 +1995,49 @@ export default function GameMaster() {
   const installHostBroadcastHook = useCallback((game: BouncyBlobsGame) => {
     type Intent = { moveX: number; moveY: number; expanding: boolean };
     initPacingFromUrl();
+
+    // ── Symmetric tick-tagged rollback path (?netpeer=1) ─────────────────────
+    // The host is just a peer: it owns its keyboard player + every bot, tags
+    // their inputs 3 ticks ahead, predicts guests, rolls back on late input,
+    // and relays each guest's tagged inputs to the other guests.
+    if (usePeerNet) {
+      const slotOf = (playerId: string): number | undefined =>
+        playerId === LOCAL_PLAYER_ID_CONST ? 0 : ensureSlot(playerId);
+      const idOfSlot = (slot: number): string | undefined => {
+        if (slot === 0) return LOCAL_PLAYER_ID_CONST;
+        for (const [pid, s] of slotByPlayerIdRef.current) if (s === slot) return pid;
+        return undefined;
+      };
+      const session = new BbNetSession({
+        game,
+        isHost: true,
+        localHumanIds: () => [...localPlayerIdsRef.current],
+        botIds: () => botsRef.current.map((b) => b.playerId),
+        readHumanInput: (pid) => {
+          const mp = game.getPlayerManager()?.getPlayer(pid);
+          return mp ? { moveX: mp.moveX, moveY: mp.moveY, expanding: mp.expanding } : { moveX: 0, moveY: 0, expanding: false };
+        },
+        slotOf,
+        idOfSlot,
+        sendBytes: (bytes) => managerRef.current?.broadcast('input', bytes, 'screen'),
+        relayBytes: (bytes) => managerRef.current?.broadcast('input', bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes, 'screen'),
+        // Reliable 'state' channel: per-tick hash beacon + periodic keyframe
+        // (broadcast). Guests verify against the beacon and request a full snapshot
+        // only on a mismatch — that's what keeps bandwidth at ~13 B/tick.
+        sendState: (bytes) => managerRef.current?.broadcast('state', bytes, 'screen'),
+        // Unicast the requested keyframe back to just the guest that asked.
+        sendStateTo: (peerId, bytes) => managerRef.current?.send(peerId, 'state', bytes),
+        // Per-guest clock sync: tell a guest whose inputs arrive late to speed up
+        // (and one too far ahead to slow down) so the host never rolls back its
+        // input — the fix for "host teleports my blob when I press a key".
+        peerIdOf: (playerId) => guestPlayersRef.current.get(playerId)?.screenId,
+        sendPacing: (peerId, bias) =>
+          managerRef.current?.send(peerId, 'state', JSON.stringify({ type: 'pacing', bias })),
+      });
+      session.install();
+      netSessionRef.current = session;
+      return;
+    }
     // Rolling history of recently-applied per-player intents (one entry
     // per tick), for redundant broadcast. RC's own inputHistory is the
     // source of truth for replay; this map is the wire-format snapshot
@@ -2027,28 +2076,22 @@ export default function GameMaster() {
       readLocalInput: () => ({ moveX: 0, moveY: 0, expanding: false }),
       applyInputs: applyInputsToPM,
       stepOne: () => {
-        // Mirror bouncyBlobsGame's onLogic sequence for replay.
-        const st = (game as unknown as { state: { world: SoftBodyEngine; playerManager: import('../game/playerManager').PlayerManager; springPadManager: import('../game/springPadManager').SpringPadManager | null; spikeManager: import('../game/spikeManager').SpikeManager | null; powerupManager: import('../game/powerups/powerupManager').PowerupManager | null; dynamicItemManager: import('../game/dynamicItemManager').DynamicItemManager | null; effects: import('../game/effectsBindings').EffectsBindings; gameTime: number } }).state;
+        // Replay one tick through the SAME code path as the live loop
+        // (bouncyBlobsGame.stepOneTick) so forward sim and restore→replay are
+        // bit-identical. runAI:false → bot inputs come from the recorded
+        // InputSet the controller re-applied (not re-derived, which would
+        // double-advance AI-controller internal state). runPreTick:false → no
+        // re-broadcast during a rewind. This replaces the old hand-copied
+        // `updateAll` sequence that silently skipped the trigger/action
+        // managers and truncated effects.update.
+        const st = game.getSimState();
         if (!st) return;
         const dt = 1 / 60;
-        st.playerManager.updateAll(dt, st.world);
-        st.world.step(dt);
-        st.powerupManager?.update(dt, st.playerManager);
-        st.springPadManager?.update(dt);
-        st.spikeManager?.update(dt);
-        st.dynamicItemManager?.update(dt);
-        st.effects.update(dt, st.playerManager);
+        game.stepOneTick(dt, { runPreTick: false, runAI: false });
         st.gameTime += dt;
-        // CRITICAL: update the per-tick hash ring during rollback
-        // replay so the recorded hash for this tick reflects the
-        // POST-rollback state. Without this, the host's ring keeps
-        // the stale pre-rollback hash for replayed ticks while the
-        // guest's ring has its own forward-sim hash — the engines
-        // agree on the CURRENT state but the compare-hashes diagnostic
-        // (and any per-tick determinism check) sees a recorded
-        // mismatch. recordHash is normally called from
-        // bouncyBlobsGame.onLogic after step+managers; mirroring it
-        // here keeps the ring consistent across rollback replays.
+        // CRITICAL: update the per-tick hash ring during rollback replay so the
+        // recorded hash reflects POST-rollback state (else the compare-hashes
+        // diagnostic sees a stale-ring mismatch even when engines agree).
         recordHash(st.world.tick, st.world.stateHash());
       },
     });
@@ -2247,6 +2290,24 @@ export default function GameMaster() {
     const interval = setInterval(broadcast, 500);
     return () => clearInterval(interval);
   }, [roomReady, selectedMapId, selectedModeId, maxPlayers, isPublic, mapOptions, phase]);
+
+  // RTT ping loop: send each connected guest a timestamped ping; the guest
+  // echoes it back as a pong and we compute round-trip time (shown per-client in
+  // the ?net=debug overlay). Drives the "high-latency clients run further ahead"
+  // intuition — pair it with the per-client buffer depth + pacing bias.
+  useEffect(() => {
+    if (!roomReady) return;
+    const ping = () => {
+      const manager = managerRef.current;
+      if (!manager) return;
+      const peerIds = new Set<string>();
+      for (const info of guestPlayersRef.current.values()) if (info.screenId) peerIds.add(info.screenId);
+      const msg = JSON.stringify({ type: 'ping', ts: performance.now() });
+      for (const pid of peerIds) manager.send(pid, 'state', msg);
+    };
+    const interval = setInterval(ping, 1000);
+    return () => clearInterval(interval);
+  }, [roomReady]);
 
   // Poll the room for new peers. Connects to each new one (phones get a
   // single ordered channel; screens get the state+input pair). Then derive
@@ -2482,6 +2543,29 @@ export default function GameMaster() {
       // Mirror to every guest so both sides freeze together.
       const evt = { type: 'set_paused' as const, paused };
       managerRef.current?.broadcast('state', JSON.stringify(evt), 'screen');
+    });
+    // Frame-stepper: advance N ticks on the host AND every guest at once (only
+    // meaningful while paused — see frameStep). Broadcast first so guests queue
+    // the same steps, then queue locally.
+    setStepFramesAccessor((n) => {
+      managerRef.current?.broadcast('state', JSON.stringify({ type: 'step_frames', n }), 'screen');
+      requestSteps(n);
+    });
+    // Slow-motion: set locally + mirror to every guest so all sides slow together.
+    setSimSpeedAccessor((speed) => {
+      setSimSpeed(speed);
+      managerRef.current?.broadcast('state', JSON.stringify({ type: 'sim_speed', speed }), 'screen');
+    });
+    // Per-guest netcode health for the host overlay: RTT + buffer depth + pacing.
+    setClientStatsAccessor((): ClientStat[] => {
+      const session = netSessionRef.current;
+      const stats = session?.guestStats() ?? [];
+      return stats.map((s) => ({
+        peerId: s.peerId,
+        rttMs: clientRttRef.current.get(s.peerId) ?? null,
+        bufferDepth: s.bufferDepth,
+        pacingBias: s.pacingBias,
+      }));
     });
     setCompareHashesAccessor(async (): Promise<CompareHashesResult> => {
       const requestId = ++hashRequestIdRef.current;

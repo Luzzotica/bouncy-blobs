@@ -4,6 +4,7 @@ import { Vec2, vec2 } from '../physics/vec2';
 import { playerColor } from '../renderer/colors';
 import type { AIController } from './aiController';
 import { hashStringSeed } from '../lib/rng';
+import { hashStringId } from './idHash';
 
 export type InputSource = 'remote' | 'ai';
 
@@ -79,6 +80,11 @@ export class PlayerManager {
       sortKey: `player:${playerId}`,
     });
 
+    // Tag the engine-side gameplay role (1 = player) + stable slot id so Rust
+    // triggers/spikes/modes can tell agents from structural blobs and key
+    // per-player state deterministically (hash of the playerId).
+    world.setBlobRole(blob.blobId, 1, hashStringId(playerId));
+
     const colorIndex = this.nextColorIndex++;
     const managed: ManagedPlayer = {
       playerId,
@@ -124,6 +130,15 @@ export class PlayerManager {
   getPlayerByBlobId(blobId: number): ManagedPlayer | undefined {
     for (const player of this.players.values()) {
       if (player.blob.blobId === blobId) return player;
+    }
+    return undefined;
+  }
+
+  /** Resolve a player from the stable engine-side gameplay id (hash of the
+   *  playerId). Used to map Rust spike/mode events back to a player. */
+  getPlayerByGameplayId(gameplayId: number): ManagedPlayer | undefined {
+    for (const player of this.players.values()) {
+      if (hashStringId(player.playerId) === gameplayId) return player;
     }
     return undefined;
   }

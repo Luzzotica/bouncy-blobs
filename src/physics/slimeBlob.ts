@@ -215,6 +215,14 @@ export class SlimeBlob {
     return this.world.getBlobGroundContacts(this.blobId) > 0;
   }
 
+  /** True while the blob is stuck to a wall — which is exactly when the Rust
+   * engine is pinning every particle to a saved snapshot each substep
+   * (`pinBlobToCurrentPose`), overriding all physics until release. Exposed for
+   * the debug overlay so the pinned state is observable. */
+  get isPinned(): boolean {
+    return this.stuckTo !== null;
+  }
+
   /** Representative ground-contact point + outward surface normal from the
    * most recent physics step, or null when not grounded. Used by VFX to
    * place splats on the actual surface rather than at the blob's centroid. */

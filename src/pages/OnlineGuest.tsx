@@ -26,6 +26,10 @@ import { decodeAggregatedInputs, MAGIC_AGGREGATED_INPUTS } from "../lib/inputPro
 import { installDebugBridge, setNetDiagAccessor, setRollbackStatsAccessor, setSnapsAccessor } from "../lib/debugBridge";
 import { initNetSimFromUrl, scheduleNetSim, isReliableChannel } from "../lib/netSim";
 import { initPacingFromUrl, getPacingConfig, setPacingConfig } from "../lib/pacingConfig";
+import { BbNetSession } from "../game/net/bbNetSession";
+import { MAGIC_TAGGED_INPUTS } from "../lib/netcode/taggedInputCodec";
+import { MAGIC_STATE_SYNC, MAGIC_HASH_BEACON } from "../lib/netcode/stateSyncCodec";
+import { requestSteps, setSimSpeed } from "../lib/frameStep";
 import { getHashHistory, recordHash, resetHashHistory } from "../lib/hashHistory";
 import { quantizeAxis } from "../lib/inputProtocol";
 import GameCanvas from "../components/GameCanvas";
@@ -41,7 +45,6 @@ import type { LevelData, LevelType } from "../levels/types";
 import type { Player } from "../types/database";
 import { ClassicMode } from "../game/gameModes/classicMode";
 import { ChainedMode } from "../game/gameModes/chainedMode";
-import { PartyMode } from "../game/gameModes/partyMode";
 import { KingOfTheHillMode } from "../game/gameModes/kingOfTheHillMode";
 import { FreeplayMode } from "../game/gameModes/freeplayMode";
 import { getLevelTypes } from "../levels/types";
@@ -76,7 +79,6 @@ function createMirrorMode(level: LevelData, override?: LevelType, freeplay = fal
   const mode = override ?? fallback;
   switch (mode) {
     case "team_racing": return new ChainedMode(level);
-    case "party": return new PartyMode(level);
     case "koth": return new KingOfTheHillMode(level);
     case "solo_racing":
     default: return new ClassicMode(level);
@@ -144,8 +146,24 @@ export default function OnlineGuest() {
   // authoritative inputs via the RollbackController.
   const usePrediction = useMemo(() => {
     const sp = new URLSearchParams(window.location.search);
-    return sp.get('prediction') === 'on';
+    // Predictive play is the default now: the guest reads its local input
+    // live and steps every tick (instant feedback), reconciling against the
+    // host's authoritative echo via rollback. `?prediction=off` falls back to
+    // pure host-authoritative lockstep for A/B diagnostics.
+    return sp.get('prediction') !== 'off';
   }, []);
+  // `?netpeer=1` opts into the new symmetric tick-tagged rollback core
+  // (NetPeer / BbNetSession). This is the real fix for "instant desync": every
+  // peer applies each input at the SAME absolute tick. Off by default while it
+  // stabilises; the existing prediction/lockstep gate stays the fallback.
+  const usePeerNet = useMemo(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('netpeer') === '0') return false;          // explicit opt-out
+    if (sp.get('netpeer') === '1') return true;
+    try { if (localStorage.getItem('netpeer') === '0') return false; } catch { /* ignore */ }
+    return true; // DEFAULT: symmetric tick-tagged rollback is now the shipping path
+  }, []);
+  const netSessionRef = useRef<import('../game/net/bbNetSession').BbNetSession | null>(null);
   // Net-debug overlay visibility. Initialised from `?net=debug` for
   // power users who want it on from page load, but ALSO toggleable at
   // runtime via the backtick (`) hotkey so a guest already mid-match
@@ -214,6 +232,14 @@ export default function OnlineGuest() {
     // WebRTC connection and re-join the lobby).
     initNetSimFromUrl();
     initPacingFromUrl();
+    // `?prediction=off` is the pure host-authoritative lockstep diagnostic:
+    // turn off BOTH local prediction and rollback so the guest's own input
+    // round-trips through the host (the old behavior), with nothing to
+    // reconcile. The default (prediction on) keeps clientPrediction +
+    // enableRollback as seeded above for instant local feedback.
+    if (!usePrediction) {
+      setPacingConfig({ clientPrediction: false, enableRollback: false });
+    }
 
     // Monkey-patch a freshly-attached PeerManager so every outgoing send
     // also goes through the netSim. Wrapping here (rather than at each of
@@ -439,12 +465,35 @@ export default function OnlineGuest() {
       const u8 = new Uint8Array(data);
       if (u8.length === 0) return;
       const magic = u8[0];
+      if (magic === MAGIC_STATE_SYNC) {
+        // Symmetric netcode: host full-state sync (keyframe / requested correction).
+        netSessionRef.current?.handleStateSync(data);
+        return;
+      }
+      if (magic === MAGIC_HASH_BEACON) {
+        // Cheap per-tick fingerprint — request a keyframe only on a mismatch.
+        netSessionRef.current?.handleHashBeacon(data);
+        return;
+      }
+      if (magic === MAGIC_TAGGED_INPUTS) {
+        // Symmetric netcode: host's + relayed guests' tagged inputs.
+        netSessionRef.current?.handleIncoming(data);
+        return;
+      }
       if (magic === BINARY_MAGIC) {
         const frame = decodeSnapshot(data);
-        if (frame) applySnapshot(frame);
+        if (!frame) return;
+        // Under netpeer: KEYFRAMES still bootstrap the roster (they spawn blobs
+        // for players this guest doesn't have yet) + restore initial state, then
+        // we re-base NetPeer. But periodic DELTAS (positions-only) are ignored —
+        // NetPeer owns ongoing positions; the 0x04 state-sync corrects divergence.
+        if (usePeerNet && !frame.isKeyframe) return;
+        applySnapshot(frame);
+        if (usePeerNet) netSessionRef.current?.notifyResync();
         return;
       }
       if (magic === MAGIC_AGGREGATED_INPUTS) {
+        if (usePeerNet) return; // netpeer uses tagged inputs (0x03), not aggregated
         // Resolve slot→playerId via the locally maintained map (updated
         // by lobby_state). A frame whose slot isn't in the map yet (e.g.
         // we got the aggregated inputs before the latest lobby_state)
@@ -689,6 +738,27 @@ export default function OnlineGuest() {
       pendingReadyLevelIdRef.current = parsed.requireReadyConfirm ? parsed.levelId : null;
       return;
     }
+    if (parsed?.type === "ping") {
+      // RTT measurement: echo the host's timestamp straight back.
+      managerRef.current?.send('host', 'state', JSON.stringify({ type: 'pong', ts: parsed.ts }));
+      return;
+    }
+    if (parsed?.type === "step_frames") {
+      // Host's debug frame-stepper: advance N ticks while paused.
+      requestSteps(Number(parsed.n) || 1);
+      return;
+    }
+    if (parsed?.type === "sim_speed") {
+      // Host's slow-motion control mirrored to this client.
+      setSimSpeed(Number(parsed.speed) || 1);
+      return;
+    }
+    if (parsed?.type === "pacing") {
+      // Host clock-sync signal: +1 speed up (our inputs are arriving late), -1
+      // slow down (too far ahead), 0 steady. Applied via the game-loop clock nudge.
+      netSessionRef.current?.setPacingBias(Number(parsed.bias) || 0);
+      return;
+    }
     if (parsed?.type === "rng_state") {
       // Host is aligning our PRNG state so subsequent random draws match.
       // If the world isn't ready yet (canvas race), stash and apply later.
@@ -876,7 +946,37 @@ export default function OnlineGuest() {
       game.setLocalPlayerIds([localPlayerIdRef.current]);
     }
 
-    if (usePrediction) {
+    if (usePeerNet) {
+      // ── Symmetric tick-tagged rollback (NetPeer) ────────────────────
+      // The guest is just another peer: it owns its one player, tags input
+      // 3 ticks ahead, predicts remote players, and rolls back when real
+      // inputs arrive. See BbNetSession + netcodeConvergence.test.ts.
+      const slotOf = (playerId: string): number | undefined => {
+        for (const [slot, id] of slotToPlayerIdRef.current) if (id === playerId) return slot;
+        return undefined;
+      };
+      const session = new BbNetSession({
+        game,
+        isHost: false,
+        localHumanIds: () => (localPlayerIdRef.current ? [localPlayerIdRef.current] : []),
+        botIds: () => [],
+        readHumanInput: () => {
+          const k = liveKeysRef.current;
+          return { moveX: (k.d ? 1 : 0) + (k.a ? -1 : 0), moveY: (k.s ? 1 : 0) + (k.w ? -1 : 0), expanding: k.space };
+        },
+        slotOf,
+        idOfSlot: (slot) => slotToPlayerIdRef.current.get(slot),
+        sendBytes: (bytes) => managerRef.current?.send('host', 'input', bytes),
+        // Ask the host for a full keyframe when a hash beacon shows our prediction
+        // diverged and the rollback didn't fix it (throttled inside BbNetSession).
+        requestState: () => managerRef.current?.send('host', 'state', JSON.stringify({ type: 'need_state' })),
+      });
+      session.install();
+      netSessionRef.current = session;
+      // Apply the host's pacing signal each RAF — keeps our tick clock aligned
+      // with the host so our inputs land just-in-time (no host rollback).
+      game.setClockAdjust(() => netSessionRef.current?.clockAdjust() ?? 0);
+    } else if (usePrediction) {
       // ── Prediction gate ─────────────────────────────────────────────
       // Local input is read NOW. Remote players' inputs are predicted
       // from their last-known authoritative input. RollbackController
@@ -907,27 +1007,20 @@ export default function OnlineGuest() {
         },
         applyInputs: applyInputsToPM,
         stepOne: () => {
-          // Used during replay — emulate one logic tick. The bouncyBlobsGame
-          // onLogic does playerManager.updateAll + world.step + manager
-          // updates; for replay we want the same effects. Calling world.step
-          // directly drives the engine; manager.update equivalents must run
-          // so spring pads/actions/etc evolve in sync.
-          const st = (game as unknown as { state: { world: SoftBodyEngine; playerManager: import('../game/playerManager').PlayerManager; springPadManager: import('../game/springPadManager').SpringPadManager | null; spikeManager: import('../game/spikeManager').SpikeManager | null; powerupManager: import('../game/powerups/powerupManager').PowerupManager | null; dynamicItemManager: import('../game/dynamicItemManager').DynamicItemManager | null; effects: import('../game/effectsBindings').EffectsBindings; gameTime: number } }).state;
+          // Replay one tick through the SAME path as the live loop
+          // (bouncyBlobsGame.stepOneTick) so forward sim and restore→replay are
+          // bit-identical. runPreTick/runAI:false — guests have no AI
+          // controllers and never broadcast; inputs come from the controller's
+          // re-applied set. Replaces the old `updateAll` sequence that skipped
+          // the trigger/action managers and truncated effects.update.
+          const st = game.getSimState();
           if (!st) return;
           const dt = 1 / 60;
-          st.playerManager.updateAll(dt, st.world);
-          st.world.step(dt);
-          st.powerupManager?.update(dt, st.playerManager);
-          st.springPadManager?.update(dt);
-          st.spikeManager?.update(dt);
-          st.dynamicItemManager?.update(dt);
-          st.effects.update(dt, st.playerManager);
+          game.stepOneTick(dt, { runPreTick: false, runAI: false });
           st.gameTime += dt;
-          // Keep the per-tick hash ring in sync during rollback
-          // replay (mirrors host-side fix in GameMaster.tsx). Without
-          // this the ring keeps stale pre-rollback hashes for replayed
-          // ticks and the cross-tab determinism test sees a recorded
-          // mismatch even when the engines actually agree post-rollback.
+          // Keep the per-tick hash ring in sync during rollback replay so the
+          // cross-tab determinism test doesn't see a stale-ring mismatch even
+          // when the engines actually agree post-rollback.
           recordHash(st.world.tick, st.world.stateHash());
         },
       });
@@ -989,18 +1082,13 @@ export default function OnlineGuest() {
         readLocalInput: readLocalKeys,
         applyInputs: applyInputsToPMSkipLocal,
         stepOne: () => {
-          // Used during replay — mirror bouncyBlobsGame's onLogic
-          // sequence: playerManager.updateAll + world.step + managers.
-          const st = (game as unknown as { state: { world: SoftBodyEngine; playerManager: import('../game/playerManager').PlayerManager; springPadManager: import('../game/springPadManager').SpringPadManager | null; spikeManager: import('../game/spikeManager').SpikeManager | null; powerupManager: import('../game/powerups/powerupManager').PowerupManager | null; dynamicItemManager: import('../game/dynamicItemManager').DynamicItemManager | null; effects: import('../game/effectsBindings').EffectsBindings; gameTime: number } }).state;
+          // Replay one tick through the SAME path as the live loop
+          // (bouncyBlobsGame.stepOneTick) — see the prediction-branch closure
+          // above for the full rationale.
+          const st = game.getSimState();
           if (!st) return;
           const dt = 1 / 60;
-          st.playerManager.updateAll(dt, st.world);
-          st.world.step(dt);
-          st.powerupManager?.update(dt, st.playerManager);
-          st.springPadManager?.update(dt);
-          st.spikeManager?.update(dt);
-          st.dynamicItemManager?.update(dt);
-          st.effects.update(dt, st.playerManager);
+          game.stepOneTick(dt, { runPreTick: false, runAI: false });
           st.gameTime += dt;
           // Keep the per-tick hash ring in sync during rollback
           // replay (mirrors host-side fix in GameMaster.tsx). Without
@@ -1130,7 +1218,7 @@ export default function OnlineGuest() {
     // broadcast gives this buffer something to draw from. Tunable target
     // live via the debug overlay (initial value from `?buffer=N`).
     game.setMaxStepsPerFrame(() => {
-      if (usePrediction) return 5; // prediction path drives its own pacing
+      if (usePrediction || usePeerNet) return 5; // prediction/netpeer drive their own pacing
       const w = game.getWorld();
       if (!w) return 1;
       const depth = latestHostTickRef.current - w.tick;
@@ -1144,10 +1232,24 @@ export default function OnlineGuest() {
     // true state divergence from network lag.
     game.setPostTickHook(() => logPlayerPositions());
 
+    // Render-state separation is now owned by BbNetSession (it installs the
+    // per-node DisplaySmoother in install() and feeds it around every rollback /
+    // state-sync correction). No page-level smoother wiring needed under netpeer.
+
     game.start();
     installDebugBridge(game);
     setNetDiagAccessor(() => {
       const world = game.getWorld();
+      if (usePeerNet) {
+        // NetPeer view: bufferSize=state-sync restores, latestHostTick=our tick,
+        // gap=pacing bias (+1 speeding up to catch the host, -1 slowing down).
+        const s = netSessionRef.current?.stats();
+        return {
+          bufferSize: s?.stateSyncRestores ?? 0,
+          latestHostTick: s?.tick ?? (world?.tick ?? 0),
+          gap: s?.pacingBias ?? 0,
+        };
+      }
       return {
         bufferSize: inputBufferRef.current.size,
         latestHostTick: latestHostTickRef.current,
@@ -1156,6 +1258,22 @@ export default function OnlineGuest() {
     });
     setSnapsAccessor(() => recentSnapsRef.current.slice());
     setRollbackStatsAccessor(() => {
+      if (usePeerNet) {
+        const s = netSessionRef.current?.stats();
+        const sm = displaySmootherRef.current;
+        if (!s) return null;
+        sm?.tick();
+        return {
+          rollbacksApplied: s.rollbacks,
+          lastDepth: s.lastDepth,
+          smoothingActive: sm?.activeCount() ?? 0,
+          ringInvalidations: s.stateSyncRestores,
+          failedRestores: s.failedRestores,
+          avgSnapshotMs: 0,
+          avgCheapTickMs: 0,
+          avgReconcileMs: 0,
+        };
+      }
       const rc = rollbackControllerRef.current;
       const sm = displaySmootherRef.current;
       if (!rc) return null;
@@ -1730,6 +1848,7 @@ export default function OnlineGuest() {
      *  prediction is off — in that mode the lockstep gate is the only
      *  writer to MP for the local player. */
     const writeLocalIntent = (): void => {
+      if (usePeerNet) return; // BbNetSession owns input application
       if (!getPacingConfig().clientPrediction) return;
       const game = gameRef.current;
       if (!game) return;
@@ -1753,6 +1872,7 @@ export default function OnlineGuest() {
      *  input ordering. The `tick` field is kept for wire-format
      *  compatibility but is ignored by the host. */
     const sendInputUpdate = (): void => {
+      if (usePeerNet) return; // BbNetSession sends tagged inputs in its step driver
       const manager = managerRef.current;
       if (!manager) return;
       const moveX = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);

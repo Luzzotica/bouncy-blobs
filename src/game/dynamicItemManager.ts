@@ -1,7 +1,6 @@
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { Vec2, vec2, add, scale, sub, length, normalize, distanceTo } from '../physics/vec2';
 import { PlayerManager } from './playerManager';
-import { PartyItemType } from './partyItems/types';
 
 /**
  * A placed dynamic item that applies forces, slows blobs, or triggers effects
@@ -9,7 +8,7 @@ import { PartyItemType } from './partyItems/types';
  */
 export interface DynamicItem {
   id: string;
-  type: PartyItemType;
+  type: string;
   x: number;
   y: number;
   width: number;
@@ -66,7 +65,7 @@ export class DynamicItemManager {
     world.clearDynamicItems();
   }
 
-  addItem(id: string, type: PartyItemType, x: number, y: number, width: number, height: number, rotation: number): void {
+  addItem(id: string, type: string, x: number, y: number, width: number, height: number, rotation: number): void {
     this.items.push({ id, type, x, y, width, height, rotation, timer: 0, active: false });
     // Phase 4: register the item with the deterministic Rust engine.
     // The engine's `step()` advances per-item timers and applies

@@ -195,6 +195,9 @@ export function loadLevel(
       hullPreset: npc.hullPreset,
       sortKey: `npc:${npc.id}`,
     });
+    // Engine-side role: 2 = npc (eligible to trip non-ignoring triggers + die
+    // to the kill plane, but never a player for scoring/respawn).
+    world.setBlobRole(blob.blobId, 2, 0);
     npcBlobs.push(blob);
   }
 
