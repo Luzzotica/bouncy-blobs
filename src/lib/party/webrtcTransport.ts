@@ -103,6 +103,17 @@ export class WebRtcTransport implements Transport {
     this.callbacks.onPhase?.(this.remoteId, phase, detail);
   }
 
+  /** Add a remote ICE candidate + log its TYPE (host/srflx/relay) so the phase
+   *  log shows whether the peer offered a relay candidate — the pair we need on
+   *  restrictive WiFi. (Also covers candidates buffered before setRemoteDescription,
+   *  which previously weren't logged at all.) */
+  private async addRemote(cand: RTCIceCandidateInit): Promise<void> {
+    if (!this.pc) return;
+    await this.pc.addIceCandidate(cand);
+    const m = /\btyp (\w+)/.exec(cand.candidate ?? "");
+    this.emit("remote-candidate", { type: m?.[1] ?? "unknown" });
+  }
+
   /** The link is (re)established. Cancel any pending grace teardown and let
    * a future blip earn a fresh budget of ICE restarts. */
   private onConnectionHealthy(): void {
@@ -314,7 +325,7 @@ export class WebRtcTransport implements Transport {
       if (signal.signal_type === "offer" && this.role === "answerer") {
         this.emit("offer-received");
         await pc.setRemoteDescription(signal.payload as RTCSessionDescriptionInit);
-        for (const c of this.pendingIce) await pc.addIceCandidate(c);
+        for (const c of this.pendingIce) await this.addRemote(c);
         this.pendingIce = [];
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -323,14 +334,13 @@ export class WebRtcTransport implements Transport {
       } else if (signal.signal_type === "answer" && this.role === "offerer") {
         this.emit("answer-received");
         await pc.setRemoteDescription(signal.payload as RTCSessionDescriptionInit);
-        for (const c of this.pendingIce) await pc.addIceCandidate(c);
+        for (const c of this.pendingIce) await this.addRemote(c);
         this.pendingIce = [];
       } else if (signal.signal_type === "ice_candidate") {
         if (!pc.remoteDescription) {
           this.pendingIce.push(signal.payload as RTCIceCandidateInit);
         } else {
-          await pc.addIceCandidate(signal.payload as RTCIceCandidateInit);
-          this.emit("remote-candidate");
+          await this.addRemote(signal.payload as RTCIceCandidateInit);
         }
       }
     } catch (err) {
