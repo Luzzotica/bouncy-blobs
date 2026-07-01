@@ -303,6 +303,7 @@ export class SoftBodyWorldHandle {
      */
     shapesSnapshot(include_triggers: boolean): Float64Array;
     spikeLivePose(idx: number): Float64Array;
+    spreadPlayersToSpawns(): void;
     springPadCount(): number;
     /**
      * Current plate retraction offset in world units. 0 = fully extended.
@@ -501,6 +502,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_setVelocitiesBulk: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_shapesSnapshot: (a: number, b: number) => number;
     readonly softbodyworldhandle_spikeLivePose: (a: number, b: number, c: number) => void;
+    readonly softbodyworldhandle_spreadPlayersToSpawns: (a: number) => void;
     readonly softbodyworldhandle_springPadCount: (a: number) => number;
     readonly softbodyworldhandle_springPadOffset: (a: number, b: number) => number;
     readonly softbodyworldhandle_springPadState: (a: number, b: number) => number;

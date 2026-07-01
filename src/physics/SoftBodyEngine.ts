@@ -283,6 +283,9 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   setSpawnPoints(flat: number[]): void;
   setSpikePose(spikeId: number, x: number, y: number, rot: number): void;
   respawnAll(): void;
+  /** Place every active player blob on a distinct spawn point (by sorted
+   *  gameplay_id rank), so a match/round never starts with players stacked. */
+  spreadPlayersToSpawns(): void;
   killPlayerByBlobId(blobId: number): void;
   clearSpikes(): void;
   takeKillEvents(): Float64Array;

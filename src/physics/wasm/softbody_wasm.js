@@ -1247,6 +1247,9 @@ export class SoftBodyWorldHandle {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
+    spreadPlayersToSpawns() {
+        wasm.softbodyworldhandle_spreadPlayersToSpawns(this.__wbg_ptr);
+    }
     /**
      * @returns {number}
      */

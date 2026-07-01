@@ -227,6 +227,16 @@ export class GameModeManager {
       this.state.phaseTimer = this.mode.config.resultsDuration;
     }
 
+    // Spread players onto distinct spawn points at the start of a round so a
+    // match never begins with blobs stacked (the JS-side hash-mod slot pick
+    // collided). The engine sorts by stable gameplay_id — deterministic — and
+    // this runs at the synced phase transition, so host + guests agree. Do it as
+    // the countdown begins (blobs stay put through the frozen countdown); for
+    // modes with no countdown, do it as play starts.
+    if (phase === 'countdown' || (phase === 'playing' && this.mode.config.countdownDuration <= 0)) {
+      this.world?.spreadPlayersToSpawns();
+    }
+
     this.mode.onPhaseStart(phase, this.state);
     this.onPhaseChange?.(phase);
   }

@@ -476,6 +476,8 @@ impl SoftBodyWorldHandle {
     }
     #[wasm_bindgen(js_name = respawnAll)]
     pub fn respawn_all(&mut self) { self.inner.respawn_all(); }
+    #[wasm_bindgen(js_name = spreadPlayersToSpawns)]
+    pub fn spread_players_to_spawns(&mut self) { self.inner.spread_players_to_spawns(); }
     #[wasm_bindgen(js_name = killPlayerByBlobId)]
     pub fn kill_player_by_blob_id(&mut self, blob_id: u32) { self.inner.kill_player_by_blob_id(blob_id); }
     #[wasm_bindgen(js_name = clearSpikes)]

@@ -128,6 +128,7 @@ export const softbodyworldhandle_setTick: (a: number, b: number) => void;
 export const softbodyworldhandle_setVelocitiesBulk: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_shapesSnapshot: (a: number, b: number) => number;
 export const softbodyworldhandle_spikeLivePose: (a: number, b: number, c: number) => void;
+export const softbodyworldhandle_spreadPlayersToSpawns: (a: number) => void;
 export const softbodyworldhandle_springPadCount: (a: number) => number;
 export const softbodyworldhandle_springPadOffset: (a: number, b: number) => number;
 export const softbodyworldhandle_springPadState: (a: number, b: number) => number;

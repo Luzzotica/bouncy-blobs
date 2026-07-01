@@ -446,6 +446,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
   setSpawnPoints(flat: number[]): void { this.h.setSpawnPoints(Float64Array.from(flat)); }
   setSpikePose(spikeId: number, x: number, y: number, rot: number): void { this.h.setSpikePose(spikeId, x, y, rot); }
   respawnAll(): void { this.h.respawnAll(); }
+  spreadPlayersToSpawns(): void { this.h.spreadPlayersToSpawns(); }
   killPlayerByBlobId(blobId: number): void { this.h.killPlayerByBlobId(blobId); }
   clearSpikes(): void { this.h.clearSpikes(); }
   takeKillEvents(): Float64Array { return this.h.takeKillEvents(); }

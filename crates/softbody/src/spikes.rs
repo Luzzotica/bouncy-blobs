@@ -251,6 +251,33 @@ impl SoftBodyWorld {
         for gid in ids { self.respawn_player(gid); }
     }
 
+    /// Place every active player blob on a DISTINCT spawn point, so a match (or
+    /// round) never starts with players stacked when there are enough points.
+    ///
+    /// Assignment is by the blob's rank in the `gameplay_id`-sorted roster →
+    /// `spawn_points[rank % n]`. Because `gameplay_id` is a stable per-player id
+    /// (identical on host, guests, and replay) and we never touch the RNG, every
+    /// client computes the same placement regardless of blob insertion order —
+    /// which is why this replaces the JS-side hash-mod slot pick (that collided).
+    /// For >n players the wrapped extras get a small deterministic x offset so
+    /// they don't perfectly overlap. Called at each round's setup.
+    pub fn spread_players_to_spawns(&mut self) {
+        let n = self.spawn_points.len();
+        if n == 0 { return; }
+        let mut players: Vec<(u32, BlobId)> = self.blob_ranges.iter().enumerate()
+            .filter(|(_, r)| !r.inactive && r.role == 1)
+            .map(|(i, r)| (r.gameplay_id, i as BlobId))
+            .collect();
+        players.sort_by_key(|&(gid, _)| gid);
+        for (rank, (_, blob_id)) in players.into_iter().enumerate() {
+            let base = self.spawn_points[rank % n];
+            let wrap = (rank / n) as i32;
+            let target = if wrap == 0 { base }
+                else { FxVec2::new(base.x + Fx::from_int(wrap * 40), base.y) };
+            self.reset_blob_to_rest(blob_id, target);
+        }
+    }
+
     fn pick_spawn(&mut self) -> FxVec2 {
         if self.spawn_points.is_empty() { return FxVec2::ZERO; }
         let r = self.rng_next_unit();

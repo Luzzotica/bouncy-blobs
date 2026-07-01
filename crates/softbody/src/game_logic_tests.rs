@@ -261,3 +261,58 @@ fn game_logic_snapshot_rollback_round_trip() {
     for _ in 50..160 { a.step(dt()); b.step(dt()); }
     assert_eq!(a.serialize_state(), b.serialize_state(), "rollback round-trip diverged");
 }
+
+// ---------- spawn spread (no stacking at match/round start) ----------
+
+#[test]
+fn spread_places_players_on_distinct_spawn_points() {
+    let mut w = world_zero_g(3);
+    // Four distinct spawn points.
+    let spawns = [fx(-300), fx(0), fx(-100), fx(0), fx(100), fx(0), fx(300), fx(0)];
+    w.set_spawn_points(&spawns);
+    // Four players ALL spawned stacked at the same origin.
+    for gid in 0..4u32 {
+        add_blob(&mut w, FxVec2::new(fx(0), fx(0)), 1, gid, &format!("p{gid}"));
+    }
+
+    w.spread_players_to_spawns();
+
+    // Every player now sits on a spawn point, and no two share one.
+    let mut used: Vec<(i64, i64)> = Vec::new();
+    for bid in 0..4u32 {
+        let c = w.blob_centroid(bid);
+        let key = (c.x.raw(), c.y.raw());
+        assert!(!used.contains(&key), "two players stacked at {:?}", key);
+        used.push(key);
+        // Landed exactly on one of the registered spawn x-coords.
+        let xs = [fx(-300), fx(-100), fx(100), fx(300)];
+        assert!(xs.iter().any(|x| x.raw() == c.x.raw()), "not on a spawn point: {:?}", key);
+    }
+}
+
+#[test]
+fn spread_is_order_independent_by_gameplay_id() {
+    // Same roster added in OPPOSITE insertion order must yield identical
+    // placement (assignment is keyed on gameplay_id, not insertion order) —
+    // the property host and guests rely on for a matching deterministic sim.
+    let spawns = [fx(-300), fx(0), fx(-100), fx(0), fx(100), fx(0), fx(300), fx(0)];
+
+    let mut a = world_zero_g(3);
+    a.set_spawn_points(&spawns);
+    for gid in 0..4u32 { add_blob(&mut a, FxVec2::new(fx(0), fx(0)), 1, gid, &format!("p{gid}")); }
+    a.spread_players_to_spawns();
+
+    let mut b = world_zero_g(3);
+    b.set_spawn_points(&spawns);
+    for gid in (0..4u32).rev() { add_blob(&mut b, FxVec2::new(fx(0), fx(0)), 1, gid, &format!("p{gid}")); }
+    b.spread_players_to_spawns();
+
+    // Compare placement per gameplay_id. In world `a`, blob_id == gid (added in
+    // order); in `b`, blob_id == 3 - gid (added reversed).
+    for gid in 0..4u32 {
+        let ca = a.blob_centroid(gid);
+        let cb = b.blob_centroid(3 - gid);
+        assert_eq!((ca.x.raw(), ca.y.raw()), (cb.x.raw(), cb.y.raw()),
+            "gameplay_id {gid} placed differently depending on insertion order");
+    }
+}

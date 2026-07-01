@@ -663,6 +663,12 @@ export default function GameMaster() {
    * stuck WebRTC handshake. Survives `knownPlayerIdsRef` getting cleared on
    * disconnect — that's the retry signal. */
   const connectAttemptsRef = useRef<Map<string, { attempts: number; lastAttemptMs: number; status: 'connecting' | 'open' | 'failed' }>>(new Map());
+  /** First time (ms) a rostered player's owning peer was seen WITHOUT a live
+   * connection. Cleared the moment the peer is connected again. Once a peer has
+   * been dead for longer than DEAD_CONN_GRACE_MS the poll loop prunes its
+   * player — the safety net for connections that die silently (no clean
+   * onPeerDisconnected), which otherwise inflate the lobby count forever. */
+  const unconnectedSinceRef = useRef<Map<string, number>>(new Map());
   /** Stores color/faceId from player_join messages so they persist across game restarts. */
   const playerCustomRef = useRef<Map<string, { color?: string; faceId?: string }>>(new Map());
   /** Track connected players via ref for use in callbacks without stale closures */
@@ -2323,6 +2329,9 @@ export default function GameMaster() {
     // the per-attempt timeout (8s) already absorbs Chrome's ICE pacing
     // window, so the backoff just needs to let signaling churn settle.
     const RETRY_BACKOFF_MS = 1000;
+    // A rostered player whose owning peer has had no live data channel for this
+    // long is pruned — the safety net for connections that die silently.
+    const DEAD_CONN_GRACE_MS = 4000;
     const interval = setInterval(async () => {
       try {
         const room = roomRef.current;
@@ -2363,12 +2372,28 @@ export default function GameMaster() {
           }
         }
 
-        // Cross-check: any player in our game whose underlying peer row has
-        // vanished from the room (server TTL'd them, they left without a
-        // clean disconnect, partially-connected screen that gave up) should
-        // be removed from game state too. Without this the lobby player
-        // count stays inflated — a guest who failed mid-handshake leaves a
-        // phantom blob behind because we never saw a proper disconnect.
+        // The live set of peers with an OPEN data channel — the source of truth
+        // for who is actually connected (PeerManager filters on isOpen()).
+        const connectedIds = new Set(manager.getConnectedPeers().map((p) => p.peerId));
+
+        // Has this owning peer had NO live connection for longer than the grace
+        // window? Clears the timer the moment it's connected again, so a brief
+        // ICE flap (or the join handshake) never trips it — only a connection
+        // that stays dead. This is what catches silent deaths (no clean
+        // onPeerDisconnected) that would otherwise inflate the count forever.
+        const deadPastGrace = (peerId: string): boolean => {
+          if (connectedIds.has(peerId)) { unconnectedSinceRef.current.delete(peerId); return false; }
+          const since = unconnectedSinceRef.current.get(peerId);
+          if (since === undefined) { unconnectedSinceRef.current.set(peerId, now); return false; }
+          return now - since > DEAD_CONN_GRACE_MS;
+        };
+
+        // Cross-check every rostered remote player against reality and prune it
+        // when its owning peer has EITHER left the room (server TTL'd them, left
+        // without a clean disconnect) OR gone silently dead (no live channel for
+        // > grace). Without this the lobby count stays inflated — a phone/laptop
+        // that failed mid-handshake leaves a phantom blob because we never saw a
+        // proper disconnect.
         const pm = gameRef.current?.getPlayerManager();
         const game = gameRef.current;
         const ctx = contextRef.current;
@@ -2379,30 +2404,34 @@ export default function GameMaster() {
             if (botIds.has(p.playerId)) continue;
             const guestInfo = guestPlayersRef.current.get(p.playerId);
             if (guestInfo) {
-              // Guest-screen-owned player: prune if the owning screen peer
-              // has left the room.
-              if (!remotePeerIds.has(guestInfo.screenId)) {
-                console.info('[webrtc] cleanup-stale-guest-player', { playerId: p.playerId, screenId: guestInfo.screenId });
+              // Guest-screen-owned player: prune if the owning screen peer left
+              // the room or its connection is dead past grace.
+              const gone = !remotePeerIds.has(guestInfo.screenId);
+              if (gone || deadPastGrace(guestInfo.screenId)) {
+                console.info(gone ? '[webrtc] cleanup-stale-guest-player' : '[webrtc] cleanup-dead-guest-connection', { playerId: p.playerId, screenId: guestInfo.screenId });
                 if (game && ctx) game.onPlayerDisconnect(ctx, p.playerId);
                 guestPlayersRef.current.delete(p.playerId);
               }
               continue;
             }
             // Phone-controller path: playerId IS the peer_id.
-            if (!remotePeerIds.has(p.playerId)) {
-              console.info('[webrtc] cleanup-stale-player', { playerId: p.playerId });
+            const gone = !remotePeerIds.has(p.playerId);
+            if (gone || deadPastGrace(p.playerId)) {
+              console.info(gone ? '[webrtc] cleanup-stale-player' : '[webrtc] cleanup-dead-connection', { playerId: p.playerId });
               handlePlayerDisconnect(p.playerId);
             }
           }
         }
 
-        // Drop attempt records for peers that have fully left the room.
+        // Drop attempt / dead-timer records for peers that have fully left the room.
         for (const id of Array.from(connectAttemptsRef.current.keys())) {
           if (!remotePeerIds.has(id)) connectAttemptsRef.current.delete(id);
         }
+        for (const id of Array.from(unconnectedSinceRef.current.keys())) {
+          if (!remotePeerIds.has(id)) unconnectedSinceRef.current.delete(id);
+        }
 
         // Derive the "connected phone players" list off active data channels.
-        const connectedIds = new Set(manager.getConnectedPeers().map((p) => p.peerId));
         const phonePlayers = remotePeers
           .filter((p) => p.kind === 'phone' && connectedIds.has(p.peer_id))
           .map((p) => peerToPlayer(p, sessionId ?? ''));

@@ -502,6 +502,16 @@ export default function Controller() {
     setExpanding(false);
   }, [controllerMode]);
 
+  /** Release our server-side room peer row so a phone that failed to connect (or
+   *  is leaving) stops counting toward the lobby total. Only WE can delete our
+   *  row — the DELETE is keyed by our own peer secret, so the host can't evict a
+   *  stuck phone; without this the row lingers until the server TTL, inflating
+   *  the "N/8" the lobby browser shows. `leaveRoom` uses keepalive so it still
+   *  lands during page teardown. Safe to call repeatedly (a stale DELETE 404s). */
+  const releaseRoom = useCallback(() => {
+    void roomRef.current?.leaveRoom().catch(() => {});
+  }, []);
+
   const handleJoin = useCallback(async () => {
     if (!sessionId || !playerName.trim()) return;
     setNameSubmitted(true);
@@ -570,6 +580,9 @@ export default function Controller() {
           if (phaseRef.current === 'joining' || phaseRef.current === 'waiting' || phaseRef.current === 'established') {
             setErrorMsg('Connection lost before it was ready.');
             setPhase('error');
+            // We never made it into the game — drop our room row so we stop
+            // counting toward the lobby total while we sit on the error screen.
+            releaseRoom();
           } else {
             // We were actually playing and the host closed — back to the lobby.
             navigateRef.current('/join');
@@ -579,6 +592,7 @@ export default function Controller() {
           addPhase('error', err.message);
           setErrorMsg(err.message);
           setPhase('error');
+          releaseRoom();
         },
       };
 
@@ -599,8 +613,11 @@ export default function Controller() {
       addPhase('join-failed', err?.message || 'error');
       setErrorMsg(err.message || 'Failed to join');
       setPhase('error');
+      // joinAsPeer may have allocated a server-side peer row before it threw —
+      // drop it so the host doesn't keep counting us.
+      releaseRoom();
     }
-  }, [sessionId, playerName, addPhase]);
+  }, [sessionId, playerName, addPhase, releaseRoom]);
 
   /** Send a live customization update to the host. */
   const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
@@ -706,13 +723,20 @@ export default function Controller() {
     };
   }, [phase]);
 
-  // Cleanup
+  // Cleanup: release our room peer row + tear down the transport on unmount
+  // (e.g. navigating back to /join). `pagehide` covers tab close / refresh /
+  // mobile-Safari swipe-away, where React cleanup never runs — leaveRoom's
+  // keepalive still lands so we don't leak a peer row into the lobby count.
   useEffect(() => {
+    const onPageHide = () => releaseRoom();
+    window.addEventListener('pagehide', onPageHide);
     return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      releaseRoom();
       managerRef.current?.dispose();
       if (sendIntervalRef.current) clearInterval(sendIntervalRef.current);
     };
-  }, []);
+  }, [releaseRoom]);
 
   // Connection-flow panel (mirrors the host/guest phase log) — shown on the
   // connecting / connected / error screens with a Copy button.
