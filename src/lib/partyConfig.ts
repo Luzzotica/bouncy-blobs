@@ -9,12 +9,20 @@ if (!apiKey) {
 // Steam/desktop builds run inside Tauri; everything else is the web platform.
 // On Steam we'd attest with a Steam auth-session ticket (see src-tauri's
 // steamworks integration) instead of Turnstile — wired as a follow-up.
+//
+// Dev builds (vite dev / Playwright) attest as `dev`: the backend accepts it
+// from a local origin (isLocalOrigin) without a Turnstile token, so local runs
+// mint a REAL session token and exercise the hardened auth path end-to-end.
+// Production web builds stay `web` (Cloudflare Turnstile) — once
+// VITE_TURNSTILE_SITE_KEY + the backend TURNSTILE_SECRET are configured, this
+// is what gates real users; until then the backend's API-key fallback (while
+// ENFORCE_SESSION_TOKENS is off) keeps everything working.
 const isTauri = typeof window !== "undefined" && "__TAURI__" in window;
-const platform = isTauri ? "steam" : "web";
+const platform = isTauri ? "steam" : import.meta.env.DEV ? "dev" : "web";
 
 async function attest(): Promise<Attestation | string | null> {
   if (platform === "web") return getTurnstileAttestation();
-  // TODO(steam): return { token: await invoke('steam_auth_ticket') } from Tauri.
+  // steam → Steam ticket (follow-up); dev → no proof needed (local origin).
   return null;
 }
 

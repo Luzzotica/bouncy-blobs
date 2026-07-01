@@ -597,9 +597,20 @@ export default function Controller() {
         },
       };
 
+      // The URL param may be a room UUID (from the QR) OR a human join code
+      // (shared verbally / typed). The /peers endpoint only accepts the UUID,
+      // so resolve a code to its room_id first.
+      let roomId = sessionId;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(sessionId)) {
+        addPhase('lookup-code', sessionId);
+        const summary = await new RoomService(roomConfig).lookupByCode(sessionId);
+        roomId = summary.room_id;
+        addPhase('resolved-room', `${roomId.slice(0, 8)}…`);
+      }
+
       const { result, manager, room } = await joinAsPeer(
         roomConfig,
-        sessionId,
+        roomId,
         { kind: 'phone', display_name: playerName.trim() },
         callbacks,
       );
