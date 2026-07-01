@@ -7,7 +7,7 @@ import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
 import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
 
-type ControllerPhase = 'joining' | 'waiting' | 'established' | 'customizing' | 'connected' | 'error';
+type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 interface PhaseEntry { ts: number; phase: string; detail?: string }
 
 /** Copy fallback for insecure contexts — phones load the controller over plain
@@ -543,9 +543,10 @@ export default function Controller() {
               faceId: 'default',
             },
           } satisfies WebRTCMessage));
-          // Stop on the connection-info screen (don't auto-advance) so the flow
-          // stays visible + copyable. The user taps "Continue" to proceed.
-          setPhase('established');
+          // Connected — jump straight into the game (customize → play). The
+          // connection-flow log is only surfaced on FAILURE (the Error screen),
+          // where it's copyable next to a Retry button.
+          setPhase('customizing');
         },
         onMessage: (_peerId, _channel, data) => {
           try {
@@ -577,7 +578,7 @@ export default function Controller() {
           addPhase('disconnected', 'link dropped / timed out');
           // If we never finished connecting (still on connecting / info screen),
           // STAY on an error screen with the copyable flow — don't bounce to /join.
-          if (phaseRef.current === 'joining' || phaseRef.current === 'waiting' || phaseRef.current === 'established') {
+          if (phaseRef.current === 'joining' || phaseRef.current === 'waiting') {
             setErrorMsg('Connection lost before it was ready.');
             setPhase('error');
             // We never made it into the game — drop our room row so we stop
@@ -851,19 +852,6 @@ export default function Controller() {
         {flowPanel}
         <button onClick={() => navigate('/join')} style={{ ...btnStyle, marginTop: 14, background: 'transparent', color: '#888', fontSize: 14, padding: '8px 24px', border: '1px solid #444' }}>
           Cancel
-        </button>
-      </div>
-    );
-  }
-
-  if (phase === 'established') {
-    return (
-      <div style={fullCenter}>
-        <h2 style={{ color: '#7dff8a', margin: '0 0 4px' }}>Connected! ✅</h2>
-        <p style={{ color: '#9ab', fontSize: 14, margin: 0 }}>Handshake complete — you can copy the flow below.</p>
-        {flowPanel}
-        <button onClick={() => setPhase('customizing')} style={{ ...btnStyle, marginTop: 18 }}>
-          Continue →
         </button>
       </div>
     );
