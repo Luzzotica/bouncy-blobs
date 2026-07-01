@@ -66,6 +66,11 @@ export class RoomService {
   // before expiry; a single in-flight refresh is shared so concurrent calls
   // don't each mint their own token.
   private sessionToken: string | null = null;
+  // After a failed token exchange, back off so we don't re-hit the endpoint on
+  // EVERY signal (offer/answer/each ICE candidate) — that added a failed round
+  // trip per signal, slowing the WebRTC handshake enough to blow the connect
+  // budget under concurrency. We just use the API-key fallback until this passes.
+  private tokenBackoffUntil = 0;
   private sessionExpiresAt = 0; // epoch ms
   private tokenRefresh: Promise<void> | null = null;
 
@@ -272,6 +277,7 @@ export class RoomService {
   private async ensureToken(): Promise<void> {
     const skewMs = 30_000; // refresh 30s before expiry
     if (this.sessionToken && Date.now() < this.sessionExpiresAt - skewMs) return;
+    if (Date.now() < this.tokenBackoffUntil) return; // recently failed → use API key, don't re-hit
     if (this.tokenRefresh) return this.tokenRefresh;
 
     this.tokenRefresh = (async () => {
@@ -301,6 +307,7 @@ export class RoomService {
       } catch (err) {
         console.warn("[RoomService] token exchange failed, falling back to API key:", err);
         this.sessionToken = null;
+        this.tokenBackoffUntil = Date.now() + 60_000; // don't retry every signal
       } finally {
         this.tokenRefresh = null;
       }

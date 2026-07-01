@@ -28,7 +28,11 @@ const DEFAULT_RTC_CONFIG: RTCConfiguration = {
 // every realistic path has failed and we should bail to the retry loop
 // rather than keep waiting. Lower than this risks killing legitimate slow
 // TURN allocations on flaky cellular.
-const CONNECT_TIMEOUT_MS = 8_000;
+// Raised 8s→15s: on WiFi that forces a TURN *relay* (AP-isolation / mDNS-blocked
+// direct path — the common phone case), the poll-signalled offer/answer/relay-
+// candidate handshake can legitimately need >8s, especially with several peers
+// joining at once. 8s was killing valid slow relay allocations mid-handshake.
+const CONNECT_TIMEOUT_MS = 15_000;
 
 // Once a connection is live, `iceConnectionState`/`connectionState` can drop
 // to "disconnected" (or even "failed") on a restrictive/rebinding NAT —

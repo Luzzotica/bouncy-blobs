@@ -7,7 +7,21 @@ import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
 import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
 
-type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
+type ControllerPhase = 'joining' | 'waiting' | 'established' | 'customizing' | 'connected' | 'error';
+interface PhaseEntry { ts: number; phase: string; detail?: string }
+
+/** Copy fallback for insecure contexts — phones load the controller over plain
+ *  HTTP on the host's LAN IP, where navigator.clipboard is unavailable. */
+function fallbackCopy(text: string, done: () => void): void {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.readOnly = true;
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    ta.setSelectionRange(0, text.length);
+    document.execCommand('copy'); ta.remove(); done();
+  } catch { /* ignore */ }
+}
 type ControllerMode = 'normal' | 'party_box' | 'placement';
 
 interface PartyBoxItem {
@@ -403,6 +417,22 @@ export default function Controller() {
   const [playerName, setPlayerName] = useState('');
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  // Connection flow log (mirrors the host/guest phase log) so a phone can SEE and
+  // COPY exactly how far the WebRTC handshake got — invaluable for debugging
+  // flaky phone connects. Fed by the party SDK's onPhase + manual milestones.
+  const [phaseLog, setPhaseLog] = useState<PhaseEntry[]>([]);
+  const [copied, setCopied] = useState(false);
+  const addPhase = useCallback((phase: string, detail?: string) => {
+    setPhaseLog((prev) => { const next = [...prev, { ts: Date.now(), phase, detail }]; return next.length > 60 ? next.slice(next.length - 60) : next; });
+  }, []);
+  const copyLog = useCallback(() => {
+    const base = phaseLog[0]?.ts ?? Date.now();
+    const lines = phaseLog.map((e) => `+${String(e.ts - base).padStart(5)}ms  ${e.phase}${e.detail ? '  —  ' + e.detail : ''}`).join('\n');
+    const text = `Bouncy Blobs — phone connect log\nsession=${sessionId ?? '?'}\nua=${typeof navigator !== 'undefined' ? navigator.userAgent : '?'}\n\n${lines}`;
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1600); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    else fallbackCopy(text, done);
+  }, [phaseLog, sessionId]);
   const [expanding, setExpanding] = useState(false);
   const [selectedColor, setSelectedColor] = useState('');
   const [selectedFace, setSelectedFace] = useState('');
@@ -472,10 +502,19 @@ export default function Controller() {
   const handleJoin = useCallback(async () => {
     if (!sessionId || !playerName.trim()) return;
     setNameSubmitted(true);
+    setPhaseLog([]);
+    addPhase('joining-room', `session=${sessionId.slice(0, 8)}…`);
 
     try {
       const callbacks: PeerCallbacks = {
+        // Full WebRTC handshake trace (offer/answer/ICE/candidates/timeouts).
+        onPhase: (_peerId, phase, detail) => {
+          const fmt = (v: unknown) => (v == null ? String(v) : Array.isArray(v) ? `[${v.length}]` : typeof v === 'object' ? '{…}' : String(v));
+          const d = detail ? Object.entries(detail).map(([k, v]) => `${k}=${fmt(v)}`).join(' ') : undefined;
+          addPhase(phase, d);
+        },
         onPeerConnected: () => {
+          addPhase('connected', '✅ data channel open');
           // Immediately join the game with default appearance — blob spawns right away
           managerRef.current?.sendPrimary('host', JSON.stringify({
             type: 'player_join',
@@ -491,7 +530,9 @@ export default function Controller() {
               faceId: 'default',
             },
           } satisfies WebRTCMessage));
-          setPhase('customizing');
+          // Stop on the connection-info screen (don't auto-advance) so the flow
+          // stays visible + copyable. The user taps "Continue" to proceed.
+          setPhase('established');
         },
         onMessage: (_peerId, _channel, data) => {
           try {
@@ -539,13 +580,15 @@ export default function Controller() {
       playerIdRef.current = result.peer_id;
       managerRef.current = manager;
       roomRef.current = room;
+      addPhase('joined-room', `peer=${result.peer_id?.slice(0, 8)}… — waiting for host`);
 
       setPhase('waiting');
     } catch (err: any) {
+      addPhase('join-failed', err?.message || 'error');
       setErrorMsg(err.message || 'Failed to join');
       setPhase('error');
     }
-  }, [sessionId, playerName]);
+  }, [sessionId, playerName, addPhase]);
 
   /** Send a live customization update to the host. */
   const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
@@ -659,6 +702,34 @@ export default function Controller() {
     };
   }, []);
 
+  // Connection-flow panel (mirrors the host/guest phase log) — shown on the
+  // connecting / connected / error screens with a Copy button.
+  const flowPanel = (
+    <div style={{ width: 'min(92vw, 440px)', marginTop: 18, background: '#12121e', border: '1px solid #333', borderRadius: 8, overflow: 'hidden', textAlign: 'left' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid #333' }}>
+        <span style={{ color: '#9ab', fontSize: 12 }}>connection flow</span>
+        <button onClick={copyLog} style={{ background: copied ? '#2a5' : '#26263a', color: '#dfe', border: '1px solid #445', borderRadius: 5, fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}>
+          {copied ? 'Copied ✓' : '📋 Copy log'}
+        </button>
+      </div>
+      <div style={{ maxHeight: 210, overflowY: 'auto', padding: '6px 10px', fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.55 }}>
+        {phaseLog.length === 0 ? (
+          <div style={{ color: '#667' }}>starting…</div>
+        ) : phaseLog.map((e, i) => {
+          const prev = i > 0 ? phaseLog[i - 1].ts : e.ts;
+          const dt = e.ts - prev;
+          return (
+            <div key={i}>
+              <span style={{ color: '#556' }}>+{String(dt).padStart(4, ' ')}ms </span>
+              <span style={{ color: '#e0c0ff' }}>{e.phase}</span>
+              {e.detail ? <span style={{ color: '#889' }}> — {e.detail}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   if (!sessionId) {
     return (
       <div style={fullCenter}>
@@ -670,8 +741,9 @@ export default function Controller() {
   if (phase === 'error') {
     return (
       <div style={fullCenter}>
-        <p style={{ color: '#f66', fontSize: 16 }}>{errorMsg}</p>
-        <button onClick={() => window.location.reload()} style={btnStyle}>
+        <p style={{ color: '#f66', fontSize: 16 }}>{errorMsg || 'Connection failed'}</p>
+        {flowPanel}
+        <button onClick={() => window.location.reload()} style={{ ...btnStyle, marginTop: 16 }}>
           Retry
         </button>
       </div>
@@ -739,7 +811,24 @@ export default function Controller() {
   if (phase === 'waiting') {
     return (
       <div style={fullCenter}>
-        <p style={{ color: '#aaa', fontSize: 16 }}>Connecting...</p>
+        <p style={{ color: '#aaa', fontSize: 16 }}>Connecting…</p>
+        {flowPanel}
+        <button onClick={() => navigate('/join')} style={{ ...btnStyle, marginTop: 14, background: 'transparent', color: '#888', fontSize: 14, padding: '8px 24px', border: '1px solid #444' }}>
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  if (phase === 'established') {
+    return (
+      <div style={fullCenter}>
+        <h2 style={{ color: '#7dff8a', margin: '0 0 4px' }}>Connected! ✅</h2>
+        <p style={{ color: '#9ab', fontSize: 14, margin: 0 }}>Handshake complete — you can copy the flow below.</p>
+        {flowPanel}
+        <button onClick={() => setPhase('customizing')} style={{ ...btnStyle, marginTop: 18 }}>
+          Continue →
+        </button>
       </div>
     );
   }
