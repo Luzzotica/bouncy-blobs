@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // Cloudflare Turnstile attestation for the rooms token exchange (web platform).
 //
 // Returns a fresh Turnstile token the backend verifies via siteverify, proving

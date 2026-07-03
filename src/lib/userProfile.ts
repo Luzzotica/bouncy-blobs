@@ -2,7 +2,7 @@
 // name, last room settings) and the guest (display name). Centralized
 // here so the keys aren't scattered across pages.
 
-import { getSelfSteamPersonaName } from "./party";
+import { getSelfSteamPersonaName } from "./party/steamTransport";
 
 const KEY_DISPLAY_NAME = "bb.profile.displayName";
 const KEY_ROOM_NAME = "bb.profile.roomName";

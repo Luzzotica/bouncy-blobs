@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // SteamTransport — Transport implementation backed by ISteamNetworkingSockets.
 //
@@ -180,13 +181,15 @@ export class SteamTransport implements Transport {
     };
   }
 
-  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer): boolean {
+  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean {
     if (this.connHandle === null || !this.opened) return false;
     const ch = channel ?? "state";
     if (typeof data === "string") {
       invoke("steam_net_send", { connHandle: this.connHandle, channel: ch, data }).catch(() => {});
     } else {
-      const u8 = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer);
+      const u8 = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data);
       invoke("steam_net_send_bin", {
         connHandle: this.connHandle,
         channel: ch,

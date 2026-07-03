@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // WebRtcTransport — Transport implementation backed by RTCPeerConnection.
 //
@@ -14,7 +15,7 @@
 
 import type { RoomService } from "./RoomService";
 import type { PeerCallbacks, Signal } from "./types";
-import { channelsForKind, type ChannelName, type Transport, type TransportRole } from "./transport";
+import { channelsForKind, rtcConfigFromIceServers, type ChannelName, type Transport, type TransportRole } from "./transport";
 
 const DEFAULT_RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -81,6 +82,12 @@ export class WebRtcTransport implements Transport {
   private seenCandidateTypes: Set<string> = new Set();
   private disposed = false;
   private firedDisconnect = false;
+  private reportedConnected = false;
+  // ── Tier-2 recovery ── one full renegotiation per outage: fresh ICE servers
+  // (TURN creds expire ~10min — the usual reason deep-match ICE restarts fail),
+  // a NEW RTCPeerConnection, and a re-offer over the still-alive signaling.
+  private renegotiated = false;
+  private rtcConfigCurrent: RTCConfiguration | null = null;
 
   constructor(
     private readonly room: RoomService,
@@ -95,8 +102,55 @@ export class WebRtcTransport implements Transport {
     if (this.firedDisconnect || this.disposed) return;
     this.firedDisconnect = true;
     dbg("disconnect", { remoteId: this.remoteId, role: this.role, reason });
+    // Terminal outcome telemetry: a timeout never connected; a post-connect
+    // death that exhausted recovery is a gave_up; anything else is failed.
+    const outcome = reason === "connect-timeout"
+      ? "timeout"
+      : reason.includes("no recovery") ? "gave_up" : "failed";
+    void this.reportTelemetry(outcome);
     this.emit("disconnect", { reason });
     this.callbacks.onPeerDisconnected?.(this.remoteId);
+  }
+
+  /** Selected-pair info for telemetry: which candidate type won, and (when
+   *  relayed) which TURN server carried the session. Best-effort. */
+  private async selectedCandidate(): Promise<{ candidate_type?: string; relay_host?: string }> {
+    const pc = this.pc;
+    if (!pc) return {};
+    try {
+      const stats = await pc.getStats();
+      const locals = new Map<string, Record<string, unknown>>();
+      let selected: Record<string, unknown> | null = null;
+      stats.forEach((s: Record<string, unknown> & { type?: string }) => {
+        if (s.type === "local-candidate") locals.set(String(s.id), s);
+        else if (s.type === "candidate-pair" && (s as { nominated?: boolean }).nominated
+          && (s as { state?: string }).state === "succeeded") selected = s;
+      });
+      if (!selected) return {};
+      const lc = locals.get(String((selected as { localCandidateId?: string }).localCandidateId));
+      if (!lc) return {};
+      const ctype = String((lc as { candidateType?: string }).candidateType ?? "");
+      const url = (lc as { url?: string }).url;
+      return {
+        candidate_type: ctype || undefined,
+        relay_host: ctype === "relay" && url ? String(url).slice(0, 128) : undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  private async reportTelemetry(
+    outcome: "connected" | "timeout" | "failed" | "recovered" | "gave_up",
+  ): Promise<void> {
+    const sel = await this.selectedCandidate();
+    this.room.postTelemetry({
+      outcome,
+      role: this.role === "offerer" ? "host" : "peer",
+      connect_ms: outcome === "connected" ? Date.now() - this.startedAtMs : undefined,
+      ice_restarts: this.iceRestarts,
+      ...sel,
+    });
   }
 
   private emit(phase: string, detail?: Record<string, unknown>): void {
@@ -122,6 +176,7 @@ export class WebRtcTransport implements Transport {
       this.emit("recovered");
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = null;
+      void this.reportTelemetry("recovered");
     }
     this.iceRestarts = 0;
   }
@@ -144,6 +199,11 @@ export class WebRtcTransport implements Transport {
       // Recovered out from under us between the timer firing and now? Bail.
       if (cs === "connected" || ics === "connected" || ics === "completed") return;
       dbg("recovery-timeout", { remoteId: this.remoteId, connectionState: cs, iceConnectionState: ics });
+      if (!this.renegotiated && this.role === "offerer") {
+        // Last rung before giving up: rebuild from scratch with fresh relays.
+        void this.renegotiate(reason);
+        return;
+      }
       this.fireDisconnectOnce(`${reason} (no recovery in ${RECOVERY_GRACE_MS}ms)`);
     }, RECOVERY_GRACE_MS);
   }
@@ -171,9 +231,48 @@ export class WebRtcTransport implements Transport {
     }
   }
 
-  async start(): Promise<void> {
+  /** Silently discard the current RTCPeerConnection: detach every handler
+   *  FIRST so closing channels/pc can't fire disconnect/recovery callbacks. */
+  private teardownPc(): void {
+    if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
+    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = null; }
+    for (const ch of this.channels.values()) {
+      ch.onopen = null; ch.onclose = null; ch.onmessage = null;
+      try { ch.close(); } catch { /* already closed */ }
+    }
+    this.channels.clear();
+    const pc = this.pc;
+    if (pc) {
+      pc.onicecandidate = null;
+      pc.onconnectionstatechange = null;
+      pc.oniceconnectionstatechange = null;
+      pc.onicegatheringstatechange = null;
+      pc.ondatachannel = null;
+      try { pc.close(); } catch { /* already closed */ }
+    }
+    this.pc = null;
+    this.pendingIce = [];
+  }
+
+  /** Tier-2 recovery (offerer side): fetch fresh ICE servers, rebuild the peer
+   *  connection, and re-offer with a `renegotiate` marker so the answerer
+   *  rebuilds too. One shot per transport — if THIS doesn't connect within the
+   *  normal connect budget, the disconnect is final. */
+  private async renegotiate(reason: string): Promise<void> {
+    if (this.disposed || this.firedDisconnect || this.renegotiated) return;
+    this.renegotiated = true;
+    dbg("renegotiate", { remoteId: this.remoteId, reason });
+    this.emit("renegotiating", { reason });
+    const fresh = await this.room.refreshIce();
+    if (this.disposed || this.firedDisconnect) return;
+    if (fresh) this.rtcConfigCurrent = rtcConfigFromIceServers(fresh) ?? null;
+    this.teardownPc();
+    await this.start(true);
+  }
+
+  async start(renegotiate = false): Promise<void> {
     this.startedAtMs = Date.now();
-    this.pc = new RTCPeerConnection(this.rtcConfig);
+    this.pc = new RTCPeerConnection(this.rtcConfigCurrent ?? this.rtcConfig);
     const chans = channelsForKind(this.remoteKind);
     dbg("start", { remoteId: this.remoteId, role: this.role, remoteKind: this.remoteKind });
     this.emit("start", { role: this.role, remoteKind: this.remoteKind });
@@ -276,7 +375,11 @@ export class WebRtcTransport implements Transport {
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
       this.emit("offer-sent");
-      await this.room.sendSignal(this.remoteId, "offer", { type: offer.type, sdp: offer.sdp });
+      await this.room.sendSignal(this.remoteId, "offer", {
+        type: offer.type,
+        sdp: offer.sdp,
+        ...(renegotiate ? { renegotiate: true } : {}),
+      });
     } else {
       // Answerer: just listen for whatever the offerer creates.
       this.pc.ondatachannel = (event) => {
@@ -302,6 +405,10 @@ export class WebRtcTransport implements Transport {
           clearTimeout(this.connectTimer);
           this.connectTimer = null;
         }
+        if (!this.reportedConnected) {
+          this.reportedConnected = true;
+          void this.reportTelemetry("connected");
+        }
         this.callbacks.onPeerConnected?.(this.remoteId, this.remoteKind);
       }
     };
@@ -314,14 +421,34 @@ export class WebRtcTransport implements Transport {
   }
 
   async handleSignal(signal: Signal): Promise<void> {
-    const pc = this.pc;
-    if (!pc) return;
+    if (!this.pc) return;
     dbg("signal-in", {
       remoteId: this.remoteId,
       type: signal.signal_type,
-      hasRemoteDesc: !!pc.remoteDescription,
+      hasRemoteDesc: !!this.pc.remoteDescription,
     });
     try {
+      // Peer-initiated tier-2 recovery: the offerer built a brand-new
+      // RTCPeerConnection with fresh relays — mirror it: fresh ICE, new pc
+      // (via start(): re-arms ondatachannel + the connect budget), THEN apply
+      // the offer below against the new pc.
+      if (
+        signal.signal_type === "offer" &&
+        this.role === "answerer" &&
+        (signal.payload as { renegotiate?: boolean }).renegotiate === true &&
+        this.pc.remoteDescription
+      ) {
+        dbg("renegotiate-accept", { remoteId: this.remoteId });
+        this.emit("renegotiating", { reason: "peer-initiated" });
+        this.renegotiated = true;
+        const fresh = await this.room.refreshIce();
+        if (this.disposed || this.firedDisconnect) return;
+        if (fresh) this.rtcConfigCurrent = rtcConfigFromIceServers(fresh) ?? null;
+        this.teardownPc();
+        await this.start();
+      }
+      const pc = this.pc;
+      if (!pc) return;
       if (signal.signal_type === "offer" && this.role === "answerer") {
         this.emit("offer-received");
         await pc.setRemoteDescription(signal.payload as RTCSessionDescriptionInit);
@@ -348,7 +475,7 @@ export class WebRtcTransport implements Transport {
     }
   }
 
-  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer): boolean {
+  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean {
     const label = channel ?? channelsForKind(this.remoteKind).primary;
     const ch = this.channels.get(label);
     if (ch?.readyState === "open") {

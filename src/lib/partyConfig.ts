@@ -1,5 +1,6 @@
 import type { Attestation, RoomClientConfig } from "./party";
-import { getTurnstileAttestation } from "./turnstileAttest";
+import { getTurnstileAttestation } from "./party/turnstileAttest";
+import { getSelfSteamId } from "./party/steamTransport";
 
 const apiKey = import.meta.env.VITE_MP_API_KEY ?? "";
 if (!apiKey) {
@@ -22,12 +23,27 @@ const platform = isTauri ? "steam" : import.meta.env.DEV ? "dev" : "web";
 
 async function attest(): Promise<Attestation | string | null> {
   if (platform === "web") return getTurnstileAttestation();
-  // steam → Steam ticket (follow-up); dev → no proof needed (local origin).
-  return null;
+  if (platform === "steam") {
+    // Steam auth session ticket: proves a genuine Steam account owning the game
+    // AND carries identity (the backend mints a steam:<id64> player identity).
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const [ticket, steamId] = await Promise.all([
+        invoke<string>("steam_auth_ticket"),
+        getSelfSteamId(),
+      ]);
+      return ticket ? { token: ticket, steamId: String(steamId) } : null;
+    } catch (err) {
+      console.warn("[partyConfig] steam ticket unavailable, exchange will fall back:", err);
+      return null;
+    }
+  }
+  return null; // dev → no proof needed (local origin)
 }
 
 /** Shared client config for the rooms SDK. */
 export const roomConfig: RoomClientConfig = {
+  gameId: "bouncy-blobs",
   baseUrl: import.meta.env.VITE_PARTY_API_URL ?? "http://localhost:3000",
   apiKey,
   pollIntervalMs: 500,

@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // Transport — abstracts the wire between two peers.
 //
@@ -13,13 +14,13 @@
 //   - anything else (default "phone") → "data" (reliable)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ChannelName = "state" | "input" | "data";
+export type ChannelName = "state" | "input" | "data" | "game-reliable" | "game-unreliable";
 export type TransportRole = "offerer" | "answerer";
 
 export interface Transport {
   readonly remoteId: string;
   readonly remoteKind: string;
-  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer): boolean;
+  send(channel: ChannelName | string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean;
   isOpen(): boolean;
   dispose(): void;
 }
@@ -38,5 +39,45 @@ export function channelsForKind(kind: string): ChannelTopology {
   // link a reliable-ordered channel head-of-line-blocks: one dropped packet
   // stalls every later one until retransmit. Discrete events stay on "data".
   if (kind === "phone") return { primary: "data", unreliable: "input" };
+  // Game peers (gyrii-style rollback netcode): reliable channel for keyframes/
+  // roster/beacons, unreliable for the per-tick input/relay stream.
+  if (kind === "player") return { primary: "game-reliable", unreliable: "game-unreliable" };
   return { primary: "data" };
+}
+
+export function rtcConfigFromIceServers(servers?: import("./types").IceServerConfig[]): RTCConfiguration | undefined {
+  if (!servers || servers.length === 0) return undefined;
+  let forceRelay = false;
+  let turnProto: string | null = null;
+  try {
+    if (typeof window !== "undefined") {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("relay") === "1") forceRelay = true;
+      turnProto = q.get("turnproto"); // "tcp" | "tls" — connectivity-matrix testing
+    }
+  } catch { /* non-browser context */ }
+
+  // ?turnproto=tcp|tls filters the minted TURN urls so the connectivity matrix
+  // can prove each relay protocol works in isolation (tls = only turns: — the
+  // 443 path UDP-blocked networks depend on). STUN entries stay for srflx
+  // unless relay is also forced.
+  let effective = servers as RTCIceServer[];
+  if (turnProto === "tcp" || turnProto === "tls") {
+    effective = effective
+      .map((s) => {
+        const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u) => {
+          if (typeof u !== "string") return false;
+          if (u.startsWith("stun:")) return true;
+          return turnProto === "tls"
+            ? u.startsWith("turns:")
+            : u.startsWith("turn:") && u.includes("transport=tcp");
+        });
+        return { ...s, urls };
+      })
+      .filter((s) => (Array.isArray(s.urls) ? s.urls.length > 0 : true));
+  }
+
+  const cfg: RTCConfiguration = { iceServers: effective };
+  if (forceRelay) cfg.iceTransportPolicy = "relay";
+  return cfg;
 }

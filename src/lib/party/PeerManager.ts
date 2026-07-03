@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // PeerManager
 //
@@ -117,19 +118,19 @@ export class PeerManager {
   }
 
   /** Send to a single peer on a named channel (or the peer's primary if omitted). */
-  send(peerId: string, channel: string | undefined, data: string | ArrayBuffer): boolean {
+  send(peerId: string, channel: string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean {
     return this.peers.get(peerId)?.send(channel, data) ?? false;
   }
 
   /** Convenience: send on the peer's primary channel. */
-  sendPrimary(peerId: string, data: string | ArrayBuffer): boolean {
+  sendPrimary(peerId: string, data: string | ArrayBuffer | ArrayBufferView): boolean {
     return this.send(peerId, undefined, data);
   }
 
   /** Broadcast to all connected peers on a named channel. Optional kind
    * filter so e.g. the lobby host can target only screen peers for snapshot
    * broadcast without phone peers receiving snapshot bytes. */
-  broadcast(channel: string, data: string | ArrayBuffer, filterByKind?: string): void {
+  broadcast(channel: string, data: string | ArrayBuffer | ArrayBufferView, filterByKind?: string): void {
     for (const peer of this.peers.values()) {
       if (filterByKind && peer.remoteKind !== filterByKind) continue;
       peer.send(channel, data);

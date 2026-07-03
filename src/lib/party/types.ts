@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // Rooms WebRTC SDK — shared types
 // Mirrors /api/rooms/** response shapes exactly. A "room" is a host-owned
@@ -110,6 +111,8 @@ export interface Attestation {
 }
 
 export interface RoomClientConfig {
+  /** Game identifier for room listing + telemetry attribution (e.g. "gyrii"). */
+  gameId?: string;
   /** Base URL of the arcadii (hexii) signaling backend. */
   baseUrl: string;
   /**

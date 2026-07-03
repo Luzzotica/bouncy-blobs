@@ -244,6 +244,20 @@ pub fn steam_available(state: State<'_, SteamState>) -> bool {
     state.client().is_ok()
 }
 
+/// Mint a Steam auth session ticket (hex-encoded) for the arcadii token
+/// exchange. The backend validates it with ISteamUserAuth/AuthenticateUserTicket
+/// using the publisher Web API key, proving this is a genuine Steam account
+/// that owns the game. The ticket handle is intentionally left uncancelled —
+/// it stays valid for the session and Steam reaps it on shutdown.
+#[tauri::command]
+pub fn steam_auth_ticket(state: State<'_, SteamState>) -> Result<String, SteamCmdError> {
+    let client = state.client()?;
+    let (_handle, ticket) = client
+        .user()
+        .authentication_session_ticket(steamworks::networking_types::NetworkingIdentity::new());
+    Ok(ticket.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 // ── Workshop browse / subscribe ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

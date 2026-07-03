@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 import type {
   Attestation,
   RoomClientConfig,
@@ -55,6 +56,26 @@ export interface JoinRoomOpts {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Stable anonymous device id for identity attribution. Persisted so the same
+ * browser keeps the same 'anon:<uuid>' across sessions; storage-less contexts
+ * (private mode, non-browser) fall back to a per-process id.
+ */
+let processDeviceId: string | null = null;
+function stableDeviceId(): string {
+  try {
+    const KEY = "arcadii_device_id";
+    const existing = localStorage.getItem(KEY);
+    if (existing) return existing;
+    const id = crypto.randomUUID();
+    localStorage.setItem(KEY, id);
+    return id;
+  } catch {
+    if (!processDeviceId) processDeviceId = crypto.randomUUID();
+    return processDeviceId;
+  }
+}
+
 export class RoomService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -77,6 +98,14 @@ export class RoomService {
   // Set after createRoom() / joinRoom(). Either one is sufficient to auth
   // mutating requests; sendSignal picks whichever is populated.
   public roomId: string | null = null;
+  /** Identity this session runs as ('steam:<id64>' | 'anon:<uuid>'), from the
+   *  token exchange. Attribution only — never used client-side for auth. */
+  public playerId: string | null = null;
+  /** game_id for telemetry attribution — set by createRoom(); joiners may set it. */
+  public gameId: string | null = null;
+  /** Scoped room credential from create/join — auths room-level surfaces
+   *  (the realtime signal gateway). */
+  public roomToken: string | null = null;
   public hostSecret: string | null = null;
   public hostPeerId: string | null = null;    // host's own peer row
   public peerId: string | null = null;        // only set on joinRoom()
@@ -86,6 +115,24 @@ export class RoomService {
   private isPolling = false;
   private sinceId = 0;
 
+  // ── Realtime push path (WSS signal gateway) ──
+  // The gateway pushes the same durable signal rows the instant they're stored;
+  // polling keeps running (relaxed) as reconciliation. BOTH paths dedupe through
+  // `seenSignalIds` so a signal is applied exactly once regardless of which
+  // path delivers it first. The poll cursor (`sinceId`) is advanced ONLY by
+  // poll responses — they're contiguous-by-id — so a push arriving out of order
+  // can never make the poll skip an undelivered earlier signal.
+  public signalGwUrl: string | null = null;
+  private ws: WebSocket | null = null;
+  private wsUp = false;
+  private wsBackoffMs = 1_000;
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private seenSignalIds = new Set<number>();
+  /** Signaling path currently delivering ("push" while the socket is open). */
+  get signalPath(): "poll" | "push" {
+    return this.wsUp ? "push" : "poll";
+  }
+
   constructor(config: RoomClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.apiKey = config.apiKey;
@@ -93,6 +140,7 @@ export class RoomService {
     this.pollIntervalMs = config.pollIntervalMs ?? 1500;
     this.platform = config.platform ?? "web";
     this.getAttestation = config.getAttestation;
+    this.gameId = config.gameId ?? null;
   }
 
   // ─── Room lifecycle ───────────────────────────────────────────────────────
@@ -100,6 +148,9 @@ export class RoomService {
   async createRoom(opts: CreateRoomOpts): Promise<CreateRoomResult> {
     const result = (await this.post("/api/rooms", opts)) as CreateRoomResult;
     this.roomId = result.room_id;
+    this.gameId = opts.game_id;
+    this.roomToken = (result as { room_token?: string }).room_token ?? null;
+    this.signalGwUrl = (result as { signal_gw?: string }).signal_gw ?? null;
     this.hostSecret = result.host_secret;
     this.hostPeerId = result.host_peer_id;
     return result;
@@ -158,6 +209,8 @@ export class RoomService {
     this.roomId = roomId;
     this.peerId = r.peer_id;
     this.peerSecret = r.peer_secret;
+    this.roomToken = (r as { room_token?: string }).room_token ?? null;
+    this.signalGwUrl = (r as { signal_gw?: string }).signal_gw ?? null;
     return r;
   }
 
@@ -226,6 +279,24 @@ export class RoomService {
     if (!this.roomId) throw new Error("roomId not set");
     this.isPolling = true;
     this.sinceId = 0;
+    this.seenSignalIds.clear();
+
+    // Exactly-once application across both delivery paths.
+    const deliver = async (sig: Signal) => {
+      const id = Number(sig.signal_id);
+      if (Number.isFinite(id)) {
+        if (this.seenSignalIds.has(id)) return;
+        this.seenSignalIds.add(id);
+        // Bound the set — old ids can't recur (cursor is past them).
+        if (this.seenSignalIds.size > 2048) {
+          for (const old of this.seenSignalIds) {
+            this.seenSignalIds.delete(old);
+            if (this.seenSignalIds.size <= 1024) break;
+          }
+        }
+      }
+      await onSignal(sig);
+    };
 
     const poll = async () => {
       if (!this.isPolling || !this.roomId) return;
@@ -235,17 +306,64 @@ export class RoomService {
           `?recipient_peer_id=${encodeURIComponent(recipientPeerId)}` +
           `&since_id=${this.sinceId}&limit=50`;
         const r = (await this.get(path)) as PollSignalsResult;
-        for (const sig of r.signals) await onSignal(sig);
+        for (const sig of r.signals) await deliver(sig);
         this.sinceId = r.next_since_id;
       } catch (err) {
         console.warn("[RoomService] poll error:", err);
       }
       if (this.isPolling) {
-        this.pollingTimer = setTimeout(poll, this.pollIntervalMs);
+        // Push healthy → polling is just reconciliation; back off. Push down →
+        // polling is the handshake path; keep it tight.
+        const interval = this.wsUp ? Math.max(this.pollIntervalMs, 5_000) : this.pollIntervalMs;
+        this.pollingTimer = setTimeout(poll, interval);
       }
     };
 
+    this.connectSignalSocket(deliver);
     poll();
+  }
+
+  /** Hold a WebSocket to the signal gateway for instant delivery. Reconnects
+   *  with backoff for as long as we're listening; harmless if the backend
+   *  doesn't advertise a gateway (older deploys) or the room predates tokens. */
+  private connectSignalSocket(deliver: (sig: Signal) => Promise<void>): void {
+    if (!this.signalGwUrl || !this.roomToken || typeof WebSocket === "undefined") return;
+    if (!this.isPolling || this.ws) return;
+    let url: string;
+    try {
+      const base = this.signalGwUrl.replace(/^http/, "ws").replace(/\/$/, "");
+      url = `${base}/rooms/${this.roomId}?token=${encodeURIComponent(this.roomToken)}`;
+    } catch {
+      return;
+    }
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      return;
+    }
+    this.ws = ws;
+    ws.onopen = () => {
+      this.wsUp = true;
+      this.wsBackoffMs = 1_000;
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as { type?: string; signal?: Signal };
+        if (msg.type === "signal" && msg.signal) void deliver(msg.signal);
+      } catch { /* ignore malformed frames */ }
+    };
+    const onDown = () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this.wsUp = false;
+      if (!this.isPolling) return;
+      const delay = this.wsBackoffMs;
+      this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, 30_000);
+      this.wsReconnectTimer = setTimeout(() => this.connectSignalSocket(deliver), delay);
+    };
+    ws.onclose = onDown;
+    ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
   }
 
   stopPolling(): void {
@@ -254,6 +372,15 @@ export class RoomService {
       clearTimeout(this.pollingTimer);
       this.pollingTimer = null;
     }
+    if (this.wsReconnectTimer !== null) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = null;
+    }
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* already closed */ }
+      this.ws = null;
+    }
+    this.wsUp = false;
   }
 
   // ─── HTTP plumbing ────────────────────────────────────────────────────────
@@ -261,6 +388,69 @@ export class RoomService {
   // Auth header for a signalling call. Prefers the session token; falls back to
   // the raw API key before the first successful exchange (and while the backend
   // still accepts raw keys during the rollout).
+  /**
+   * Mint FRESH ICE servers for this peer (new short-TTL TURN creds). TURN
+   * credentials expire ~10 minutes after join, so a deep-into-the-match ICE
+   * restart re-gathers against dead relays — tier-2 recovery calls this before
+   * rebuilding the peer connection. Null on any failure (caller keeps the old
+   * config and lets the final grace window decide).
+   */
+  async refreshIce(): Promise<import("./types").IceServerConfig[] | null> {
+    if (!this.roomId) return null;
+    const body = this.hostSecret
+      ? { host_secret: this.hostSecret }
+      : this.peerSecret && this.peerId
+        ? { peer_secret: this.peerSecret, peer_id: this.peerId }
+        : null;
+    if (!body) return null;
+    try {
+      const r = (await this.post(`/api/rooms/${this.roomId}/refresh-ice`, body)) as {
+        ice_servers?: import("./types").IceServerConfig[];
+      };
+      return r.ice_servers ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fire-and-forget connection telemetry (POST /api/telemetry/connect).
+   * Measurement only — must NEVER block or throw into the caller: connection
+   * outcomes are how we find out which failure class hits real players.
+   */
+  postTelemetry(fields: {
+    outcome: "connected" | "timeout" | "failed" | "recovered" | "gave_up";
+    role: "host" | "peer";
+    connect_ms?: number;
+    candidate_type?: string;
+    relay_host?: string;
+    ice_restarts?: number;
+    signaling_path?: "poll" | "push";
+  }): void {
+    try {
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const uaHint =
+        /iPhone|iPad/.test(ua) ? "ios" :
+        /Android/.test(ua) ? "android" :
+        /Firefox\//.test(ua) ? "firefox" :
+        /Edg\//.test(ua) ? "edge" :
+        /Chrome\//.test(ua) ? "chrome" :
+        /Safari\//.test(ua) ? "safari" : "other";
+      void fetch(`${this.baseUrl}/api/telemetry/connect`, {
+        method: "POST",
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
+        keepalive: true,
+        body: JSON.stringify({
+          signaling_path: this.signalPath,
+          ...fields,
+          game_id: this.gameId ?? "",
+          room_id: this.roomId ?? undefined,
+          ua_hint: uaHint,
+        }),
+      }).catch(() => { /* telemetry is best-effort */ });
+    } catch { /* never let telemetry break gameplay */ }
+  }
+
   private authHeaders(extra: Record<string, string> = {}): Record<string, string> {
     if (this.sessionToken) {
       return { Authorization: `Bearer ${this.sessionToken}`, ...extra };
@@ -295,15 +485,25 @@ export class RoomService {
         const res = await this.fetchWithTimeout(`${this.baseUrl}/api/auth/token`, {
           method: "POST",
           headers: { "X-API-Key": this.apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ platform: this.platform, attestation, steam_id: steamId }),
+          body: JSON.stringify({
+            platform: this.platform,
+            attestation,
+            steam_id: steamId,
+            device_id: stableDeviceId(),
+          }),
         });
         if (!res.ok) {
           const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
           throw new Error(`token exchange ${res.status}: ${b?.error ?? res.statusText}`);
         }
-        const data = (await res.json()) as { session_token: string; expires_in: number };
+        const data = (await res.json()) as {
+          session_token: string;
+          expires_in: number;
+          player_id?: string;
+        };
         this.sessionToken = data.session_token;
         this.sessionExpiresAt = Date.now() + data.expires_in * 1000;
+        this.playerId = data.player_id ?? null;
       } catch (err) {
         console.warn("[RoomService] token exchange failed, falling back to API key:", err);
         this.sessionToken = null;

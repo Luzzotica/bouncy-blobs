@@ -1,3 +1,4 @@
+// GENERATED from packages/party-kit — edit there, then run scripts/sync-party-kit.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 // Rooms WebRTC SDK — public surface
 //
@@ -13,7 +14,11 @@
 export { RoomService } from "./RoomService";
 export type { CreateRoomOpts, JoinRoomOpts, PatchRoomOpts } from "./RoomService";
 export { PeerManager } from "./PeerManager";
-export { SteamTransport, steamNetStartListening, getSelfSteamId, getSelfSteamPersonaName, steamNetCloseAll } from "./steamTransport";
+export { rtcConfigFromIceServers } from "./transport";
+import { rtcConfigFromIceServers } from "./transport";
+// SteamTransport is intentionally NOT re-exported here: it statically imports
+// @tauri-apps/*, which only Tauri games carry. Steam builds import it directly
+// from "./steamTransport" (the sync script ships that file to Tauri targets only).
 export type { Transport, ChannelName } from "./transport";
 export type {
   Room,
@@ -96,18 +101,6 @@ export async function joinAsPeer(
  * self-loop pruning). Relay-only is still useful for cross-network
  * testing when the operator wants to confirm TURN-relay works at all.
  */
-function rtcConfigFromIceServers(servers?: import("./types").IceServerConfig[]): RTCConfiguration | undefined {
-  if (!servers || servers.length === 0) return undefined;
-  let forceRelay = false;
-  try {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("relay") === "1") {
-      forceRelay = true;
-    }
-  } catch { /* non-browser context */ }
-  const cfg: RTCConfiguration = { iceServers: servers as RTCIceServer[] };
-  if (forceRelay) cfg.iceTransportPolicy = "relay";
-  return cfg;
-}
 
 /** Strip credentials before logging — usernames are HMAC strings and
  * credentials are base64 hashes; safe to show urls + whether a credential

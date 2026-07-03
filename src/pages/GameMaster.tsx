@@ -2,7 +2,8 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useUser } from '../contexts/UserContext';
-import { createHostRoom, RoomService, PeerManager, SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from '../lib/party';
+import { createHostRoom, RoomService, PeerManager } from '../lib/party';
+import { SteamTransport, steamNetStartListening, getSelfSteamId, steamNetCloseAll } from '../lib/party/steamTransport';
 import { installRtcDebug } from '../lib/rtcDebug';
 import { isSteamAvailable } from '../lib/workshopApi';
 import {
