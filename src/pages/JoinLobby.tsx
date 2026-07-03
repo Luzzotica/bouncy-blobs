@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RoomService } from '../lib/party';
 import { roomConfig } from '../lib/partyConfig';
+import { COLORS } from '../theme/uiTheme';
 
 export default function JoinLobby() {
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ export default function JoinLobby() {
       background: '#0f0f1a',
       color: '#fff',
     }}>
-      <h1 style={{ color: '#c77dff', margin: '0 0 8px', fontSize: 28 }}>
+      <h1 style={{ color: COLORS.lavender, margin: '0 0 8px', fontSize: 28 }}>
         Bouncy Blobs
       </h1>
       <p style={{ color: '#888', margin: '0 0 32px', fontSize: 14 }}>
@@ -158,7 +159,7 @@ export default function JoinLobby() {
               padding: '14px 22px',
               fontSize: 16,
               fontWeight: 'bold',
-              background: joinCode.trim() ? '#c77dff' : '#444',
+              background: joinCode.trim() ? COLORS.lavender : '#444',
               color: '#fff',
               border: 'none',
               borderRadius: 8,
@@ -184,7 +185,7 @@ export default function JoinLobby() {
         marginBottom: 20,
       }}>
         <div style={{ flex: 1, height: 1, background: '#333' }} />
-        <span style={{ color: '#555', fontSize: 12 }}>or</span>
+        <span style={{ color: COLORS.inkDim, fontSize: 12 }}>or</span>
         <div style={{ flex: 1, height: 1, background: '#333' }} />
       </div>
 
@@ -203,7 +204,7 @@ export default function JoinLobby() {
             height: 260,
             borderRadius: 16,
             overflow: 'hidden',
-            border: '3px solid #c77dff',
+            border: `3px solid ${COLORS.lavender}`,
             position: 'relative',
           }}>
             <video
@@ -247,7 +248,7 @@ export default function JoinLobby() {
             fontSize: 16,
             fontWeight: 'bold',
             background: '#1a1a2e',
-            color: '#c77dff',
+            color: COLORS.lavender,
             border: '2px solid #2a3a5a',
             borderRadius: 12,
             cursor: 'pointer',

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { playSfx } from '../utils/audio';
+import { COLORS, modalTape } from '../theme/uiTheme';
 
 interface GameMenuProps {
   /** Leave the match entirely and return to the home menu. */
@@ -123,8 +124,8 @@ const menuButton: React.CSSProperties = {
   fontSize: 15,
   fontWeight: 800,
   padding: '9px 20px 8px',
-  background: '#fffae6',
-  color: '#1a0f2e',
+  background: COLORS.paper,
+  color: COLORS.ink,
   border: '3px solid #0a0612',
   borderRadius: 4,
   cursor: 'pointer',
@@ -146,8 +147,8 @@ const backdrop: React.CSSProperties = {
 
 const modal: React.CSSProperties = {
   position: 'relative',
-  background: '#fffae6',
-  color: '#1a0f2e',
+  background: COLORS.paper,
+  color: COLORS.ink,
   border: '4px solid #0a0612',
   borderRadius: 6,
   padding: '32px 40px 26px',
@@ -159,24 +160,14 @@ const modal: React.CSSProperties = {
   gap: 12,
 };
 
-const tape: React.CSSProperties = {
-  position: 'absolute',
-  top: -14,
-  left: '50%',
-  transform: 'translateX(-50%) rotate(-2deg)',
-  width: 160,
-  height: 28,
-  background: 'rgba(200, 180, 120, 0.78)',
-  border: '1px solid rgba(120, 100, 60, 0.4)',
-  boxShadow: '0 3px 6px rgba(0,0,0,0.2)',
-};
+const tape: React.CSSProperties = modalTape;
 
 const heading: React.CSSProperties = {
   margin: '0 0 8px',
   fontSize: 28,
   fontWeight: 900,
   textAlign: 'center',
-  textShadow: '2px 2px 0 #c77dff',
+  textShadow: `2px 2px 0 ${COLORS.lavender}`,
 };
 
 const btnBase: React.CSSProperties = {
@@ -193,6 +184,6 @@ const btnBase: React.CSSProperties = {
   boxShadow: '0 4px 0 #0a0612, 0 6px 14px rgba(0,0,0,0.3)',
 };
 
-const primaryBtn: React.CSSProperties = { ...btnBase, background: '#5a189a', color: '#fffae6' };
-const secondaryBtn: React.CSSProperties = { ...btnBase, background: '#fffae6', color: '#1a0f2e' };
-const quitBtn: React.CSSProperties = { ...btnBase, background: '#fffae6', color: '#7a1020', fontWeight: 700 };
+const primaryBtn: React.CSSProperties = { ...btnBase, background: COLORS.purple, color: COLORS.onAccent };
+const secondaryBtn: React.CSSProperties = { ...btnBase, background: COLORS.paper, color: COLORS.ink };
+const quitBtn: React.CSSProperties = { ...btnBase, background: COLORS.paper, color: COLORS.danger, fontWeight: 700 };

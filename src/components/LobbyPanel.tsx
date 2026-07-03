@@ -7,6 +7,7 @@ import type { LevelData, LevelType } from '../levels/types';
 import { features } from '../config/featureFlags';
 import MapPickerModal from './MapPickerModal';
 import FaceSwatch from './FaceSwatch';
+import { COLORS } from '../theme/uiTheme';
 
 export interface PlayerSummary {
   playerId: string;
@@ -80,13 +81,13 @@ export interface LobbyPanelProps {
 const panelStyle: React.CSSProperties = {
   width: 300,
   height: '100%',
-  background: '#fffae6',
+  background: COLORS.paper,
   borderRight: '4px solid #0a0612',
   display: 'flex',
   flexDirection: 'column',
   overflowY: 'auto',
   fontSize: 13,
-  color: '#1a0f2e',
+  color: COLORS.ink,
 };
 
 const sectionStyle: React.CSSProperties = {
@@ -99,7 +100,7 @@ const sectionStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
-  color: '#6b5e85',
+  color: COLORS.inkFaint,
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: 0.5,
@@ -108,8 +109,8 @@ const labelStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = {
   padding: '7px 9px',
   fontSize: 13,
-  background: '#fffefb',
-  color: '#1a0f2e',
+  background: COLORS.paperInput,
+  color: COLORS.ink,
   border: '2px solid #0a0612',
   borderRadius: 4,
   fontFamily: 'inherit',
@@ -119,8 +120,8 @@ const buttonStyle: React.CSSProperties = {
   padding: '7px 12px',
   fontSize: 13,
   fontWeight: 700,
-  background: '#fffefb',
-  color: '#1a0f2e',
+  background: COLORS.paperInput,
+  color: COLORS.ink,
   border: '2px solid #0a0612',
   borderRadius: 4,
   cursor: 'pointer',
@@ -171,19 +172,19 @@ export default function LobbyPanel(props: LobbyPanelProps) {
     <div style={panelStyle} data-testid="lobby-panel">
       {/* Header */}
       <div style={sectionStyle}>
-        <Link to="/" style={{ color: '#6b5e85', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>← Home</Link>
-        <div style={{ fontSize: 18, fontWeight: 900, color: '#1a0f2e' }}>Bouncy Lobby</div>
+        <Link to="/" style={{ color: COLORS.inkFaint, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>← Home</Link>
+        <div style={{ fontSize: 18, fontWeight: 900, color: COLORS.ink }}>Bouncy Lobby</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={labelStyle}>Join</span>
           <code data-testid="join-code" style={{
-            background: '#fffefb',
+            background: COLORS.paperInput,
             padding: '3px 8px',
             borderRadius: 4,
             border: '2px solid #0a0612',
             fontSize: 14,
             letterSpacing: 2,
             fontWeight: 800,
-            color: '#1a0f2e',
+            color: COLORS.ink,
           }}>{joinCode || '…'}</code>
         </div>
       </div>
@@ -222,7 +223,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#6b5e85',
+                    color: COLORS.inkFaint,
                     cursor: 'pointer',
                     fontSize: 16,
                     fontWeight: 800,
@@ -252,8 +253,8 @@ export default function LobbyPanel(props: LobbyPanelProps) {
             disabled={!canAddBot}
             style={{
               ...buttonStyle,
-              background: canAddBot ? '#c77dff' : '#d8cfe2',
-              color: canAddBot ? '#1a0f2e' : '#7a6e8c',
+              background: canAddBot ? COLORS.lavender : '#d8cfe2',
+              color: canAddBot ? COLORS.ink : '#7a6e8c',
               opacity: canAddBot ? 1 : 0.7,
               cursor: canAddBot ? 'pointer' : 'not-allowed',
             }}
@@ -314,15 +315,15 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                   <span style={{
                     fontSize: 9,
                     padding: '1px 5px',
-                    background: '#c77dff',
-                    color: '#1a0f2e',
+                    background: COLORS.lavender,
+                    color: COLORS.ink,
                     fontWeight: 800,
                     borderRadius: 8,
                     textTransform: 'uppercase',
                     letterSpacing: 0.4,
                   }}>Custom</span>
                 )}
-                <span style={{ color: '#6b5e85' }}>▾</span>
+                <span style={{ color: COLORS.inkFaint }}>▾</span>
               </span>
             </button>
           );
@@ -386,7 +387,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
                       width: 30,
                       height: 30,
                       borderRadius: '50%',
-                      background: '#fffefb',
+                      background: COLORS.paperInput,
                       border: selected ? '3px solid #0a0612' : '1px solid rgba(10,6,18,0.3)',
                       opacity: taken ? 0.25 : 1,
                       cursor: taken ? 'not-allowed' : 'pointer',
@@ -415,8 +416,8 @@ export default function LobbyPanel(props: LobbyPanelProps) {
           disabled={visibilityBusy}
           style={{
             ...buttonStyle,
-            background: isPublic ? '#5ec27e' : '#fffefb',
-            color: '#0a0612',
+            background: isPublic ? '#5ec27e' : COLORS.paperInput,
+            color: isPublic ? '#0a0612' : COLORS.ink,
           }}
         >
           {isPublic ? '🌐 Public — anyone can find' : '🔒 Private — code only'}

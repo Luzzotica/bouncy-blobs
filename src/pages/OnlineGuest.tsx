@@ -50,6 +50,7 @@ import { FreeplayMode } from "../game/gameModes/freeplayMode";
 import { getLevelTypes } from "../levels/types";
 import type { GameMode, GamePhase } from "../game/gameModes/types";
 import { getPendingJoin, clearPendingJoin } from "../lib/pendingJoin";
+import { COLORS } from "../theme/uiTheme";
 
 // Guest → host input send rate. Bumped from 30 → 60 to match the host's
 // physics tick rate, so the host's preTickHook sees a fresh input on
@@ -2026,7 +2027,7 @@ export default function OnlineGuest() {
           // path tight — no log, just the "match ended" message.
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
             <h2>Host disconnected — match ended</h2>
-            <Link to="/lobbies"><button style={{ padding: "10px 20px", background: "#c77dff" }}>Back to lobbies</button></Link>
+            <Link to="/lobbies"><button style={{ padding: "10px 20px", background: COLORS.lavender }}>Back to lobbies</button></Link>
           </div>
         ) : !hasLevel ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 16 }}>
@@ -2075,7 +2076,7 @@ export default function OnlineGuest() {
               <div style={{ display: "flex", gap: 12 }}>
                 <button
                   onClick={() => window.location.reload()}
-                  style={{ padding: "8px 16px", background: "#c77dff", color: "#1a0a10", border: "2px solid #1a0a10", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}
+                  style={{ padding: "8px 16px", background: COLORS.lavender, color: "#1a0a10", border: "2px solid #1a0a10", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}
                 >
                   Retry
                 </button>

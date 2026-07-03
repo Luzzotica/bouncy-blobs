@@ -3,6 +3,7 @@ import type { LevelData } from '../levels/types';
 import MapPreview from './MapPreview';
 import type { MapOption } from './LobbyPanel';
 import { playSfx } from '../utils/audio';
+import { COLORS } from '../theme/uiTheme';
 
 interface MapPickerModalProps {
   open: boolean;
@@ -174,8 +175,8 @@ export default function MapPickerModal({
                       style={{
                         fontSize: 10,
                         padding: '2px 6px',
-                        background: '#5a189a',
-                        color: '#fff',
+                        background: COLORS.purple,
+                        color: COLORS.onAccent,
                         borderRadius: 10,
                         textTransform: 'uppercase',
                         letterSpacing: 0.5,

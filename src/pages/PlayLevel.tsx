@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
+import { COLORS, tape } from '../theme/uiTheme';
 import type { SoftBodyEngine } from "../physics/SoftBodyEngine";
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { createSoftBodyEngine } from '../physics/engineSelector';
@@ -407,7 +408,7 @@ export default function PlayLevel() {
   if (loadError) {
     return (
       <div style={centerShell}>
-        <div style={{ color: '#fffae6', textAlign: 'center' }}>
+        <div style={{ color: COLORS.titleInk, textAlign: 'center' }}>
           <p style={{ marginBottom: 16 }}>Couldn't load level "{levelId}".</p>
           <Link to="/play"><button style={overlayBtn}>← Back to levels</button></Link>
         </div>
@@ -480,13 +481,13 @@ function drawRunHud(ctx: CanvasRenderingContext2D, canvasWidth: number, elapsedM
 
   const timeW = ctx.measureText(timeStr).width + pad * 2;
   const x = Math.round((canvasWidth - timeW) / 2);
-  ctx.fillStyle = '#fffae6';
+  ctx.fillStyle = COLORS.paper;
   ctx.strokeStyle = '#0a0612';
   ctx.lineWidth = 3;
   roundRect(ctx, x, top, timeW, chipH, 6);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = '#1a0f2e';
+  ctx.fillStyle = COLORS.ink;
   ctx.fillText(timeStr, x + pad, top + chipH / 2 + 1);
   ctx.restore();
 }
@@ -507,7 +508,7 @@ const centerShell: React.CSSProperties = {
 };
 
 const chipBtn: React.CSSProperties = {
-  padding: '6px 12px', fontSize: 14, background: '#fffae6', color: '#1a0f2e',
+  padding: '6px 12px', fontSize: 14, background: COLORS.paper, color: COLORS.ink,
   border: '3px solid #0a0612', borderRadius: 4, cursor: 'pointer', fontWeight: 700,
   transform: 'rotate(-2deg)',
 };
@@ -516,8 +517,8 @@ const overlayBtn: React.CSSProperties = { ...chipBtn, padding: '10px 18px' };
 
 const levelTitle: React.CSSProperties = {
   position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%) rotate(-1.5deg)',
-  fontSize: 22, fontWeight: 900, color: '#fffae6',
-  textShadow: '2px 2px 0 #c77dff, -1px -1px 0 #0a0612, 1px 1px 0 #0a0612',
+  fontSize: 22, fontWeight: 900, color: COLORS.titleInk,
+  textShadow: `2px 2px 0 ${COLORS.lavender}, -1px -1px 0 #0a0612, 1px 1px 0 #0a0612`,
   pointerEvents: 'none', userSelect: 'none',
 };
 
@@ -527,20 +528,16 @@ const completeBackdrop: React.CSSProperties = {
 };
 
 const completeCard: React.CSSProperties = {
-  position: 'relative', background: '#fffae6', color: '#1a0f2e',
+  position: 'relative', background: COLORS.paper, color: COLORS.ink,
   border: '4px solid #0a0612', borderRadius: 6, padding: '30px 40px 24px',
   minWidth: 320, boxShadow: '0 12px 50px rgba(0,0,0,0.5)', textAlign: 'center',
 };
 
-const completeTape: React.CSSProperties = {
-  position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(-2deg)',
-  width: 150, height: 26, background: 'rgba(199,125,255,0.8)',
-  border: '1px solid rgba(120,100,60,0.4)', boxShadow: '0 3px 6px rgba(0,0,0,0.2)',
-};
+const completeTape: React.CSSProperties = tape(COLORS.lavender);
 
 const completeHeading: React.CSSProperties = {
   margin: '0 0 18px', fontSize: 26, fontWeight: 900,
-  textShadow: '2px 2px 0 #c77dff',
+  textShadow: `2px 2px 0 ${COLORS.lavender}`,
 };
 
 const statRow: React.CSSProperties = {
@@ -553,17 +550,17 @@ const statVal: React.CSSProperties = {
 };
 
 const bestBadge: React.CSSProperties = {
-  marginTop: 12, fontSize: 15, fontWeight: 800, color: '#5a189a',
+  marginTop: 12, fontSize: 15, fontWeight: 800, color: COLORS.purple,
 };
 
 const primaryBtn: React.CSSProperties = {
-  padding: '12px 22px', background: '#5a189a', color: '#fffae6',
+  padding: '12px 22px', background: COLORS.purple, color: COLORS.onAccent,
   border: '3px solid #0a0612', borderRadius: 4, fontSize: 15, fontWeight: 800,
   cursor: 'pointer', boxShadow: '0 4px 0 #0a0612',
 };
 
 const secondaryBtn: React.CSSProperties = {
-  padding: '12px 18px', background: '#fffae6', color: '#1a0f2e',
+  padding: '12px 18px', background: COLORS.paper, color: COLORS.ink,
   border: '3px solid #0a0612', borderRadius: 4, fontSize: 15, fontWeight: 700,
   cursor: 'pointer',
 };

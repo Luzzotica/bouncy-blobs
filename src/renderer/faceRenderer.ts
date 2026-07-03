@@ -20,6 +20,16 @@ function pupilOffset(eyeW: number, eyeH: number, pupilR: number, s: number, gaze
   return { x: gaze.x * maxX, y: gaze.y * maxY };
 }
 
+/** Small white catchlight on a pupil — the little "wet" glint that makes eyes
+ * read as real. Sits up-and-left of the pupil center. */
+function drawGlint(ctx: CanvasRenderingContext2D, px: number, py: number, pupilR: number, s: number) {
+  const gr = Math.max(0.9, pupilR * 0.42 * s);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.beginPath();
+  ctx.arc(px - pupilR * 0.42 * s, py - pupilR * 0.5 * s, gr, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, eyeW: number, eyeH: number, pupilR: number, gaze: Gaze = NO_GAZE) {
   const off = pupilOffset(eyeW, eyeH, pupilR, s, gaze);
 
@@ -32,6 +42,7 @@ function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   ctx.beginPath();
   ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, pupilR * s, 0, Math.PI * 2);
   ctx.fill();
+  drawGlint(ctx, cx - 8 * s + off.x, cy - 3 * s + off.y, pupilR, s);
 
   // Right eye
   ctx.fillStyle = '#fff';
@@ -42,6 +53,7 @@ function drawEyes(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   ctx.beginPath();
   ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, pupilR * s, 0, Math.PI * 2);
   ctx.fill();
+  drawGlint(ctx, cx + 8 * s + off.x, cy - 3 * s + off.y, pupilR, s);
 }
 
 const FACE_PRESETS: FacePreset[] = [
@@ -90,6 +102,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 9 * s + offL.x, cy - 2 * s + offL.y, 3 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 9 * s + offL.x, cy - 2 * s + offL.y, 3, s);
 
       ctx.fillStyle = '#fff';
       ctx.beginPath();
@@ -99,6 +112,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx + 7 * s + offR.x, cy - 4 * s + offR.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx + 7 * s + offR.x, cy - 4 * s + offR.y, 2, s);
 
       // Tongue out
       ctx.strokeStyle = '#222';
@@ -466,6 +480,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 3.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 8 * s + off.x, cy - 3 * s + off.y, 3.5, s);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(cx + 8 * s, cy - 4 * s, 7 * s, 0, Math.PI * 2);
@@ -474,6 +489,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, 3.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx + 8 * s + off.x, cy - 3 * s + off.y, 3.5, s);
       // Small O mouth
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 1.5 * s;
@@ -492,6 +508,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 9 * s + off.x, cy - 3 * s + off.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 9 * s + off.x, cy - 3 * s + off.y, 2, s);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(cx + 9 * s, cy - 4 * s, 9 * s, 0, Math.PI * 2);
@@ -500,6 +517,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx + 9 * s + off.x, cy - 3 * s + off.y, 2 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx + 9 * s + off.x, cy - 3 * s + off.y, 2, s);
       // Big O mouth
       ctx.fillStyle = '#222';
       ctx.beginPath();
@@ -521,6 +539,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5, s);
       // Right eye (winking)
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2 * s;
@@ -563,6 +582,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 5 * s + off.x, cy - 2 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 5 * s + off.x, cy - 2 * s + off.y, 2.5, s);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.ellipse(cx + 8 * s, cy - 3 * s, 5 * s, 4 * s, 0, 0, Math.PI * 2);
@@ -571,6 +591,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx + 11 * s + off.x, cy - 2 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx + 11 * s + off.x, cy - 2 * s + off.y, 2.5, s);
       // Eyelids (top half)
       ctx.fillStyle = 'rgba(30,30,30,0.15)';
       ctx.beginPath();
@@ -796,6 +817,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx - 8 * s + off.x, cy - 3 * s + off.y, 2.5, s);
       // Monocle on right eye
       ctx.strokeStyle = '#c8a84e';
       ctx.lineWidth = 2 * s;
@@ -818,6 +840,7 @@ const FACE_PRESETS: FacePreset[] = [
       ctx.beginPath();
       ctx.arc(cx + 8 * s + off.x, cy - 3 * s + off.y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
+      drawGlint(ctx, cx + 8 * s + off.x, cy - 3 * s + off.y, 2.5, s);
       // Redraw monocle rim on top
       ctx.strokeStyle = '#c8a84e';
       ctx.lineWidth = 2 * s;

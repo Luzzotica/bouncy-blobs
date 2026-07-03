@@ -5,8 +5,11 @@
 
 import { getMusicVolume, onAudioSettingsChange } from './audioSettings'
 import { assetUrl } from './assetUrl'
+import { isCave } from '../renderer/colors'
 
-const SRC = assetUrl('/intro/theme.mp3')
+// Theme-aware loop: the cave theme plays its own atmospheric-but-happy track;
+// classic keeps the original cheerful theme.
+const SRC = assetUrl(isCave ? '/intro/theme-cave.mp3' : '/intro/theme.mp3')
 
 let audio: HTMLAudioElement | null = null
 let started = false

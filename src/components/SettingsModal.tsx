@@ -7,6 +7,7 @@ import {
 } from '../utils/audioSettings'
 import { playSfx } from '../utils/audio'
 import { assetUrl } from '../utils/assetUrl'
+import { COLORS, modalTape } from '../theme/uiTheme'
 
 interface Props {
   open: boolean
@@ -179,8 +180,8 @@ const backdrop: React.CSSProperties = {
 
 const modal: React.CSSProperties = {
   position: 'relative',
-  background: '#fffae6',
-  color: '#1a0f2e',
+  background: COLORS.paper,
+  color: COLORS.ink,
   border: '4px solid #0a0612',
   borderRadius: 6,
   padding: '32px 40px 24px',
@@ -189,17 +190,8 @@ const modal: React.CSSProperties = {
   boxShadow: '0 12px 50px rgba(0,0,0,0.5)',
 }
 
-const tape: React.CSSProperties = {
-  position: 'absolute',
-  top: -14,
-  left: '50%',
-  transform: 'translateX(-50%) rotate(-2deg)',
-  width: 160,
-  height: 28,
-  background: 'rgba(200, 180, 120, 0.78)',
-  border: '1px solid rgba(120, 100, 60, 0.4)',
-  boxShadow: '0 3px 6px rgba(0,0,0,0.2)',
-}
+// Masking tape — theme-aware (hidden in the cave theme).
+const tape: React.CSSProperties = modalTape
 
 const closeBtn: React.CSSProperties = {
   position: 'absolute',
@@ -207,7 +199,7 @@ const closeBtn: React.CSSProperties = {
   right: 12,
   background: 'transparent',
   border: 'none',
-  color: '#1a0f2e',
+  color: COLORS.ink,
   fontSize: 28,
   fontWeight: 900,
   cursor: 'pointer',
@@ -219,7 +211,7 @@ const heading: React.CSSProperties = {
   fontSize: 28,
   fontWeight: 900,
   textAlign: 'center',
-  textShadow: '2px 2px 0 #c77dff',
+  textShadow: `2px 2px 0 ${COLORS.lavender}`,
 }
 
 const row: React.CSSProperties = {
@@ -238,7 +230,7 @@ const label: React.CSSProperties = {
 
 const slider: React.CSSProperties = {
   width: '100%',
-  accentColor: '#c77dff',
+  accentColor: COLORS.lavender,
   cursor: 'pointer',
 }
 
@@ -251,7 +243,7 @@ const valueText: React.CSSProperties = {
 const hint: React.CSSProperties = {
   margin: '12px 0 16px',
   fontSize: 12,
-  color: '#555',
+  color: COLORS.inkDim,
   textAlign: 'center',
   fontStyle: 'italic',
 }
@@ -261,8 +253,8 @@ const replayBtn: React.CSSProperties = {
   width: '100%',
   marginTop: 8,
   padding: '12px 20px',
-  background: '#5a189a',
-  color: '#fffae6',
+  background: COLORS.purple,
+  color: COLORS.onAccent,
   border: '3px solid #0a0612',
   borderRadius: 4,
   fontSize: 15,

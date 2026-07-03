@@ -6,6 +6,7 @@ import { roomConfig } from '../lib/partyConfig';
 import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
 import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
+import { COLORS } from '../theme/uiTheme';
 
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 interface PhaseEntry { ts: number; phase: string; detail?: string }
@@ -801,7 +802,7 @@ export default function Controller() {
   if (phase === 'joining' && !nameSubmitted) {
     return (
       <div style={fullCenter}>
-        <h2 style={{ color: '#c77dff', margin: '0 0 20px' }}>Join Game</h2>
+        <h2 style={{ color: COLORS.lavender, margin: '0 0 20px' }}>Join Game</h2>
 
         {/* Name input */}
         <input
@@ -830,7 +831,7 @@ export default function Controller() {
           style={{
             ...btnStyle,
             marginTop: 16,
-            background: playerName.trim() ? '#c77dff' : '#555',
+            background: playerName.trim() ? COLORS.lavender : '#555',
             fontSize: 18,
             padding: '12px 32px',
           }}
@@ -901,7 +902,7 @@ export default function Controller() {
         paddingTop: 24,
         paddingBottom: 24,
       }}>
-        <h2 style={{ color: '#c77dff', margin: '0 0 4px' }}>Customize</h2>
+        <h2 style={{ color: COLORS.lavender, margin: '0 0 4px' }}>Customize</h2>
         <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>{playerName}</p>
 
         {/* Color picker */}
@@ -965,7 +966,7 @@ export default function Controller() {
                     height: 44,
                     borderRadius: 8,
                     background: selected ? '#3a4a6a' : '#1a1a2e',
-                    border: selected ? '2px solid #c77dff' : '2px solid #333',
+                    border: selected ? `2px solid ${COLORS.lavender}` : '2px solid #333',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1004,7 +1005,7 @@ export default function Controller() {
           style={{
             ...btnStyle,
             marginTop: 16,
-            background: canConfirm ? '#c77dff' : '#555',
+            background: canConfirm ? COLORS.lavender : '#555',
             fontSize: 18,
             padding: '12px 32px',
           }}
@@ -1042,7 +1043,7 @@ export default function Controller() {
       <div style={{ padding: '8px 16px', textAlign: 'center', color: '#888', fontSize: 12, touchAction: 'none', userSelect: 'none', pointerEvents: 'none' }}>
         {playerName}
         {controllerMode !== 'normal' && (
-          <span style={{ marginLeft: 8, color: '#c77dff', fontWeight: 'bold' }}>
+          <span style={{ marginLeft: 8, color: COLORS.lavender, fontWeight: 'bold' }}>
             {controllerMode === 'party_box' ? 'PICK AN ITEM' : 'PLACE YOUR ITEM'}
           </span>
         )}

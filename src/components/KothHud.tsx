@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { BouncyBlobsGame } from '../game/bouncyBlobsGame';
+import { COLORS } from '../theme/uiTheme';
 
 interface KothRow {
   playerId: string;
@@ -124,7 +125,7 @@ const timerPill = (t: number): React.CSSProperties => ({
   fontSize: 26,
   fontWeight: 900,
   fontVariantNumeric: 'tabular-nums',
-  color: t <= 10 ? '#ff5c5c' : '#fffae6',
+  color: t <= 10 ? '#ff5c5c' : COLORS.titleInk,
   background: 'rgba(10,6,18,0.7)',
   border: '2px solid #0a0612',
   borderRadius: 999,
@@ -165,7 +166,7 @@ const name: React.CSSProperties = {
   width: 70,
   fontSize: 13,
   fontWeight: 700,
-  color: '#fffae6',
+  color: COLORS.titleInk,
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',

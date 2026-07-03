@@ -14,9 +14,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type React from 'react';
+import { isCave } from '../renderer/colors';
 
-/** Core palette used by UI surfaces. Mirrors the `bouncy-blobs-style` skill. */
-export const COLORS = {
+type Palette = {
+  bg: string; ink: string; paper: string; paperInput: string; titleInk: string;
+  lavender: string; purple: string; pink: string; green: string; yellow: string;
+  inkDim: string; inkFaint: string; danger: string; blue: string;
+  workCanvas: string; onAccent: string;
+};
+
+/** Original "cream-paper-and-tape" palette. */
+const CLASSIC_COLORS: Palette = {
   bg: '#0a0612',          // dark void behind everything
   ink: '#1a0f2e',         // text on paper / deep purple
   paper: '#fffae6',       // sticky-note / card surface
@@ -32,16 +40,69 @@ export const COLORS = {
   danger: '#b3261e',      // destructive actions (delete)
   blue: '#1a6aaa',        // occasional non-brand accent (toggles)
   workCanvas: '#0f1629',  // dark working-canvas / thumbnail backdrop
-} as const;
+  onAccent: '#fffae6',    // text on solid accent buttons (light)
+};
+
+/** Cave variant — dark blue-stone "paper", cool light ink, cyan/teal accents,
+ * red danger. Same token names so every component reskins automatically.
+ * Keeps the cream-paper motif structurally, just carved from cavern rock. */
+const CAVE_COLORS: Palette = {
+  bg: '#05070f',          // deep cavern void
+  ink: '#dce8ff',         // cool light text on dark stone
+  paper: '#15233c',       // dark blue-stone card surface
+  paperInput: '#1d2f4e',  // slightly lighter input field
+  titleInk: '#cfe4ff',    // icy big-title text
+  lavender: '#54d3e6',    // cave cyan — primary accent + title shadow + tape
+  purple: '#1f7d92',      // deep teal — primary action buttons
+  pink: '#ff5d7a',
+  green: '#2fae8f',
+  yellow: '#f2c14e',
+  inkDim: '#8aa0c4',      // muted light label text
+  inkFaint: '#6f86ab',    // uppercase picker labels
+  danger: '#ff3b4e',      // spike-tip red — destructive actions
+  blue: '#3f9fe0',
+  workCanvas: '#0a1020',  // dark working-canvas / thumbnail backdrop
+  onAccent: '#eaf3ff',    // light text on solid accent buttons
+};
+
+/** Core palette used by UI surfaces. Cave theme swaps the whole palette so
+ * every screen follows the dark cavern look. Mirrors the `bouncy-blobs-style`
+ * skill. */
+export const COLORS = isCave ? CAVE_COLORS : CLASSIC_COLORS;
 
 /** Faint ink hairline for dividers / internal borders on paper surfaces. */
 export const HAIRLINE = 'rgba(10,6,18,0.15)';
 
 export const RADII = { card: 6, control: 4 } as const;
 export const PAPER_SHADOW = '0 8px 20px rgba(0,0,0,0.35)';
-/** The chunky multi-layer drop used on big page titles. */
+/** The chunky multi-layer drop used on big page titles. Accent-colored offset
+ * (lavender classic / cyan cave) with a dark outline. */
 export const TITLE_SHADOW =
-  '4px 4px 0 #c77dff, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612';
+  `4px 4px 0 ${COLORS.lavender}, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612`;
+
+// ─── Craggy rock treatment (cave) ──────────────────────────────────────────
+// Cave theme carves the prominent buttons out of stone: a lit-top → dark-bottom
+// gradient, an irregular clip-path silhouette, an outer drop-shadow and inset
+// volume shading. Text stays centered so the jagged edges never clip it.
+const STONE_GRAD = 'linear-gradient(160deg, #2a3d59 0%, #182740 55%, #0c1526 100%)';
+const CRAG_CLIP =
+  'polygon(2% 12%, 9% 3%, 20% 8%, 33% 2%, 47% 7%, 61% 2%, 75% 8%, 88% 3%, 98% 11%, 95% 28%, 100% 46%, 96% 64%, 100% 82%, 92% 94%, 81% 99%, 67% 93%, 53% 99%, 40% 94%, 27% 99%, 15% 94%, 4% 98%, 2% 82%, 6% 62%, 1% 45%, 5% 28%)';
+const CRAG_DROP = 'drop-shadow(0 6px 7px rgba(0,0,0,0.5))';
+const CRAG_INSET = 'inset 0 3px 0 rgba(150,190,240,0.13), inset 0 -12px 18px rgba(0,0,0,0.42)';
+
+/** Craggy-rock decoration merged onto a button (cave only). */
+function rock(bg: string = STONE_GRAD, fg: string = COLORS.ink): React.CSSProperties {
+  return {
+    background: bg,
+    color: fg,
+    border: 'none',
+    borderRadius: 0,
+    clipPath: CRAG_CLIP,
+    filter: CRAG_DROP,
+    boxShadow: CRAG_INSET,
+    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+  };
+}
 
 // ─── Page shell ──────────────────────────────────────────────────────────────
 // Screens render inside <HomeBackground> (parallax hero + overlay). This is the
@@ -99,22 +160,33 @@ export const pickerLabel: React.CSSProperties = {
 // Add className="paper-btn" (from HomeBackground's global CSS) for the hover
 // lift/scale used across menu screens.
 
-/** Big cream sticky-note button — main-menu CTAs. */
-export const paperBtn: React.CSSProperties = {
-  position: 'relative',
-  fontSize: 22,
-  fontWeight: 800,
-  padding: '20px 40px 18px',
-  background: COLORS.paper,
-  color: COLORS.ink,
-  border: '4px solid #0a0612',
-  borderRadius: RADII.control,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  letterSpacing: 0.5,
-  boxShadow: PAPER_SHADOW,
-  textShadow: '1px 1px 0 rgba(199,125,255,0.4)',
-};
+/** Big main-menu CTA — cream sticky-note (classic) / carved rock (cave). */
+export const paperBtn: React.CSSProperties = isCave
+  ? {
+      position: 'relative',
+      fontSize: 22,
+      fontWeight: 800,
+      padding: '22px 46px',
+      cursor: 'pointer',
+      fontFamily: 'inherit',
+      letterSpacing: 0.5,
+      ...rock(),
+    }
+  : {
+      position: 'relative',
+      fontSize: 22,
+      fontWeight: 800,
+      padding: '20px 40px 18px',
+      background: COLORS.paper,
+      color: COLORS.ink,
+      border: '4px solid #0a0612',
+      borderRadius: RADII.control,
+      cursor: 'pointer',
+      fontFamily: 'inherit',
+      letterSpacing: 0.5,
+      boxShadow: PAPER_SHADOW,
+      textShadow: '1px 1px 0 rgba(199,125,255,0.4)',
+    };
 
 /** Small cream "back / home" button — slightly tilted, soft shadow. */
 export const backBtn: React.CSSProperties = {
@@ -133,20 +205,18 @@ export const backBtn: React.CSSProperties = {
 };
 
 /** Solid accent action button (e.g. "Create Game", "Resume"). */
-export function actionBtn(bg: string = COLORS.purple, fg: string = COLORS.paper): React.CSSProperties {
-  return {
-    padding: '13px 20px',
+export function actionBtn(bg: string = COLORS.purple, fg: string = COLORS.onAccent): React.CSSProperties {
+  const base: React.CSSProperties = {
+    padding: isCave ? '15px 24px' : '13px 20px',
     fontSize: 16,
     fontWeight: 800,
     letterSpacing: 0.4,
-    background: bg,
-    color: fg,
-    border: '3px solid #0a0612',
-    borderRadius: RADII.control,
     cursor: 'pointer',
     fontFamily: 'inherit',
-    boxShadow: '0 5px 12px rgba(0,0,0,0.3)',
   };
+  return isCave
+    ? { ...base, ...rock(bg, fg) }
+    : { ...base, background: bg, color: fg, border: '3px solid #0a0612', borderRadius: RADII.control, boxShadow: '0 5px 12px rgba(0,0,0,0.3)' };
 }
 
 // ─── Compact controls (dense UI: editor toolbars, property panels, dialogs) ────
@@ -165,7 +235,7 @@ export const paperBtnSm: React.CSSProperties = {
 };
 
 /** Small solid accent button — compact actions. */
-export function actionBtnSm(bg: string = COLORS.purple, fg: string = COLORS.paper): React.CSSProperties {
+export function actionBtnSm(bg: string = COLORS.purple, fg: string = COLORS.onAccent): React.CSSProperties {
   return { ...paperBtnSm, background: bg, color: fg, fontWeight: 800 };
 }
 
@@ -219,6 +289,7 @@ export const inputStyle: React.CSSProperties = {
 /** Coloured tape strip stuck across the top of a card/button. Position the
  * parent `relative`. Pass an accent colour from COLORS. */
 export function tape(color: string = COLORS.lavender): React.CSSProperties {
+  if (isCave) return { display: 'none' }; // no tape on rock — cave drops it
   return {
     position: 'absolute',
     top: -10,
@@ -263,8 +334,8 @@ export const modalCard: React.CSSProperties = {
   boxShadow: '0 18px 40px rgba(0,0,0,0.5)',
 };
 
-/** Tan "masking tape" used on modals (warmer than card tape). */
-export const modalTape: React.CSSProperties = {
+/** Tan "masking tape" used on modals (warmer than card tape). Hidden in cave. */
+export const modalTape: React.CSSProperties = isCave ? { display: 'none' } : {
   position: 'absolute',
   top: -14,
   left: '50%',

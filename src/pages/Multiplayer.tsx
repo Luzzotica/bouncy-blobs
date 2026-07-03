@@ -10,6 +10,7 @@ import {
   setStoredRoomPrefs,
   resolveDefaultDisplayName,
 } from "../lib/userProfile";
+import { COLORS, TITLE_SHADOW } from "../theme/uiTheme";
 
 // Combined Host + Browse screen. Left column: one name card + host-a-game.
 // Right column browses + joins existing lobbies. Shares the home hero
@@ -137,7 +138,7 @@ function HostPanel({ displayName }: { displayName: string }) {
           type="checkbox"
           checked={isPublic}
           onChange={(e) => setIsPublic(e.target.checked)}
-          style={{ accentColor: "#c77dff", width: 16, height: 16 }}
+          style={{ accentColor: COLORS.lavender, width: 16, height: 16 }}
         />
         <span style={{ ...fieldLabel, marginBottom: 0 }}>
           List publicly (others can find it without a code)
@@ -165,8 +166,8 @@ function HostPanel({ displayName }: { displayName: string }) {
         disabled={!canCreate}
         style={{
           ...createBtn,
-          background: canCreate ? "#c77dff" : "#d8cfe2",
-          color: canCreate ? "#1a0f2e" : "#7a6e8c",
+          background: canCreate ? COLORS.lavender : "#d8cfe2",
+          color: canCreate ? COLORS.ink : "#7a6e8c",
           cursor: canCreate ? "pointer" : "not-allowed",
         }}
       >
@@ -227,9 +228,9 @@ const pageTitle: React.CSSProperties = {
   margin: 0,
   fontSize: "clamp(32px, 5vw, 52px)",
   fontWeight: 900,
-  color: "#fffae6",
+  color: COLORS.titleInk,
   transform: "rotate(-1.5deg)",
-  textShadow: "4px 4px 0 #c77dff, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612",
+  textShadow: TITLE_SHADOW,
   letterSpacing: 1,
 };
 
@@ -237,8 +238,8 @@ const homeBtn: React.CSSProperties = {
   padding: "10px 18px",
   fontSize: 15,
   fontWeight: 800,
-  background: "#fffae6",
-  color: "#1a0f2e",
+  background: COLORS.paper,
+  color: COLORS.ink,
   border: "3px solid #0a0612",
   borderRadius: 4,
   cursor: "pointer",
@@ -284,7 +285,7 @@ const paperCard: React.CSSProperties = {
   gap: 14,
   padding: "24px 20px 20px",
   borderRadius: 6,
-  background: "#fffae6",
+  background: COLORS.paper,
   border: "4px solid #0a0612",
   boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
 };
@@ -293,7 +294,7 @@ const cardTitle: React.CSSProperties = {
   fontSize: 22,
   fontWeight: 900,
   margin: 0,
-  color: "#1a0f2e",
+  color: COLORS.ink,
   letterSpacing: 0.3,
 };
 
@@ -306,7 +307,7 @@ const field: React.CSSProperties = {
 const fieldLabel: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
-  color: "#5a4a72",
+  color: COLORS.inkDim,
   marginBottom: 0,
 };
 
@@ -315,8 +316,8 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
   borderRadius: 4,
   border: "2px solid #0a0612",
-  background: "#fffefb",
-  color: "#1a0f2e",
+  background: COLORS.paperInput,
+  color: COLORS.ink,
   fontFamily: "inherit",
 };
 
@@ -354,7 +355,7 @@ const sliderTrack: React.CSSProperties = {
 
 const sliderFill: React.CSSProperties = {
   height: "100%",
-  background: "#c77dff",
+  background: COLORS.lavender,
 };
 
 const sliderThumb: React.CSSProperties = {
@@ -363,7 +364,7 @@ const sliderThumb: React.CSSProperties = {
   width: 20,
   height: 20,
   borderRadius: "50%",
-  background: "#fffae6",
+  background: COLORS.paper,
   border: "3px solid #0a0612",
   transform: "translate(-50%, -50%)",
   boxShadow: "0 2px 4px rgba(0,0,0,0.3)",

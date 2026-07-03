@@ -5,6 +5,7 @@ import type { RoomSummary } from "../lib/party";
 import { roomConfig, GAME_ID } from "../lib/partyConfig";
 import { setStoredDisplayName } from "../lib/userProfile";
 import { setPendingJoin } from "../lib/pendingJoin";
+import { COLORS, modalTape as themeModalTape } from "../theme/uiTheme";
 
 // Browse + join joinable online lobbies. Fetches its own list and owns the
 // password prompt, but the display name is supplied by the parent (single
@@ -124,7 +125,7 @@ export default function LobbyList({ displayName }: { displayName: string }) {
   return (
     <div style={panel}>
       <div style={headerRow}>
-        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: "#1a0f2e" }}>Lobbies</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: COLORS.ink }}>Lobbies</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             className="bb-hover-btn"
@@ -149,7 +150,7 @@ export default function LobbyList({ displayName }: { displayName: string }) {
         </div>
       </div>
 
-      {error && <div style={{ color: "#b3261e", fontSize: 13, fontWeight: 600 }}>{error}</div>}
+      {error && <div style={{ color: COLORS.danger, fontSize: 13, fontWeight: 600 }}>{error}</div>}
 
       <div data-testid="lobby-list" style={listBox}>
         {lobbies.length === 0 && (
@@ -160,11 +161,11 @@ export default function LobbyList({ displayName }: { displayName: string }) {
         {lobbies.map((l) => (
           <div key={l.room_id} data-testid={`lobby-row-${l.join_code}`} style={lobbyRow}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a0f2e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: COLORS.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {l.is_password_protected && <span title="Password protected" style={{ marginRight: 6 }}>🔒</span>}
                 {l.display_name || "Untitled lobby"}
               </div>
-              <div style={{ color: "#6b5e85", fontSize: 12, fontWeight: 600 }}>
+              <div style={{ color: COLORS.inkDim, fontSize: 12.5, fontWeight: 600 }}>
                 {l.peer_count}/{l.max_peers} · code {l.join_code}
               </div>
             </div>
@@ -172,7 +173,7 @@ export default function LobbyList({ displayName }: { displayName: string }) {
               className="bb-hover-btn"
               onClick={() => beginJoin(l)}
               disabled={busy || l.peer_count >= l.max_peers}
-              style={{ ...joinBtn, background: l.peer_count >= l.max_peers ? "#d8cfe2" : "#c77dff", color: l.peer_count >= l.max_peers ? "#7a6e8c" : "#1a0f2e" }}
+              style={{ ...joinBtn, background: l.peer_count >= l.max_peers ? "#d8cfe2" : COLORS.lavender, color: l.peer_count >= l.max_peers ? "#7a6e8c" : COLORS.ink }}
             >
               {l.peer_count >= l.max_peers ? "Full" : "Join"}
             </button>
@@ -199,7 +200,7 @@ export default function LobbyList({ displayName }: { displayName: string }) {
           >
             <div style={modalTape} />
             <h3 style={modalTitle}>Password required</h3>
-            <div style={{ color: "#6b5e85", fontSize: 13, fontWeight: 600 }}>
+            <div style={{ color: COLORS.inkFaint, fontSize: 13, fontWeight: 600 }}>
               {joinTarget.display_name || "Untitled lobby"}
             </div>
             <input
@@ -221,8 +222,8 @@ export default function LobbyList({ displayName }: { displayName: string }) {
                 disabled={!joinPassword}
                 style={{
                   ...joinBtn,
-                  background: joinPassword ? "#c77dff" : "#d8cfe2",
-                  color: joinPassword ? "#1a0f2e" : "#7a6e8c",
+                  background: joinPassword ? COLORS.lavender : "#d8cfe2",
+                  color: joinPassword ? COLORS.ink : "#7a6e8c",
                   cursor: joinPassword ? "pointer" : "not-allowed",
                 }}
               >
@@ -249,7 +250,7 @@ export default function LobbyList({ displayName }: { displayName: string }) {
           >
             <div style={modalTape} />
             <h3 style={modalTitle}>Enter Game Code</h3>
-            <div style={{ color: "#6b5e85", fontSize: 13, fontWeight: 600 }}>
+            <div style={{ color: COLORS.inkFaint, fontSize: 13, fontWeight: 600 }}>
               Type the join code shared by the host.
             </div>
             <input
@@ -273,8 +274,8 @@ export default function LobbyList({ displayName }: { displayName: string }) {
                 disabled={!codeInput.trim()}
                 style={{
                   ...joinBtn,
-                  background: codeInput.trim() ? "#c77dff" : "#d8cfe2",
-                  color: codeInput.trim() ? "#1a0f2e" : "#7a6e8c",
+                  background: codeInput.trim() ? COLORS.lavender : "#d8cfe2",
+                  color: codeInput.trim() ? COLORS.ink : "#7a6e8c",
                   cursor: codeInput.trim() ? "pointer" : "not-allowed",
                 }}
               >
@@ -329,8 +330,8 @@ const modalBackdrop: React.CSSProperties = {
 
 const modalCard: React.CSSProperties = {
   position: "relative",
-  background: "#fffae6",
-  color: "#1a0f2e",
+  background: COLORS.paper,
+  color: COLORS.ink,
   padding: "30px 24px 24px",
   borderRadius: 6,
   border: "4px solid #0a0612",
@@ -341,23 +342,13 @@ const modalCard: React.CSSProperties = {
   gap: 14,
 };
 
-const modalTape: React.CSSProperties = {
-  position: "absolute",
-  top: -14,
-  left: "50%",
-  transform: "translateX(-50%) rotate(-2deg)",
-  width: 160,
-  height: 28,
-  background: "rgba(200, 180, 120, 0.78)",
-  border: "1px solid rgba(120, 100, 60, 0.4)",
-  boxShadow: "0 3px 6px rgba(0,0,0,0.2)",
-};
+const modalTape: React.CSSProperties = themeModalTape;
 
 const modalTitle: React.CSSProperties = {
   margin: 0,
   fontSize: 20,
   fontWeight: 900,
-  color: "#1a0f2e",
+  color: COLORS.ink,
 };
 
 const panel: React.CSSProperties = {
@@ -369,7 +360,7 @@ const panel: React.CSSProperties = {
   gap: 12,
   padding: "24px 20px 20px",
   borderRadius: 6,
-  background: "#fffae6",
+  background: COLORS.paper,
   border: "4px solid #0a0612",
   boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
   minHeight: 0,
@@ -386,8 +377,8 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
   borderRadius: 4,
   border: "2px solid #0a0612",
-  background: "#fffefb",
-  color: "#1a0f2e",
+  background: COLORS.paperInput,
+  color: COLORS.ink,
   fontFamily: "inherit",
 };
 
@@ -397,24 +388,37 @@ const listBox: React.CSSProperties = {
   overflowY: "auto",
   borderRadius: 4,
   border: "2px solid rgba(10,6,18,0.25)",
-  background: "rgba(255,255,255,0.35)",
+  // Recessed well behind the row cards — dark tint reads correctly on both
+  // cream (classic) and blue-stone (cave) paper, unlike the old translucent
+  // WHITE wash which went milky on the dark theme.
+  background: "rgba(10,6,18,0.18)",
+  padding: 8,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
 };
 
+// Each lobby is its own raised card so the name + player-count subtext sit
+// on a solid surface instead of the translucent well.
 const lobbyRow: React.CSSProperties = {
-  padding: 14,
+  padding: "12px 14px",
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
   gap: 10,
-  borderTop: "1px solid rgba(10,6,18,0.12)",
+  background: COLORS.paperInput,
+  border: "2px solid rgba(10,6,18,0.35)",
+  borderRadius: 4,
+  boxShadow: "0 2px 6px rgba(0,0,0,0.18)",
+  flexShrink: 0,
 };
 
 const smallBtn: React.CSSProperties = {
   padding: "8px 14px",
   fontSize: 14,
   fontWeight: 700,
-  background: "#fffefb",
-  color: "#1a0f2e",
+  background: COLORS.paperInput,
+  color: COLORS.ink,
   border: "2px solid #0a0612",
   borderRadius: 4,
   cursor: "pointer",
@@ -423,8 +427,8 @@ const smallBtn: React.CSSProperties = {
 
 const joinBtn: React.CSSProperties = {
   padding: "10px 20px",
-  background: "#c77dff",
-  color: "#1a0f2e",
+  background: COLORS.lavender,
+  color: COLORS.ink,
   fontWeight: 800,
   border: "2px solid #0a0612",
   borderRadius: 4,

@@ -2,6 +2,7 @@ import React from 'react';
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import BlobPreview from './BlobPreview';
 import FaceSwatch from './FaceSwatch';
+import { COLORS } from '../theme/uiTheme';
 
 interface Props {
   color: string;
@@ -49,9 +50,9 @@ export default function IdentityPicker({
               aria-pressed={selected}
               style={{
                 ...faceBtn,
-                borderColor: selected ? '#5a189a' : '#0a0612',
-                boxShadow: selected ? '0 0 0 3px #c77dff' : 'none',
-                background: selected ? '#f3e8ff' : '#fffae6',
+                borderColor: selected ? COLORS.purple : '#0a0612',
+                boxShadow: selected ? `0 0 0 3px ${COLORS.lavender}` : 'none',
+                background: selected ? COLORS.paperInput : COLORS.paper,
               }}
             >
               <FaceSwatch faceId={f.id} color={color} size={34} />
@@ -76,7 +77,7 @@ const previewBox: React.CSSProperties = {
 
 const colorRow: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-  fontSize: 15, fontWeight: 800, color: '#1a0f2e',
+  fontSize: 15, fontWeight: 800, color: COLORS.ink,
 };
 
 const colorSwatch: React.CSSProperties = {
@@ -85,7 +86,7 @@ const colorSwatch: React.CSSProperties = {
 };
 
 const facesLabel: React.CSSProperties = {
-  fontSize: 15, fontWeight: 800, color: '#1a0f2e',
+  fontSize: 15, fontWeight: 800, color: COLORS.ink,
 };
 
 const facesGrid: React.CSSProperties = {

@@ -4,6 +4,7 @@ import { hasSeenIntro, resetIntroSeen } from '../utils/introSeen'
 import { startMusic, isMusicStarted } from '../utils/music'
 import SettingsModal from '../components/SettingsModal'
 import HomeBackground, { paperBtn, tapeStrip } from '../components/HomeBackground'
+import { COLORS } from '../theme/uiTheme'
 
 interface MenuButtonConfig {
   label: string
@@ -13,8 +14,8 @@ interface MenuButtonConfig {
 }
 
 const MENU: MenuButtonConfig[] = [
-  { label: 'Play',         to: '/play',        testId: 'play-button',        tape: '#c77dff' },
-  { label: 'Multiplayer',  to: '/multiplayer', testId: 'multiplayer-button',  tape: '#5a189a' },
+  { label: 'Play',         to: '/play',        testId: 'play-button',        tape: COLORS.lavender },
+  { label: 'Multiplayer',  to: '/multiplayer', testId: 'multiplayer-button',  tape: COLORS.purple },
   { label: 'Level Editor', to: '/editor',      tape: '#e85d75' },
 ]
 
@@ -144,8 +145,8 @@ const title: React.CSSProperties = {
   margin: 0,
   fontSize: 'clamp(43px, 7.2vw, 86px)',
   fontWeight: 900,
-  color: '#fffae6',
-  textShadow: '5px 5px 0 #c77dff, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612',
+  color: COLORS.titleInk,
+  textShadow: `5px 5px 0 ${COLORS.lavender}, -2px -2px 0 #0a0612, 2px -2px 0 #0a0612, -2px 2px 0 #0a0612, 2px 2px 0 #0a0612`,
   letterSpacing: 1,
   whiteSpace: 'nowrap',
   userSelect: 'none',

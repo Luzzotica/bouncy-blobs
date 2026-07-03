@@ -3,7 +3,7 @@
   "pages": [
     {
       "index": 1,
-      "title": "I HEREBY DECLARE MYSELF KING!",
+      "title": "Far below everything, the dark runs deep.",
       "sfx": "page-1.mp3",
       "gridTemplate": "\"a a a\" 3fr \"b c c\" 2fr / 1fr 1fr 1fr",
       "panels": [
@@ -23,7 +23,7 @@
     },
     {
       "index": 2,
-      "title": "But what is a king without subjects?",
+      "title": "Something down here stirs.",
       "sfx": "page-2.mp3",
       "gridTemplate": "\"a a a\" 2fr \"b c c\" 3fr / 1fr 1fr 1fr",
       "panels": [
@@ -43,7 +43,7 @@
     },
     {
       "index": 3,
-      "title": "A king needs subjects.",
+      "title": "\u2026and it isn't alone.",
       "sfx": "page-3.mp3",
       "gridTemplate": "\"a c\" 1fr \"b c\" 1fr / 1fr 1fr",
       "panels": [
@@ -63,7 +63,7 @@
     },
     {
       "index": 4,
-      "title": "Oh. Oh no. Oh YES.",
+      "title": "No memory. No way out. No manners.",
       "sfx": "page-4.mp3",
       "gridTemplate": "\"a a b\" 1fr \"a a c\" 1fr \"a a d\" 1fr / 1fr 1fr 1fr",
       "panels": [
@@ -87,7 +87,7 @@
     },
     {
       "index": 5,
-      "title": "LET THE ROYAL TRIALS BEGIN!",
+      "title": "LAST BLOB GLOWING.",
       "sfx": "page-5.mp3",
       "gridTemplate": "\"a a\" 1fr \"b c\" 1fr \"b c\" 1fr / 1fr 2fr",
       "panels": [

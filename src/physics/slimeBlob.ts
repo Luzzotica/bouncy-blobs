@@ -13,7 +13,9 @@ export const BLOB_SQUASH_Y_AMOUNT = 0.3;
 // Forces are now per-second (multiplied by dt in applyBlobMoveForce).
 // Old per-frame values (2.0 / 1.5 / 0.8) scaled by 60 to preserve 60fps feel.
 const MOVE_FORCE = 240.0;
-const AIR_MOVE_MULTIPLIER = 0.3;
+// Airborne lateral authority. 0.3 felt too weak — players couldn't brake or
+// steer mid-jump and kept overshooting platforms.
+const AIR_MOVE_MULTIPLIER = 0.6;
 const PLAYER_K_MULT = 0.92;
 const PLAYER_MASS_MULT = 0.5;
 const EXPAND_SPRING_STIFFNESS_MULT = 1.45;
@@ -36,7 +38,8 @@ const LEDGE_UP_FORCE_MULT = 12.0;
 const LEDGE_HANG_MIN_UPPER_CONTACTS = 1;
 // Lateral move force on non-floor surfaces (walls / ceilings). Contact friction
 // is low there, so full force lets you zoom across a ceiling faster than the
-// ground — this throttles it. Between AIR_MOVE_MULTIPLIER (0.3) and floor (1.0).
+// ground — this throttles it. Kept below floor (1.0); air has its own
+// AIR_MOVE_MULTIPLIER.
 const NONFLOOR_MOVE_MULT = 0.4;
 // Climb up-force scale on vertical WALLS (vs ceilings). Keeps the strong UP for
 // sticking under a ceiling but cuts it on walls so you can't shoot straight up.
@@ -399,7 +402,7 @@ export class SlimeBlob {
 
     // Lateral movement — along the gravity-relative `right` axis (floor
     // tangent). Full on a floor, throttled on walls/ceilings (low friction
-    // there would otherwise let you zoom), least in the air.
+    // there would otherwise let you zoom) and in the air.
     const lateralMult = onFloor ? 1.0 : (touching ? NONFLOOR_MOVE_MULT : AIR_MOVE_MULTIPLIER);
     const lateralDir = vec2(right.x * this.stickX, right.y * this.stickX);
     this.world.applyBlobMoveForce(this.blobId, lateralDir, MOVE_FORCE * this.moveForceMultiplier * lateralMult, delta);

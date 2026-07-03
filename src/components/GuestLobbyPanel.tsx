@@ -5,6 +5,7 @@ import { COLOR_PALETTE } from '../constants/customization';
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import { MODE_OPTIONS } from './LobbyPanel';
 import type { LobbyStateEvent } from '../lib/multiplayerSnapshot';
+import { COLORS } from '../theme/uiTheme';
 
 interface GuestLobbyPanelProps {
   /** Latest lobby_state message from the host. May be null before the first
@@ -122,7 +123,7 @@ export default function GuestLobbyPanel(props: GuestLobbyPanelProps) {
         <button
           data-testid="leave-game"
           onClick={onLeaveGame}
-          style={{ ...buttonStyle, background: '#5a189a' }}
+          style={{ ...buttonStyle, background: COLORS.purple, color: COLORS.onAccent }}
           title="Leave the match and return to the lobby browser"
         >
           🚪 Leave Match

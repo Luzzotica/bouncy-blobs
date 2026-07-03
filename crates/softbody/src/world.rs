@@ -200,6 +200,14 @@ pub fn eval_gravity_field(field: &GravityField, pt: FxVec2) -> FxVec2 {
     }
 }
 
+/// Result of a CCD segment-vs-hull-boundary sweep (`earliest_hull_crossing`).
+struct CcdEdgeHit {
+    point: FxVec2,
+    normal: FxVec2,
+    edge_i: usize,
+    edge_dir: FxVec2,
+}
+
 pub struct SoftBodyWorld {
     // Particle arrays
     pub pos: Vec<FxVec2>,
@@ -1732,14 +1740,28 @@ impl SoftBodyWorld {
 
         let dt = self.config.fixed_dt / Fx::from_int(self.config.substeps as i32);
         let half = Fx::HALF;
+        // Hull centroids — the deep-penetration fallback in
+        // `resolve_point_in_shape` pushes along the centroid-separation axis
+        // (owner − container) when a particle is embedded too deep for the
+        // closest-edge normal to be trustworthy.
+        let ca = Self::poly_centroid(&poly_a);
+        let cb = Self::poly_centroid(&poly_b);
         // A's hull into B
         for k in 0..ra.hull.len() {
-            self.resolve_point_in_shape(ra.hull[k] as usize, a_id, &poly_b, &rb.hull, half, dt, apply_velocity_impulses);
+            self.resolve_point_in_shape(ra.hull[k] as usize, a_id, &poly_b, &rb.hull, ca, cb, half, dt, apply_velocity_impulses);
         }
         // B's hull into A
         for k in 0..rb.hull.len() {
-            self.resolve_point_in_shape(rb.hull[k] as usize, b_id, &poly_a, &ra.hull, half, dt, apply_velocity_impulses);
+            self.resolve_point_in_shape(rb.hull[k] as usize, b_id, &poly_a, &ra.hull, cb, ca, half, dt, apply_velocity_impulses);
         }
+    }
+
+    /// Average of a world-space polygon's vertices. Fx-only.
+    fn poly_centroid(poly: &[FxVec2]) -> FxVec2 {
+        if poly.is_empty() { return FxVec2::ZERO; }
+        let mut c = FxVec2::ZERO;
+        for &p in poly { c = c.add(p); }
+        c.scale(Fx::ONE / Fx::from_int(poly.len() as i32))
     }
 
     fn resolve_point_in_shape(
@@ -1753,6 +1775,10 @@ impl SoftBodyWorld {
         owner_blob_id: usize,
         poly_world: &[FxVec2],
         poly_indices: &[ParticleIdx],
+        // Hull centroid of the blob that OWNS `pi` — deep-pen fallback axis.
+        owner_centroid: FxVec2,
+        // Hull centroid of the CONTAINING polygon's blob.
+        container_centroid: FxVec2,
         friction_scale: Fx,
         dt: Fx,
         apply_velocity_impulses: bool,
@@ -1769,7 +1795,7 @@ impl SoftBodyWorld {
         if self.inv_mass[pi].is_zero() { return; }
 
         let info = closest_point_on_polygon_boundary(p, poly_world);
-        let n = info.normal.neg(); // flip: interior → push outward
+        let mut n = info.normal.neg(); // flip: interior → push outward
         let closest = info.closest;
         let wts = edge_vertex_weights(p, info.a, info.b);
         let wb = wts.wb; let wc = wts.wc;
@@ -1786,6 +1812,24 @@ impl SoftBodyWorld {
         // margin` path under-pushed deep penetrations and let particles
         // stay wedged.
         let pen_actual = p.sub(closest).length();
+
+        // Deep-penetration fallback: past this depth the closest edge is as
+        // likely to be the FAR side of the containing hull as the entry side,
+        // so pushing along its normal wedges the particle deeper — the
+        // "tangled blobs" lock-up. Override the push direction with the
+        // centroid-separation axis (owner − container): every embedded
+        // particle of both blobs then pushes along one consistent axis and
+        // the pair separates within a few solver iterations. Shallow contacts
+        // (normal gameplay, pen ≲ 2 units) keep the closest-edge normal.
+        let deep_pen = fx_lit(10, 1);
+        if pen_actual > deep_pen {
+            let axis = owner_centroid.sub(container_centroid);
+            let alen = axis.length();
+            if alen > Fx::from_raw(1 << 8) {
+                n = axis.scale(Fx::ONE / alen);
+            }
+        }
+
         let pen = if pen_actual > self.config.collision_margin {
             pen_actual
         } else {
@@ -2312,6 +2356,43 @@ impl SoftBodyWorld {
         }
     }
 
+    /// Earliest crossing of the segment `old_p → new_p` against a hull
+    /// polygon's boundary. Returns the hit point, an outward normal oriented
+    /// toward `old_p`'s side, the edge index and its unit direction.
+    /// `skip_if_inside`: bail when `old_p` starts INSIDE the polygon — an
+    /// already-embedded (or escaping) particle is the discrete pass's job;
+    /// yanking it back to the boundary it crossed on the way OUT would
+    /// re-capture it. The legacy pass keeps this off for byte-identical
+    /// behavior with the original sweep.
+    fn earliest_hull_crossing(old_p: FxVec2, new_p: FxVec2, poly: &[FxVec2], skip_if_inside: bool) -> Option<CcdEdgeHit> {
+        if skip_if_inside && is_point_in_polygon(old_p, poly) { return None; }
+        let pn = poly.len();
+        let mut best_t: Option<Fx> = None;
+        let mut best: Option<CcdEdgeHit> = None;
+        for e in 0..pn {
+            let ea = poly[e];
+            let eb = poly[(e + 1) % pn];
+            let Some((t, hit_point)) = segment_intersection_t(old_p, new_p, ea, eb) else { continue };
+            if best_t.map_or(false, |bt| t >= bt) { continue; }
+            let edge = eb.sub(ea);
+            let elen = edge.length();
+            if elen < Fx::from_raw(1 << 4) { continue; }
+            let inv = Fx::ONE / elen;
+            let mut nx = -edge.y * inv;
+            let mut ny = edge.x * inv;
+            let to_old = (old_p.x - ea.x) * nx + (old_p.y - ea.y) * ny;
+            if to_old < Fx::ZERO { nx = -nx; ny = -ny; }
+            best_t = Some(t);
+            best = Some(CcdEdgeHit {
+                point: hit_point,
+                normal: FxVec2::new(nx, ny),
+                edge_i: e,
+                edge_dir: FxVec2::new(edge.x * inv, edge.y * inv),
+            });
+        }
+        best
+    }
+
     fn sweep_blob_ccd(&mut self, prev_pos: &[FxVec2]) {
         let n_blobs = self.blob_ranges.len();
         for a in 0..n_blobs {
@@ -2330,72 +2411,134 @@ impl SoftBodyWorld {
 
                 let pn = rb.hull.len();
                 if pn < 3 { continue; }
-                // B's previous hull polygon.
+                // B's previous AND current hull polygons. The sweep runs
+                // against the previous hull first (original behavior), and —
+                // when that misses — against the CURRENT hull: with both
+                // blobs closing head-on, A's absolute-space path never
+                // crosses where B WAS, but does cross where B IS. That miss
+                // was the main way fast blobs tunneled into each other.
                 let poly_b_prev: Vec<FxVec2> = rb.hull.iter().map(|&i| prev_pos[i as usize]).collect();
+                let poly_b_cur:  Vec<FxVec2> = rb.hull.iter().map(|&i| self.pos[i as usize]).collect();
+                // B's average hull displacement this substep — the frame the
+                // relative sweep below runs in.
+                let db = Self::poly_centroid(&poly_b_cur).sub(Self::poly_centroid(&poly_b_prev));
 
                 for &pidx in &ra.hull {
                     let pi = pidx as usize;
                     if self.inv_mass[pi].is_zero() { continue; }
                     let old_p = prev_pos[pi];
                     let new_p = self.pos[pi];
-                    let dx = new_p.x - old_p.x;
-                    let dy = new_p.y - old_p.y;
-                    if (dx * dx + dy * dy) < Fx::from_raw(1 << 18) { continue; }
+                    let own_dx = new_p.x - old_p.x;
+                    let own_dy = new_p.y - old_p.y;
+                    let rel_dx = own_dx - db.x;
+                    let rel_dy = own_dy - db.y;
+                    let own_fast = (own_dx * own_dx + own_dy * own_dy) >= Fx::from_raw(1 << 18);
+                    // The relative passes engage only at genuine tunneling
+                    // scale (≥ 4 units/substep of relative motion). Resting or
+                    // pressing contact (a blob standing on another) has tiny
+                    // relative motion and belongs to the discrete pass — firing
+                    // impulses there every substep hammers stacked blobs.
+                    let rel_fast = (rel_dx * rel_dx + rel_dy * rel_dy) >= fx_lit(16, 1);
+                    if !own_fast && !rel_fast { continue; }
 
-                    let mut best_t: Option<Fx> = None;
-                    let mut best_point = FxVec2::ZERO;
-                    let mut best_normal = FxVec2::ZERO;
-                    let mut best_edge: i32 = -1;
-                    let mut best_edge_dir = FxVec2::ZERO;
+                    // Pass 0 — the ORIGINAL absolute sweep against B's prev
+                    // hull with a hard position clamp. Unchanged behavior for
+                    // the classic case (fast particle, slow B).
+                    if own_fast {
+                        if let Some(hit) = Self::earliest_hull_crossing(old_p, new_p, &poly_b_prev, false) {
+                            self.pos[pi] = hit.point.add(hit.normal.scale(self.config.collision_margin));
 
-                    for e in 0..pn {
-                        let ea = poly_b_prev[e];
-                        let eb = poly_b_prev[(e + 1) % pn];
-                        let Some((t, hit_point)) = segment_intersection_t(old_p, new_p, ea, eb) else { continue };
-                        if best_t.map_or(false, |bt| t >= bt) { continue; }
-                        let edge = eb.sub(ea);
-                        let elen = edge.length();
-                        if elen < Fx::from_raw(1 << 4) { continue; }
-                        let inv = Fx::ONE / elen;
-                        let mut nx = -edge.y * inv;
-                        let mut ny = edge.x * inv;
-                        let to_old = (old_p.x - ea.x) * nx + (old_p.y - ea.y) * ny;
-                        if to_old < Fx::ZERO { nx = -nx; ny = -ny; }
-                        best_t = Some(t);
-                        best_point = hit_point;
-                        best_normal = FxVec2::new(nx, ny);
-                        best_edge = e as i32;
-                        best_edge_dir = FxVec2::new(edge.x * inv, edge.y * inv);
+                            let edge_i = hit.edge_i;
+                            let ib0 = rb.hull[edge_i] as usize;
+                            let ib1 = rb.hull[(edge_i + 1) % pn] as usize;
+                            let e_a = poly_b_prev[edge_i];
+                            let e_b = poly_b_prev[(edge_i + 1) % pn];
+                            let wts = edge_vertex_weights(hit.point, e_a, e_b);
+
+                            let half = Fx::HALF;
+                            let (va_new, vb_new, vc_new) = resolve_three_body_velocity(
+                                self.vel[pi], self.mass[pi],
+                                self.vel[ib0], self.mass[ib0],
+                                self.vel[ib1], self.mass[ib1],
+                                hit.normal, wts.wb, wts.wc,
+                                self.config.collision_restitution,
+                                self.config.blob_blob_friction_mu * half,
+                                hit.edge_dir,
+                                self.config.blob_blob_friction_impulse_scale * half,
+                                Fx::ZERO,
+                            );
+                            self.vel[pi]  = va_new;
+                            self.vel[ib0] = vb_new;
+                            self.vel[ib1] = vc_new;
+                            continue;
+                        }
                     }
 
-                    if best_edge < 0 { continue; }
+                    // Pass 1 — RELATIVE-frame sweep (A's displacement minus
+                    // B's average displacement) against B's prev hull. Catches
+                    // head-on closings and full pass-throughs (blobs swapping
+                    // sides within one substep) that the absolute sweep can't
+                    // see. Pass 2 — absolute sweep against B's CURRENT hull,
+                    // for deformation the average-motion frame misses.
+                    //
+                    // Both gated on the particle ITSELF moving (own_fast): a
+                    // stationary bystander's particles must not be dragged
+                    // around because something fast swept past them — the fast
+                    // body's own particles catch that crossing from their
+                    // side, and embedded leftovers are the discrete pass's
+                    // job. Processing the still side hammered stacked blobs
+                    // (pile-ons read as crushes).
+                    if !own_fast || !rel_fast { continue; }
+                    let rel_end = new_p.sub(db);
+                    let hit = Self::earliest_hull_crossing(old_p, rel_end, &poly_b_prev, true)
+                        .or_else(|| Self::earliest_hull_crossing(old_p, new_p, &poly_b_cur, true));
+                    let Some(hit) = hit else { continue };
 
-                    // Position clamp.
-                    self.pos[pi] = best_point.add(best_normal.scale(self.config.collision_margin));
-
-                    // Three-body impulse against the two edge vertices of B.
-                    let edge_i = best_edge as usize;
+                    // Respond against the CURRENT edge (the prev-frame contact
+                    // point is stale — B has moved). Entry-side normal keeps
+                    // the particle on the side it came from.
+                    let edge_i = hit.edge_i;
                     let ib0 = rb.hull[edge_i] as usize;
                     let ib1 = rb.hull[(edge_i + 1) % pn] as usize;
-                    let e_a = poly_b_prev[edge_i];
-                    let e_b = poly_b_prev[(edge_i + 1) % pn];
-                    let wts = edge_vertex_weights(best_point, e_a, e_b);
+                    let pb0 = self.pos[ib0];
+                    let pb1 = self.pos[ib1];
+                    let edge = pb1.sub(pb0);
+                    let elen = edge.length();
+                    if elen < Fx::from_raw(1 << 4) { continue; }
+                    let inv = Fx::ONE / elen;
+                    let mut n = FxVec2::new(-edge.y * inv, edge.x * inv);
+                    if n.dot(hit.normal) < Fx::ZERO { n = n.neg(); }
+                    // Signed clearance of the particle from the current edge
+                    // along the entry normal (negative = past the edge).
+                    let s = new_p.sub(pb0).dot(n);
+                    let margin = self.config.collision_margin;
+                    if s >= margin { continue; } // already clear on the entry side
+                    let wts = edge_vertex_weights(new_p, pb0, pb1);
 
-                    let half = Fx::HALF;
-                    let (va_new, vb_new, vc_new) = resolve_three_body_velocity(
-                        self.vel[pi], self.mass[pi],
-                        self.vel[ib0], self.mass[ib0],
-                        self.vel[ib1], self.mass[ib1],
-                        best_normal, wts.wb, wts.wc,
-                        self.config.collision_restitution,
-                        self.config.blob_blob_friction_mu * half,
-                        best_edge_dir,
-                        self.config.blob_blob_friction_impulse_scale * half,
-                        Fx::ZERO,
-                    );
-                    self.vel[pi]  = va_new;
-                    self.vel[ib0] = vb_new;
-                    self.vel[ib1] = vc_new;
+                    // Mass-weighted MUTUAL correction back to the entry side
+                    // (mirrors the discrete pass) — regardless of depth. A
+                    // one-sided hard clamp here slams slow bystanders when a
+                    // heavy mover sinks past their particles (crushes stacked
+                    // blobs); splitting the correction by inverse mass keeps
+                    // both bodies honest and still prevents side-swaps within
+                    // a couple of substeps.
+                    let inv_a = self.inv_mass[pi];
+                    let inv_b = self.inv_mass[ib0];
+                    let inv_c = self.inv_mass[ib1];
+                    let w_sum = inv_a + inv_b * wts.wb * wts.wb + inv_c * wts.wc * wts.wc;
+                    if w_sum >= Fx::from_raw(1 << 6) {
+                        let corr = (margin - s) / w_sum;
+                        self.pos[pi]  = self.pos[pi].add(n.scale(corr * inv_a));
+                        self.pos[ib0] = self.pos[ib0].sub(n.scale(corr * inv_b * wts.wb));
+                        self.pos[ib1] = self.pos[ib1].sub(n.scale(corr * inv_c * wts.wc));
+                    }
+
+                    // NO velocity impulse here, deliberately. The discrete
+                    // pass right after this applies restitution + friction
+                    // once per step with resting-load handling; adding a
+                    // second impulse per crossing hammered stacked blobs
+                    // (a pile-on landing read as a crush). Position-only
+                    // corrections are all the tunneling prevention needs.
                 }
             }
         }
@@ -4173,6 +4316,138 @@ mod tests {
                     step, i, wa.vel[i], wb.vel[i]);
             }
         }
+    }
+
+    /// True if any hull particle of either blob sits inside the other's hull.
+    fn blobs_mutually_penetrating(w: &SoftBodyWorld, a: &BlobResult, b: &BlobResult) -> bool {
+        let poly_a: Vec<FxVec2> = a.hull_indices.iter().map(|&i| w.pos[i as usize]).collect();
+        let poly_b: Vec<FxVec2> = b.hull_indices.iter().map(|&i| w.pos[i as usize]).collect();
+        a.hull_indices.iter().any(|&i| is_point_in_polygon(w.pos[i as usize], &poly_b))
+            || b.hull_indices.iter().any(|&i| is_point_in_polygon(w.pos[i as usize], &poly_a))
+    }
+
+    /// Assert no hull particle of either blob sits inside the other's hull.
+    fn assert_no_mutual_penetration(w: &SoftBodyWorld, a: &BlobResult, b: &BlobResult, label: &str) {
+        let poly_a: Vec<FxVec2> = a.hull_indices.iter().map(|&i| w.pos[i as usize]).collect();
+        let poly_b: Vec<FxVec2> = b.hull_indices.iter().map(|&i| w.pos[i as usize]).collect();
+        for &i in &a.hull_indices {
+            assert!(
+                !is_point_in_polygon(w.pos[i as usize], &poly_b),
+                "{}: particle {} of blob A is inside blob B at {:?}",
+                label, i, w.pos[i as usize]
+            );
+        }
+        for &i in &b.hull_indices {
+            assert!(
+                !is_point_in_polygon(w.pos[i as usize], &poly_a),
+                "{}: particle {} of blob B is inside blob A at {:?}",
+                label, i, w.pos[i as usize]
+            );
+        }
+    }
+
+    /// Hull-centroid x of a blob (test helper).
+    fn hull_centroid_x(w: &SoftBodyWorld, r: &BlobResult) -> Fx {
+        let mut sum = Fx::ZERO;
+        for &i in &r.hull_indices { sum += w.pos[i as usize].x; }
+        sum / Fx::from_int(r.hull_indices.len() as i32)
+    }
+
+    /// A menu-style SOFT blob: 16-point circle hull, weak shape matching.
+    /// Mirrors src/renderer/menuBlobs.ts tuning — the squishiest blobs the
+    /// game ships, and the easiest to tangle.
+    fn soft_circle_blob(w: &mut SoftBodyWorld, origin: FxVec2, sort_key: &str) -> BlobResult {
+        let n = 16;
+        let r = fx(48);
+        let mut hull = Vec::with_capacity(n);
+        for k in 0..n {
+            let ang = Fx::from_int(k as i32) * Fx::from_raw(crate::math::FX_TAU) / Fx::from_int(n as i32);
+            hull.push(FxVec2::new(crate::math::cos_fx(ang) * r, crate::math::sin_fx(ang) * r));
+        }
+        w.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: hull,
+            center_local: FxVec2::ZERO,
+            center_mass: crate::tuning::CENTER_MASS,
+            hull_mass:   crate::tuning::HULL_MASS,
+            spring_k:    crate::tuning::SPRING_K,
+            spring_damp: crate::tuning::SPRING_DAMP,
+            radial_k:    Fx::ZERO,
+            radial_damp: Fx::ZERO,
+            pressure_k:  crate::tuning::PRESSURE_K,
+            shape_match_k:    fx(26),
+            shape_match_damp: fx_lit(35, 100),
+            world_origin: origin,
+            sort_key: Some(sort_key.into()),
+            static_hull_indices: Vec::new(),
+            static_center: false,
+            pin_frame: false,
+        })
+    }
+
+    #[test]
+    fn head_on_high_speed_blobs_do_not_tunnel() {
+        // Two blobs slammed together at ±4000 px/s — a combined 133 px/frame
+        // closing speed, more than a full blob width per substep at 2
+        // substeps. Without the RELATIVE-frame CCD sweep, A's absolute-space
+        // segment never crosses where B WAS, so the pair passes straight
+        // through and swaps sides. Assert they never swap AND end separated.
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::ZERO;
+        cfg.substeps = 2;
+        let mut w = SoftBodyWorld::new(cfg, 42);
+        // Circle hulls with a slight y offset: axis-aligned squares graze
+        // corner-on-corner (degenerate segment intersections); circles cross
+        // edge interiors like real gameplay/menu blobs do.
+        let a = soft_circle_blob(&mut w, FxVec2::new(fx(0), fx(0)), "a");
+        let b = soft_circle_blob(&mut w, FxVec2::new(fx(260), fx(9)), "b");
+        w.apply_blob_linear_velocity_delta(a.blob_id, FxVec2::new(fx(2000), Fx::ZERO));
+        w.apply_blob_linear_velocity_delta(b.blob_id, FxVec2::new(fx(-2000), Fx::ZERO));
+
+        let dt = Fx::ONE / Fx::from_int(60);
+        for step in 0..60 {
+            w.step(dt);
+            let ax = hull_centroid_x(&w, &a);
+            let bx = hull_centroid_x(&w, &b);
+            assert!(ax < bx, "step {}: blobs swapped sides (tunneled through): ax={:?} bx={:?}", step, ax, bx);
+        }
+        assert_no_mutual_penetration(&w, &a, &b, "head-on slam");
+    }
+
+    #[test]
+    fn deeply_overlapped_blobs_untangle() {
+        // Menu-soft circle blobs starting ~85% overlapped — the locked-tangle
+        // state that used to persist: closest-edge depenetration pushed the
+        // embedded particles toward the FAR side, wedging the hulls together
+        // forever. With the centroid-separation-axis fallback the pair must
+        // fully separate within 2 seconds.
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::ZERO;
+        cfg.substeps = 2;
+        let mut w = SoftBodyWorld::new(cfg, 7);
+        let a = soft_circle_blob(&mut w, FxVec2::new(fx(0), fx(0)), "a");
+        let b = soft_circle_blob(&mut w, FxVec2::new(fx(400), fx(0)), "b");
+        // Teleport B onto A: centers 4 units apart — nearly concentric, the
+        // worst tangle (most embedded particles are past the containing
+        // hull's midline, so closest-edge pushout points the WRONG way).
+        w.teleport_blob(b.blob_id, FxVec2::new(fx(4), fx(2)));
+
+        // Regression guard for the deep-penetration separation-axis path:
+        // this scenario drives pen_actual well past the 10-unit threshold on
+        // the first solver iterations, so the axis override IS the code that
+        // runs. The engine separates a static overlap almost instantly —
+        // assert the override keeps that true (a wrong-side axis or sign bug
+        // here would wedge the pair instead).
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut separated_at: Option<usize> = None;
+        for step in 0..120 {
+            w.step(dt);
+            if !blobs_mutually_penetrating(&w, &a, &b) {
+                separated_at = Some(step);
+                break;
+            }
+        }
+        let frames = separated_at.expect("blobs never separated within 120 frames");
+        assert!(frames <= 5, "untangle took {} frames (> 5) — deep-pen recovery regressed", frames);
     }
 
     #[test]

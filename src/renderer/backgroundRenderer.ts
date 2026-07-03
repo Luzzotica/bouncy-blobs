@@ -7,7 +7,7 @@ import { assetUrl } from '../utils/assetUrl';
 import {
   isCave,
   CAVE_BG_TOP, CAVE_BG_MID, CAVE_BG_BOTTOM,
-  CAVE_ROCK_LAYERS, CAVE_ROCK_SHEEN, CAVE_BACKWALL,
+  CAVE_ROCK_LAYERS, CAVE_BACKWALL,
 } from './colors';
 
 const VARIANTS = [
@@ -296,14 +296,6 @@ function drawCaveBackground(
         const lenT = layer.lenBase + layer.lenVar * fbm(col * 1.7 + l + 0.5);
         const leanT = (hash2(col, l + 41) - 0.5) * halfW * 0.9;
         drawRockSpike(ctx, cxTop, 0, +1, lenT, halfW, leanT, seed + 0.3);
-        if (layer.sheen) {
-          ctx.strokeStyle = CAVE_ROCK_SHEEN;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(cxTop - halfW * 0.3, 0);
-          ctx.lineTo(cxTop + leanT, lenT);
-          ctx.stroke();
-        }
         // Stalagmite (bottom), interlaced half a column over.
         const cxBot = baseX + layer.spacing * 0.5 + (hash2(col, l + 71) - 0.5) * layer.spacing * 0.6;
         const halfWb = layer.width * (0.28 + 0.34 * hash2(col, l + 97));

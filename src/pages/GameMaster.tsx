@@ -48,6 +48,7 @@ import {
   type PersonalityName,
 } from '../game/aiPersonalities';
 import { COLOR_PALETTE } from '../constants/customization';
+import { COLORS } from '../theme/uiTheme';
 import LobbyPanel, { type MapOption, type PlayerSummary } from '../components/LobbyPanel';
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import { InputManager } from '../managers/InputManager';
@@ -2740,8 +2741,8 @@ export default function GameMaster() {
                 fontSize: 14,
                 fontWeight: 800,
                 padding: '10px 18px 9px',
-                background: '#fffae6',
-                color: '#1a0f2e',
+                background: COLORS.paper,
+                color: COLORS.ink,
                 border: '3px solid #0a0612',
                 borderRadius: 4,
                 cursor: 'pointer',
@@ -2830,7 +2831,7 @@ function JoinQrBadge({ joinUrl }: { joinUrl: string }) {
       <span style={{
         fontSize: 13,
         fontWeight: 800,
-        color: '#fffae6',
+        color: COLORS.titleInk,
         letterSpacing: 0.3,
         textShadow: '1px 1px 0 #0a0612, -1px -1px 0 #0a0612, 1px -1px 0 #0a0612, -1px 1px 0 #0a0612',
         whiteSpace: 'nowrap',
