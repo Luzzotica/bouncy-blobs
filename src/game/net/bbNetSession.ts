@@ -15,6 +15,7 @@
 import type { BouncyBlobsGame } from '../bouncyBlobsGame';
 import { NetPeer, type PlayerInput, type TaggedInput, type SimDriver } from '../../lib/netcode/netPeer';
 import { makeBouncyBlobsSimDriver } from './simDriver';
+import { recordReplayInput, isRecording } from '../../replay/replayRecorder';
 import { encodeTaggedInputs, decodeTaggedInputs } from '../../lib/netcode/taggedInputCodec';
 import { encodeStateSync, decodeStateSync, encodeHashBeacon, decodeHashBeacon } from '../../lib/netcode/stateSyncCodec';
 import { quantizeAxis } from '../../lib/inputProtocol';
@@ -220,6 +221,9 @@ export class BbNetSession {
       // host sends 1 input packet/guest/tick instead of ~N (huge packet-overhead win).
       const agg = this.peer.recentAuthInputs(REDUNDANCY_TICKS);
       if (agg.length > 0) this.opts.sendBytes(encodeTaggedInputs(agg, this.opts.slotOf));
+      if (isRecording()) {
+        for (const t of agg) recordReplayInput({ t: t.applyTick, p: t.playerId, mx: t.input.moveX, my: t.input.moveY, e: t.input.expanding });
+      }
     } else if (this.recentOut.length > 0) {
       // Guest: send only our own redundant window upstream to the host.
       this.opts.sendBytes(encodeTaggedInputs(this.recentOut, this.opts.slotOf));

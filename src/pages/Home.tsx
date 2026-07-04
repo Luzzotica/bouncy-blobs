@@ -17,6 +17,7 @@ const MENU: MenuButtonConfig[] = [
   { label: 'Play',         to: '/play',        testId: 'play-button',        tape: COLORS.lavender },
   { label: 'Multiplayer',  to: '/multiplayer', testId: 'multiplayer-button',  tape: COLORS.purple },
   { label: 'Level Editor', to: '/editor',      tape: '#e85d75' },
+  { label: 'My Replays',   to: '/replays',     tape: COLORS.green },
 ]
 
 export default function Home() {

@@ -36,6 +36,7 @@ const LOCAL_PLAYER_ID_CONST = 'local-keyboard';
 const MAX_SLOT_CONST = MAX_SLOT;
 import { initPacingFromUrl, getPacingConfig, setPacingConfig, REDUNDANCY_TICKS } from '../lib/pacingConfig';
 import { BbNetSession } from '../game/net/bbNetSession';
+import { beginReplayRecording, finishReplayRecording, isRecording } from '../replay/replayRecorder';
 import { MAGIC_TAGGED_INPUTS } from '../lib/netcode/taggedInputCodec';
 import { getHashHistory, recordHash, resetHashHistory } from '../lib/hashHistory';
 import { installDebugBridge, setCompareHashesAccessor, setTogglePauseAccessor, setStepFramesAccessor, setClientStatsAccessor, setSimSpeedAccessor, type CompareHashesResult, type ClientStat } from '../lib/debugBridge';
@@ -61,6 +62,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_CONTROLLER_CONFIG } from '../types/controllerConfig';
 import { WebRTCMessage } from '../types/webrtc';
 import GameCanvas from '../components/GameCanvas';
+import { SaveReplayOverlay } from '../components/SaveReplayOverlay';
 import HostSetupModal, { type HostSetupResult } from '../components/HostSetupModal';
 import NetDebugOverlay from '../components/NetDebugOverlay';
 import GameMenu from '../components/GameMenu';
@@ -976,6 +978,7 @@ export default function GameMaster() {
     game.setPhaseChangeCallback((gp) => {
       setGamePhase(gp);
       if (gp === 'results') {
+        if (isRecording()) finishReplayRecording(gameRef.current?.getWorld?.()?.tick ?? 0);
         setTimeout(() => {
           gameRef.current?.destroy();
           gameRef.current = null;
@@ -993,6 +996,15 @@ export default function GameMaster() {
     contextRef.current = context;
     game.initialize(context);
     spawnExistingPlayers(game, context);
+
+    // Record this match for replay (host authoritative stream via BbNetSession).
+    if (usePeerNet) {
+      const pm = game.getPlayerManager();
+      const players = (pm?.getAllPlayers() ?? []).map((p) => ({
+        playerId: p.playerId, name: p.name, colorIndex: p.colorIndex, isBot: p.aiController !== null,
+      }));
+      beginReplayRecording({ rngSeed: sessionSeedRef.current, levelData, levelType: resolvedType, players });
+    }
 
     // Broadcast level_loaded now that the host's game is fully set up
     // (initialized + players spawned). Order matters: we send
@@ -2797,6 +2809,7 @@ export default function GameMaster() {
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
       {showNetDebug && <NetDebugOverlay role="host" />}
+      {gamePhase === 'results' && usePeerNet && <SaveReplayOverlay />}
       <KothHud gameRef={gameRef} />
       <GameMenu
         onExit={() => navigate('/')}

@@ -7,6 +7,9 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { isTauri } from '../lib/runtime';
 import { COLORS, paperPanel, paperBtnSm, actionBtnSm } from '../theme/uiTheme';
 import { publishLevelToCloud } from '../levels/levelRegistry';
+import { LoginRequiredError } from '../lib/party';
+import { SignInModal } from '../components/SignInModal';
+import { editorCloud } from '../levels/levelRegistry';
 
 interface EditorToolbarProps {
   state: EditorState;
@@ -38,6 +41,7 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
 export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvailable }: EditorToolbarProps) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [cloudSharing, setCloudSharing] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(false);
 
   const shareToCloud = async () => {
     if (state.level.spawnPoints.length === 0) { alert('Add at least one spawn point first.'); return; }
@@ -47,7 +51,8 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
       await navigator.clipboard.writeText(shareCode).catch(() => {});
       alert(`Shared to the community! Code: ${shareCode}\n(copied — anyone can load it, on any platform)`);
     } catch (err: any) {
-      alert('Share failed: ' + (err?.message ?? err));
+      if (err instanceof LoginRequiredError) { setShowSignIn(true); }
+      else alert('Share failed: ' + (err?.message ?? err));
     } finally {
       setCloudSharing(false);
     }
@@ -214,6 +219,13 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           state={state}
           onClose={() => setPublishOpen(false)}
           onPublished={(id) => { state.workshopId = id; onUpdate(); setPublishOpen(false); }}
+        />
+      )}
+      {showSignIn && (
+        <SignInModal
+          cloud={editorCloud}
+          onClose={() => setShowSignIn(false)}
+          onSignedIn={() => { setShowSignIn(false); void shareToCloud(); }}
         />
       )}
     </>

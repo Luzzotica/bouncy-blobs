@@ -33,6 +33,22 @@ export interface CloudItem {
 const DEVICE_KEY = "lobbii_device_id";
 const TOKEN_KEY = (game: string) => `lobbii_player_token_${game}`;
 
+/** Thrown by publish() when the player is anonymous and must sign in first.
+ *  Callers should catch this and open a sign-in modal. */
+export class LoginRequiredError extends Error {
+  constructor() {
+    super("login_required");
+    this.name = "LoginRequiredError";
+  }
+}
+
+export interface PlayerProfile {
+  playerId: string;
+  displayName: string | null;
+  /** Linked provider ids, e.g. ['anon', 'email']. */
+  providers: string[];
+}
+
 function readLS(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
 }
@@ -106,8 +122,128 @@ export class CloudContent {
       res = await fn(headers);
     }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    if (!res.ok) {
+      if ((data as { error?: string }).error === "login_required") throw new LoginRequiredError();
+      throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    }
     return data as T;
+  }
+
+  // ── Sign-in ──────────────────────────────────────────────────────────────
+
+  /** Current player profile (creates a silent anon player if none). */
+  async profile(): Promise<PlayerProfile | null> {
+    return this.withPlayer<{ player_id: string; display_name: string | null; identities: { provider: string }[] }>(
+      (headers) => fetch(`${this.base()}/api/players/me`, { headers }),
+    )
+      .then((me) => ({
+        playerId: me.player_id,
+        displayName: me.display_name,
+        providers: (me.identities ?? []).map((i) => i.provider),
+      }))
+      .catch(() => null);
+  }
+
+  /** True once the player has a real (non-anonymous) identity — the gate for
+   *  publishing maps/replays to the cloud. */
+  async isSignedIn(): Promise<boolean> {
+    const p = await this.profile();
+    return !!p && p.providers.some((prov) => prov !== "anon");
+  }
+
+  private async emailAuthConfig(): Promise<{ authUrl: string; anonKey: string }> {
+    const res = await fetch(`${this.base()}/api/players/providers`, {
+      headers: { "X-API-Key": this.config.apiKey },
+    });
+    const data = await res.json();
+    const email = (data as { providers?: { email?: { auth_url?: string; anon_key?: string } } }).providers?.email;
+    if (!email?.auth_url || !email?.anon_key) throw new Error("Email sign-in is not available");
+    return { authUrl: email.auth_url.replace(/\/$/, ""), anonKey: email.anon_key };
+  }
+
+  /** Create a hosted email account and sign in. */
+  async signUpWithEmail(email: string, password: string): Promise<PlayerProfile> {
+    const { authUrl, anonKey } = await this.emailAuthConfig();
+    const res = await fetch(`${authUrl}/signup`, {
+      method: "POST",
+      headers: { apikey: anonKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data as { msg?: string; error_description?: string }).msg ?? (data as { error_description?: string }).error_description ?? "Sign-up failed");
+    // Supabase may require email confirmation → no session yet. If we got a
+    // token, link/login immediately; otherwise the caller must confirm first.
+    const token = (data as { access_token?: string }).access_token;
+    if (!token) throw new Error("Check your email to confirm your account, then sign in.");
+    return this.attachEmail(token);
+  }
+
+  /** Sign in to an existing hosted email account (password grant). */
+  async signInWithEmail(email: string, password: string): Promise<PlayerProfile> {
+    const { authUrl, anonKey } = await this.emailAuthConfig();
+    const res = await fetch(`${authUrl}/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: anonKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok || !(data as { access_token?: string }).access_token) {
+      throw new Error((data as { error_description?: string }).error_description ?? "Sign-in failed");
+    }
+    return this.attachEmail((data as { access_token: string }).access_token);
+  }
+
+  /** Sign in with a Steam auth session ticket (Tauri/Steam builds). */
+  async signInWithSteam(ticket: string, steamId?: string): Promise<PlayerProfile> {
+    return this.attachProvider("steam", { ticket, steam_id: steamId });
+  }
+
+  /** Link-if-anon-else-login: attach the provider to the current device player
+   *  (preserving local content); if that identity already belongs to another
+   *  player, switch to logging into it. */
+  private async attachEmail(accessToken: string): Promise<PlayerProfile> {
+    return this.attachProvider("email", { access_token: accessToken });
+  }
+
+  private async attachProvider(provider: string, proof: Record<string, unknown>): Promise<PlayerProfile> {
+    const token = await this.ensurePlayer();
+    if (token) {
+      // Try to LINK onto the existing (anon) player first.
+      const linkRes = await fetch(`${this.base()}/api/players/link`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, ...proof }),
+      });
+      if (linkRes.ok) {
+        const p = await this.profile();
+        if (p) return p;
+      } else {
+        const err = await linkRes.json().catch(() => ({}));
+        // 409 → this identity already owns a different player: log into it.
+        if ((err as { error?: string }).error !== "identity_already_linked" && linkRes.status !== 409) {
+          throw new Error((err as { error?: string }).error ?? "Sign-in failed");
+        }
+      }
+    }
+    // Login (creates or returns the provider's player); replace our token.
+    const res = await fetch(`${this.base()}/api/players/login`, {
+      method: "POST",
+      headers: { "X-API-Key": this.config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, ...proof }),
+    });
+    const data = await res.json();
+    if (!res.ok || !(data as { player_token?: string }).player_token) {
+      throw new Error((data as { error?: string }).error ?? "Sign-in failed");
+    }
+    this.playerToken = (data as { player_token: string }).player_token;
+    writeLS(TOKEN_KEY(this.config.gameId), this.playerToken);
+    return (await this.profile()) ?? { playerId: (data as { player_id: string }).player_id, displayName: null, providers: [provider] };
+  }
+
+  /** Sign out — the next call re-creates a silent anonymous player. */
+  signOut(): void {
+    this.playerToken = null;
+    try { localStorage.removeItem(TOKEN_KEY(this.config.gameId)); } catch { /* ignore */ }
   }
 
   /** Publish a JSON payload (a level, a save). Returns its id + share code. */

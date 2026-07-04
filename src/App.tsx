@@ -15,6 +15,8 @@ import Multiplayer from './pages/Multiplayer'
 import OnlineGuest from './pages/OnlineGuest'
 import Intro from './pages/Intro'
 import NetcodeHarness from './pages/NetcodeHarness'
+import MyReplays from './pages/MyReplays'
+import ReplayView from './pages/ReplayView'
 
 export default function App() {
   const navigate = useNavigate()
@@ -50,6 +52,8 @@ export default function App() {
       <Route path="/play/level" element={<PlayLevel />} />
       <Route path="/sandbox" element={<Sandbox />} />
       <Route path="/editor" element={<Editor />} />
+      <Route path="/replays" element={<MyReplays />} />
+      <Route path="/replay/:id" element={<ReplayView />} />
       <Route path="/game" element={<GameMaster />} />
       <Route path="/join" element={<JoinLobby />} />
       <Route path="/controller/:sessionId" element={<Controller />} />

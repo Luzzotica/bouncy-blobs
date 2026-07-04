@@ -8,7 +8,8 @@ import { roomConfig, GAME_ID } from '../lib/partyConfig';
 
 // Shared cloud-content client (Lobbii player content). Works on ANY build,
 // including web/itch where Steam Workshop is unavailable.
-const cloud = new CloudContent({ baseUrl: roomConfig.baseUrl, apiKey: roomConfig.apiKey, gameId: GAME_ID });
+export const editorCloud = new CloudContent({ baseUrl: roomConfig.baseUrl, apiKey: roomConfig.apiKey, gameId: GAME_ID });
+const cloud = editorCloud;
 const cloudCache = new Map<string, LevelData>();
 
 export type LevelSource = 'builtin' | 'local' | 'workshop' | 'cloud';
