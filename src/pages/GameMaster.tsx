@@ -73,7 +73,7 @@ import { ChainedMode } from '../game/gameModes/chainedMode';
 import { KingOfTheHillMode } from '../game/gameModes/kingOfTheHillMode';
 import { FreeplayMode } from '../game/gameModes/freeplayMode';
 
-import { getAvailableLevels, loadBuiltinLevel, listAllLevels, loadLevelById } from '../levels/levelRegistry';
+import { getAvailableLevels, loadBuiltinLevel, listAllLevels, loadLevelById, loadCloudLevelByCode } from '../levels/levelRegistry';
 
 /** LAN IP for dev QR codes — set VITE_LOCAL_LAN_IP in .env to your machine's IP */
 const LOCAL_LAN_IP = import.meta.env.VITE_LOCAL_LAN_IP ?? '127.0.0.1';
@@ -784,6 +784,19 @@ export default function GameMaster() {
     } catch (err) {
       console.warn('Failed to refresh map options:', err);
     }
+  }, []);
+
+  // Load a shared community level by its 8-char code, add it to the picker,
+  // and select it. Works on every build (no Steam required).
+  const loadCloudCode = useCallback(async (code: string) => {
+    const { id, name, level } = await loadCloudLevelByCode(code);
+    setMapOptions((prev) =>
+      prev.some((o) => o.id === id)
+        ? prev
+        : [...prev, { id, name, source: 'cloud' as const, levelTypes: ['solo_racing', 'team_racing', 'koth'] }],
+    );
+    setSelectedMapId(id);
+    void level;
   }, []);
 
   // ─── Core game lifecycle ──────────────────────────────────────────────────
@@ -2709,6 +2722,7 @@ export default function GameMaster() {
           selectedModeId={selectedModeId}
           onChangeMode={setSelectedModeId}
           loadLevel={loadMapById}
+          onLoadCloudCode={loadCloudCode}
           onAddBot={addBot}
           onRemoveBot={removeBot}
           canAddBot={canAddBot}

@@ -13,6 +13,8 @@ interface MapPickerModalProps {
   onConfirm: (mapId: string) => void;
   /** Returns LevelData for a map id; the modal calls this lazily as it opens. */
   loadLevel: (mapId: string) => Promise<LevelData>;
+  /** Load a shared community level by its share code (adds + selects it). */
+  onLoadCloudCode?: (code: string) => Promise<void>;
 }
 
 /**
@@ -22,9 +24,25 @@ interface MapPickerModalProps {
  * "Custom" badge so the host knows they're user-uploaded.
  */
 export default function MapPickerModal({
-  open, options, currentMapId, onCancel, onConfirm, loadLevel,
+  open, options, currentMapId, onCancel, onConfirm, loadLevel, onLoadCloudCode,
 }: MapPickerModalProps) {
   const [pendingId, setPendingId] = useState(currentMapId);
+  const [code, setCode] = useState('');
+  const [loadingCode, setLoadingCode] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const submitCode = async () => {
+    if (!onLoadCloudCode || !code.trim()) return;
+    setLoadingCode(true);
+    setCodeError(null);
+    try {
+      await onLoadCloudCode(code.trim());
+      setCode('');
+    } catch (err) {
+      setCodeError(err instanceof Error ? err.message : 'Could not load that code');
+    } finally {
+      setLoadingCode(false);
+    }
+  };
   const [levels, setLevels] = useState<Map<string, LevelData>>(new Map());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
 
@@ -169,7 +187,7 @@ export default function MapPickerModal({
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.name}
                   </span>
-                  {(m.source === 'local' || m.source === 'workshop') && (
+                  {(m.source === 'local' || m.source === 'workshop' || m.source === 'cloud') && (
                     <span
                       data-testid="custom-badge"
                       style={{
@@ -195,8 +213,33 @@ export default function MapPickerModal({
           borderTop: '1px solid #232634',
           display: 'flex',
           gap: 8,
+          alignItems: 'center',
           justifyContent: 'flex-end',
         }}>
+          {onLoadCloudCode && (
+            <div style={{ display: 'flex', gap: 6, marginRight: 'auto', alignItems: 'center' }}>
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === 'Enter') void submitCode(); }}
+                placeholder="SHARE CODE"
+                maxLength={8}
+                style={{
+                  padding: '8px 10px', fontSize: 13, width: 130, letterSpacing: '0.12em',
+                  background: '#1a1d28', color: '#ddd', border: '1px solid #353a4c', borderRadius: 4,
+                }}
+              />
+              <button
+                onClick={() => void submitCode()}
+                disabled={loadingCode || !code.trim()}
+                style={{
+                  padding: '8px 14px', fontSize: 13, background: '#2d4a6a', color: '#fff',
+                  border: 'none', borderRadius: 4, cursor: 'pointer', opacity: loadingCode ? 0.6 : 1,
+                }}
+              >{loadingCode ? '…' : '☁ Load'}</button>
+              {codeError && <span style={{ fontSize: 11, color: '#e06a6a' }}>{codeError}</span>}
+            </div>
+          )}
           <button
             onClick={onCancel}
             style={{

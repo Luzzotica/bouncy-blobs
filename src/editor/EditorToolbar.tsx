@@ -6,6 +6,7 @@ import { exportLocalMap, importLocalMap, readLocalMap } from '../lib/localMaps';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { isTauri } from '../lib/runtime';
 import { COLORS, paperPanel, paperBtnSm, actionBtnSm } from '../theme/uiTheme';
+import { publishLevelToCloud } from '../levels/levelRegistry';
 
 interface EditorToolbarProps {
   state: EditorState;
@@ -36,6 +37,21 @@ const tools: { id: EditorTool; label: string; hotkey: string }[] = [
 
 export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvailable }: EditorToolbarProps) {
   const [publishOpen, setPublishOpen] = useState(false);
+  const [cloudSharing, setCloudSharing] = useState(false);
+
+  const shareToCloud = async () => {
+    if (state.level.spawnPoints.length === 0) { alert('Add at least one spawn point first.'); return; }
+    setCloudSharing(true);
+    try {
+      const { shareCode } = await publishLevelToCloud(state.level, 'public');
+      await navigator.clipboard.writeText(shareCode).catch(() => {});
+      alert(`Shared to the community! Code: ${shareCode}\n(copied — anyone can load it, on any platform)`);
+    } catch (err: any) {
+      alert('Share failed: ' + (err?.message ?? err));
+    } finally {
+      setCloudSharing(false);
+    }
+  };
 
   const handleExport = async () => {
     if (!state.localId) {
@@ -170,6 +186,15 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
             : { ...actionBtnStyle(), opacity: 0.5, cursor: 'not-allowed' }}
         >
           {state.workshopId ? 'Update Workshop' : 'Publish to Workshop'}
+        </button>
+
+        <button
+          onClick={shareToCloud}
+          disabled={cloudSharing}
+          title="Share to the cross-platform community cloud (works everywhere, no Steam needed)"
+          style={actionBtnStyle(COLORS.blue, COLORS.ink)}
+        >
+          {cloudSharing ? 'Sharing…' : '☁ Share to Cloud'}
         </button>
 
         <div style={{ flex: 1 }} />

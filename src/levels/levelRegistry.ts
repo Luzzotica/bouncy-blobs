@@ -3,8 +3,15 @@ import { getLevelTypes } from './types';
 import { listLocalMaps, readLocalMap } from '../lib/mapsStore';
 import { listSubscribedItems } from '../lib/workshopApi';
 import { assetUrl } from '../utils/assetUrl';
+import { CloudContent } from '../lib/party';
+import { roomConfig, GAME_ID } from '../lib/partyConfig';
 
-export type LevelSource = 'builtin' | 'local' | 'workshop';
+// Shared cloud-content client (Lobbii player content). Works on ANY build,
+// including web/itch where Steam Workshop is unavailable.
+const cloud = new CloudContent({ baseUrl: roomConfig.baseUrl, apiKey: roomConfig.apiKey, gameId: GAME_ID });
+const cloudCache = new Map<string, LevelData>();
+
+export type LevelSource = 'builtin' | 'local' | 'workshop' | 'cloud';
 
 export interface LevelManifestEntry {
   id: string;
@@ -136,7 +143,45 @@ export async function listAllLevels(): Promise<MergedLevel[]> {
     // Steam not available — fine.
   }
 
+  // Community cloud levels (public). The cross-platform sharing path — the only
+  // sharing source that works on web/itch builds (no Steam required).
+  try {
+    const items = await cloud.listPublic({ contentType: 'level', limit: 30 });
+    for (const c of items) {
+      out.push({
+        id: `cloud:${c.id}`,
+        name: c.name,
+        source: 'cloud',
+        levelTypes: ['solo_racing', 'team_racing', 'koth'],
+      });
+    }
+  } catch {
+    // Offline / unauthenticated — fine.
+  }
+
   return out;
+}
+
+/** Load a shared cloud level by its 8-char share code (returns the merged id
+ *  and level so callers can add it to the picker). */
+export async function loadCloudLevelByCode(code: string): Promise<{ id: string; name: string; level: LevelData }> {
+  const { item, data } = await cloud.fetchData<LevelData>(code.trim().toUpperCase());
+  cloudCache.set(item.id, data);
+  return { id: `cloud:${item.id}`, name: item.name, level: data };
+}
+
+/** Publish a level to the community cloud. Returns its share code. */
+export async function publishLevelToCloud(
+  level: LevelData,
+  visibility: 'public' | 'unlisted' = 'public',
+): Promise<{ shareCode: string }> {
+  const { share_code } = await cloud.publish({
+    contentType: 'level',
+    name: level.name || 'Untitled',
+    data: level,
+    visibility,
+  });
+  return { shareCode: share_code };
 }
 
 /** Resolve a merged-id back to LevelData (works for any source). */
@@ -145,6 +190,14 @@ export async function loadLevelById(id: string): Promise<LevelData> {
   if (id.startsWith('local:')) {
     const mf = await readLocalMap(id.slice('local:'.length));
     return mf.level;
+  }
+  if (id.startsWith('cloud:')) {
+    const cid = id.slice('cloud:'.length);
+    const cached = cloudCache.get(cid);
+    if (cached) return cached;
+    const { data } = await cloud.fetchData<LevelData>(cid);
+    cloudCache.set(cid, data);
+    return data;
   }
   if (id.startsWith('workshop:')) {
     // The merged listAllLevels carries the file path; for direct callers we

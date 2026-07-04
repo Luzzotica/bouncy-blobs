@@ -21,7 +21,7 @@ export interface PlayerSummary {
 export interface MapOption {
   id: string;          // 'builtin:default' | 'local:<uuid>' | 'workshop:<id>'
   name: string;
-  source: 'builtin' | 'local' | 'workshop';
+  source: 'builtin' | 'local' | 'workshop' | 'cloud';
   /** Modes this map is designed for. Local/Workshop maps default to all modes
    * since we can't introspect a stored level without loading it. */
   levelTypes: LevelType[];
@@ -52,6 +52,8 @@ export interface LobbyPanelProps {
   onChangeMode: (id: LevelType) => void;
   /** Lazily fetch a level's data for the map-picker preview. */
   loadLevel: (mapId: string) => Promise<LevelData>;
+  /** Load a shared community level by its share code. */
+  onLoadCloudCode?: (code: string) => Promise<void>;
 
   // AI bots
   onAddBot: (personality?: PersonalityName) => void;
@@ -150,7 +152,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
     joinCode,
     players, maxPlayers, onChangeMaxPlayers,
     mapOptions, selectedMapId, onChangeMap,
-    selectedModeId, onChangeMode, loadLevel,
+    selectedModeId, onChangeMode, loadLevel, onLoadCloudCode,
     onAddBot, onRemoveBot, canAddBot,
     localPlayerJoined, onJoinLocal, onLeaveLocal,
     localColor, onChangeLocalColor,
@@ -458,6 +460,7 @@ export default function LobbyPanel(props: LobbyPanelProps) {
           setMapPickerOpen(false);
         }}
         loadLevel={loadLevel}
+        onLoadCloudCode={onLoadCloudCode}
       />
     </div>
   );

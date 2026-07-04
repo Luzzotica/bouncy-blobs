@@ -15,6 +15,7 @@ export { RoomService } from "./RoomService";
 export type { CreateRoomOpts, JoinRoomOpts, PatchRoomOpts } from "./RoomService";
 export { PeerManager } from "./PeerManager";
 export { rtcConfigFromIceServers } from "./transport";
+export { CloudContent, type CloudContentConfig, type CloudItem } from "./cloudContent";
 import { rtcConfigFromIceServers } from "./transport";
 // SteamTransport is intentionally NOT re-exported here: it statically imports
 // @tauri-apps/*, which only Tauri games carry. Steam builds import it directly
