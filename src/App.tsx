@@ -1,6 +1,9 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { installUiSounds } from './utils/uiSounds'
+import { CloudContent, initArcadeSso } from './lib/party'
+import { roomConfig, GAME_ID } from './lib/partyConfig'
+import { ARCADE_ORIGINS } from './lib/arcadeOrigins'
 import { preloadAll, SFX_NAMES } from './utils/audio'
 import { onJoinRequested, onLaunchJoin } from './lib/steamLobbyApi'
 import Home from './pages/Home'
@@ -24,6 +27,12 @@ export default function App() {
   useEffect(() => {
     installUiSounds()
     preloadAll(SFX_NAMES)
+  }, [])
+
+  // Arcade SSO: auto-sign-in when embedded in the arcade (iframe/mobile).
+  useEffect(() => {
+    const cloud = new CloudContent({ baseUrl: roomConfig.baseUrl, apiKey: roomConfig.apiKey, gameId: GAME_ID })
+    return initArcadeSso(cloud, { allowedOrigins: ARCADE_ORIGINS })
   }, [])
 
   // Steam invite handlers — fire when a friend launches us via "Join Game"

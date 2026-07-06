@@ -198,6 +198,13 @@ export class CloudContent {
     return this.attachProvider("steam", { ticket, steam_id: steamId });
   }
 
+  /** Sign in with a token handed down from the host Arcade (iframe/mobile SSO).
+   *  Arcade accounts share the Lobbii auth pool, so this resolves to the SAME
+   *  player as an in-game email sign-in with that account. */
+  async signInWithArcadeToken(accessToken: string): Promise<PlayerProfile> {
+    return this.attachProvider("email", { access_token: accessToken });
+  }
+
   /** Link-if-anon-else-login: attach the provider to the current device player
    *  (preserving local content); if that identity already belongs to another
    *  player, switch to logging into it. */
