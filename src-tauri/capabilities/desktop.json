@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Desktop-only fs scopes: the Desktop and Downloads dirs used by map import/export. These base dirs do not exist on iOS/Android.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$DESKTOP/**" }, { "path": "$DOWNLOAD/**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$DESKTOP/**" }, { "path": "$DOWNLOAD/**" }]
+    }
+  ]
+}
