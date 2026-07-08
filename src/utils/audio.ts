@@ -57,6 +57,34 @@ export function resumeAudio(): void {
   if (c && c.state === 'suspended') c.resume().catch(() => {})
 }
 
+/**
+ * Install a one-time, app-wide audio unlock. iOS/Safari (and the iOS Tauri
+ * WKWebView) leave the AudioContext suspended until it is resumed *inside* a
+ * real user-gesture handler. The uiSounds click handler only fires on buttons,
+ * but on touch the first gesture is often the game canvas — so nothing would
+ * unlock audio. This listens for the first pointer/touch/key gesture anywhere,
+ * resumes, and removes itself. Safe to call multiple times (guarded).
+ */
+let audioUnlockInstalled = false
+export function installAudioUnlock(): void {
+  if (audioUnlockInstalled || typeof document === 'undefined') return
+  audioUnlockInstalled = true
+  const unlock = () => {
+    resumeAudio()
+    const c = getCtx()
+    // Only tear down once the context is actually running; a suspended resume
+    // can be rejected if the gesture wasn't "trusted" enough, so keep trying.
+    if (!c || c.state === 'running') {
+      document.removeEventListener('pointerdown', unlock, true)
+      document.removeEventListener('touchstart', unlock, true)
+      document.removeEventListener('keydown', unlock, true)
+    }
+  }
+  document.addEventListener('pointerdown', unlock, true)
+  document.addEventListener('touchstart', unlock, true)
+  document.addEventListener('keydown', unlock, true)
+}
+
 async function fetchBuffer(name: string): Promise<AudioBuffer | null> {
   const c = getCtx()
   if (!c) return null

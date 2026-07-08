@@ -9,7 +9,12 @@ import App from './App'
 import { UserProvider } from './contexts/UserContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { prepareEngine } from './physics/engineSelector'
+import { installAudioUnlock } from './utils/audio'
 import './index.css'
+
+// iOS/WKWebView keep the AudioContext suspended until the first user gesture —
+// install the app-wide unlock before anything renders.
+installAudioUnlock()
 
 function mount() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
