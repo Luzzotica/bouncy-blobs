@@ -9,6 +9,8 @@ import { render, RenderOptions } from '../renderer/canvasRenderer';
 import { drawGoalZone } from '../renderer/zoneRenderer';
 import { GameLoop } from '../game/gameLoop';
 import { KeyboardInput } from '../game/keyboardInput';
+import { TouchInput, shouldUsePad } from '../game/touchInput';
+import { TouchControls } from '../components/TouchControls';
 import { PlayerManager } from '../game/playerManager';
 import { SpikeManager } from '../game/spikeManager';
 import { computeMapAABB, FALL_KILL_MARGIN, lavaKillPlaneY } from '../game/mapBounds';
@@ -87,6 +89,11 @@ export default function PlayLevel() {
   const [complete, setComplete] = useState<{ timeMs: number; deaths: number; isBest: boolean } | null>(null);
 
   const stateRef = useRef<RunnerState | null>(null);
+  // Shared touch-input instance: driven by <TouchControls>, read by the game
+  // loop (merged with the keyboard). One instance for the component's life.
+  const touchRef = useRef<TouchInput | null>(null);
+  if (!touchRef.current) touchRef.current = new TouchInput();
+  const [showPad] = useState(() => shouldUsePad());
 
   const teardown = useCallback(() => {
     const s = stateRef.current;
@@ -288,9 +295,12 @@ export default function PlayLevel() {
       // While the pause menu is open we freeze the whole simulation (and the
       // run clock) but keep rendering the static frame beneath the overlay.
       if (!state.paused) {
-        const moveX = input.getMoveX(1);
-        const moveY = input.getMoveY(1);
-        playerBlob.setInput(moveX, moveY, input.isExpanding(1));
+        // Merge keyboard + on-screen touch pad; either source can drive the
+        // blob (clamped so a held key + full stick don't exceed ±1).
+        const touch = touchRef.current!;
+        const moveX = Math.max(-1, Math.min(1, input.getMoveX(1) + touch.getMoveX()));
+        const moveY = Math.max(-1, Math.min(1, input.getMoveY(1) + touch.getMoveY()));
+        playerBlob.setInput(moveX, moveY, input.isExpanding(1) || touch.isExpanding());
         playerBlob.update(dt);
 
         // Ease the gaze toward the movement direction so the eyes look where the
@@ -427,6 +437,10 @@ export default function PlayLevel() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#0f1629' }}>
       <GameCanvas key={`${levelId}:${runKey}`} onInit={onInit} onResize={onResize} />
+
+      {showPad && !pauseOpen && !settingsOpen && !complete && (
+        <TouchControls input={touchRef.current!} />
+      )}
 
       {/* Top-left controls */}
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', gap: 8, alignItems: 'center' }}>

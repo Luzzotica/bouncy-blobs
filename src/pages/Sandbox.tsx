@@ -7,6 +7,8 @@ import { Camera } from '../renderer/camera';
 import { render, RenderOptions } from '../renderer/canvasRenderer';
 import { GameLoop } from '../game/gameLoop';
 import { KeyboardInput } from '../game/keyboardInput';
+import { TouchInput, shouldUsePad } from '../game/touchInput';
+import { TouchControls } from '../components/TouchControls';
 import { PlayerManager } from '../game/playerManager';
 import { SpikeManager } from '../game/spikeManager';
 import { SpringPadManager } from '../game/springPadManager';
@@ -121,6 +123,10 @@ export default function Sandbox() {
   }, []);
   const stepOnce = useCallback(() => { timeControlRef.current.stepRequested = true; }, []);
   const stepBack = useCallback(() => { timeControlRef.current.stepBackRequested = true; }, []);
+  const touchRef = useRef<TouchInput | null>(null);
+  if (!touchRef.current) touchRef.current = new TouchInput();
+  const [showPad] = useState(() => shouldUsePad());
+
   const stateRef = useRef<{
     world: SoftBodyEngine;
     camera: Camera;
@@ -399,8 +405,14 @@ export default function Sandbox() {
             world.restoreState(hist.buffer[hist.cursor]);
             clearParticles();
           } else {
-            // Live edge: simulate a fresh tick, then record it.
-            playerBlob.setInput(input.getMoveX(1), input.getMoveY(1), input.isExpanding(1));
+            // Live edge: simulate a fresh tick, then record it. Player 1 also
+            // accepts the on-screen touch pad (merged with the keyboard).
+            const touch = touchRef.current!;
+            playerBlob.setInput(
+              Math.max(-1, Math.min(1, input.getMoveX(1) + touch.getMoveX())),
+              Math.max(-1, Math.min(1, input.getMoveY(1) + touch.getMoveY())),
+              input.isExpanding(1) || touch.isExpanding(),
+            );
             playerBlob.update(dt);
             if (playerBlob2) {
               playerBlob2.setInput(input.getMoveX(2), input.getMoveY(2), input.isExpanding(2));
@@ -661,6 +673,7 @@ export default function Sandbox() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <GameCanvas key={levelData.name} onInit={onInit} onResize={onResize} />
+      {showPad && <TouchControls input={touchRef.current!} />}
       <div style={{
         position: 'absolute',
         top: 12,
