@@ -11,6 +11,7 @@ import {
   resolveDefaultDisplayName,
 } from "../lib/userProfile";
 import { COLORS, TITLE_SHADOW } from "../theme/uiTheme";
+import { useIsNarrow } from "../lib/useIsNarrow";
 
 // Combined Host + Browse screen. Left column: one name card + host-a-game.
 // Right column browses + joins existing lobbies. Shares the home hero
@@ -18,6 +19,7 @@ import { COLORS, TITLE_SHADOW } from "../theme/uiTheme";
 // game. The display name lives here (single source) and feeds both columns.
 export default function Multiplayer() {
   const [displayName, setDisplayName] = useState<string>(getStoredDisplayName());
+  const narrow = useIsNarrow();
 
   // Resolve a sensible default (Steam persona / stored) once on mount.
   useEffect(() => {
@@ -44,8 +46,8 @@ export default function Multiplayer() {
           <Link to="/"><button className="bb-hover-btn" style={homeBtn}>← Home</button></Link>
           <h1 style={pageTitle}>Multiplayer</h1>
         </div>
-        <div style={columns}>
-          <div style={leftCol}>
+        <div style={narrow ? columnsStacked : columns}>
+          <div style={narrow ? leftColStacked : leftCol}>
             <NameCard name={displayName} onChange={changeName} />
             <HostPanel displayName={displayName} />
           </div>
@@ -257,6 +259,18 @@ const columns: React.CSSProperties = {
   alignItems: "stretch",
 };
 
+// Phone: stack the two columns vertically (host on top, lobby list below) and
+// let the whole thing scroll, instead of overflowing off the right edge.
+const columnsStacked: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+  overflowY: "auto",
+  WebkitOverflowScrolling: "touch",
+};
+
 // Left: narrow (~1/4), only as tall as its content, pinned in place while the
 // lobby list scrolls.
 const leftCol: React.CSSProperties = {
@@ -274,6 +288,15 @@ const rightCol: React.CSSProperties = {
   flex: "1 1 0",
   minWidth: 0,
   display: "flex",
+};
+
+// Phone: full width, not sticky, natural height (part of the stacked scroll).
+const leftColStacked: React.CSSProperties = {
+  flex: "0 0 auto",
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
 };
 
 // Cream paper sticky-note card — matches the Home menu buttons.
