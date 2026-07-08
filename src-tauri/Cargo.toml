@@ -17,12 +17,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
 
-[features]
 # `steam` pulls in the steamworks SDK and the whole desktop Steam layer
-# (Workshop, Steam Networking, Steam lobbies). It is default-on for desktop
-# builds. Mobile (iOS/Android) builds MUST use `--no-default-features` because
-# the steamworks crate cannot compile or link for those targets.
-default = ["steam"]
+# (Workshop, Steam Networking, Steam lobbies). It is OFF by default because the
+# steamworks crate cannot compile or link for iOS/Android, and the Tauri mobile
+# CLI (`tauri ios/android dev|build`) has no `--no-default-features` flag — so
+# the only reliable way to keep Steam out of the mobile build is to make it
+# opt-in. Desktop builds enable it explicitly: `tauri dev/build -f steam`
+# (see the tauri:dev / tauri:build npm scripts). Mobile builds pass no feature.
+[features]
+default = []
 steam = ["dep:steamworks"]
 
 [dependencies]
