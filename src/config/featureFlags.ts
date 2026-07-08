@@ -1,9 +1,13 @@
-import { isTauri } from "../lib/runtime";
+import { isDesktopTauri, isMobile } from "../lib/runtime";
 
 const demoEnv = (import.meta.env?.VITE_DEMO ?? "") as string;
 
 export const isDemoBuild = demoEnv === "true" || demoEnv === "1";
-export const isDesktop = isTauri();
+// `isDesktop` gates Steam-only surfaces (Workshop publish/browse, Steam
+// overlay, Steam Networking). The mobile Tauri build is NOT desktop even
+// though it runs inside Tauri — it has no steamworks.
+export const isDesktop = isDesktopTauri();
+export const isMobileBuild = isMobile();
 
 export const features = {
   lobbyBrowser: !isDemoBuild,

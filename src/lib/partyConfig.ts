@@ -1,6 +1,6 @@
 import type { Attestation, RoomClientConfig } from "./party";
 import { getTurnstileAttestation } from "./party/turnstileAttest";
-import { getSelfSteamId } from "./party/steamTransport";
+import { isDesktopTauri, isMobile } from "./runtime";
 
 const apiKey = import.meta.env.VITE_MP_API_KEY ?? "";
 if (!apiKey) {
@@ -18,16 +18,31 @@ if (!apiKey) {
 // VITE_TURNSTILE_SITE_KEY + the backend TURNSTILE_SECRET are configured, this
 // is what gates real users; until then the backend's API-key fallback (while
 // ENFORCE_SESSION_TOKENS is off) keeps everything working.
-const isTauri = typeof window !== "undefined" && "__TAURI__" in window;
-const platform = isTauri ? "steam" : import.meta.env.DEV ? "dev" : "web";
+// Platform selection:
+//  - desktop Tauri (has steamworks) → "steam"  (Steam auth-session ticket)
+//  - iOS/Android Tauri (no steamworks) → "web"  (see mobile note in attest())
+//  - vite dev / Playwright            → "dev"   (local origin, no proof)
+//  - production web                   → "web"   (Cloudflare Turnstile)
+// Mobile reports as "web" so the backend (which knows steam|dev|web) accepts it
+// unchanged; the app-specific attestation difference lives in attest() below.
+const mobile = isMobile();
+const platform = isDesktopTauri() ? "steam" : import.meta.env.DEV ? "dev" : "web";
 
 async function attest(): Promise<Attestation | string | null> {
+  // Mobile in-app: Cloudflare Turnstile can't render meaningfully inside the
+  // native webview (no configured web origin), so skip it and rely on the
+  // backend's API-key fallback while ENFORCE_SESSION_TOKENS is off. When
+  // enforcement lands, mobile needs a real proof — the arcadii identity JWT
+  // (BYO attestation) is the intended path. TODO(mobile-attestation).
+  if (mobile) return null;
   if (platform === "web") return getTurnstileAttestation();
   if (platform === "steam") {
     // Steam auth session ticket: proves a genuine Steam account owning the game
     // AND carries identity (the backend mints a steam:<id64> player identity).
+    // Loaded lazily so the web/mobile bundles never pull the Tauri steam layer.
     try {
       const { invoke } = await import("@tauri-apps/api/core");
+      const { getSelfSteamId } = await import("./party/steamTransport");
       const [ticket, steamId] = await Promise.all([
         invoke<string>("steam_auth_ticket"),
         getSelfSteamId(),

@@ -6,8 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:mobile": "tsc -b && VITE_MOBILE=1 vite build",
     "build:wasm": "cd crates && cargo build --target wasm32-unknown-unknown --release -p softbody-wasm && cd .. && wasm-bindgen --target web --out-dir src/physics/wasm crates/target/wasm32-unknown-unknown/release/softbody_wasm.wasm",
     "preview": "vite preview",
+    "ios:dev": "tauri ios dev --no-default-features",
+    "ios:build": "tauri ios build --no-default-features",
+    "android:dev": "tauri android dev --no-default-features",
+    "android:build": "tauri android build --no-default-features",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test ai-smoke",

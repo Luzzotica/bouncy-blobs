@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { LevelData } from '../levels/types';
-import { isTauri } from './runtime';
+import { isTauri, isDesktopTauri } from './runtime';
 import * as tauriMaps from './localMaps';
 
 export interface LocalMap {
@@ -103,13 +103,14 @@ export async function writeLocalMap(args: { id?: string; workshopId?: string | n
 }
 export async function deleteLocalMap(id: string): Promise<void> { return backend.delete(id); }
 
-/** Tauri-only: open the OS file manager pointing at this map's file. No-op in web. */
+/** Desktop-only: open the OS file manager pointing at this map's file. No-op elsewhere.
+ * (On mobile `maps_reveal` compiles to a no-op — there's no file manager to reveal into.) */
 export async function revealMapInFiles(id: string): Promise<void> {
-  if (!isTauri()) return;
+  if (!isDesktopTauri()) return;
   await invoke('maps_reveal', { id });
 }
 
-export function canRevealInFiles(): boolean { return isTauri(); }
+export function canRevealInFiles(): boolean { return isDesktopTauri(); }
 
 /** Tauri-only download/export prompt. Web mode triggers a browser download. */
 export async function downloadMapJson(map: LocalMap, level: LevelData): Promise<void> {
