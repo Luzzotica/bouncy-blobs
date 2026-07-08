@@ -17,6 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
 
+[features]
+# `steam` pulls in the steamworks SDK and the whole desktop Steam layer
+# (Workshop, Steam Networking, Steam lobbies). It is default-on for desktop
+# builds. Mobile (iOS/Android) builds MUST use `--no-default-features` because
+# the steamworks crate cannot compile or link for those targets.
+default = ["steam"]
+steam = ["dep:steamworks"]
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -25,7 +33,7 @@ tauri = { version = "2.11.1", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
-steamworks = "0.11"
+steamworks = { version = "0.11", optional = true }
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
