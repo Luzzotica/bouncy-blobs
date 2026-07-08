@@ -129,7 +129,7 @@ function NewLevelTypePicker({ onCreateNew, onBack, busy }: { onCreateNew: (types
         />
       </div>
       <p style={{ color: COLORS.inkFaint, fontSize: 14, margin: 0 }}>Select one or more modes this map supports</p>
-      <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 16, marginTop: 8, maxWidth: '100%', padding: '0 12px' }}>
         {EDITOR_LEVEL_TYPES.map(lt => {
           const active = selected.has(lt);
           return (
