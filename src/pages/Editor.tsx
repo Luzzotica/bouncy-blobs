@@ -223,6 +223,9 @@ export default function Editor() {
   }
 
   const editorState = stateRef.current;
+  // Dev/e2e handle (mirrors GameMaster's __bbGame): lets tests assert on the
+  // live editor state (zoom, level contents) without UI scraping.
+  if (import.meta.env.DEV) (window as unknown as { __bbEditor?: EditorState }).__bbEditor = editorState;
 
   type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
