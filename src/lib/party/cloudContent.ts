@@ -56,6 +56,19 @@ function writeLS(key: string, val: string): void {
   try { localStorage.setItem(key, val); } catch { /* private mode / non-browser */ }
 }
 
+/** True when a JWT's `exp` is past or within `slackSeconds` of now. Treats
+ *  unparseable tokens as expired so a bad cache entry heals via re-login. */
+function jwtNearExpiry(token: string, slackSeconds = 300): boolean {
+  try {
+    const payload = token.split(".")[1];
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    if (typeof json.exp !== "number") return false; // no expiry claim — trust it
+    return json.exp * 1000 <= Date.now() + slackSeconds * 1000;
+  } catch {
+    return true;
+  }
+}
+
 /** A tiny cloud-content client bound to one game project. */
 export class CloudContent {
   private playerToken: string | null = null;
@@ -102,6 +115,19 @@ export class CloudContent {
       }
     })();
     return this.loginInFlight;
+  }
+
+  /** A valid player JWT for BYO attestation (the `platform: "player"` token
+   *  exchange): a session token is only minted when the backend can verify
+   *  this token, so hand out a fresh one — silently anon-logging-in if the
+   *  cached token is missing, expired, or within 5 minutes of expiry. A
+   *  device whose anon identity was linked to a real account resumes as the
+   *  same player. Returns null when the backend is unreachable (callers fall
+   *  back to the API-key path while enforcement is off). */
+  async getPlayerToken(): Promise<string | null> {
+    if (this.playerToken && !jwtNearExpiry(this.playerToken)) return this.playerToken;
+    this.playerToken = null;
+    return this.ensurePlayer();
   }
 
   private async playerHeaders(): Promise<Record<string, string> | null> {

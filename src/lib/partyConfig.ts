@@ -1,5 +1,6 @@
 import type { Attestation, RoomClientConfig } from "./party";
 import { getTurnstileAttestation } from "./party/turnstileAttest";
+import { CloudContent } from "./party";
 import { isDesktopTauri, isMobile } from "./runtime";
 
 const apiKey = import.meta.env.VITE_MP_API_KEY ?? "";
@@ -19,22 +20,48 @@ if (!apiKey) {
 // is what gates real users; until then the backend's API-key fallback (while
 // ENFORCE_SESSION_TOKENS is off) keeps everything working.
 // Platform selection:
-//  - desktop Tauri (has steamworks) → "steam"  (Steam auth-session ticket)
-//  - iOS/Android Tauri (no steamworks) → "web"  (see mobile note in attest())
-//  - vite dev / Playwright            → "dev"   (local origin, no proof)
-//  - production web                   → "web"   (Cloudflare Turnstile)
-// Mobile reports as "web" so the backend (which knows steam|dev|web) accepts it
-// unchanged; the app-specific attestation difference lives in attest() below.
+//  - desktop Tauri (has steamworks) → "steam"   (Steam auth-session ticket)
+//  - iOS/Android Tauri              → "player"  (arcadii player JWT — BYO attestation)
+//  - vite dev / Playwright          → "dev"     (local origin, no proof)
+//  - production web                 → "web"     (Cloudflare Turnstile)
+// Mobile uses the backend's `player` platform: the attestation is a player
+// JWT (silent anon device login, or the account the device linked via arcade
+// SSO / email), which /api/auth/token verifies with verifyPlayerToken() and
+// binds the session to `player:<id>`. That keeps mobile working when
+// ENFORCE_SESSION_TOKENS flips on — no Turnstile origin, no Steam ticket
+// needed. Device-integrity attestation (App Attest / Play Integrity) can
+// later harden the players/login call itself; see docs/MobileAttestation.md.
 const mobile = isMobile();
-const platform = isDesktopTauri() ? "steam" : import.meta.env.DEV ? "dev" : "web";
+const platform = isDesktopTauri()
+  ? "steam"
+  : mobile
+    ? "player"
+    : import.meta.env.DEV
+      ? "dev"
+      : "web";
+
+/** Lazy CloudContent bound to this game — the player-token source for mobile
+ *  attestation. Shares the cached `lobbii_player_token_<game>` localStorage
+ *  entry with every other CloudContent instance in the app (App.tsx SSO,
+ *  level registry), so an arcade/email sign-in upgrades the attested identity
+ *  here automatically. */
+let attestCloud: CloudContent | null = null;
+function cloudForAttest(): CloudContent {
+  attestCloud ??= new CloudContent({
+    baseUrl: import.meta.env.VITE_PARTY_API_URL ?? "http://localhost:3000",
+    apiKey,
+    gameId: "bouncy-blobs",
+  });
+  return attestCloud;
+}
 
 async function attest(): Promise<Attestation | string | null> {
-  // Mobile in-app: Cloudflare Turnstile can't render meaningfully inside the
-  // native webview (no configured web origin), so skip it and rely on the
-  // backend's API-key fallback while ENFORCE_SESSION_TOKENS is off. When
-  // enforcement lands, mobile needs a real proof — the arcadii identity JWT
-  // (BYO attestation) is the intended path. TODO(mobile-attestation).
-  if (mobile) return null;
+  if (platform === "player") {
+    // Mobile: BYO attestation — a fresh arcadii player JWT (24h TTL, renewed
+    // by CloudContent when near expiry). null when offline/unreachable → the
+    // exchange falls back to the API key while enforcement is off.
+    return cloudForAttest().getPlayerToken();
+  }
   if (platform === "web") return getTurnstileAttestation();
   if (platform === "steam") {
     // Steam auth session ticket: proves a genuine Steam account owning the game

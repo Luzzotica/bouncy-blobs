@@ -78,11 +78,11 @@ needs the Apple/Google developer accounts.
 
 ## Known pre-launch items (out of scope of the parity work)
 
-- **`TODO(mobile-attestation)`** (`src/lib/partyConfig.ts`): mobile multiplayer
-  auth currently rides the backend API-key fallback. Before the arcadii
-  backend enables `ENFORCE_SESSION_TOKENS`, mobile needs a real attestation
-  path (arcade SSO JWT via `window.__ARCADE_TOKEN__`, or a platform proof) or
-  phone clients will be locked out of online play.
+- ~~`TODO(mobile-attestation)`~~ **DONE (2026-07-14)**: mobile attests with an
+  arcadii player JWT (`platform: "player"`), verified end-to-end against
+  production — see `docs/MobileAttestation.md` for the model, the enforcement
+  runbook, and the phase-2 device-integrity (App Attest / Play Integrity)
+  upgrade path.
 - **Native `confirm()/alert()/prompt()` probe**: ~22 call sites (editor list,
   MyReplays deletes, toolbar errors). Verify on a real iOS device that Tauri's
   WKWebView shows JS dialogs; if any are silently dropped, replace the
