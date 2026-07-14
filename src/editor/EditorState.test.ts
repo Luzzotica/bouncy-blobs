@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { EditorState } from './EditorState';
+import { EditorState, applyAnchoredZoom } from './EditorState';
 import { LevelData } from '../levels/types';
 
 function blankLevel(): LevelData {
@@ -573,5 +573,59 @@ describe('EditorState — game-mode validation + setLevelTypes', () => {
     state.setLevelTypes(['team_racing', 'koth']);
     expect(state.level.levelTypes).toEqual(['team_racing', 'koth']);
     expect(state.level.levelType).toBeUndefined();
+  });
+});
+
+describe('EditorState — touch hit scaling (hitScale)', () => {
+  function stateWithPlatform(): EditorState {
+    const state = new EditorState({
+      name: 'test', version: 1,
+      bounds: { width: 1000, height: 1000 },
+      platforms: [{ id: 'plat_1', x: 0, y: 0, width: 100, height: 30, rotation: 0 }],
+      walls: [], spawnPoints: [], npcBlobs: [],
+    } as LevelData);
+    state.snapToGrid = false;
+    state.zoom = 1;
+    state.selectedElement = { type: 'platform', id: 'plat_1' };
+    return state;
+  }
+
+  it('default hitScale=1 keeps the 10px handle threshold', () => {
+    const state = stateWithPlatform();
+    // Right edge handle sits at x=50, y=0. 9px away hits, 15px misses.
+    expect(state.hitTestHandle(59, 0)).toBe('right');
+    expect(state.hitTestHandle(65, 0)).toBeNull();
+  });
+
+  it('hitScale=2.2 widens the handle threshold for fingers', () => {
+    const state = stateWithPlatform();
+    state.hitScale = 2.2;
+    expect(state.hitTestHandle(65, 0)).toBe('right'); // 15px now inside 22px
+    expect(state.hitTestHandle(75, 0)).toBeNull();    // 25px still outside
+  });
+});
+
+describe('applyAnchoredZoom', () => {
+  const CX = 400, CY = 300;
+  const s2w = (cam: { panX: number; panY: number; zoom: number }, sx: number, sy: number) =>
+    ({ x: (sx - CX) / cam.zoom + cam.panX, y: (sy - CY) / cam.zoom + cam.panY });
+
+  it('keeps the world point under the anchor fixed', () => {
+    const cam = { panX: 120, panY: -40, zoom: 0.5 };
+    const before = s2w(cam, 650, 90);
+    applyAnchoredZoom(cam, 650, 90, CX, CY, 1.37);
+    const after = s2w(cam, 650, 90);
+    expect(after.x).toBeCloseTo(before.x, 9);
+    expect(after.y).toBeCloseTo(before.y, 9);
+    expect(cam.zoom).toBeCloseTo(0.5 * 1.37, 9);
+  });
+
+  it('clamps zoom to [0.1, 3]', () => {
+    const lo = { panX: 0, panY: 0, zoom: 0.2 };
+    applyAnchoredZoom(lo, 0, 0, CX, CY, 0.01);
+    expect(lo.zoom).toBe(0.1);
+    const hi = { panX: 0, panY: 0, zoom: 2 };
+    applyAnchoredZoom(hi, 0, 0, CX, CY, 100);
+    expect(hi.zoom).toBe(3);
   });
 });

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback } from 'react';
-import { EditorState, TOOL_HOTKEYS, snapToAngle } from './EditorState';
+import { EditorState, TOOL_HOTKEYS, snapToAngle, applyAnchoredZoom } from './EditorState';
 import { PLATFORM_COLOR, PLATFORM_BORDER, BACKGROUND_COLOR } from '../renderer/colors';
 import { drawSpring, PLATE_THICKNESS, PLATE_WIDTH_SCALE } from '../game/springRenderer';
 import { getSprite } from '../assets/spriteRegistry';
@@ -1601,14 +1601,11 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
   /** Zoom by `zoomFactor` keeping the world point under (sx, sy) fixed
    *  (Godot-style anchor). Shared by wheel zoom and touch pinch. */
   const applyZoomAt = useCallback((sx: number, sy: number, zoomFactor: number) => {
-    const before = screenToWorld(sx, sy);
-    const newZoom = Math.max(0.1, Math.min(3, state.zoom * zoomFactor));
-    state.zoom = newZoom;
-    // Keep the world point under the cursor fixed (Godot-style cursor anchor).
-    const after = screenToWorld(sx, sy);
-    state.panX += before.x - after.x;
-    state.panY += before.y - after.y;
-  }, [state, screenToWorld]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    applyAnchoredZoom(state, sx, sy, rect.width / 2, rect.height / 2, zoomFactor);
+  }, [state]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();

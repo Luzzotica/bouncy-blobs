@@ -138,6 +138,26 @@ function pointInPolygon(x: number, y: number, pts: { x: number; y: number }[]): 
   return inside;
 }
 
+/** Zoom a camera by `factor`, clamped to [0.1, 3], keeping the world point
+ *  under screen position (sx, sy) fixed — the Godot-style cursor anchor.
+ *  (cx, cy) is the canvas center. Pure math, shared by the editor's wheel
+ *  zoom and touch pinch (see EditorCanvas.applyZoomAt). */
+export function applyAnchoredZoom(
+  cam: { panX: number; panY: number; zoom: number },
+  sx: number,
+  sy: number,
+  cx: number,
+  cy: number,
+  factor: number,
+): void {
+  const s2w = () => ({ x: (sx - cx) / cam.zoom + cam.panX, y: (sy - cy) / cam.zoom + cam.panY });
+  const before = s2w();
+  cam.zoom = Math.max(0.1, Math.min(3, cam.zoom * factor));
+  const after = s2w();
+  cam.panX += before.x - after.x;
+  cam.panY += before.y - after.y;
+}
+
 export class EditorState {
   level: LevelData;
   selectedTool: EditorTool = 'select';
