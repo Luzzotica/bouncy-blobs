@@ -192,7 +192,9 @@ export default function GuestLobbyPanel(props: GuestLobbyPanelProps) {
 
 // ── Styles (mirror LobbyPanel for visual consistency) ────────────────────────
 const panelStyle: React.CSSProperties = {
-  width: 300, height: '100%', background: '#181a24',
+  // Fixed sidebar on desktop; the phone layout stacks it above the canvas
+  // and overrides these via CSS vars (see OnlineGuest.tsx).
+  width: 'var(--guest-lobby-width, 300px)', height: 'var(--guest-lobby-height, 100%)', background: '#181a24',
   borderRight: '1px solid #2a2d3a', display: 'flex', flexDirection: 'column',
   overflowY: 'auto', fontSize: 13, color: '#ddd',
 };

@@ -35,6 +35,9 @@ import { getHashHistory, recordHash, resetHashHistory } from "../lib/hashHistory
 import { quantizeAxis } from "../lib/inputProtocol";
 import GameCanvas from "../components/GameCanvas";
 import GuestLobbyPanel from "../components/GuestLobbyPanel";
+import { TouchInput, shouldUsePad } from "../game/touchInput";
+import { TouchControls } from "../components/TouchControls";
+import { useIsNarrow } from "../lib/useIsNarrow";
 import NetDebugOverlay from "../components/NetDebugOverlay";
 import GameMenu from "../components/GameMenu";
 import KothHud from "../components/KothHud";
@@ -194,6 +197,25 @@ export default function OnlineGuest() {
   /** Live keyboard state — shared between the keyboard interval and the
    *  prediction gate so the gate can read "what's pressed RIGHT NOW". */
   const liveKeysRef = useRef({ w: false, a: false, s: false, d: false, space: false });
+  /** On-screen pad for phone guests (same TouchInput/TouchControls pair as
+   *  PlayLevel/Sandbox). Blended with the keyboard by readRawIntent so every
+   *  input path — lockstep session, prediction gate, host batches — sees one
+   *  merged intent regardless of source. */
+  const touchInputRef = useRef<TouchInput | null>(null);
+  if (!touchInputRef.current) touchInputRef.current = new TouchInput();
+  const [showPad] = useState(() => shouldUsePad());
+  const isNarrow = useIsNarrow();
+  /** Keyboard + pad, clamped to [-1, 1]. Reads refs only, so effect closures
+   *  can capture it safely. Callers quantize where their wire path needs it. */
+  const readRawIntent = () => {
+    const k = liveKeysRef.current;
+    const t = touchInputRef.current!;
+    return {
+      x: Math.max(-1, Math.min(1, (k.d ? 1 : 0) + (k.a ? -1 : 0) + t.getMoveX())),
+      y: Math.max(-1, Math.min(1, (k.s ? 1 : 0) + (k.w ? -1 : 0) + t.getMoveY())),
+      expanding: k.space || t.isExpanding(),
+    };
+  };
   /** RollbackController instance, only built when prediction is on. */
   const rollbackControllerRef = useRef<import('../game/rollback/RollbackController').RollbackController | null>(null);
   /** Display smoother for rollback corrections. Only built when prediction is on. */
@@ -963,8 +985,8 @@ export default function OnlineGuest() {
         localHumanIds: () => (localPlayerIdRef.current ? [localPlayerIdRef.current] : []),
         botIds: () => [],
         readHumanInput: () => {
-          const k = liveKeysRef.current;
-          return { moveX: (k.d ? 1 : 0) + (k.a ? -1 : 0), moveY: (k.s ? 1 : 0) + (k.w ? -1 : 0), expanding: k.space };
+          const i = readRawIntent();
+          return { moveX: i.x, moveY: i.y, expanding: i.expanding };
         },
         slotOf,
         idOfSlot: (slot) => slotToPlayerIdRef.current.get(slot),
@@ -1000,12 +1022,8 @@ export default function OnlineGuest() {
       const rc = new RollbackController({
         localPlayerId: localPlayerIdRef.current,
         readLocalInput: () => {
-          const k = liveKeysRef.current;
-          return {
-            moveX: (k.d ? 1 : 0) + (k.a ? -1 : 0),
-            moveY: (k.s ? 1 : 0) + (k.w ? -1 : 0),
-            expanding: k.space,
-          };
+          const i = readRawIntent();
+          return { moveX: i.x, moveY: i.y, expanding: i.expanding };
         },
         applyInputs: applyInputsToPM,
         stepOne: () => {
@@ -1072,11 +1090,11 @@ export default function OnlineGuest() {
         }
       };
       const readLocalKeys = (): { moveX: number; moveY: number; expanding: boolean } => {
-        const k = liveKeysRef.current;
+        const i = readRawIntent();
         return {
-          moveX: quantizeAxis((k.d ? 1 : 0) + (k.a ? -1 : 0)),
-          moveY: quantizeAxis((k.s ? 1 : 0) + (k.w ? -1 : 0)),
-          expanding: k.space,
+          moveX: quantizeAxis(i.x),
+          moveY: quantizeAxis(i.y),
+          expanding: i.expanding,
         };
       };
       const rc = new RollbackController({
@@ -1858,11 +1876,10 @@ export default function OnlineGuest() {
       if (!pm) return;
       const mp = pm.getPlayer(localPlayerIdRef.current);
       if (!mp) return;
-      const rawX = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
-      const rawY = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
-      mp.moveX = quantizeAxis(rawX);
-      mp.moveY = quantizeAxis(rawY);
-      mp.expanding = keys.space;
+      const i = readRawIntent();
+      mp.moveX = quantizeAxis(i.x);
+      mp.moveY = quantizeAxis(i.y);
+      mp.expanding = i.expanding;
     };
 
     /** Send the current raw key state to the host. We do NOT tag it with a
@@ -1877,11 +1894,10 @@ export default function OnlineGuest() {
       if (usePeerNet) return; // BbNetSession sends tagged inputs in its step driver
       const manager = managerRef.current;
       if (!manager) return;
-      const moveX = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
-      const moveY = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
+      const i = readRawIntent();
       const batch: InputBatch = {
         type: "input",
-        frames: [{ playerId: localPlayerIdRef.current, moveX, moveY, expanding: keys.space, tick: 0 }],
+        frames: [{ playerId: localPlayerIdRef.current, moveX: i.x, moveY: i.y, expanding: i.expanding, tick: 0 }],
       };
       manager.send("host", "input", JSON.stringify(batch));
     };
@@ -2002,7 +2018,22 @@ export default function OnlineGuest() {
   const leaveAndExit = () => leaveAndExitTo("/lobbies");
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "row" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        // Phone: stack the lobby panel (capped, scrollable) above the canvas.
+        ...(isNarrow && showPanel
+          ? ({
+              flexDirection: "column" as const,
+              ["--guest-lobby-width" as string]: "100%",
+              ["--guest-lobby-height" as string]: "min(45%, 340px)",
+              paddingTop: "var(--safe-area-top, 0px)",
+            } as React.CSSProperties)
+          : { flexDirection: "row" as const }),
+      }}
+    >
       {showPanel && (
         <GuestLobbyPanel
           lobbyState={lobbyState}
@@ -2092,6 +2123,7 @@ export default function OnlineGuest() {
         ) : (
           <div style={{ position: "relative", flex: 1 }}>
             <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+            {showPad && localPlayerJoined && <TouchControls input={touchInputRef.current!} />}
             {showNetDebug && <NetDebugOverlay />}
             <KothHud gameRef={gameRef} />
             {/* Themed Menu popup during the playing phase, so guests can drop

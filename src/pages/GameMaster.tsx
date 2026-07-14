@@ -54,6 +54,10 @@ import { COLORS } from '../theme/uiTheme';
 import LobbyPanel, { type MapOption, type PlayerSummary } from '../components/LobbyPanel';
 import { getAllFacePresets } from '../renderer/faceRenderer';
 import { InputManager } from '../managers/InputManager';
+import { TouchInput, shouldUsePad } from '../game/touchInput';
+import { attachTouchInputBridge } from '../game/touchInputBridge';
+import { TouchControls } from '../components/TouchControls';
+import { useIsNarrow } from '../lib/useIsNarrow';
 import { BouncyBlobsGame } from '../game/bouncyBlobsGame';
 import { createGamepadInput } from '../game/gamepadInput';
 import { GameContext, GameState } from '../game/GameInterface';
@@ -381,6 +385,13 @@ export default function GameMaster() {
   // Stable id used by both onPlayerJoin and InputManager for the keyboard player.
   const LOCAL_PLAYER_ID = LOCAL_PLAYER_ID_CONST;
   const [localPlayerJoined, setLocalPlayerJoined] = useState(false);
+  /** On-screen pad for a phone host — same TouchInput/TouchControls pair as
+   * PlayLevel/Sandbox, bridged onto the InputManager bus (the wire vocabulary
+   * phone controllers speak) so the host's blob is driven identically. */
+  const touchRef = useRef<TouchInput | null>(null);
+  if (!touchRef.current) touchRef.current = new TouchInput();
+  const [showPad] = useState(() => shouldUsePad());
+  const isNarrow = useIsNarrow();
 
   // Player IDs the camera should follow on the host: every player whose
   // INPUT originates on this machine — keyboard, gamepads, and phone
@@ -542,6 +553,23 @@ export default function GameMaster() {
       window.removeEventListener('keyup', onUp);
     };
   }, [localPlayerJoined]);
+
+  // Touch pad → InputManager bridge (phone host). Same lifecycle as the
+  // keyboard bridge: only while the local player has joined.
+  useEffect(() => {
+    if (!localPlayerJoined || !showPad) return;
+    return attachTouchInputBridge(touchRef.current!, inputManagerRef.current, LOCAL_PLAYER_ID);
+  }, [localPlayerJoined, showPad]);
+
+  // A phone host IS a player: auto-join once the lobby sim is live (phase
+  // flips to 'lobby' right after gameRef/contextRef are set). The LobbyPanel
+  // "Play from this device" toggle remains the opt-out.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!showPad || autoJoinedRef.current || phase !== 'lobby') return;
+    autoJoinedRef.current = true;
+    joinAsLocalPlayer();
+  }, [showPad, phase, joinAsLocalPlayer]);
 
   // Gamepad → InputManager bridge. Up to 4 controllers (Xbox, PlayStation,
   // Steam Deck built-in, generic XInput) auto-join as separate local
@@ -2722,7 +2750,23 @@ export default function GameMaster() {
   // freeplay playground where players can mess around.
   if (phase === 'lobby') {
     return (
-      <div style={{ width: '100%', height: '100%', display: 'flex' }}>
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          // Phone: stack the lobby panel (capped, scrollable) above the
+          // freeplay canvas instead of a side-by-side sidebar.
+          ...(isNarrow
+            ? ({
+                flexDirection: 'column' as const,
+                ['--lobby-panel-width' as string]: '100%',
+                ['--lobby-panel-height' as string]: 'min(45%, 340px)',
+                paddingTop: 'var(--safe-area-top, 0px)',
+              } as React.CSSProperties)
+            : {}),
+        }}
+      >
         <LobbyPanel
           joinCode={joinCode}
           players={playerSummaries}
@@ -2753,6 +2797,7 @@ export default function GameMaster() {
         />
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
           <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+          {showPad && localPlayerJoined && <TouchControls input={touchRef.current!} />}
           {showNetDebug && <NetDebugOverlay role="host" />}
 
           {/* Invite Friends on Steam — bottom-right, above QR. Paper+tape
@@ -2808,6 +2853,7 @@ export default function GameMaster() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <GameCanvas key={canvasKey} onInit={onCanvasInit} onResize={onCanvasResize} />
+      {showPad && localPlayerJoined && gamePhase !== 'results' && <TouchControls input={touchRef.current!} />}
       {showNetDebug && <NetDebugOverlay role="host" />}
       {gamePhase === 'results' && usePeerNet && <SaveReplayOverlay />}
       <KothHud gameRef={gameRef} />
@@ -2823,6 +2869,8 @@ export default function GameMaster() {
 // hint on hover. Self-contained so it can own its hover state.
 function JoinQrBadge({ joinUrl }: { joinUrl: string }) {
   const [hover, setHover] = useState(false);
+  // Touch devices never hover — confirm the copy on tap instead.
+  const [copied, setCopied] = useState(false);
 
   const copy = () => {
     if (navigator.clipboard?.writeText) {
@@ -2835,6 +2883,8 @@ function JoinQrBadge({ joinUrl }: { joinUrl: string }) {
       document.execCommand('copy');
       document.body.removeChild(ta);
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
   };
 
   return (
@@ -2864,7 +2914,7 @@ function JoinQrBadge({ joinUrl }: { joinUrl: string }) {
         textShadow: '1px 1px 0 #0a0612, -1px -1px 0 #0a0612, 1px -1px 0 #0a0612, -1px 1px 0 #0a0612',
         whiteSpace: 'nowrap',
       }}>
-        {hover ? 'Click to copy invite link' : 'Scan to play from phone'}
+        {copied ? 'Invite link copied!' : hover ? 'Click to copy invite link' : 'Scan to play from phone'}
       </span>
     </div>
   );

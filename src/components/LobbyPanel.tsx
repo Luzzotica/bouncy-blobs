@@ -81,8 +81,10 @@ export interface LobbyPanelProps {
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 const panelStyle: React.CSSProperties = {
-  width: 300,
-  height: '100%',
+  // Fixed sidebar on desktop; the phone layout stacks the lobby above the
+  // canvas and overrides these via CSS vars (see GameMaster.tsx).
+  width: 'var(--lobby-panel-width, 300px)',
+  height: 'var(--lobby-panel-height, 100%)',
   background: COLORS.paper,
   borderRight: '4px solid #0a0612',
   display: 'flex',
