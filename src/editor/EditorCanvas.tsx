@@ -66,6 +66,22 @@ interface EditorCanvasProps {
   onUpdate: () => void;
 }
 
+/** Pointer-agnostic gesture input: the mouse handlers and the touch layer
+ *  both funnel into pointerDown/Move/Up with this shape, so every tool's
+ *  interaction logic lives exactly once. `pan` = an explicit pan gesture
+ *  (middle/right button, Space+left on mouse; two-finger on touch);
+ *  `primary` = the main button (always true for touch); `shiftKey`/`modifier`
+ *  come from the keyboard on desktop and from the touch modifier chips on
+ *  phones. */
+interface EditorPointer {
+  sx: number;
+  sy: number;
+  shiftKey: boolean;
+  modifier: boolean;
+  pan: boolean;
+  primary: boolean;
+}
+
 export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
@@ -1290,17 +1306,15 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [draw]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+  const pointerDown = useCallback((p: EditorPointer) => {
+    const { sx, sy } = p;
     const { x: wx, y: wy } = screenToWorld(sx, sy);
 
     // Middle mouse, right click, Space+left, or Shift+left = pan (Godot-style).
     // Shift+left also doubles as multi-select on hits in the select tool, so
     // that path is handled below; we only enter pan mode here when the user
     // is on a non-select tool OR shift-clicked empty space.
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceHeldRef.current)) {
+    if (p.pan) {
       state.isPanning = true;
       state.panStartX = sx;
       state.panStartY = sy;
@@ -1308,7 +1322,7 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       state.panStartCamY = state.panY;
       return;
     }
-    if (e.button === 0 && e.shiftKey && state.selectedTool !== 'select') {
+    if (p.primary && p.shiftKey && state.selectedTool !== 'select') {
       state.isPanning = true;
       state.panStartX = sx;
       state.panStartY = sy;
@@ -1335,13 +1349,13 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       }
 
       const hit = state.hitTest(wx, wy);
-      if (e.shiftKey && hit) {
+      if (p.shiftKey && hit) {
         // Shift-click on an element: add/remove from multi-select.
         state.toggleMultiSelect(hit);
         onUpdate();
         return;
       }
-      if (e.shiftKey && !hit) {
+      if (p.shiftKey && !hit) {
         // Shift-drag on empty space: pan. Same handler as Space+drag.
         state.isPanning = true;
         state.panStartX = sx;
@@ -1360,12 +1374,12 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     } else if (state.selectedTool === 'pointShape') {
       // Shift = snap angle (from previous point); Alt = anchor the new point.
       let px = wx, py = wy;
-      if (e.shiftKey && state.draftPointShape && state.draftPointShape.points.length > 0) {
+      if (p.shiftKey && state.draftPointShape && state.draftPointShape.points.length > 0) {
         const last = state.draftPointShape.points[state.draftPointShape.points.length - 1];
         const snapped = snapToAngle(last.x, last.y, wx, wy);
         px = snapped.x; py = snapped.y;
       }
-      state.appendDraftPoint(px, py, isModifierHeld(e));
+      state.appendDraftPoint(px, py, p.modifier);
       onUpdate();
     } else if (state.selectedTool === 'chain') {
       state.appendChainEndpoint(wx, wy);
@@ -1392,7 +1406,7 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       }
       // Alt/Option/Ctrl-click on a soft body OR static platform → add a
       // ROTATION target instead of the default behavior.
-      if (isModifierHeld(e)) {
+      if (p.modifier) {
         for (const ps of state.level.pointShapes ?? []) {
           if (ps.points.length >= 3 && pointInPolygonPts(wx, wy, ps.points)) {
             if (!state.draftAction) state.beginDraftAction();
@@ -1474,17 +1488,27 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     }
   }, [state, screenToWorld, onUpdate]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    pointerDown({
+      sx: e.clientX - rect.left,
+      sy: e.clientY - rect.top,
+      shiftKey: e.shiftKey,
+      modifier: isModifierHeld(e),
+      pan: e.button === 1 || e.button === 2 || (e.button === 0 && spaceHeldRef.current),
+      primary: e.button === 0,
+    });
+  }, [pointerDown]);
+
+  const pointerMove = useCallback((p: EditorPointer) => {
+    const { sx, sy } = p;
     const { x: cwx, y: cwy } = screenToWorld(sx, sy);
     state.cursorX = cwx;
     state.cursorY = cwy;
     // Track Shift for shape-draft angle-snap preview.
-    state.angleSnapHeld = e.shiftKey;
+    state.angleSnapHeld = p.shiftKey;
     // Track Alt/Option/Ctrl for the action-tool rotation-target highlight.
-    state.modifierHeld = isModifierHeld(e);
+    state.modifierHeld = p.modifier;
 
     if (state.draggingActionTarget !== null) {
       state.setDraftActionTargetEnd(state.draggingActionTarget, cwx, cwy);
@@ -1541,7 +1565,19 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     }
   }, [state, screenToWorld]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    pointerMove({
+      sx: e.clientX - rect.left,
+      sy: e.clientY - rect.top,
+      shiftKey: e.shiftKey,
+      modifier: isModifierHeld(e),
+      pan: false,
+      primary: true,
+    });
+  }, [pointerMove]);
+
+  const pointerUp = useCallback(() => {
     if (state.isPlacing) {
       state.finishPlacement();
       onUpdate();
@@ -1559,17 +1595,12 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     state.isPanning = false;
   }, [state, onUpdate]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+  const handleMouseUp = pointerUp;
+
+  /** Zoom by `zoomFactor` keeping the world point under (sx, sy) fixed
+   *  (Godot-style anchor). Shared by wheel zoom and touch pinch. */
+  const applyZoomAt = useCallback((sx: number, sy: number, zoomFactor: number) => {
     const before = screenToWorld(sx, sy);
-    // Continuous zoom — exp(deltaY * k) gives smooth, framerate-independent feel.
-    // k=0.0015 = ~10% per typical wheel notch, much gentler than the old 0.9/1.1 step.
-    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
     const newZoom = Math.max(0.1, Math.min(3, state.zoom * zoomFactor));
     state.zoom = newZoom;
     // Keep the world point under the cursor fixed (Godot-style cursor anchor).
@@ -1577,6 +1608,16 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     state.panX += before.x - after.x;
     state.panY += before.y - after.y;
   }, [state, screenToWorld]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    // Continuous zoom — exp(deltaY * k) gives smooth, framerate-independent feel.
+    // k=0.0015 = ~10% per typical wheel notch, much gentler than the old 0.9/1.1 step.
+    applyZoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
+  }, [applyZoomAt]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't capture hotkeys when typing in inputs
