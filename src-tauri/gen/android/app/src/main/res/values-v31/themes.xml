@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Android 12+ system splash: paper-cream background with the launcher
+         icon centered — matches the game's cream-paper look from the first
+         frame. (Pre-12 devices get the plain cream windowBackground from
+         values/themes.xml.) -->
+    <style name="Theme.app" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/paper_cream</item>
+        <item name="android:windowSplashScreenBackground">@color/paper_cream</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

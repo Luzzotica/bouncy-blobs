@@ -1,6 +1,9 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.app" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Pre-Android-12 launch background: the game's paper cream instead
+             of a black flash before the webview paints. Android 12+ splash
+             styling lives in values-v31/themes.xml. -->
+        <item name="android:windowBackground">@color/paper_cream</item>
     </style>
 </resources>

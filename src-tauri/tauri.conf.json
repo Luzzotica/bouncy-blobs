@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Bouncy Blobs",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "me.sterlinglong.bouncyblobs",
   "build": {
     "frontendDist": "../dist",
