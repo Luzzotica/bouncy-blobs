@@ -1775,6 +1775,151 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
     }
   }, [state, onUpdate]);
 
+  // ── Touch gestures ─────────────────────────────────────────────────────────
+  // One finger = the current tool's left-click semantics (via pointerDown/
+  // Move/Up); two fingers = simultaneous pan + pinch-zoom. Raw Touch Events
+  // with per-identifier tracking, NOT Pointer Events — iOS drops the second
+  // simultaneous pointer (see TouchControls.tsx), and pinch needs both.
+  // Native listeners with { passive: false } so preventDefault() works: it
+  // suppresses the synthesized compatibility mouse events (no double-fire
+  // through the mouse handlers) and iOS scroll/double-tap zoom.
+  //
+  // The latest handler closures live in refs so the listeners bind once per
+  // canvas/state lifetime without re-subscribing every render.
+  const pointerDownRef = useRef(pointerDown);
+  const pointerMoveRef = useRef(pointerMove);
+  const pointerUpRef = useRef(pointerUp);
+  const applyZoomAtRef = useRef(applyZoomAt);
+  pointerDownRef.current = pointerDown;
+  pointerMoveRef.current = pointerMove;
+  pointerUpRef.current = pointerUp;
+  applyZoomAtRef.current = applyZoomAt;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const touches = new Map<number, { sx: number; sy: number }>();
+    /** idle → nothing down; pending → one finger down, dispatch deferred so a
+     *  second finger can upgrade to pinch without placing anything; single →
+     *  one-finger gesture live; multi → pan+pinch; spent → gesture over but
+     *  fingers still down (require full lift before the next one). */
+    let mode: 'idle' | 'pending' | 'single' | 'multi' | 'spent' = 'idle';
+    let pendingTimer = 0;
+    let pendingPoint: { sx: number; sy: number } | null = null;
+    let lastMid = { sx: 0, sy: 0 };
+    let lastDist = 0;
+
+    const pos = (t: Touch) => {
+      const rect = canvas.getBoundingClientRect();
+      return { sx: t.clientX - rect.left, sy: t.clientY - rect.top };
+    };
+    const mkPointer = (sx: number, sy: number): EditorPointer => ({
+      sx,
+      sy,
+      shiftKey: state.touchShift,
+      modifier: state.touchModifier,
+      pan: false,
+      primary: true,
+    });
+    const dispatchPending = () => {
+      if (mode !== 'pending' || !pendingPoint) return;
+      mode = 'single';
+      window.clearTimeout(pendingTimer);
+      pointerDownRef.current(mkPointer(pendingPoint.sx, pendingPoint.sy));
+      pendingPoint = null;
+    };
+    const beginMulti = () => {
+      const [a, b] = [...touches.values()];
+      lastMid = { sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2 };
+      lastDist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
+      mode = 'multi';
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      for (const t of Array.from(e.changedTouches)) touches.set(t.identifier, pos(t));
+      if (touches.size === 1 && (mode === 'idle' || mode === 'spent')) {
+        const p = [...touches.values()][0];
+        pendingPoint = { sx: p.sx, sy: p.sy };
+        mode = 'pending';
+        window.clearTimeout(pendingTimer);
+        pendingTimer = window.setTimeout(dispatchPending, 80);
+      } else if (touches.size === 2) {
+        if (mode === 'pending') {
+          // Second finger before dispatch: it was a pinch all along.
+          window.clearTimeout(pendingTimer);
+          pendingPoint = null;
+        } else if (mode === 'single') {
+          // Second finger mid-gesture: end it cleanly (finishes a placement),
+          // then pinch.
+          pointerUpRef.current();
+        }
+        beginMulti();
+      }
+      // 3+ fingers: extras join the map but only the first two drive multi.
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      for (const t of Array.from(e.changedTouches)) {
+        if (touches.has(t.identifier)) touches.set(t.identifier, pos(t));
+      }
+      if (mode === 'pending' && pendingPoint) {
+        const p = [...touches.values()][0];
+        // Past the slop = a deliberate drag: dispatch at the ORIGINAL point so
+        // drags (placement rects, element moves) anchor where the finger
+        // landed, then fall through to feed the move.
+        if (Math.hypot(p.sx - pendingPoint.sx, p.sy - pendingPoint.sy) > 8) dispatchPending();
+      }
+      if (mode === 'single') {
+        const p = [...touches.values()][0];
+        pointerMoveRef.current(mkPointer(p.sx, p.sy));
+      } else if (mode === 'multi' && touches.size >= 2) {
+        const [a, b] = [...touches.values()];
+        const mid = { sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2 };
+        const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
+        state.panX -= (mid.sx - lastMid.sx) / state.zoom;
+        state.panY -= (mid.sy - lastMid.sy) / state.zoom;
+        if (lastDist > 0 && dist > 0) applyZoomAtRef.current(mid.sx, mid.sy, dist / lastDist);
+        lastMid = mid;
+        lastDist = dist;
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      for (const t of Array.from(e.changedTouches)) touches.delete(t.identifier);
+      if (mode === 'pending') {
+        // A quick tap: run the full down→up now.
+        dispatchPending();
+        pointerUpRef.current();
+        mode = touches.size === 0 ? 'idle' : 'spent';
+      } else if (mode === 'single' && touches.size === 0) {
+        pointerUpRef.current();
+        mode = 'idle';
+      } else if (mode === 'multi' && touches.size < 2) {
+        // Pinch over: require a full lift before the next one-finger action so
+        // the trailing finger can't draw.
+        mode = touches.size === 0 ? 'idle' : 'spent';
+      } else if (mode === 'spent' && touches.size === 0) {
+        mode = 'idle';
+      }
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    return () => {
+      window.clearTimeout(pendingTimer);
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [state]);
+
   // Editor-wide shortcuts (undo / redo / duplicate) on `window`, so they work
   // regardless of which element has focus. The canvas's own onKeyDown only
   // fires while the canvas is focused, which is easy to lose (clicking the
@@ -1819,6 +1964,11 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
         height: '100%',
         display: 'block',
         cursor,
+        // Belt-and-braces alongside preventDefault in the touch layer: no
+        // browser panning/zooming or long-press text selection on the canvas.
+        touchAction: 'none',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

@@ -191,6 +191,11 @@ export class EditorState {
   /** Whether Option/Alt or Ctrl is currently held — drives the action-tool
    *  rotation-target preview highlight on the canvas. */
   modifierHeld = false;
+  /** Touch equivalents of Shift / Alt: sticky chips in the touch bar set
+   *  these, and the touch gesture layer passes them wherever the mouse
+   *  handlers would read e.shiftKey / isModifierHeld(e). */
+  touchShift = false;
+  touchModifier = false;
   /** Toggle: show entity id labels on every object on the canvas. Toggled
    *  with the 'I' hotkey or the toolbar Labels button. */
   showIds = true;
