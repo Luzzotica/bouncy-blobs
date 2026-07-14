@@ -4,6 +4,8 @@ import { EditorState } from '../editor/EditorState';
 import EditorToolbar from '../editor/EditorToolbar';
 import EditorCanvas from '../editor/EditorCanvas';
 import EditorProperties from '../editor/EditorProperties';
+import EditorTouchBar from '../editor/EditorTouchBar';
+import { shouldUsePad } from '../game/touchInput';
 import MapPreview from '../components/MapPreview';
 import PublishToGameDialog from '../editor/PublishToGameDialog';
 import CampaignEditor from '../editor/CampaignEditor';
@@ -206,6 +208,8 @@ export default function Editor() {
   const [steamReady, setSteamReady] = useState(false);
   const [showPublishGame, setShowPublishGame] = useState(false);
   const [showCampaign, setShowCampaign] = useState(false);
+  /** Touch device: overlay the EditorTouchBar (modifier chips + selection/draft actions). */
+  const [usePadDevice] = useState(() => shouldUsePad());
   const stateRef = useRef<EditorState | null>(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -815,6 +819,7 @@ export default function Editor() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div style={{ flex: 1, position: 'relative' }}>
           <EditorCanvas state={editorState} onUpdate={forceUpdate} />
+          {usePadDevice && <EditorTouchBar state={editorState} onUpdate={forceUpdate} />}
         </div>
         <EditorProperties state={editorState} onUpdate={forceUpdate} />
       </div>
