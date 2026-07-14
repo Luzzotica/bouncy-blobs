@@ -113,7 +113,10 @@ export const pageContent: React.CSSProperties = {
   inset: 0,
   display: 'flex',
   flexDirection: 'column',
-  padding: '24px clamp(16px, 4vw, 48px)',
+  // Safe-area insets keep content clear of notches / home indicators on
+  // phones (the vars are 0 on desktop) — every themed page inherits this.
+  padding:
+    'calc(24px + var(--safe-area-top, 0px)) calc(clamp(16px, 4vw, 48px) + var(--safe-area-right, 0px)) calc(24px + var(--safe-area-bottom, 0px)) calc(clamp(16px, 4vw, 48px) + var(--safe-area-left, 0px))',
   gap: 16,
   overflowY: 'auto',
 };

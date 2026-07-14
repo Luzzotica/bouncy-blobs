@@ -126,6 +126,8 @@ export default function Sandbox() {
   const touchRef = useRef<TouchInput | null>(null);
   if (!touchRef.current) touchRef.current = new TouchInput();
   const [showPad] = useState(() => shouldUsePad());
+  /** Phone: the debug toggle row collapses behind one Debug disclosure. */
+  const [debugOpen, setDebugOpen] = useState(false);
 
   const stateRef = useRef<{
     world: SoftBodyEngine;
@@ -676,11 +678,13 @@ export default function Sandbox() {
       {showPad && <TouchControls input={touchRef.current!} />}
       <div style={{
         position: 'absolute',
-        top: 12,
-        left: 12,
+        top: 'calc(12px + var(--safe-area-top, 0px))',
+        left: 'calc(12px + var(--safe-area-left, 0px))',
         display: 'flex',
         gap: 8,
         alignItems: 'center',
+        flexWrap: 'wrap',
+        maxWidth: 'calc(100vw - 24px)',
       }}>
         {fromEditor ? (
           <Link to="/editor?restore=1">
@@ -691,6 +695,15 @@ export default function Sandbox() {
             <button className="bb-hover-btn" style={paperBtnSm}>Home</button>
           </Link>
         )}
+        {showPad && (
+          <button
+            style={debugOpen ? actionBtnSm(COLORS.blue) : paperBtnSm}
+            onClick={() => setDebugOpen(o => !o)}
+          >
+            Debug {debugOpen ? '▾' : '▸'}
+          </button>
+        )}
+        {(!showPad || debugOpen) && (<>
         <button
           style={showPoints ? actionBtnSm(COLORS.blue) : paperBtnSm}
           onClick={() => setShowPoints(p => !p)}
@@ -734,17 +747,21 @@ export default function Sandbox() {
             {playersChained ? 'Chained' : 'Chain Players'}
           </button>
         )}
+        </>)}
         <button
           style={paperBtnSm}
           onClick={() => setSettingsOpen(true)}
         >
           ⚙ Settings
         </button>
-        <span style={{ color: '#888', fontSize: 13 }}>
-          {fromEditor
-            ? 'P1: WASD + Space | P2: Arrows + Shift'
-            : 'WASD: Move | Space: Expand'}
-        </span>
+        {/* Keyboard hints mean nothing on a touch device. */}
+        {!showPad && (
+          <span style={{ color: '#888', fontSize: 13 }}>
+            {fromEditor
+              ? 'P1: WASD + Space | P2: Arrows + Shift'
+              : 'WASD: Move | Space: Expand'}
+          </span>
+        )}
       </div>
       {/* Time controls — slow-mo / pause / single-step for frame-by-frame debugging */}
       <div style={{

@@ -5,6 +5,7 @@ import { startMusic, isMusicStarted } from '../utils/music'
 import SettingsModal from '../components/SettingsModal'
 import HomeBackground, { paperBtn, tapeStrip } from '../components/HomeBackground'
 import { COLORS } from '../theme/uiTheme'
+import { useIsNarrow } from '../lib/useIsNarrow'
 
 interface MenuButtonConfig {
   label: string
@@ -23,6 +24,9 @@ const MENU: MenuButtonConfig[] = [
 export default function Home() {
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Phone: tighten the sticky-note column so title + 4 notes + settings all
+  // fit without scrolling, and respect the notch/home-indicator insets.
+  const isNarrow = useIsNarrow()
 
   // Pick small random tilts once per mount so each paper button feels
   // hand-placed but doesn't twitch on rerender. One extra tilt for the
@@ -69,7 +73,7 @@ export default function Home() {
         ))}
       </h1>
 
-      <div style={buttonRow}>
+      <div style={{ ...buttonRow, ...(isNarrow ? buttonRowNarrow : {}) }}>
         {MENU.map((item, i) => (
           <Link key={item.to} to={item.to} style={{ textDecoration: 'none' }}>
             <button
@@ -139,8 +143,8 @@ export default function Home() {
 
 const title: React.CSSProperties = {
   position: 'absolute',
-  top: '4vh',
-  left: 32,
+  top: 'calc(4vh + var(--safe-area-top, 0px))',
+  left: 'calc(32px + var(--safe-area-left, 0px))',
   transform: 'rotate(-2deg)',
   transformOrigin: 'left top',
   margin: 0,
@@ -164,6 +168,11 @@ const buttonRow: React.CSSProperties = {
   gap: 44,
 }
 
+const buttonRowNarrow: React.CSSProperties = {
+  left: 'calc(24px + var(--safe-area-left, 0px))',
+  gap: 22,
+}
+
 const versionLabel: React.CSSProperties = {
   position: 'absolute',
   bottom: 12,
@@ -181,8 +190,8 @@ const versionLabel: React.CSSProperties = {
 // just smaller and parked in the bottom-left corner under the menu.
 const settingsStickyBase: React.CSSProperties = {
   position: 'absolute',
-  bottom: 24,
-  left: 32,
+  bottom: 'calc(24px + var(--safe-area-bottom, 0px))',
+  left: 'calc(32px + var(--safe-area-left, 0px))',
   fontSize: 16,
   padding: '12px 22px 10px',
 }

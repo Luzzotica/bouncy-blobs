@@ -14,6 +14,7 @@ import {
   COLORS, pageContent, headerRow, pageTitle, backBtn, cardTitle, paperCard,
   tape, modalBackdrop, modalCard, modalTape, actionBtn,
 } from '../theme/uiTheme';
+import { useIsNarrow } from '../lib/useIsNarrow';
 
 function formatTime(ms: number | null): string {
   if (ms == null) return '—';
@@ -50,6 +51,8 @@ export default function PlayHub() {
   }, []);
 
   const ids = useMemo(() => (levels ?? []).map((l) => l.id), [levels]);
+  // Phone: the blob-customization sidebar stacks above the level grid.
+  const isNarrow = useIsNarrow();
 
   return (
     <HomeBackground>
@@ -59,9 +62,9 @@ export default function PlayHub() {
           <h1 style={pageTitle}>Play</h1>
         </div>
 
-        <div style={mainRow}>
+        <div style={{ ...mainRow, ...(isNarrow ? { flexDirection: 'column' as const, alignItems: 'stretch' as const } : {}) }}>
           {/* Left: live blob customization */}
-          <aside style={sidePanel}>
+          <aside style={{ ...sidePanel, ...(isNarrow ? { flex: 'none', position: 'static' as const, alignSelf: 'stretch' as const } : {}) }}>
             <h2 style={panelHeading}>Your Blob</h2>
             <IdentityPicker
               color={blobColor}
@@ -197,7 +200,7 @@ const dim: React.CSSProperties = { color: '#cbb8e0', fontWeight: 700 };
 
 // First-time picker modal — theme modal card + a scroll cap for the tall picker.
 const firstTimeCard: React.CSSProperties = {
-  ...modalCard, width: 360, maxHeight: '90vh', overflowY: 'auto',
+  ...modalCard, width: 'min(360px, 92vw)', maxHeight: '90vh', overflowY: 'auto',
   display: 'flex', flexDirection: 'column',
 };
 
