@@ -6,6 +6,7 @@ import EditorCanvas from '../editor/EditorCanvas';
 import EditorProperties from '../editor/EditorProperties';
 import EditorTouchBar from '../editor/EditorTouchBar';
 import { shouldUsePad } from '../game/touchInput';
+import { useIsNarrow } from '../lib/useIsNarrow';
 import MapPreview from '../components/MapPreview';
 import PublishToGameDialog from '../editor/PublishToGameDialog';
 import CampaignEditor from '../editor/CampaignEditor';
@@ -210,6 +211,9 @@ export default function Editor() {
   const [showCampaign, setShowCampaign] = useState(false);
   /** Touch device: overlay the EditorTouchBar (modifier chips + selection/draft actions). */
   const [usePadDevice] = useState(() => shouldUsePad());
+  /** Phone-width: properties panel becomes a slide-over drawer instead of a fixed sidebar. */
+  const isNarrow = useIsNarrow();
+  const [propsOpen, setPropsOpen] = useState(false);
   const stateRef = useRef<EditorState | null>(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -820,9 +824,39 @@ export default function Editor() {
         <div style={{ flex: 1, position: 'relative' }}>
           <EditorCanvas state={editorState} onUpdate={forceUpdate} />
           {usePadDevice && <EditorTouchBar state={editorState} onUpdate={forceUpdate} />}
+          {isNarrow && (
+            <button
+              onClick={() => setPropsOpen(true)}
+              style={{ ...paperBtnSm, position: 'absolute', top: 8, right: 8, zIndex: 25, minHeight: 40 }}
+            >
+              Properties
+            </button>
+          )}
         </div>
-        <EditorProperties state={editorState} onUpdate={forceUpdate} />
+        {!isNarrow && <EditorProperties state={editorState} onUpdate={forceUpdate} />}
       </div>
+      {isNarrow && propsOpen && (
+        <div
+          onClick={() => setPropsOpen(false)}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(10,6,18,0.35)', zIndex: 40 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 'min(320px, 85vw)',
+              display: 'flex',
+              paddingBottom: 'var(--safe-area-bottom, 0px)',
+              ['--editor-props-width' as string]: '100%',
+            } as React.CSSProperties}
+          >
+            <EditorProperties state={editorState} onUpdate={forceUpdate} />
+          </div>
+        </div>
+      )}
       {showCampaign && <CampaignEditor onClose={() => setShowCampaign(false)} />}
       {showPublishGame && (
         <PublishToGameDialog

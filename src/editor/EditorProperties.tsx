@@ -961,7 +961,9 @@ const panelStyle: React.CSSProperties = {
   ...paperPanel,
   padding: 12,
   borderLeft: '3px solid #0a0612',
-  width: 220,
+  // Fixed sidebar on desktop; the phone slide-over drawer overrides the CSS
+  // var to fill its own width (see Editor.tsx).
+  width: 'var(--editor-props-width, 220px)',
   overflowY: 'auto',
 };
 

@@ -6,6 +6,7 @@ import { exportLocalMap, importLocalMap, readLocalMap } from '../lib/localMaps';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { isTauri } from '../lib/runtime';
 import { COLORS, paperPanel, paperBtnSm, actionBtnSm } from '../theme/uiTheme';
+import { useIsNarrow } from '../lib/useIsNarrow';
 import { publishLevelToCloud } from '../levels/levelRegistry';
 import { LoginRequiredError } from '../lib/party';
 import { SignInModal } from '../components/SignInModal';
@@ -42,6 +43,13 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
   const [publishOpen, setPublishOpen] = useState(false);
   const [cloudSharing, setCloudSharing] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+  // Phone: a wrapped 27-button toolbar would eat half the screen — scroll
+  // one row horizontally instead, with bigger (finger-sized) buttons.
+  const narrow = useIsNarrow();
+  const btnExtra: React.CSSProperties = narrow
+    ? { minHeight: 40, whiteSpace: 'nowrap', flexShrink: 0 }
+    : {};
+  const abtn = (bg?: string, fg?: string): React.CSSProperties => ({ ...actionBtnStyle(bg, fg), ...btnExtra });
 
   const shareToCloud = async () => {
     if (state.level.spawnPoints.length === 0) { alert('Add at least one spawn point first.'); return; }
@@ -123,7 +131,9 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
         gap: 4,
         padding: '8px 12px',
         borderBottom: '3px solid #0a0612',
-        flexWrap: 'wrap',
+        ...(narrow
+          ? { flexWrap: 'nowrap' as const, overflowX: 'auto' as const, WebkitOverflowScrolling: 'touch' as const }
+          : { flexWrap: 'wrap' as const }),
       }}>
         {tools.map(t => (
           <button
@@ -144,6 +154,7 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
               padding: '5px 10px',
               fontSize: 12,
               borderRadius: 4,
+              ...btnExtra,
             }}
           >
             <span>{t.label}</span>
@@ -157,7 +168,7 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           onClick={() => { state.undo(); onUpdate(); }}
           disabled={state.undoStack.length === 0}
           title="Undo (⌘/Ctrl+Z)"
-          style={disableable(actionBtnStyle(), state.undoStack.length === 0)}
+          style={disableable(abtn(), state.undoStack.length === 0)}
         >
           ↶ Undo
         </button>
@@ -165,7 +176,7 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           onClick={() => { state.redo(); onUpdate(); }}
           disabled={state.redoStack.length === 0}
           title="Redo (⌘/Ctrl+Shift+Z)"
-          style={disableable(actionBtnStyle(), state.redoStack.length === 0)}
+          style={disableable(abtn(), state.redoStack.length === 0)}
         >
           ↷ Redo
         </button>
@@ -173,12 +184,12 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
         <div style={{ width: 2, height: 20, background: '#0a0612', margin: '0 4px' }} />
 
         <button onClick={() => { state.newLevel(); state.localId = null; state.workshopId = null; onUpdate(); }}
-          style={actionBtnStyle()}>
+          style={abtn()}>
           New
         </button>
-        <button onClick={handleSaveNow} style={actionBtnStyle(COLORS.blue)}>Save</button>
-        {isTauri() && <button onClick={handleImport} style={actionBtnStyle(COLORS.green)}>Import</button>}
-        {isTauri() && <button onClick={handleExport} style={actionBtnStyle(COLORS.green)}>Export</button>}
+        <button onClick={handleSaveNow} style={abtn(COLORS.blue)}>Save</button>
+        {isTauri() && <button onClick={handleImport} style={abtn(COLORS.green)}>Import</button>}
+        {isTauri() && <button onClick={handleExport} style={abtn(COLORS.green)}>Export</button>}
 
         <div style={{ width: 2, height: 20, background: '#0a0612', margin: '0 4px' }} />
 
@@ -187,8 +198,8 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           disabled={!steamAvailable}
           title={steamAvailable ? 'Publish to Steam Workshop' : 'Steam is not running'}
           style={steamAvailable
-            ? (state.workshopId ? actionBtnStyle(COLORS.green) : actionBtnStyle(COLORS.lavender, COLORS.ink))
-            : { ...actionBtnStyle(), opacity: 0.5, cursor: 'not-allowed' }}
+            ? (state.workshopId ? abtn(COLORS.green) : abtn(COLORS.lavender, COLORS.ink))
+            : { ...abtn(), opacity: 0.5, cursor: 'not-allowed' }}
         >
           {state.workshopId ? 'Update Workshop' : 'Publish to Workshop'}
         </button>
@@ -197,7 +208,7 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
           onClick={shareToCloud}
           disabled={cloudSharing}
           title="Share to the cross-platform community cloud (works everywhere, no Steam needed)"
-          style={actionBtnStyle(COLORS.blue, COLORS.ink)}
+          style={abtn(COLORS.blue, COLORS.ink)}
         >
           {cloudSharing ? 'Sharing…' : '☁ Share to Cloud'}
         </button>
@@ -207,11 +218,11 @@ export default function EditorToolbar({ state, onUpdate, onTestPlay, steamAvaila
         <button
           onClick={() => { state.showIds = !state.showIds; onUpdate(); }}
           title="Toggle id labels on every entity (I)"
-          style={state.showIds ? actionBtnStyle(COLORS.blue) : actionBtnStyle()}
+          style={state.showIds ? abtn(COLORS.blue) : abtn()}
         >
           {state.showIds ? 'Labels ON' : 'Labels OFF'}
         </button>
-        <button onClick={onTestPlay} style={actionBtnStyle(COLORS.green)}>Test Play</button>
+        <button onClick={onTestPlay} style={abtn(COLORS.green)}>Test Play</button>
       </div>
 
       {publishOpen && (

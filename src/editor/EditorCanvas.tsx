@@ -9,6 +9,7 @@ import { computeLevelAABB, FALL_KILL_MARGIN } from '../game/mapBounds';
 import { BLOB_RADIUS, BLOB_EXPAND_MAX_SCALE, BLOB_SQUASH_X_AMOUNT, BLOB_SQUASH_Y_AMOUNT } from '../physics/slimeBlob';
 import type { SpringPadDef, ActionTarget } from '../levels/types';
 import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+import { shouldUsePad } from '../game/touchInput';
 
 /** Detect macOS for platform-appropriate modifier labels. On Mac the
  *  physical key is labelled "Option" (or "⌥"), not "Alt". `e.altKey` IS
@@ -1794,6 +1795,13 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
   pointerMoveRef.current = pointerMove;
   pointerUpRef.current = pointerUp;
   applyZoomAtRef.current = applyZoomAt;
+
+  // Fingers need bigger hit targets than a cursor: scale the handle/vertex
+  // hit-test thresholds on touch devices (single point — every EditorState
+  // instance passes through this component).
+  useEffect(() => {
+    state.hitScale = shouldUsePad() ? 2.2 : 1;
+  }, [state]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

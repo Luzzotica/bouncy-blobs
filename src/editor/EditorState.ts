@@ -196,6 +196,10 @@ export class EditorState {
    *  handlers would read e.shiftKey / isModifierHeld(e). */
   touchShift = false;
   touchModifier = false;
+  /** Hit-test threshold multiplier — bumped (~2.2) on touch devices where a
+   *  fingertip can't land on a 10px handle. Scales resize handles and chain
+   *  segment hit distances; element bodies are already finger-sized. */
+  hitScale = 1;
   /** Toggle: show entity id labels on every object on the canvas. Toggled
    *  with the 'I' hotkey or the toolbar Labels button. */
   showIds = true;
@@ -1441,7 +1445,7 @@ export class EditorState {
     const rotation = data.rotation ?? 0;
     const hw = data.width / 2;
     const hh = data.height / 2;
-    const threshold = 10 / this.zoom;
+    const threshold = (10 * this.hitScale) / this.zoom;
 
     // Spikes anchor at the base bar (def.y = base); visual extends UP from there.
     // Handles must follow that asymmetric layout so they sit on the spike's edges.
@@ -1587,7 +1591,7 @@ export class EditorState {
         const dx = worldX - pt.x;
         const dy = worldY - pt.y;
         const d = dx * dx + dy * dy;
-        if (d < POINT_HIT_RADIUS_SQ && (!best || d < best.distSq)) {
+        if (d < POINT_HIT_RADIUS_SQ * this.hitScale * this.hitScale && (!best || d < best.distSq)) {
           best = { shapeId: shape.id, pointIndex: i, distSq: d };
         }
       }
@@ -1615,7 +1619,7 @@ export class EditorState {
       if (t.kind === 'shapePoint') {
         const dx = worldX - t.endX;
         const dy = worldY - t.endY;
-        if (dx * dx + dy * dy < POINT_HIT_RADIUS_SQ) return i;
+        if (dx * dx + dy * dy < POINT_HIT_RADIUS_SQ * this.hitScale * this.hitScale) return i;
         continue;
       }
       if (t.kind === 'moveShape') {
@@ -1735,7 +1739,7 @@ export class EditorState {
       if (dx * dx + dy * dy < 400) return { type: 'powerup', id: p.id };
     }
     // Chains — straight-line distance from cursor to the segment between endpoints.
-    const chainThresholdSq = (8 / this.zoom) * (8 / this.zoom);
+    const chainThresholdSq = ((8 * this.hitScale) / this.zoom) ** 2;
     for (const c of this.level.chains ?? []) {
       const a = this.anchorPosition(c.endpointA);
       const b = this.anchorPosition(c.endpointB);
