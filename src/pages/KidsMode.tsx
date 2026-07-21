@@ -13,7 +13,7 @@
  */
 
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { createSoftBodyEngine } from '../physics/engineSelector';
 import { SlimeBlob, type HullPreset } from '../physics/slimeBlob';
@@ -35,6 +35,7 @@ import { loadBuiltinLevel } from '../levels/levelRegistry';
 import type { LevelData } from '../levels/types';
 import GameCanvas from '../components/GameCanvas';
 import KidsBottomBar from '../components/KidsBottomBar';
+import KidsHoldBack from '../components/KidsHoldBack';
 import KidsLandscapeGate from '../components/KidsLandscapeGate';
 import KidsModePicker, { type KidsLearnMode } from '../components/KidsModePicker';
 import { EffectsBindings } from '../game/effectsBindings';
@@ -151,6 +152,7 @@ interface RunnerState {
 }
 
 export default function KidsMode() {
+  const navigate = useNavigate();
   const [levelData, setLevelData] = useState<LevelData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [blobColor, setBlobColor] = useState(() => getPlayerColor());
@@ -431,6 +433,7 @@ export default function KidsMode() {
       });
     } else {
       const friend = s.friends[best.i];
+      // Full expand while finger is down — shrink only on release.
       friend.puffT = PICK_PUFF_SEC;
       fireModeLessonRef.current({
         friendShape: friend.shape,
@@ -459,10 +462,11 @@ export default function KidsMode() {
     const ty = Math.max(-FLING_CAP, Math.min(FLING_CAP, g.pvy));
     s.world.applyBlobLinearVelocityDelta(g.blobId, vec2(tx, ty));
     if (g.kind === 'player') {
+      // Shrink only when finger lifts.
       touchRef.current?.setExpanding(false);
     } else if (g.friendIndex >= 0) {
-      // Keep a short post-release puff so the pick-up feels bouncy.
-      s.friends[g.friendIndex].puffT = Math.max(s.friends[g.friendIndex].puffT, 0.45);
+      // Post-release shrink: short remaining puff decays to rest scale.
+      s.friends[g.friendIndex].puffT = 0.45;
     }
     s.grab = null;
   }, []);
@@ -706,42 +710,45 @@ export default function KidsMode() {
           world.setParticleVel(g.particleIdx, sx, sy);
         }
 
-        // Keep friend puffed while held.
+        // Keep friend fully expanded for entire finger-down / drag.
         if (g.kind === 'friend' && g.friendIndex >= 0) {
-          state.friends[g.friendIndex].puffT = Math.max(
-            state.friends[g.friendIndex].puffT,
-            0.2,
-          );
+          state.friends[g.friendIndex].puffT = PICK_PUFF_SEC;
         }
       }
 
       // Friend wander + puff: AI roam + self-expand; Space/pad expands ALL.
+      // Grabbed friends stay expanded until release (no shrink mid-drag).
       for (const f of state.friends) {
         if (f.blob.destroyed) continue;
         const held = state.grab?.kind === 'friend'
           && state.friends[state.grab.friendIndex] === f;
-        if (!held) {
-          f.wanderT -= dt;
-          if (f.wanderT <= 0) {
-            f.wanderDir = -f.wanderDir;
-            f.wanderT = 1.4 + Math.random() * 2.2;
-          }
-          if (f.selfExpandHold > 0) {
-            f.selfExpandHold = Math.max(0, f.selfExpandHold - dt);
-          } else {
-            f.selfExpandT -= dt;
-            if (f.selfExpandT <= 0) {
-              // Visible puff like main-game AI expand pulses.
-              f.selfExpandHold = 0.48;
-              f.selfExpandT = 2.0 + Math.random() * 2.8;
-              f.puffT = Math.max(f.puffT, 0.55);
-            }
-          }
-          const selfExpand = f.selfExpandHold > 0;
-          // Gentle horizontal roam; groupExpand or autonomous self-expand.
-          f.blob.setInput(f.wanderDir * 0.55, 0, groupExpand || selfExpand);
+        if (held) {
+          // Finger down: expand ON (shape stays big while dragging).
+          f.blob.setInput(0, 0, true);
           f.blob.update(dt);
+          world.setBlobShapeMatchRestScale(f.blob.blobId, PICK_SCALE_PEAK);
+          continue;
         }
+        f.wanderT -= dt;
+        if (f.wanderT <= 0) {
+          f.wanderDir = -f.wanderDir;
+          f.wanderT = 1.4 + Math.random() * 2.2;
+        }
+        if (f.selfExpandHold > 0) {
+          f.selfExpandHold = Math.max(0, f.selfExpandHold - dt);
+        } else {
+          f.selfExpandT -= dt;
+          if (f.selfExpandT <= 0) {
+            // Visible puff like main-game AI expand pulses.
+            f.selfExpandHold = 0.48;
+            f.selfExpandT = 2.0 + Math.random() * 2.8;
+            f.puffT = Math.max(f.puffT, 0.55);
+          }
+        }
+        const selfExpand = f.selfExpandHold > 0;
+        // Gentle horizontal roam; groupExpand or autonomous self-expand.
+        f.blob.setInput(f.wanderDir * 0.55, 0, groupExpand || selfExpand);
+        f.blob.update(dt);
         if (f.puffT > 0) {
           f.puffT = Math.max(0, f.puffT - dt);
           const t = f.puffT / PICK_PUFF_SEC;
@@ -780,16 +787,20 @@ export default function KidsMode() {
           expandScale: playerBlob.getExpandScale(),
           gaze: { x: managed.gazeX, y: managed.gazeY },
         },
-        ...state.friends.filter((f) => !f.blob.destroyed).map((f) => ({
-          name: '',
-          color: f.color,
-          faceId: 'default' as const,
-          expanding: f.puffT > 0 || groupExpand || f.blob.isExpanding(),
-          expandScale: groupExpand
-            ? f.blob.getExpandScale()
-            : 1 + (PICK_SCALE_PEAK - 1) * Math.min(1, (f.puffT / PICK_PUFF_SEC) * 1.2),
-          gaze: { x: 0, y: 0 },
-        })),
+        ...state.friends.filter((f) => !f.blob.destroyed).map((f) => {
+          const held = state.grab?.kind === 'friend'
+            && state.friends[state.grab.friendIndex] === f;
+          return {
+            name: '',
+            color: f.color,
+            faceId: 'default' as const,
+            expanding: held || f.puffT > 0 || groupExpand || f.blob.isExpanding(),
+            expandScale: held || groupExpand
+              ? (held ? PICK_SCALE_PEAK : f.blob.getExpandScale())
+              : 1 + (PICK_SCALE_PEAK - 1) * Math.min(1, (f.puffT / PICK_PUFF_SEC) * 1.2),
+            gaze: { x: 0, y: 0 },
+          };
+        }),
       ];
 
       render(
@@ -965,12 +976,8 @@ export default function KidsMode() {
       />
 
       <div style={topLeft} data-kids-chrome>
-        <Link to="/" style={{ textDecoration: 'none' }}>
-          <button className="paper-btn" style={kidsBack} aria-label="Home">
-            <span style={{ ...tape(COLORS.lavender), width: '70%', height: 14, top: -9 }} />
-            ← Home
-          </button>
-        </Link>
+        {/* Kid-proof: hold ~1.5s (progress fill) — no one-tap exit. */}
+        <KidsHoldBack onComplete={() => navigate('/')} />
       </div>
 
       <div style={letterBadge} aria-hidden="true" data-kids-chrome>
@@ -1023,19 +1030,6 @@ const topLeft: React.CSSProperties = {
   top: 'calc(14px + var(--safe-area-top, 0px))',
   left: 'calc(14px + var(--safe-area-left, 0px))',
   zIndex: 25,
-};
-
-/** Big cream sticky for parent exit — kid-safe hit target, brand tape. */
-const kidsBack: React.CSSProperties = {
-  ...backBtn,
-  position: 'relative',
-  fontSize: 20,
-  padding: '16px 22px 14px',
-  minHeight: 56,
-  minWidth: 96,
-  border: '4px solid #0a0612',
-  boxShadow: PAPER_SHADOW,
-  transform: 'rotate(-2deg)',
 };
 
 /** ABC letter on a cream sticky note — matches paper/tape brand, not a pill. */
