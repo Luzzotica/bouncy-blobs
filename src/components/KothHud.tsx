@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { BouncyBlobsGame } from '../game/bouncyBlobsGame';
 import { COLORS } from '../theme/uiTheme';
+import { displayColor } from '../renderer/colors';
 
 interface KothRow {
   playerId: string;
@@ -76,7 +77,7 @@ export default function KothHud({ gameRef }: KothHudProps) {
   const sorted = [...snap.rows].sort((a, b) => b.score - a.score);
 
   return (
-    <div style={wrap}>
+    <div style={wrap} className="bb-ui-zoom">
       {snap.timeRemaining !== null && (
         <div style={timerPill(snap.timeRemaining)} data-testid="koth-timer">
           {formatTime(snap.timeRemaining)}
@@ -88,10 +89,10 @@ export default function KothHud({ gameRef }: KothHudProps) {
             const pct = Math.min(r.score / snap.targetScore, 1) * 100;
             return (
               <div key={r.playerId} style={row}>
-                <span style={{ ...dot, background: r.color }} />
+                <span style={{ ...dot, background: displayColor(r.color) }} />
                 <span style={name}>{r.name}</span>
                 <div style={track}>
-                  <div style={{ ...fill, width: `${pct}%`, background: r.color }} />
+                  <div style={{ ...fill, width: `${pct}%`, background: displayColor(r.color) }} />
                 </div>
                 <span style={scoreText}>{Math.floor(r.score)}</span>
               </div>

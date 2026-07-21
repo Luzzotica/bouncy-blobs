@@ -37,6 +37,19 @@ html, body, #root {
 input, textarea {
   -webkit-user-select: text;
   user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Game canvas + touch shells: never select, never long-press callout. */
+canvas,
+[data-kids-pad],
+[data-kids-color-rail],
+[data-kids-mode-picker],
+[data-kids-chrome] {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-drag: none;
 }
 
 a {
@@ -105,6 +118,14 @@ input {
 input:focus {
   outline: none;
   border-color: #7b68ee;
+}
+
+/* UI text scale — accessibility setting, pushed to --bb-ui-zoom by
+   accessibilitySettings.ts. Zooms DOM UI surfaces (modals, HUD overlays)
+   without touching the game canvas. */
+.modal-paper,
+.bb-ui-zoom {
+  zoom: var(--bb-ui-zoom, 1);
 }
 
 /* Custom range slider — the filled portion spans the full track exactly from

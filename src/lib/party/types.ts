@@ -55,7 +55,7 @@ export interface RoomSummary {
   expires_at: string;
 }
 
-/** Mirrors hexii's `lib/api/turn.ts` IceServer shape. The values flow
+/** Mirrors partii's `lib/api/turn.ts` IceServer shape. The values flow
  * directly into `RTCConfiguration.iceServers` on both host and joiner. */
 export interface IceServerConfig {
   urls: string | string[];
@@ -113,7 +113,7 @@ export interface Attestation {
 export interface RoomClientConfig {
   /** Game identifier for room listing + telemetry attribution (e.g. "gyrii"). */
   gameId?: string;
-  /** Base URL of the arcadii (hexii) signaling backend. */
+  /** Base URL of the Lobbii / Partii signaling backend. */
   baseUrl: string;
   /**
    * API key. Exchanged once at POST /api/auth/token for a short-lived session

@@ -62,7 +62,7 @@ export interface JoinRoomOpts {
  * (private mode, non-browser) fall back to a per-process id.
  */
 let processDeviceId: string | null = null;
-function stableDeviceId(): string {
+export function stableDeviceId(): string {
   try {
     const KEY = "arcadii_device_id";
     const existing = localStorage.getItem(KEY);

@@ -7,6 +7,7 @@ import { Vec2 } from '../physics/vec2'
 import { PlayerManager, ManagedPlayer } from './playerManager'
 import { playSfx } from '../utils/audio'
 import { emitBurst, emitPuff, emitSparkle } from '../renderer/particles'
+import { displayColor } from '../renderer/colors'
 import { addSplat, addTrailSplat, tickDecals, SplatAnchor } from '../renderer/decals'
 import { addBlobImpact, tickBlobImpacts } from '../renderer/blobImpacts'
 import { GamePhase } from './gameModes/types'
@@ -274,14 +275,14 @@ export class EffectsBindings {
             normal = { x: -track.prevVelocity.x / speedMag, y: -track.prevVelocity.y / speedMag }
           }
           const count = 6 + Math.floor(t * 10)
-          emitBurst(origin, player.color, count, 220 + t * 280, normal, 110)
+          emitBurst(origin, displayColor(player.color), count, 220 + t * 280, normal, 110)
 
           if (speed >= LAND_DECAL_SPEED) {
             const size = 12 + t * 22
             const anchor = pickSurfaceAnchor(origin, normal, platformLookup, springLookup)
             const clip = this.resolveClipPoly(contact?.poly, origin)
             if (this.onPaintableSurface(clip, anchor)) {
-              addSplat(origin, player.color, size, normal, clip, anchor)
+              addSplat(origin, displayColor(player.color), size, normal, clip, anchor)
             }
           }
           // Ring ripples through the blob from the contact point. Strength
@@ -308,11 +309,11 @@ export class EffectsBindings {
           const t = Math.min(1, (prevSpeed - LAND_MIN_SPEED) / (LAND_LOUD_SPEED - LAND_MIN_SPEED))
           const size = 12 + t * 22
           const count = 6 + Math.floor(t * 10)
-          emitBurst(impact.point, player.color, count, 220 + t * 280, impact.normal, 110)
+          emitBurst(impact.point, displayColor(player.color), count, 220 + t * 280, impact.normal, 110)
           const wallAnchor = pickSurfaceAnchor(impact.point, impact.normal, platformLookup, springLookup)
           const wallClip = this.resolveClipPoly(impact.poly, impact.point)
           if (this.onPaintableSurface(wallClip, wallAnchor)) {
-            addSplat(impact.point, player.color, size, impact.normal, wallClip, wallAnchor)
+            addSplat(impact.point, displayColor(player.color), size, impact.normal, wallClip, wallAnchor)
           }
           addBlobImpact(player.blob.blobId, { x: impact.point.x - c.x, y: impact.point.y - c.y }, t)
           firedRingThisTick = true
@@ -333,7 +334,7 @@ export class EffectsBindings {
           const trailAnchor = pickSurfaceAnchor(contact.point, contact.normal, platformLookup, springLookup)
           const trailClip = this.resolveClipPoly(contact.poly, contact.point)
           if (this.onPaintableSurface(trailClip, trailAnchor)) {
-            addTrailSplat(contact.point, player.color, size, contact.normal, trailClip, trailAnchor)
+            addTrailSplat(contact.point, displayColor(player.color), size, contact.normal, trailClip, trailAnchor)
             track.lastTrailAt = this.elapsed
           }
         }
@@ -371,7 +372,7 @@ export class EffectsBindings {
         // 2× the previous 0.108–0.144 envelope → 0.216–0.288.
         const volume = 0.216 + Math.random() * 0.072
         playSfx('puff-up', { volume, pitch })
-        emitPuff(c, player.color, 8)
+        emitPuff(c, displayColor(player.color), 8)
       }
 
       // ── Wall stick / wall jump ──────────────────────────────────────
@@ -589,7 +590,7 @@ export class EffectsBindings {
             // (players were pushed first), and we know one of i/j is a
             // player blob with the other being this hull.
             const playerIdx = isPlayer[i] ? i : j
-            const playerColor = players[playerIdx]?.color ?? '#ffffff'
+            const playerColor = displayColor(players[playerIdx]?.color ?? '#ffffff')
             // Slightly smaller than a landing splat — hull splats can't be
             // clipped to the deforming silhouette, so a tighter footprint
             // limits overflow as the soft body jiggles.
@@ -609,8 +610,8 @@ export class EffectsBindings {
   /** Forwarded from spikeManager.onKill. */
   onSpikeKill(player: ManagedPlayer, deathPosition: Vec2): void {
     playSfx('spike-splat', { volume: 0.10625, pitch: 0.9 + Math.random() * 0.2 })
-    emitBurst(deathPosition, player.color, 24, 380, { x: 0, y: -1 }, 360)
-    addSplat(deathPosition, player.color, 28, { x: 0, y: -1 })
+    emitBurst(deathPosition, displayColor(player.color), 24, 380, { x: 0, y: -1 }, 360)
+    addSplat(deathPosition, displayColor(player.color), 28, { x: 0, y: -1 })
     const c = player.blob.getCentroid()
     addBlobImpact(player.blob.blobId, { x: deathPosition.x - c.x, y: deathPosition.y - c.y }, 1)
     // Drop the track so the corpse-respawn doesn't trip a phantom landing.

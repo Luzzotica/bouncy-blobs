@@ -1,29 +1,233 @@
 {
   "levels": [
-    { "id": "classic", "name": "Classic Race", "file": "classic.json", "levelTypes": ["solo_racing","team_racing"] },
-    { "id": "koth", "name": "King of the Hill Arena", "file": "koth.json", "levelTypes": ["koth"], "hidden": true },
-    { "id": "koth-moving-test", "name": "KOTH Moving Hill (test)", "file": "koth-moving-test.json", "levelTypes": ["koth"], "hidden": true },
-    { "id": "simple-koth", "name": "Simple King of the Hill", "file": "simple-koth.json", "levelTypes": ["koth"] },
-    { "id": "blob-hill", "name": "Blob Hill", "file": "blob-hill.json", "levelTypes": ["koth"] },
-    { "id": "default", "name": "Default Arena", "file": "default.json", "levelTypes": ["solo_racing"], "hidden": true },
-    { "id": "showcase", "name": "Showcase Arena", "file": "showcase.json", "levelTypes": [], "hidden": true },
-    { "id": "playground", "name": "Physics Playground", "file": "playground.json", "levelTypes": [], "hidden": true },
-    { "id": "det-test", "name": "Determinism Test Arena", "file": "det-test.json", "levelTypes": [], "hidden": true },
-    { "id": "simple-race", "name": "Simple Race", "file": "simple-race.json", "levelTypes": ["solo_racing","team_racing"] },
-    { "id": "chained-climb", "name": "Chained Together", "file": "chained-climb.json", "levelTypes": ["team_racing","solo_racing"] },
-    { "id": "swervy", "name": "Swervy", "file": "swervy.json", "levelTypes": ["team_racing","solo_racing"] },
-    { "id": "wall-climb", "name": "Wall Climb", "file": "wall-climb.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "ceiling-crawl", "name": "Ceiling Crawl", "file": "ceiling-crawl.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "moving-platforms", "name": "Moving Platforms", "file": "moving-platforms.json", "levelTypes": ["solo_racing","team_racing"] },
-    { "id": "gravity-drive", "name": "Gravity Drive", "file": "gravity-drive.json", "levelTypes": ["koth"] },
-    { "id": "springy", "name": "Springy", "file": "springy.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "simple-king-of-the-hill", "name": "Simple King of the Hill", "file": "simple-king-of-the-hill.json", "levelTypes": ["koth"] },
-    { "id": "jump", "name": "Jump", "file": "jump.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "cannon", "name": "Cannon", "file": "cannon.json", "levelTypes": ["solo_racing","team_racing"] },
-    { "id": "platforms-be-movin", "name": "Platforms Be MOVIN", "file": "platforms-be-movin.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "squeeze-up", "name": "Squeeze Up", "file": "squeeze-up.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "squeeze-in", "name": "Squeeze In", "file": "squeeze-in.json", "levelTypes": ["solo_racing","team_racing","koth"] },
-    { "id": "getting-crushed", "name": "Getting Crushed", "file": "getting-crushed.json", "levelTypes": ["solo_racing","team_racing"] },
-    { "id": "crush-test", "name": "Crush Test", "file": "crush-test.json", "levelTypes": ["solo_racing"], "hidden": true }
+    {
+      "id": "classic",
+      "name": "Classic Race",
+      "file": "classic.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing"
+      ]
+    },
+    {
+      "id": "koth",
+      "name": "King of the Hill Arena",
+      "file": "koth.json",
+      "levelTypes": [
+        "koth"
+      ],
+      "hidden": true
+    },
+    {
+      "id": "koth-moving-test",
+      "name": "KOTH Moving Hill (test)",
+      "file": "koth-moving-test.json",
+      "levelTypes": [
+        "koth"
+      ],
+      "hidden": true
+    },
+    {
+      "id": "simple-koth",
+      "name": "Simple King of the Hill",
+      "file": "simple-koth.json",
+      "levelTypes": [
+        "koth"
+      ]
+    },
+    {
+      "id": "blob-hill",
+      "name": "Blob Hill",
+      "file": "blob-hill.json",
+      "levelTypes": [
+        "koth"
+      ]
+    },
+    {
+      "id": "default",
+      "name": "Default Arena",
+      "file": "default.json",
+      "levelTypes": [
+        "solo_racing"
+      ],
+      "hidden": true
+    },
+    {
+      "id": "showcase",
+      "name": "Showcase Arena",
+      "file": "showcase.json",
+      "levelTypes": [],
+      "hidden": true
+    },
+    {
+      "id": "playground",
+      "name": "Physics Playground",
+      "file": "playground.json",
+      "levelTypes": [],
+      "hidden": true
+    },
+    {
+      "id": "det-test",
+      "name": "Determinism Test Arena",
+      "file": "det-test.json",
+      "levelTypes": [],
+      "hidden": true
+    },
+    {
+      "id": "simple-race",
+      "name": "Simple Race",
+      "file": "simple-race.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing"
+      ]
+    },
+    {
+      "id": "chained-climb",
+      "name": "Chained Together",
+      "file": "chained-climb.json",
+      "levelTypes": [
+        "team_racing",
+        "solo_racing"
+      ]
+    },
+    {
+      "id": "swervy",
+      "name": "Swervy",
+      "file": "swervy.json",
+      "levelTypes": [
+        "team_racing",
+        "solo_racing"
+      ]
+    },
+    {
+      "id": "wall-climb",
+      "name": "Wall Climb",
+      "file": "wall-climb.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "ceiling-crawl",
+      "name": "Ceiling Crawl",
+      "file": "ceiling-crawl.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "moving-platforms",
+      "name": "Moving Platforms",
+      "file": "moving-platforms.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing"
+      ]
+    },
+    {
+      "id": "gravity-drive",
+      "name": "Gravity Drive",
+      "file": "gravity-drive.json",
+      "levelTypes": [
+        "koth"
+      ]
+    },
+    {
+      "id": "springy",
+      "name": "Springy",
+      "file": "springy.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "simple-king-of-the-hill",
+      "name": "Simple King of the Hill",
+      "file": "simple-king-of-the-hill.json",
+      "levelTypes": [
+        "koth"
+      ]
+    },
+    {
+      "id": "jump",
+      "name": "Jump",
+      "file": "jump.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "cannon",
+      "name": "Cannon",
+      "file": "cannon.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing"
+      ]
+    },
+    {
+      "id": "platforms-be-movin",
+      "name": "Platforms Be MOVIN",
+      "file": "platforms-be-movin.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "squeeze-up",
+      "name": "Squeeze Up",
+      "file": "squeeze-up.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "squeeze-in",
+      "name": "Squeeze In",
+      "file": "squeeze-in.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing",
+        "koth"
+      ]
+    },
+    {
+      "id": "getting-crushed",
+      "name": "Getting Crushed",
+      "file": "getting-crushed.json",
+      "levelTypes": [
+        "solo_racing",
+        "team_racing"
+      ]
+    },
+    {
+      "id": "crush-test",
+      "name": "Crush Test",
+      "file": "crush-test.json",
+      "levelTypes": [
+        "solo_racing"
+      ],
+      "hidden": true
+    },
+    {
+      "id": "kids-playground",
+      "name": "Kids Playground",
+      "file": "kids-playground.json",
+      "levelTypes": [],
+      "hidden": true
+    }
   ]
 }

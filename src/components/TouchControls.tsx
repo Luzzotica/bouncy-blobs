@@ -9,16 +9,28 @@ import type { TouchInput } from '../game/touchInput';
  * Multi-touch uses Touch Events with per-zone identifier tracking (Pointer
  * Events drop the second simultaneous touch on iOS), so the joystick and the
  * button work at the same time — the same approach the phone Controller uses.
+ *
+ * `variant="kids"`: stick + PUFF hug the true bottom edge so the color rail
+ * can sit BETWEEN them (not pushed up into the playfield).
  */
 const JOY_RADIUS = 64; // px; travel that maps to a full-magnitude axis
+const JOY_RADIUS_KIDS = 56;
 
-export function TouchControls({ input }: { input: TouchInput }) {
+export function TouchControls({
+  input,
+  variant = 'default',
+}: {
+  input: TouchInput;
+  variant?: 'default' | 'kids';
+}) {
   const joyRef = useRef<HTMLDivElement>(null);
   const joyTouchId = useRef<number | null>(null);
   const joyOrigin = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const btnTouchId = useRef<number | null>(null);
   const [knob, setKnob] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [pressed, setPressed] = useState(false);
+  const isKids = variant === 'kids';
+  const joyR = isKids ? JOY_RADIUS_KIDS : JOY_RADIUS;
 
   const onJoyStart = (e: React.TouchEvent) => {
     if (joyTouchId.current !== null) return;
@@ -49,12 +61,12 @@ export function TouchControls({ input }: { input: TouchInput }) {
   const updateJoy = (cx: number, cy: number) => {
     const dx = cx - joyOrigin.current.x;
     const dy = cy - joyOrigin.current.y;
-    const nx = Math.max(-1, Math.min(1, dx / JOY_RADIUS));
-    const ny = Math.max(-1, Math.min(1, dy / JOY_RADIUS));
+    const nx = Math.max(-1, Math.min(1, dx / joyR));
+    const ny = Math.max(-1, Math.min(1, dy / joyR));
     input.setVector(nx, ny);
-    // Clamp the visual knob to the ring.
+    // Clamp the visual knobs to the ring.
     const mag = Math.hypot(dx, dy);
-    const k = mag > JOY_RADIUS ? JOY_RADIUS / mag : 1;
+    const k = mag > joyR ? joyR / mag : 1;
     setKnob({ x: dx * k, y: dy * k });
   };
 
@@ -77,22 +89,31 @@ export function TouchControls({ input }: { input: TouchInput }) {
   };
 
   return (
-    <div style={overlay}>
+    <div style={overlay} data-touch-controls={variant}>
       {/* Joystick zone (bottom-left) */}
       <div
         ref={joyRef}
-        style={joyBase}
+        style={isKids ? joyBaseKids : joyBase}
         onTouchStart={onJoyStart}
         onTouchMove={onJoyMove}
         onTouchEnd={onJoyEnd}
         onTouchCancel={onJoyEnd}
       >
-        <div style={{ ...joyKnob, transform: `translate(${knob.x}px, ${knob.y}px)` }} />
+        <div
+          style={{
+            ...(isKids ? joyKnobKids : joyKnob),
+            transform: `translate(${knob.x}px, ${knob.y}px)`,
+          }}
+        />
       </div>
 
       {/* Expand button (bottom-right) */}
       <div
-        style={{ ...expandBtn, transform: pressed ? 'scale(0.92)' : 'scale(1)', opacity: pressed ? 1 : 0.85 }}
+        style={{
+          ...(isKids ? expandBtnKids : expandBtn),
+          transform: pressed ? 'scale(0.92)' : 'scale(1)',
+          opacity: pressed ? 1 : 0.85,
+        }}
         onTouchStart={onBtnStart}
         onTouchEnd={onBtnEnd}
         onTouchCancel={onBtnEnd}
@@ -113,8 +134,8 @@ const overlay: React.CSSProperties = {
 
 const joyBase: React.CSSProperties = {
   position: 'absolute',
-  left: `calc(28px + var(--safe-area-left))`,
-  bottom: `calc(28px + var(--safe-area-bottom))`,
+  left: `calc(28px + var(--safe-area-left, 0px))`,
+  bottom: `calc(28px + var(--safe-area-bottom, 0px))`,
   width: 132,
   height: 132,
   borderRadius: '50%',
@@ -127,6 +148,15 @@ const joyBase: React.CSSProperties = {
   touchAction: 'none',
 };
 
+/** Kids: true bottom edge — leaves center band free for the color rail. */
+const joyBaseKids: React.CSSProperties = {
+  ...joyBase,
+  left: `calc(12px + var(--safe-area-left, 0px))`,
+  bottom: `calc(10px + var(--safe-area-bottom, 0px))`,
+  width: 120,
+  height: 120,
+};
+
 const joyKnob: React.CSSProperties = {
   width: 60,
   height: 60,
@@ -136,10 +166,16 @@ const joyKnob: React.CSSProperties = {
   willChange: 'transform',
 };
 
+const joyKnobKids: React.CSSProperties = {
+  ...joyKnob,
+  width: 52,
+  height: 52,
+};
+
 const expandBtn: React.CSSProperties = {
   position: 'absolute',
-  right: `calc(32px + var(--safe-area-right))`,
-  bottom: `calc(44px + var(--safe-area-bottom))`,
+  right: `calc(32px + var(--safe-area-right, 0px))`,
+  bottom: `calc(44px + var(--safe-area-bottom, 0px))`,
   width: 104,
   height: 104,
   borderRadius: '50%',
@@ -156,4 +192,14 @@ const expandBtn: React.CSSProperties = {
   touchAction: 'none',
   userSelect: 'none',
   transition: 'transform 0.06s ease-out, opacity 0.06s ease-out',
+};
+
+/** Kids: match joy bottom — was floating mid-screen at bottom:44 and felt “pushed up”. */
+const expandBtnKids: React.CSSProperties = {
+  ...expandBtn,
+  right: `calc(12px + var(--safe-area-right, 0px))`,
+  bottom: `calc(16px + var(--safe-area-bottom, 0px))`,
+  width: 96,
+  height: 96,
+  fontSize: 16,
 };

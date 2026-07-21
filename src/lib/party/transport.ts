@@ -22,6 +22,9 @@ export interface Transport {
   readonly remoteKind: string;
   send(channel: ChannelName | string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean;
   isOpen(): boolean;
+  /** Best-effort round-trip time in ms (selected ICE candidate pair), or null
+   *  when unavailable. Optional — non-WebRTC transports may omit it. */
+  getRttMs?(): Promise<number | null>;
   dispose(): void;
 }
 

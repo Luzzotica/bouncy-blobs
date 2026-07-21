@@ -1,0 +1,91 @@
+{
+  "name": "Kids Playground",
+  "version": 1,
+  "levelTypes": [],
+  "showLava": false,
+  "bounds": {
+    "width": 1800,
+    "height": 1100
+  },
+  "walls": [
+    {
+      "id": "floor",
+      "points": [
+        { "x": -40, "y": 980 },
+        { "x": 1840, "y": 980 },
+        { "x": 1840, "y": 1140 },
+        { "x": -40, "y": 1140 }
+      ]
+    },
+    {
+      "id": "ceiling",
+      "points": [
+        { "x": -40, "y": -40 },
+        { "x": 1840, "y": -40 },
+        { "x": 1840, "y": 80 },
+        { "x": -40, "y": 80 }
+      ]
+    },
+    {
+      "id": "left-wall",
+      "points": [
+        { "x": -40, "y": -40 },
+        { "x": 80, "y": -40 },
+        { "x": 80, "y": 1140 },
+        { "x": -40, "y": 1140 }
+      ]
+    },
+    {
+      "id": "right-wall",
+      "points": [
+        { "x": 1720, "y": -40 },
+        { "x": 1840, "y": -40 },
+        { "x": 1840, "y": 1140 },
+        { "x": 1720, "y": 1140 }
+      ]
+    }
+  ],
+  "platforms": [
+    {
+      "id": "mid-left",
+      "x": 420,
+      "y": 720,
+      "width": 280,
+      "height": 48,
+      "rotation": 0
+    },
+    {
+      "id": "mid-right",
+      "x": 1380,
+      "y": 720,
+      "width": 280,
+      "height": 48,
+      "rotation": 0
+    },
+    {
+      "id": "top-center",
+      "x": 900,
+      "y": 480,
+      "width": 320,
+      "height": 48,
+      "rotation": 0
+    }
+  ],
+  "spawnPoints": [
+    { "id": "sp1", "x": 900, "y": 860, "type": "player" }
+  ],
+  "npcBlobs": [
+    { "id": "friend-0", "x": 320, "y": 860, "hullPreset": "star" },
+    { "id": "friend-1", "x": 520, "y": 640, "hullPreset": "square" },
+    { "id": "friend-2", "x": 900, "y": 400, "hullPreset": "triangle" },
+    { "id": "friend-3", "x": 1280, "y": 640, "hullPreset": "star" },
+    { "id": "friend-4", "x": 1480, "y": 860, "hullPreset": "square" },
+    { "id": "friend-5", "x": 700, "y": 860, "hullPreset": "triangle" },
+    { "id": "friend-6", "x": 1100, "y": 860, "hullPreset": "star" },
+    { "id": "friend-7", "x": 900, "y": 640, "hullPreset": "square" }
+  ],
+  "spikes": [],
+  "springPads": [],
+  "triggers": [],
+  "actions": []
+}

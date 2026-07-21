@@ -42,11 +42,41 @@ export class LoginRequiredError extends Error {
   }
 }
 
+export interface FeedbackInput {
+  /** 1–5 stars. */
+  rating?: number;
+  /** Freeform feedback — bug reports, ideas. Lands in the developer's inbox. */
+  text?: string;
+  /** Where in the game: route/level/area tag. */
+  context?: string;
+  matchId?: string;
+}
+
 export interface PlayerProfile {
   playerId: string;
   displayName: string | null;
   /** Linked provider ids, e.g. ['anon', 'email']. */
   providers: string[];
+  /** Per-project role — 'admin' unlocks dev functionality (debug reporter). */
+  role: "player" | "admin";
+}
+
+export interface TaskReportInput {
+  title: string;
+  description?: string;
+  /** Where in the game: route/level/area tag. */
+  context?: string;
+  /** A png/jpeg data URL (e.g. from a page screenshot) attached to the task. */
+  screenshotDataUrl?: string;
+}
+
+export type PresenceStatus = "online" | "playing";
+
+export interface PresenceCounts {
+  online: number;
+  playing: number;
+  by_game: Record<string, { online: number; playing: number }>;
+  stale_after_sec: number;
 }
 
 function readLS(key: string): string | null {
@@ -69,6 +99,23 @@ function jwtNearExpiry(token: string, slackSeconds = 300): boolean {
   }
 }
 
+// Auth-change bus — module-level so EVERY CloudContent instance in the tab
+// shares it. Games routinely construct one client per module; signing in
+// through one must let the others react (refresh profile UIs, drop caches).
+type AuthListener = () => void;
+const authListeners = new Set<AuthListener>();
+
+/** Subscribe to sign-in/sign-out through any CloudContent instance in this
+ *  tab (returns an unsubscribe). Fires AFTER the new token is persisted. */
+export function onCloudAuthChanged(l: AuthListener): () => void {
+  authListeners.add(l);
+  return () => authListeners.delete(l);
+}
+
+function notifyAuthChanged(): void {
+  authListeners.forEach((l) => l());
+}
+
 /** A tiny cloud-content client bound to one game project. */
 export class CloudContent {
   private playerToken: string | null = null;
@@ -76,6 +123,15 @@ export class CloudContent {
 
   constructor(private readonly config: CloudContentConfig) {
     this.playerToken = readLS(TOKEN_KEY(config.gameId));
+  }
+
+  /** Adopt whatever token localStorage holds. Another instance (or another
+   *  tab) may have signed in/out since this one cached its copy — a stale
+   *  ANON token stays valid forever, so a 401-retry never heals it. Called
+   *  before every authenticated request. */
+  private syncTokenFromStorage(): void {
+    const ls = readLS(TOKEN_KEY(this.config.gameId));
+    if (ls !== this.playerToken) this.playerToken = ls;
   }
 
   private base(): string {
@@ -94,6 +150,7 @@ export class CloudContent {
 
   /** Ensure we hold a player token — silent anonymous login, cached, single-flight. */
   private async ensurePlayer(): Promise<string | null> {
+    this.syncTokenFromStorage();
     if (this.playerToken) return this.playerToken;
     if (this.loginInFlight) return this.loginInFlight;
     this.loginInFlight = (async () => {
@@ -125,6 +182,7 @@ export class CloudContent {
    *  same player. Returns null when the backend is unreachable (callers fall
    *  back to the API-key path while enforcement is off). */
   async getPlayerToken(): Promise<string | null> {
+    this.syncTokenFromStorage();
     if (this.playerToken && !jwtNearExpiry(this.playerToken)) return this.playerToken;
     this.playerToken = null;
     return this.ensurePlayer();
@@ -159,15 +217,36 @@ export class CloudContent {
 
   /** Current player profile (creates a silent anon player if none). */
   async profile(): Promise<PlayerProfile | null> {
-    return this.withPlayer<{ player_id: string; display_name: string | null; identities: { provider: string }[] }>(
+    return this.withPlayer<{ player_id: string; display_name: string | null; role?: string; identities: { provider: string }[] }>(
       (headers) => fetch(`${this.base()}/api/players/me`, { headers }),
     )
       .then((me) => ({
         playerId: me.player_id,
         displayName: me.display_name,
         providers: (me.identities ?? []).map((i) => i.provider),
+        role: (me.role === "admin" ? "admin" : "player") as PlayerProfile["role"],
       }))
       .catch(() => null);
+  }
+
+  /**
+   * Update profile fields. Partii: `PATCH /api/players/me` body `{ display_name }`.
+   * Requires a signed-in (non-anon) player for the name to stick across devices.
+   */
+  async updateProfile(opts: { displayName: string }): Promise<PlayerProfile> {
+    const name = opts.displayName.trim();
+    if (!name) throw new Error("Display name is required");
+    await this.withPlayer((headers) =>
+      fetch(`${this.base()}/api/players/me`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ display_name: name }),
+      }),
+    );
+    notifyAuthChanged();
+    const p = await this.profile();
+    if (!p) throw new Error("Profile update failed");
+    return { ...p, displayName: name };
   }
 
   /** True once the player has a real (non-anonymous) identity — the gate for
@@ -175,6 +254,13 @@ export class CloudContent {
   async isSignedIn(): Promise<boolean> {
     const p = await this.profile();
     return !!p && p.providers.some((prov) => prov !== "anon");
+  }
+
+  /** True when this player has the per-project 'admin' role (granted from the
+   *  developer dashboard) — the gate for in-game dev functionality. */
+  async isAdmin(): Promise<boolean> {
+    const p = await this.profile();
+    return p?.role === "admin";
   }
 
   private async emailAuthConfig(): Promise<{ authUrl: string; anonKey: string }> {
@@ -224,6 +310,28 @@ export class CloudContent {
     return this.attachProvider("steam", { ticket, steam_id: steamId });
   }
 
+  /** Sign in with an Apple Game Center identity-verification signature
+   *  (iOS Tauri builds — the GameKit plugin's `authenticate` command returns
+   *  this proof). `playerId` must be the TEAM player id (`teamPlayerID`, the
+   *  value Apple signs). Link-if-anon-else-login, like Steam. */
+  async signInWithGameCenter(proof: {
+    publicKeyUrl: string;
+    signature: string; // base64
+    salt: string; // base64
+    timestamp: number | string;
+    playerId: string; // teamPlayerID
+    displayName?: string;
+  }): Promise<PlayerProfile> {
+    return this.attachProvider("gamecenter", {
+      public_key_url: proof.publicKeyUrl,
+      signature: proof.signature,
+      salt: proof.salt,
+      timestamp: Number(proof.timestamp),
+      player_id: proof.playerId,
+      ...(proof.displayName ? { display_name: proof.displayName } : {}),
+    });
+  }
+
   /** Sign in with a token handed down from the host Arcade (iframe/mobile SSO).
    *  Arcade accounts share the Lobbii auth pool, so this resolves to the SAME
    *  player as an in-game email sign-in with that account. */
@@ -248,6 +356,8 @@ export class CloudContent {
         body: JSON.stringify({ provider, ...proof }),
       });
       if (linkRes.ok) {
+        // Same player, new identity — token unchanged but auth state changed.
+        notifyAuthChanged();
         const p = await this.profile();
         if (p) return p;
       } else {
@@ -270,13 +380,15 @@ export class CloudContent {
     }
     this.playerToken = (data as { player_token: string }).player_token;
     writeLS(TOKEN_KEY(this.config.gameId), this.playerToken);
-    return (await this.profile()) ?? { playerId: (data as { player_id: string }).player_id, displayName: null, providers: [provider] };
+    notifyAuthChanged();
+    return (await this.profile()) ?? { playerId: (data as { player_id: string }).player_id, displayName: null, providers: [provider], role: "player" };
   }
 
   /** Sign out — the next call re-creates a silent anonymous player. */
   signOut(): void {
     this.playerToken = null;
     try { localStorage.removeItem(TOKEN_KEY(this.config.gameId)); } catch { /* ignore */ }
+    notifyAuthChanged();
   }
 
   /** Publish a JSON payload (a level, a save). Returns its id + share code. */
@@ -351,5 +463,141 @@ export class CloudContent {
     await this.withPlayer((headers) =>
       fetch(`${this.base()}/api/player-content/${id}`, { method: "DELETE", headers }),
     );
+  }
+
+  // ── Feedback ─────────────────────────────────────────────────────────────
+
+  /** Submit a match rating and/or freeform feedback. Anonymous players are
+   *  accepted (no sign-in gate — feedback is input, not published content).
+   *  Best-effort by design: never throws, returns null on any failure so a
+   *  post-match "rate this" flow can't break gameplay. */
+  async submitFeedback(input: FeedbackInput): Promise<{ id: string } | null> {
+    try {
+      return await this.withPlayer<{ id: string }>((headers) =>
+        fetch(`${this.base()}/api/feedback`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            rating: input.rating,
+            text: input.text,
+            context: input.context,
+            match_id: input.matchId,
+            game_id: this.config.gameId,
+          }),
+        }),
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Convenience for the post-match star prompt. */
+  async rateMatch(rating: number, matchId?: string): Promise<{ id: string } | null> {
+    return this.submitFeedback({ rating, matchId });
+  }
+
+  /** File a task into the project's inbox from inside the game (the debug
+   *  reporter). Server-enforced admin-only — throws on any failure (including
+   *  403 admin_required) so the reporter UI can show what went wrong. */
+  async reportTask(input: TaskReportInput): Promise<{ id: string }> {
+    return this.withPlayer<{ id: string }>((headers) =>
+      fetch(`${this.base()}/api/tasks/report`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: input.title,
+          description: input.description,
+          context: input.context,
+          screenshot: input.screenshotDataUrl,
+          game_id: this.config.gameId,
+        }),
+      }),
+    );
+  }
+
+  // ── Presence (online / in-game) ──────────────────────────────────────────
+
+  #presenceTimer: ReturnType<typeof setInterval> | null = null;
+  #presenceStatus: PresenceStatus = "online";
+
+  /**
+   * Heartbeat: mark this player online or in-game. Call once when the app
+   * opens, again when entering a match (`status: "playing"`), and on a
+   * ~30s interval (see `startPresenceHeartbeat`). Best-effort — never throws.
+   * Response includes current project counts.
+   */
+  async setPresence(opts?: {
+    status?: PresenceStatus;
+    /** Override game id (defaults to CloudContent config.gameId). */
+    gameId?: string | null;
+  }): Promise<PresenceCounts | null> {
+    if (opts?.status) this.#presenceStatus = opts.status;
+    try {
+      return await this.withPlayer<PresenceCounts & { ok: boolean }>((headers) =>
+        fetch(`${this.base()}/api/presence`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            status: this.#presenceStatus,
+            game_id:
+              opts && "gameId" in opts
+                ? opts.gameId
+                : this.config.gameId,
+          }),
+        }),
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Clear this player's presence row (app close / sign out). */
+  async clearPresence(): Promise<void> {
+    this.stopPresenceHeartbeat();
+    try {
+      await this.withPlayer((headers) =>
+        fetch(`${this.base()}/api/presence`, { method: "DELETE", headers }),
+      );
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Project-wide online counts (API key auth — no player required).
+   * Optional `gameId` filters to one game tag.
+   */
+  async getPresence(gameId?: string): Promise<PresenceCounts | null> {
+    try {
+      const q = gameId ? `?game_id=${encodeURIComponent(gameId)}` : "";
+      const res = await fetch(`${this.base()}/api/presence${q}`, {
+        headers: { "X-API-Key": this.config.apiKey },
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as PresenceCounts;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Auto-heartbeat every `intervalMs` (default 30s). Stops previous timer if any.
+   * Also fires one immediate heartbeat. Pair with `clearPresence` on unmount.
+   */
+  startPresenceHeartbeat(
+    opts?: { status?: PresenceStatus; intervalMs?: number },
+  ): void {
+    if (opts?.status) this.#presenceStatus = opts.status;
+    this.stopPresenceHeartbeat();
+    void this.setPresence({ status: this.#presenceStatus });
+    const ms = opts?.intervalMs ?? 30_000;
+    this.#presenceTimer = setInterval(() => {
+      void this.setPresence({ status: this.#presenceStatus });
+    }, ms);
+  }
+
+  stopPresenceHeartbeat(): void {
+    if (this.#presenceTimer) {
+      clearInterval(this.#presenceTimer);
+      this.#presenceTimer = null;
+    }
   }
 }

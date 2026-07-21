@@ -65,12 +65,18 @@ export default function GameCanvas({ onInit, onResize, style }: GameCanvasProps)
   return (
     <canvas
       ref={canvasRef}
+      // Prevent iOS long-press select / callout while grabbing blobs.
+      onContextMenu={(e) => e.preventDefault()}
       style={{
         width: '100%',
         height: '100%',
         display: 'block',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+        touchAction: 'none',
         ...style,
-      }}
+      } as React.CSSProperties}
     />
   );
 }

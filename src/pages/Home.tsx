@@ -12,12 +12,15 @@ interface MenuButtonConfig {
   to: string
   testId?: string
   tape: string
+  /** Hero entry — larger sticky note for the primary kids path. */
+  hero?: boolean
 }
 
 const MENU: MenuButtonConfig[] = [
+  { label: 'Kids Mode',    to: '/kids',        testId: 'kids-mode-button',    tape: COLORS.yellow, hero: true },
   { label: 'Play',         to: '/play',        testId: 'play-button',        tape: COLORS.lavender },
   { label: 'Multiplayer',  to: '/multiplayer', testId: 'multiplayer-button',  tape: COLORS.purple },
-  { label: 'Level Editor', to: '/editor',      tape: '#e85d75' },
+  { label: 'Level Editor', to: '/editor',      tape: COLORS.pink },
   { label: 'My Replays',   to: '/replays',     tape: COLORS.green },
 ]
 
@@ -81,10 +84,21 @@ export default function Home() {
               className="paper-btn"
               style={{
                 ...paperBtn,
+                ...(item.hero ? kidsHeroBtn : null),
+                ...(isNarrow && !item.hero ? menuBtnNarrow : null),
                 transform: `rotate(${tilts[i]}deg)`,
               }}
             >
-              <span style={{ ...tapeStrip, background: item.tape }} />
+              <span
+                style={{
+                  ...tapeStrip,
+                  background: item.tape,
+                  // Wider / taller tape on the Kids hero sticky note.
+                  ...(item.hero
+                    ? { width: '68%', height: 18, top: -12 }
+                    : null),
+                }}
+              />
               {item.label}
             </button>
           </Link>
@@ -101,7 +115,7 @@ export default function Home() {
           transform: `rotate(${settingsTilt}deg)`,
         }}
       >
-        <span style={{ ...tapeStrip, background: '#fdd835' }} />
+        <span style={{ ...tapeStrip, background: COLORS.yellow }} />
         ⚙  Settings
       </button>
 
@@ -160,23 +174,45 @@ const title: React.CSSProperties = {
 const buttonRow: React.CSSProperties = {
   position: 'absolute',
   top: '50%',
-  left: 32,
+  left: 'calc(32px + var(--safe-area-left, 0px))',
   transform: 'translateY(-50%)',
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'flex-start',
-  gap: 44,
+  gap: 40,
+  // Keep the stack clear of the home indicator on tall phones / iPad split.
+  maxHeight: 'calc(100vh - 120px - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px))',
 }
 
 const buttonRowNarrow: React.CSSProperties = {
-  left: 'calc(24px + var(--safe-area-left, 0px))',
-  gap: 22,
+  left: 'calc(20px + var(--safe-area-left, 0px))',
+  gap: 18,
+  // Nudge up a touch so five notes + settings fit on short phones.
+  top: '48%',
+}
+
+/** Kids Mode hero sticky — bigger than Play, obvious first tap for parents. */
+const kidsHeroBtn: React.CSSProperties = {
+  fontSize: 26,
+  fontWeight: 900,
+  padding: '24px 48px 22px',
+  minHeight: 64,
+  letterSpacing: 0.6,
+  // Slightly stronger lavender text-shadow so it pops on cream paper.
+  textShadow: '1px 1px 0 rgba(199,125,255,0.55)',
+}
+
+/** Compact non-hero menu notes on narrow viewports so the column still fits. */
+const menuBtnNarrow: React.CSSProperties = {
+  fontSize: 18,
+  padding: '14px 28px 12px',
+  minHeight: 48,
 }
 
 const versionLabel: React.CSSProperties = {
   position: 'absolute',
-  bottom: 12,
-  right: 16,
+  bottom: 'calc(12px + var(--safe-area-bottom, 0px))',
+  right: 'calc(16px + var(--safe-area-right, 0px))',
   fontSize: 12,
   fontWeight: 700,
   color: 'rgba(255, 250, 230, 0.55)',
@@ -194,4 +230,5 @@ const settingsStickyBase: React.CSSProperties = {
   left: 'calc(32px + var(--safe-area-left, 0px))',
   fontSize: 16,
   padding: '12px 22px 10px',
+  minHeight: 48,
 }

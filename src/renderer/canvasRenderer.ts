@@ -5,7 +5,8 @@ import { drawBlob, drawBlobShine, perturbHullForWind } from './blobRenderer';
 import { drawJellyCandy, drawFlatSurface, SOFT_PLATFORM_PALETTE, setCandyParallax } from './candySkin';
 import { drawStaticPolygon } from './levelRenderer';
 import { drawSprings, drawShapeMatchTargets, drawBlobPoints, drawBlobHulls } from './debugRenderer';
-import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR, isCave, CAVE_PLATFORM_FILL, CAVE_GRAVITY_POINT_RGB, CAVE_GRAVITY_DIR_RGB } from './colors';
+import { playerColor, playerColorAlpha, npcColor, NPC_HUES, BACKGROUND_COLOR, isCave, CAVE_PLATFORM_FILL, CAVE_GRAVITY_POINT_RGB, CAVE_GRAVITY_DIR_RGB, displayColor } from './colors';
+import { getHighContrast, getGameTextScale } from '../utils/accessibilitySettings';
 import { drawBlobFace } from './faceRenderer';
 import { drawChain } from './chainRenderer';
 import { renderDecals } from './decals';
@@ -44,19 +45,29 @@ const renderVel = new Map<number, {
  *  the camera follower. A dark stroke under the fill keeps the text
  *  readable over both pale and saturated blob colors. */
 function drawNameTag(ctx: CanvasRenderingContext2D, name: string, worldX: number, topY: number, color: string): void {
-  const fontPx = 18;
+  const fontPx = Math.round(18 * getGameTextScale());
   const padAbove = 12;
   ctx.save();
   ctx.font = `bold ${fontPx}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-  ctx.fillStyle = color || '#ffffff';
   const y = topY - padAbove;
-  ctx.strokeText(name, worldX, y);
-  ctx.fillText(name, worldX, y);
+  if (getHighContrast()) {
+    // Solid dark pill + white text — maximum legibility over any scene.
+    const w = ctx.measureText(name).width;
+    const padX = 7;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+    ctx.fillRect(worldX - w / 2 - padX, y - fontPx - 3, w + padX * 2, fontPx + 7);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(name, worldX, y);
+  } else {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillStyle = displayColor(color) || '#ffffff';
+    ctx.strokeText(name, worldX, y);
+    ctx.fillText(name, worldX, y);
+  }
   ctx.restore();
 }
 
@@ -106,6 +117,11 @@ export interface RenderOptions {
   showPoints?: boolean;
   /** Draw each blob's hull perimeter polygon + its hull points. */
   showHull?: boolean;
+  /**
+   * Hull corner smoothing for drawBlob (0 = sharp polygon, 0.5 = full blob round).
+   * Kids shape mode uses a lower value so stars/squares read as shapes.
+   */
+  cornerRoundness?: number;
 }
 
 export interface ModeOverlay {
@@ -169,7 +185,15 @@ export function render(
   showPhysicsPoints = false,
 ): void {
   // Background image (or solid fallback color while it's still loading).
-  drawGameBackground(ctx, camera, canvasWidth, canvasHeight, BACKGROUND_COLOR);
+  // High-contrast mode: a flat dark backdrop instead of the decorated art so
+  // foreground gameplay elements stand out.
+  const highContrast = getHighContrast();
+  if (highContrast) {
+    ctx.fillStyle = '#0a0c14';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  } else {
+    drawGameBackground(ctx, camera, canvasWidth, canvasHeight, BACKGROUND_COLOR);
+  }
 
   ctx.save();
 
@@ -343,11 +367,13 @@ export function render(
     const v = sampleBlobVelocity(npc, npc.getCentroid(), nowMs);
     const hue = NPC_HUES[i % NPC_HUES.length];
     const fill = npcColor(hue);
-    drawBlob(ctx, hull, fill, fill, 2.25);
-    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(npc.blobId));
+    const roundness = options.cornerRoundness ?? 0.5;
+    drawBlob(ctx, hull, fill, fill, 2.25, roundness);
+    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(npc.blobId), roundness);
   }
 
   // Player blobs
+  const cornerRoundness = options.cornerRoundness ?? 0.5;
   for (let i = 0; i < playerBlobs.length; i++) {
     const blob = playerBlobs[i];
     // Draw from the interpolated/smoothed hull (motion + shape eased) when present,
@@ -358,19 +384,21 @@ export function render(
     const v = sampleBlobVelocity(blob, blob.getCentroid(), nowMs);
     const pd = playerData?.[i];
 
-    // Use player's custom color or fall back to palette
+    // Use player's custom color or fall back to palette. High contrast:
+    // fully-opaque fill + thick dark outline so blobs pop off the scene.
     let fill: string;
     let stroke: string;
     if (pd?.color) {
-      fill = pd.color + 'd9'; // ~85% alpha
-      stroke = pd.color;
+      const base = displayColor(pd.color);
+      fill = highContrast ? base : base + 'd9'; // ~85% alpha when not HC
+      stroke = highContrast ? '#0a0612' : base;
     } else {
-      fill = playerColorAlpha(i, 0.85);
-      stroke = playerColor(i);
+      fill = playerColorAlpha(i, highContrast ? 1 : 0.85);
+      stroke = highContrast ? '#0a0612' : playerColor(i);
     }
 
-    drawBlob(ctx, hull, fill, stroke, 2.5);
-    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(blob.blobId));
+    drawBlob(ctx, hull, fill, stroke, highContrast ? 4 : 2.5, cornerRoundness);
+    drawBlobShine(ctx, hull, shineTime, c, v, impactsFor(blob.blobId), cornerRoundness);
 
     // Draw face at the interpolated centroid.
     if (pd) {
@@ -461,7 +489,7 @@ export function render(
   // Cave foreground — craggy black rock surrounding the MAP. World-anchored so
   // it only appears as the camera nears a map edge; never covers the open
   // middle. Bounds computed here from the static geometry + soft-platform hulls.
-  if (isCave) {
+  if (isCave && !highContrast) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const surface of world.staticSurfaces) {
       for (const p of surface.poly) {

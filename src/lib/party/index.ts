@@ -11,11 +11,22 @@
 //   joinAsPeer(config, roomId, opts) → joiner
 // ─────────────────────────────────────────────────────────────────────────────
 
-export { RoomService } from "./RoomService";
+export { RoomService, stableDeviceId } from "./RoomService";
 export type { CreateRoomOpts, JoinRoomOpts, PatchRoomOpts } from "./RoomService";
 export { PeerManager } from "./PeerManager";
 export { rtcConfigFromIceServers } from "./transport";
-export { CloudContent, LoginRequiredError, type CloudContentConfig, type CloudItem, type PlayerProfile } from "./cloudContent";
+export {
+  CloudContent,
+  LoginRequiredError,
+  onCloudAuthChanged,
+  type CloudContentConfig,
+  type CloudItem,
+  type PlayerProfile,
+  type FeedbackInput,
+  type TaskReportInput,
+  type PresenceStatus,
+  type PresenceCounts,
+} from "./cloudContent";
 export { ReplayRecorder, encodeReplay, decodeReplay, replayIsCompatible, type ReplayFile } from "./replay";
 export { initArcadeSso, type ArcadeSsoOptions } from "./arcadeSso";
 import { rtcConfigFromIceServers } from "./transport";

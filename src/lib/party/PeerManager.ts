@@ -158,6 +158,13 @@ export class PeerManager {
     return [...this.peers.values()];
   }
 
+  /** Best-effort round-trip time (ms) to a peer, from its ICE candidate pair.
+   * null if the peer is unknown or RTT isn't available yet. */
+  async getRttMs(peerId: string): Promise<number | null> {
+    const peer = this.peers.get(peerId);
+    return peer?.getRttMs ? peer.getRttMs() : null;
+  }
+
   /** Dispose a single peer connection (e.g. when a remote peer's room row
    * disappears). Safe to call repeatedly. */
   disposePeer(peerId: string): void {

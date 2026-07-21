@@ -5,6 +5,20 @@ import {
   getSfxVolume,
   setSfxVolumeSetting,
 } from '../utils/audioSettings'
+import {
+  getColorMode,
+  setColorModeSetting,
+  getHighContrast,
+  setHighContrastSetting,
+  getGameTextScale,
+  setGameTextScaleSetting,
+  getUiTextScale,
+  setUiTextScaleSetting,
+  GAME_TEXT_MIN,
+  GAME_TEXT_MAX,
+  UI_TEXT_MIN,
+  UI_TEXT_MAX,
+} from '../utils/accessibilitySettings'
 import { playSfx } from '../utils/audio'
 import { assetUrl } from '../utils/assetUrl'
 import { COLORS, modalTape } from '../theme/uiTheme'
@@ -18,6 +32,10 @@ interface Props {
 export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
   const [musicV, setMusicV] = useState(() => getMusicVolume())
   const [sfxV, setSfxV] = useState(() => getSfxVolume())
+  const [gameTextV, setGameTextV] = useState(() => getGameTextScale())
+  const [uiTextV, setUiTextV] = useState(() => getUiTextScale())
+  const [colorblindOn, setColorblindOn] = useState(() => getColorMode() === 'colorblind')
+  const [contrastOn, setContrastOn] = useState(() => getHighContrast())
   // visible drives whether we render the DOM at all; closing flips the
   // animation to the rip-off keyframes before we unmount.
   const [visible, setVisible] = useState(open)
@@ -31,6 +49,10 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
       setClosing(false)
       setMusicV(getMusicVolume())
       setSfxV(getSfxVolume())
+      setGameTextV(getGameTextScale())
+      setUiTextV(getUiTextScale())
+      setColorblindOn(getColorMode() === 'colorblind')
+      setContrastOn(getHighContrast())
       if (!wasOpenRef.current) playSfx('ui-modal-open', { volume: 0.6 })
     } else if (visible) {
       setClosing(true)
@@ -67,6 +89,30 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
     a.volume = sfxV
     sfxPreviewRef.current = a
     a.play().catch(() => {})
+  }
+
+  function handleGameTextChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = parseInt(e.target.value, 10) / 100
+    setGameTextV(v)
+    setGameTextScaleSetting(v)
+  }
+
+  function handleUiTextChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = parseInt(e.target.value, 10) / 100
+    setUiTextV(v)
+    setUiTextScaleSetting(v)
+  }
+
+  function handleColorblindToggle() {
+    const next = !colorblindOn
+    setColorblindOn(next)
+    setColorModeSetting(next ? 'colorblind' : 'default')
+  }
+
+  function handleContrastToggle() {
+    const next = !contrastOn
+    setContrastOn(next)
+    setHighContrastSetting(next)
   }
 
   function handleReplay() {
@@ -129,6 +175,69 @@ export default function SettingsModal({ open, onClose, onReplayIntro }: Props) {
         </label>
 
         <p style={hint}>Release the SFX slider to hear a preview.</p>
+
+        <div style={sectionTitle}>Accessibility</div>
+
+        <label style={row}>
+          <span style={label}>Game text</span>
+          <input
+            className="bb-range"
+            type="range"
+            min={Math.round(GAME_TEXT_MIN * 100)}
+            max={Math.round(GAME_TEXT_MAX * 100)}
+            value={Math.round(gameTextV * 100)}
+            onChange={handleGameTextChange}
+            style={{ ...slider, '--range-fill': rangeFill(gameTextV, GAME_TEXT_MIN, GAME_TEXT_MAX) } as React.CSSProperties}
+          />
+          <span style={valueText}>{Math.round(gameTextV * 100)}%</span>
+        </label>
+
+        <label style={row}>
+          <span style={label}>UI text</span>
+          <input
+            className="bb-range"
+            type="range"
+            min={Math.round(UI_TEXT_MIN * 100)}
+            max={Math.round(UI_TEXT_MAX * 100)}
+            value={Math.round(uiTextV * 100)}
+            onChange={handleUiTextChange}
+            style={{ ...slider, '--range-fill': rangeFill(uiTextV, UI_TEXT_MIN, UI_TEXT_MAX) } as React.CSSProperties}
+          />
+          <span style={valueText}>{Math.round(uiTextV * 100)}%</span>
+        </label>
+
+        <label style={row}>
+          <span style={label}>Colorblind</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={colorblindOn}
+            onClick={handleColorblindToggle}
+            style={toggleBtn(colorblindOn)}
+          >
+            {colorblindOn ? 'On' : 'Off'}
+          </button>
+          <span />
+        </label>
+
+        <label style={row}>
+          <span style={label}>Contrast</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={contrastOn}
+            onClick={handleContrastToggle}
+            style={toggleBtn(contrastOn)}
+          >
+            {contrastOn ? 'High' : 'Normal'}
+          </button>
+          <span />
+        </label>
+
+        <p style={hint}>
+          Colorblind swaps player colors for a colorblind-safe palette. High
+          contrast boosts outlines and flattens the background.
+        </p>
 
         {onReplayIntro && (
           <button onClick={handleReplay} style={replayBtn}>
@@ -214,15 +323,46 @@ const heading: React.CSSProperties = {
   textShadow: `2px 2px 0 ${COLORS.lavender}`,
 }
 
+/** Position of `v` within [min, max] as a CSS percentage — drives the
+ * bb-range filled-track gradient for the non-0-based scale sliders. */
+function rangeFill(v: number, min: number, max: number): string {
+  return `${Math.round(((v - min) / (max - min)) * 100)}%`
+}
+
 const row: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '90px 1fr 32px',
+  gridTemplateColumns: '100px 1fr 44px',
   alignItems: 'center',
   gap: 12,
   margin: '14px 0',
   fontSize: 16,
   fontWeight: 700,
 }
+
+const sectionTitle: React.CSSProperties = {
+  margin: '18px 0 2px',
+  fontSize: 13,
+  fontWeight: 900,
+  letterSpacing: 1.2,
+  textTransform: 'uppercase',
+  color: COLORS.inkDim,
+  textAlign: 'center',
+}
+
+const toggleBtn = (on: boolean): React.CSSProperties => ({
+  justifySelf: 'start',
+  minWidth: 88,
+  padding: '7px 16px',
+  background: on ? COLORS.purple : 'transparent',
+  color: on ? COLORS.onAccent : COLORS.ink,
+  border: '3px solid #0a0612',
+  borderRadius: 4,
+  fontSize: 14,
+  fontWeight: 800,
+  letterSpacing: 0.3,
+  cursor: 'pointer',
+  boxShadow: on ? '0 3px 0 #0a0612' : 'none',
+})
 
 const label: React.CSSProperties = {
   textAlign: 'right',

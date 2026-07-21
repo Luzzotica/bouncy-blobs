@@ -1,4 +1,6 @@
 import { ManagedPlayer } from '../game/playerManager';
+import { displayColor } from './colors';
+import { getGameTextScale, getHighContrast } from '../utils/accessibilitySettings';
 
 /** Draw scores as horizontal bars in top-right corner. */
 export function drawScoreBoard(
@@ -11,14 +13,16 @@ export function drawScoreBoard(
   if (scores.size === 0) return;
 
   const maxScore = targetScore ?? Math.max(...scores.values(), 1);
+  const fontPx = Math.round(12 * getGameTextScale());
   const barWidth = 140;
   const barHeight = 16;
+  const rowStep = Math.max(barHeight, fontPx) + 4;
   const padding = 8;
   const startX = width - barWidth - padding - 60;
   const startY = 12;
 
   ctx.save();
-  ctx.font = '12px sans-serif';
+  ctx.font = `${fontPx}px sans-serif`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
 
@@ -28,7 +32,7 @@ export function drawScoreBoard(
     const fillWidth = Math.min(score / maxScore, 1) * barWidth;
 
     // Name
-    ctx.fillStyle = '#ccc';
+    ctx.fillStyle = getHighContrast() ? '#fff' : '#ccc';
     ctx.fillText(p.name, startX - 8, y + barHeight / 2);
 
     // Bar background
@@ -36,7 +40,7 @@ export function drawScoreBoard(
     ctx.fillRect(startX, y, barWidth, barHeight);
 
     // Bar fill
-    ctx.fillStyle = p.color;
+    ctx.fillStyle = displayColor(p.color);
     ctx.fillRect(startX, y, fillWidth, barHeight);
 
     // Score text
@@ -45,7 +49,7 @@ export function drawScoreBoard(
     ctx.fillText(String(Math.floor(score)), startX + barWidth + 6, y + barHeight / 2);
     ctx.textAlign = 'right';
 
-    y += barHeight + 4;
+    y += rowStep;
   }
 
   ctx.restore();
@@ -62,7 +66,7 @@ export function drawTimer(
   const text = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
   ctx.save();
-  ctx.font = 'bold 28px sans-serif';
+  ctx.font = `bold ${Math.round(28 * getGameTextScale())}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillStyle = timeRemaining <= 10 ? '#ff4444' : '#fff';

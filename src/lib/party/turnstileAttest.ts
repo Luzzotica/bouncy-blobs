@@ -8,6 +8,10 @@
 // 'dev'/localhost, and during the rollout still accepts the raw API key.
 //
 // Docs: https://developers.cloudflare.com/turnstile/
+//
+// Important: do NOT call turnstile.ready() after loading api.js with async/defer
+// (Cloudflare throws: "Remove async/defer … before using turnstile.ready()").
+// We wait for script onload, then render immediately.
 
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "";
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
@@ -19,12 +23,11 @@ type TurnstileApi = {
       sitekey: string;
       size?: "invisible" | "normal" | "compact";
       callback: (token: string) => void;
-      "error-callback"?: () => void;
+      "error-callback"?: (code?: string | number) => void;
     },
   ) => string;
   execute: (widgetId: string) => void;
   remove: (widgetId: string) => void;
-  ready: (cb: () => void) => void;
 };
 
 declare global {
@@ -44,7 +47,6 @@ function loadScript(): Promise<TurnstileApi | null> {
     const s = document.createElement("script");
     s.src = SCRIPT_SRC;
     s.async = true;
-    s.defer = true;
     s.onload = () => resolve(window.turnstile ?? null);
     s.onerror = () => resolve(null);
     document.head.appendChild(s);
@@ -59,44 +61,47 @@ export async function getTurnstileAttestation(): Promise<string | null> {
   if (!api) return null;
 
   return new Promise<string | null>((resolve) => {
+    // Keep the host element in the layout tree. display:none can prevent the
+    // challenge iframe from running on some browsers.
     const container = document.createElement("div");
-    container.style.display = "none";
+    container.setAttribute("aria-hidden", "true");
+    container.style.cssText =
+      "position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;pointer-events:none;";
     document.body.appendChild(container);
 
     let settled = false;
-    const cleanup = (widgetId?: string) => {
+    let widgetId: string | undefined;
+    const finish = (token: string | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       try {
-        if (widgetId) api.remove(widgetId);
+        if (widgetId !== undefined) api.remove(widgetId);
       } catch {
         /* ignore */
       }
       container.remove();
+      resolve(token);
     };
-    // Safety timeout so a stuck challenge never blocks room creation forever.
-    const timer = setTimeout(() => {
-      cleanup(widgetId);
-      resolve(null);
-    }, 8000);
 
-    let widgetId: string | undefined;
-    api.ready(() => {
+    // Safety timeout so a stuck challenge never blocks room creation forever.
+    const timer = setTimeout(() => finish(null), 8000);
+
+    try {
+      // Default execution is "render" (challenge starts on render). Do not call
+      // execute() after that — Turnstile warns "already executing" and can fail.
       widgetId = api.render(container, {
         sitekey: SITE_KEY,
         size: "invisible",
-        callback: (token: string) => {
-          clearTimeout(timer);
-          cleanup(widgetId);
-          resolve(token);
-        },
-        "error-callback": () => {
-          clearTimeout(timer);
-          cleanup(widgetId);
-          resolve(null);
+        callback: (token: string) => finish(token),
+        "error-callback": (code) => {
+          console.warn("[turnstile] challenge error:", code ?? "(no code)");
+          finish(null);
         },
       });
-      api.execute(widgetId);
-    });
+    } catch (err) {
+      console.warn("[turnstile] render failed:", err);
+      finish(null);
+    }
   });
 }

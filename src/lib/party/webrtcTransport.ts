@@ -72,6 +72,13 @@ export class WebRtcConnectTimeoutError extends Error {
 }
 
 export class WebRtcTransport implements Transport {
+  // When a peer's SCTP send buffer backs up past this, drop the send instead of
+  // enqueuing. Realtime state re-sends every tick, so a dropped frame self-heals
+  // — but an unbounded buffer climbs in latency and eventually makes ch.send()
+  // THROW "send queue is full", which (uncaught in the broadcast loop) killed a
+  // live host. Applies to both channels: a reliable channel this backed up is
+  // already head-of-line-blocked and dead anyway.
+  private static readonly MAX_BUFFERED = 512 * 1024;
   private pc: RTCPeerConnection | null = null;
   private channels: Map<string, RTCDataChannel> = new Map();
   private pendingIce: RTCIceCandidateInit[] = [];
@@ -110,6 +117,30 @@ export class WebRtcTransport implements Transport {
     void this.reportTelemetry(outcome);
     this.emit("disconnect", { reason });
     this.callbacks.onPeerDisconnected?.(this.remoteId);
+  }
+
+  /** Best-effort RTT (ms) from the selected/nominated ICE candidate pair.
+   *  Returns null before the pair is chosen or if the stat is absent. */
+  async getRttMs(): Promise<number | null> {
+    const pc = this.pc;
+    if (!pc) return null;
+    try {
+      const stats = await pc.getStats();
+      let rtt: number | null = null;
+      stats.forEach((s: Record<string, unknown> & { type?: string }) => {
+        if (
+          s.type === "candidate-pair" &&
+          (s as { nominated?: boolean }).nominated &&
+          (s as { state?: string }).state === "succeeded"
+        ) {
+          const t = (s as { currentRoundTripTime?: number }).currentRoundTripTime;
+          if (typeof t === "number") rtt = Math.round(t * 1000);
+        }
+      });
+      return rtt;
+    } catch {
+      return null;
+    }
   }
 
   /** Selected-pair info for telemetry: which candidate type won, and (when
@@ -478,11 +509,16 @@ export class WebRtcTransport implements Transport {
   send(channel: ChannelName | string | undefined, data: string | ArrayBuffer | ArrayBufferView): boolean {
     const label = channel ?? channelsForKind(this.remoteKind).primary;
     const ch = this.channels.get(label);
-    if (ch?.readyState === "open") {
+    if (ch?.readyState !== "open") return false;
+    if (ch.bufferedAmount > WebRtcTransport.MAX_BUFFERED) return false; // link stalled — drop
+    try {
       ch.send(data as string);
       return true;
+    } catch {
+      // Race between the readyState/buffer checks and send (closing channel, or
+      // the queue filled this tick). Drop — never let a send kill the caller.
+      return false;
     }
-    return false;
   }
 
   /** Snapshot every candidate pair this PC is currently considering, plus

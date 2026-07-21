@@ -1813,21 +1813,43 @@ impl SoftBodyWorld {
         // stay wedged.
         let pen_actual = p.sub(closest).length();
 
-        // Deep-penetration fallback: past this depth the closest edge is as
-        // likely to be the FAR side of the containing hull as the entry side,
-        // so pushing along its normal wedges the particle deeper — the
-        // "tangled blobs" lock-up. Override the push direction with the
-        // centroid-separation axis (owner − container): every embedded
-        // particle of both blobs then pushes along one consistent axis and
-        // the pair separates within a few solver iterations. Shallow contacts
-        // (normal gameplay, pen ≲ 2 units) keep the closest-edge normal.
+        // Deep-penetration fallback for NEAR-CONCENTRIC tangles only.
+        //
+        // Default = local closest-surface exit (shortest path out). That is
+        // correct for standing/expanding against irregular soft platforms
+        // (L-shapes, thin spurs, offset mass) whose geometric centroid is
+        // far from the contact region — centroid-axis push tunnels the
+        // blob through the platform (P1 expand-through-platform).
+        //
+        // Nearly-concentric blob-vs-blob lock-ups are different: closest
+        // edge is past the containing midline and fights pair separation.
+        // Override with owner−container ONLY when all of:
+        //   (a) penetration is deep,
+        //   (b) centroids are nearly concentric (alen ≲ ½ pen — a few
+        //       units for the menu-tangle fixture; soft-platform expand
+        //       has alen ≫ pen and keeps local n),
+        //   (c) container centroid lies inside its hull,
+        //   (d) local outward fights the pair axis (dot < 0).
+        // See `deeply_overlapped_blobs_untangle` +
+        // `expand_inside_offset_platform_does_not_tunnel`.
         let deep_pen = fx_lit(10, 1);
         if pen_actual > deep_pen {
             let axis = owner_centroid.sub(container_centroid);
             let alen = axis.length();
-            if alen > Fx::from_raw(1 << 8) {
-                n = axis.scale(Fx::ONE / alen);
+            // Half-pen: concentric tangle has alen≈4 with pen≈40–50;
+            // platform expand has alen≈80+ with similar pen → stays local.
+            let tangle_radius = pen_actual * Fx::HALF;
+            if alen > Fx::from_raw(1 << 8)
+                && alen < tangle_radius
+                && is_point_in_polygon(container_centroid, poly_world)
+            {
+                let axis_n = axis.scale(Fx::ONE / alen);
+                // Only override when local exit would drive the pair deeper.
+                if n.dot(axis_n) < Fx::ZERO {
+                    n = axis_n;
+                }
             }
+            // else: keep local surface normal `n` (closest-edge outward).
         }
 
         let pen = if pen_actual > self.config.collision_margin {
@@ -4448,6 +4470,192 @@ mod tests {
         }
         let frames = separated_at.expect("blobs never separated within 120 frames");
         assert!(frames <= 5, "untangle took {} frames (> 5) — deep-pen recovery regressed", frames);
+    }
+
+    /// Soft-platform expand tunnel regression.
+    ///
+    /// Root cause: deep-pen used owner−container centroid axis unconditionally.
+    /// An irregular platform (wide body + thin side spur) has a geometric
+    /// centroid pulled toward the spur — often far from where a player is
+    /// nested. Expanding inside the main body then pushed along that bad
+    /// axis and tunneled through the platform.
+    ///
+    /// Fix: prefer local closest-surface exit; only use centroid axis for
+    /// near-concentric tangles. Fixture mirrors production soft platforms
+    /// (corner anchors mass=0 + stiff shape-match).
+    #[test]
+    fn expand_inside_offset_platform_does_not_tunnel() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::ZERO;
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 11);
+
+        // Irregular "platform": fat left rectangle + thin right spur.
+        //   Main: x∈[-120, 40], y∈[-40, 40]
+        //   Spur: x∈[40, 200],  y∈[-12, 12]
+        // Vertex order CCW. Indices 0,1,6,7 = main-body corners (anchored).
+        let platform_hull = vec![
+            FxVec2::new(fx(-120), fx(-40)), // 0 main SW (anchor)
+            FxVec2::new(fx(40), fx(-40)),   // 1 main SE (anchor)
+            FxVec2::new(fx(40), fx(-12)),   // 2 spur root
+            FxVec2::new(fx(200), fx(-12)),  // 3 spur tip
+            FxVec2::new(fx(200), fx(12)),   // 4 spur tip
+            FxVec2::new(fx(40), fx(12)),    // 5 spur root
+            FxVec2::new(fx(40), fx(40)),    // 6 main NE (anchor)
+            FxVec2::new(fx(-120), fx(40)),  // 7 main NW (anchor)
+        ];
+        let platform = w.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: platform_hull,
+            center_local: FxVec2::ZERO,
+            center_mass: crate::tuning::CENTER_MASS,
+            hull_mass: crate::tuning::HULL_MASS,
+            spring_k: crate::tuning::SPRING_K * fx(2),
+            spring_damp: crate::tuning::SPRING_DAMP,
+            radial_k: Fx::ZERO,
+            radial_damp: Fx::ZERO,
+            pressure_k: Fx::ZERO, // platforms don't puff
+            // Stiff shape-match like soft-platform loader.
+            shape_match_k: fx(200),
+            shape_match_damp: fx(2),
+            world_origin: FxVec2::new(fx(0), fx(0)),
+            sort_key: Some("platform".into()),
+            // Anchored corners — production soft platforms lock anchors.
+            static_hull_indices: vec![0, 1, 6, 7],
+            static_center: false,
+            pin_frame: true,
+        });
+
+        // Player nested in the MAIN BODY (x=-40), not the spur.
+        let player = soft_circle_blob(&mut w, FxVec2::new(fx(-40), fx(0)), "player");
+
+        let pc = w.blob_centroid(platform.blob_id);
+        let player0 = w.blob_centroid(player.blob_id);
+        // Centroid must sit well right of the embed — the bad-axis case.
+        assert!(
+            (pc.x - player0.x).to_f64() > 40.0,
+            "fixture invalid: need offset centroid (platform.x={:?} player.x={:?})",
+            pc.x, player0.x
+        );
+
+        // Expand like holding puff — shape-match rest scale ramps out.
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut max_cx = player0.x.to_f64();
+        for step in 0..90 {
+            let scale = if step < 45 {
+                Fx::ONE + Fx::from_int(step as i32) * fx_lit(4, 100)
+            } else {
+                fx_lit(28, 10)
+            };
+            w.set_blob_shape_match_rest_scale(player.blob_id, scale);
+            w.step(dt);
+
+            let c = w.blob_centroid(player.blob_id);
+            max_cx = max_cx.max(c.x.to_f64());
+            // Tunnel signature under the OLD centroid-axis: player is shoved
+            // toward the spur / through the body (cx past main SE at ~40,
+            // often ≫ 80). Local-surface exit ejects toward nearest face
+            // (usually left/top/bottom of main body) and stays left of spur.
+            assert!(
+                c.x.to_f64() < 70.0,
+                "step {}: player tunneled through offset platform (cx={:.1}, max={:.1})",
+                step,
+                c.x.to_f64(),
+                max_cx
+            );
+            assert!(
+                c.y.to_f64().abs() < 160.0,
+                "step {}: player ejected vertically (cy={:.1})",
+                step,
+                c.y.to_f64()
+            );
+        }
+
+        // Should not remain deeply buried inside the platform after expand.
+        let poly_p: Vec<FxVec2> = platform
+            .hull_indices
+            .iter()
+            .map(|&i| w.pos[i as usize])
+            .collect();
+        let mut deep_inside = 0usize;
+        for &i in &player.hull_indices {
+            let p = w.pos[i as usize];
+            if is_point_in_polygon(p, &poly_p) {
+                let info = closest_point_on_polygon_boundary(p, &poly_p);
+                if p.sub(info.closest).length().to_f64() > 28.0 {
+                    deep_inside += 1;
+                }
+            }
+        }
+        assert!(
+            deep_inside <= 3,
+            "{} player hull points still deep inside platform after expand",
+            deep_inside
+        );
+    }
+
+    /// Directional unit of the deep-pen policy: a particle deep inside an
+    /// offset-centroid poly must exit via the *nearest surface*, not toward
+    /// the geometric centroid (which may lie far from the contact region).
+    #[test]
+    fn deep_pen_prefers_local_surface_over_offset_centroid() {
+        // Standard L (CCW): vertical stem on left + horizontal foot bottom.
+        // Centroid sits right of the stem; a particle nested mid-stem is deep
+        // and far from the centroid (the expand-through-platform case).
+        let poly = vec![
+            FxVec2::new(fx(0), fx(0)),
+            FxVec2::new(fx(200), fx(0)),
+            FxVec2::new(fx(200), fx(40)),
+            FxVec2::new(fx(40), fx(40)),
+            FxVec2::new(fx(40), fx(160)),
+            FxVec2::new(fx(0), fx(160)),
+        ];
+        let container_c = SoftBodyWorld::poly_centroid(&poly);
+        // Particle deep in the vertical stem.
+        let p = FxVec2::new(fx(20), fx(100));
+        assert!(is_point_in_polygon(p, &poly), "probe must be inside L");
+        assert!(
+            container_c.x.to_f64() > 50.0,
+            "L centroid should sit rightward, got {:?}",
+            container_c.x
+        );
+
+        let info = closest_point_on_polygon_boundary(p, &poly);
+        let local_out = info.normal.neg(); // interior → outward (same as resolve)
+        let pen = p.sub(info.closest).length();
+        assert!(pen > fx(10), "need deep pen, got {:?}", pen);
+
+        // Owner (player) centroid near the particle; container offset right.
+        let owner_c = FxVec2::new(fx(20), fx(100));
+        let axis = owner_c.sub(container_c);
+        let axis_n = axis.scale(Fx::ONE / axis.length());
+
+        // Policy under test (mirrors resolve_point_in_shape):
+        let deep_pen = fx(10);
+        let mut n = local_out;
+        if pen > deep_pen {
+            let alen = axis.length();
+            let tangle_radius = pen * Fx::HALF;
+            if alen > Fx::from_raw(1 << 8)
+                && alen < tangle_radius
+                && is_point_in_polygon(container_c, &poly)
+                && n.dot(axis_n) < Fx::ZERO
+            {
+                n = axis_n;
+            }
+        }
+
+        // Local surface must win for this offset-centroid case.
+        assert!(
+            n.dot(local_out) > Fx::HALF,
+            "expected local surface exit, got n·local={:?} (axis would be {:?})",
+            n.dot(local_out),
+            axis_n
+        );
+        // And must NOT strongly agree with the (wrong) centroid axis.
+        assert!(
+            n.dot(axis_n) < Fx::HALF,
+            "push still follows offset centroid axis"
+        );
     }
 
     #[test]
