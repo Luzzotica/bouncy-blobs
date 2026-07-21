@@ -12,14 +12,13 @@ interface MenuButtonConfig {
   to: string
   testId?: string
   tape: string
-  /** Hero entry — larger sticky note for the primary kids path. */
-  hero?: boolean
 }
 
+/** Home menu order: Kids sits below Multiplayer at the same sticky size (no hero). */
 const MENU: MenuButtonConfig[] = [
-  { label: 'Kids Mode',    to: '/kids',        testId: 'kids-mode-button',    tape: COLORS.yellow, hero: true },
   { label: 'Play',         to: '/play',        testId: 'play-button',        tape: COLORS.lavender },
   { label: 'Multiplayer',  to: '/multiplayer', testId: 'multiplayer-button',  tape: COLORS.purple },
+  { label: 'Kids Mode',    to: '/kids',        testId: 'kids-mode-button',    tape: COLORS.yellow },
   { label: 'Level Editor', to: '/editor',      tape: COLORS.pink },
   { label: 'My Replays',   to: '/replays',     tape: COLORS.green },
 ]
@@ -84,21 +83,11 @@ export default function Home() {
               className="paper-btn"
               style={{
                 ...paperBtn,
-                ...(item.hero ? kidsHeroBtn : null),
-                ...(isNarrow && !item.hero ? menuBtnNarrow : null),
+                ...(isNarrow ? menuBtnNarrow : null),
                 transform: `rotate(${tilts[i]}deg)`,
               }}
             >
-              <span
-                style={{
-                  ...tapeStrip,
-                  background: item.tape,
-                  // Wider / taller tape on the Kids hero sticky note.
-                  ...(item.hero
-                    ? { width: '68%', height: 18, top: -12 }
-                    : null),
-                }}
-              />
+              <span style={{ ...tapeStrip, background: item.tape }} />
               {item.label}
             </button>
           </Link>
@@ -191,18 +180,7 @@ const buttonRowNarrow: React.CSSProperties = {
   top: '48%',
 }
 
-/** Kids Mode hero sticky — bigger than Play, obvious first tap for parents. */
-const kidsHeroBtn: React.CSSProperties = {
-  fontSize: 26,
-  fontWeight: 900,
-  padding: '24px 48px 22px',
-  minHeight: 64,
-  letterSpacing: 0.6,
-  // Slightly stronger lavender text-shadow so it pops on cream paper.
-  textShadow: '1px 1px 0 rgba(199,125,255,0.55)',
-}
-
-/** Compact non-hero menu notes on narrow viewports so the column still fits. */
+/** Compact menu notes on narrow viewports so the column still fits. */
 const menuBtnNarrow: React.CSSProperties = {
   fontSize: 18,
   padding: '14px 28px 12px',
