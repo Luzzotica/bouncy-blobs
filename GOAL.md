@@ -99,7 +99,7 @@ When this is done, a parent can put an iPad in a kid’s hands and:
 - [x] Kids **grab hold-expand** (stay expanded while finger held/dragging) — *eng*
 - [x] **Kid-proof Back** hold ~1.5s (`KidsHoldBack`) — *eng* · leave also silences kids audio (teardown + visibility/pagehide/blur)
 - [x] **Confirm TF 2.0.0.9** — *eng*: VALID; was MISSING_EXPORT_COMPLIANCE → fixed → READY_FOR_BETA_TESTING
-- [ ] **TF 2.0.0.10** upload (green + hold-expand + Back + `ITSAppUsesNonExemptEncryption=false`) — *eng* in flight
+- [x] **TF 2.0.0.10** upload (green + hold-expand + Back + `ITSAppUsesNonExemptEncryption=false`) — *eng* · Delivery `c6e53771-49b3-49b7-b3b1-cecd7895d1f7` · SHA `967c5d5` · await ASC processing → Available
 
 ### 12. Sterling Padii dogfood / walk-away install — *directed 2026-07-19*
 - [x] Production **walk-away install** on connected iPad (not tethered vite) — *eng* · **2.0.0.4** then **2.0.0.5**
