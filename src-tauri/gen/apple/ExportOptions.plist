@@ -22,5 +22,8 @@
 	<true/>
 	<key>compileBitcode</key>
 	<false/>
+	<!-- Keep CFBundleVersion from Info.plist (do not collapse to marketing version). -->
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
 </dict>
 </plist>

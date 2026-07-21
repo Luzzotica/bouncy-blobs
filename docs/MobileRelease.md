@@ -130,6 +130,8 @@ screenshots per device class, age rating. Kids Mode is a local play path
 | --- | --- | --- | --- |
 | **#1** | 2.0.0 / `2.0.0` | Kids Mode slice | `567f659e-9091-4b34-8eee-c809310f90e7` |
 | **#2** | 2.0.0 / `2.0.0.2` | BB AppIcon + soft-platform P1 | `f7df7b68-3e55-449f-951c-e479d139c74c` |
+| **#3** | 2.0.0 / `2.0.0.9` | Full-screen iPad landscape Kids | `b613b950-7745-4bd3-b116-3f5aacf08f4a` |
+| **#4** | 2.0.0 / `2.0.0.10` | Hold-back + soft green + grab hold-expand | `c6e53771-49b3-49b7-b3b1-cecd7895d1f7` |
 
 IPA path (latest): `src-tauri/gen/apple/build/arm64/Bouncy Blobs.ipa` (~89 MB).  
 Export: `app-store-connect` / team `74874V9Z5H`. Upload: `altool` + tankii ASC key.
