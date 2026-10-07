@@ -615,6 +615,7 @@ pub fn look_for(game: &Game, id: BodyId) -> Look {
             _ => Look::Blob { halo: 0.06 },
         },
         Some(BodyTag::Prop) => Look::Blob { halo: 0.05 },
+        Some(BodyTag::Amoeba(_)) => Look::Blob { halo: 0.45 },
         Some(BodyTag::Jelly) => {
             if is_mushroom_cap(game, id) {
                 return Look::Cap;
@@ -697,6 +698,10 @@ pub fn style_for(game: &Game, id: BodyId, theme: &ThemeColors) -> Style {
                 _ => (hex(0x7ccf6b), hex(0x2f6b3a)),
             };
             Style { fill, rim, rim_w: 2.0, highlight: false, z: z::ROPE, top_rim_only: false }
+        }
+        Some(BodyTag::Amoeba(i)) => {
+            let c = hex(bb_sim::amoeba_color(i as usize));
+            Style { fill: c, rim: lighten(c, 0.5), rim_w: 2.5, highlight: true, z: z::ITEMS + 0.2, top_rim_only: false }
         }
         Some(BodyTag::Ui) | None => Style { fill: theme.accent, rim: darken(theme.accent, 0.3), rim_w: 4.0, highlight: true, z: z::PROP, top_rim_only: false },
     }
@@ -795,6 +800,12 @@ fn sync_bodies(
     for mut v in visuals.iter_mut() {
         if let Some(s) = overrides.0.get(&v.id) {
             v.style = *s;
+        } else if let Some(BodyTag::Player(slot)) = game.sim.tag(v.id) {
+            // Players change colour (eating amoebas): keep the style live.
+            let want = game.sim.player(slot).map_or(0xffffff, |p| p.color);
+            if v.style.fill != hex(want) {
+                v.style = style_for(&game, v.id, &theme);
+            }
         }
         let Some(b) = game.sim.world.body(v.id) else { continue };
         if v.look == Look::Cap {

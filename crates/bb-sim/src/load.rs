@@ -27,6 +27,8 @@ pub mod layer {
     pub const ROPE: u32 = 8;
     pub const NPC: u32 = 16;
     pub const UI: u32 = 32;
+    /// Amoebas: float about and never collide with anything.
+    pub const AMOEBA: u32 = 128;
     /// Jelly ground tiles and soft platforms: never collide with each
     /// other (adjacent tiles would push apart and open seams).
     pub const JELLY: u32 = 64;
@@ -244,4 +246,25 @@ pub fn star(points: usize, outer: f32, inner: f32) -> Vec<Vec2> {
             Vec2::new(a.cos(), a.sin()) * r
         })
         .collect()
+}
+
+/// A little edible amoeba: a soft, squirmy ring blob that floats near its
+/// spot (home tether, no gravity) and passes through everything.
+pub fn spawn_amoeba(w: &mut World, at: Vec2, index: usize) -> BodyId {
+    let r = 11.0 + (index % 3) as f32 * 1.5;
+    let mut d = BodyDesc::blob(at, r, 12, 0.08);
+    d.params.gravity_scale = 0.0;
+    d.params.shape_compliance = Some(6e-3);
+    d.params.volume_compliance = 2e-6;
+    d.params.edge_compliance = 3e-5;
+    d.params.internal_damping = 1.5;
+    d.params.linear_damping = 2.0;
+    d.params.limits.poppable = false;
+    d.layer = layer::AMOEBA;
+    d.mask = 0;
+    let id = w.add_body(d);
+    if let Some(b) = w.body_mut(id) {
+        b.anchor_home(4e-3);
+    }
+    id
 }

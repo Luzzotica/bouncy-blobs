@@ -23,9 +23,6 @@ pub struct SpringVisual(pub usize, pub Handle<Mesh>);
 pub struct CheckpointVisual(pub usize, pub Handle<Mesh>, pub Option<f32>, pub bool);
 
 #[derive(Component)]
-pub struct PickupVisual(pub usize);
-
-#[derive(Component)]
 pub struct GoalVisual(pub Handle<Mesh>);
 
 #[derive(Component)]
@@ -48,7 +45,7 @@ impl Plugin for LevelViewPlugin {
         app.add_systems(PostUpdate, spawn_level_view.run_if(resource_added::<Game>))
             .add_systems(
                 PostUpdate,
-                (update_movers, update_springs, update_checkpoints, update_pickups, update_goal, follow_sky, parallax, motes)
+                (update_movers, update_springs, update_checkpoints, update_goal, follow_sky, parallax, motes)
                     .run_if(resource_exists::<Game>),
             )
             .add_systems(PostUpdate, despawn_level_view.run_if(resource_removed::<Game>));
@@ -328,22 +325,7 @@ pub fn spawn_level_view(
         commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS - 0.2), CheckpointVisual(i, h, None, false), LevelEntity));
     }
 
-    // Pickups: glow drops.
-    let mut drop = MeshBuf::default();
-    drop.halo(PVec2::ZERO, PVec2::splat(if theme.dark { 3.6 } else { 2.2 }), -0.002, la(theme.glow, if theme.dark { 0.25 } else { 0.18 }));
-    drop.ellipse(PVec2::ZERO, PVec2::ONE, 0.0, 0.0, lin(theme.glow));
-    drop.ellipse(PVec2::new(0.05, -0.05), PVec2::splat(0.62), 0.0, 0.001, lin(lighten(theme.glow, 0.45)));
-    drop.ellipse(PVec2::new(-0.32, 0.36), PVec2::new(0.26, 0.2), 0.5, 0.002, la(Color::WHITE, 0.9));
-    let drop_mesh = meshes.add(drop.into_mesh());
-    for (i, p) in level.pickups.iter().enumerate() {
-        commands.spawn((
-            Mesh2d(drop_mesh.clone()),
-            MeshMaterial2d(shared.blend.clone()),
-            Transform::from_xyz(p.x, p.y, z::ITEMS + 0.1).with_scale(Vec3::splat(9.0)),
-            PickupVisual(i),
-            LevelEntity,
-        ));
-    }
+    // Pickups are amoebas now: real softbodies drawn by render.rs.
 
     // Goal: a glowing arch.
     if level.goal.is_some() {
@@ -660,19 +642,6 @@ fn update_checkpoints(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Asset
     }
 }
 
-fn update_pickups(game: Res<Game>, time: Res<Time>, mut q: Query<(&PickupVisual, &mut Transform, &mut Visibility)>) {
-    let t = time.elapsed_secs();
-    for (PickupVisual(i), mut tf, mut vis) in q.iter_mut() {
-        if game.sim.collected.get(*i).copied().unwrap_or(true) {
-            *vis = Visibility::Hidden;
-            continue;
-        }
-        let p = game.sim.level.pickups[*i];
-        tf.translation.y = p.y + (t * 3.0 + *i as f32 * 0.7).sin() * 5.0;
-        let s = 9.0 + (t * 6.0 + *i as f32).sin() * 1.5;
-        tf.scale = Vec3::new(s, s * 1.2, 1.0);
-    }
-}
 
 fn update_goal(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Assets<Mesh>>, q: Query<&GoalVisual>) {
     let theme = palette::theme(game.sim.level.theme);

@@ -32,6 +32,8 @@ pub enum BodyTag {
     Platform,
     Rope,
     Ui,
+    /// An edible amoeba (index into `level.pickups`).
+    Amoeba(u16),
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +94,8 @@ pub enum SimEvent {
     Popped { who: Who, pos: Vec2, color: u32 },
     Respawned { who: Who, pos: Vec2 },
     Checkpoint { index: usize, pos: Vec2 },
-    Pickup { index: usize, pos: Vec2, slot: u8 },
+    /// Ate an amoeba: the eater turns its colour.
+    Pickup { index: usize, pos: Vec2, slot: u8, color: u32 },
     Goal { slot: u8 },
     Story { script: String, slot: u8 },
     Impact { body: BodyId, pos: Vec2, speed: f32 },
@@ -119,6 +122,8 @@ pub struct Sim {
     /// Highest checkpoint reached (index into `level.respawn_points()`).
     pub checkpoint: usize,
     pub collected: Vec<bool>,
+    /// Living amoebas, one per pickup (None once eaten).
+    pub amoebas: Vec<Option<BodyId>>,
     pub story_fired: Vec<bool>,
     pub completed: bool,
     pub time: f32,
@@ -159,6 +164,7 @@ impl Sim {
             springs: Vec::new(),
             checkpoint: 0,
             collected: vec![false; level.pickups.len()],
+            amoebas: Vec::new(),
             story_fired: vec![false; level.story.len()],
             completed: false,
             time: 0.0,
@@ -168,6 +174,11 @@ impl Sim {
             level: level.clone(),
         };
         load::load(&mut sim, &level);
+        for i in 0..level.pickups.len() {
+            let id = load::spawn_amoeba(&mut sim.world, level.pickups[i], i);
+            sim.tags.insert(id, BodyTag::Amoeba(i as u16));
+            sim.amoebas.push(Some(id));
+        }
         for (i, n) in level.npcs.iter().enumerate() {
             let npc = Npc::spawn(&mut sim.world, i as u16, n);
             sim.tags.insert(npc.ctl.body, BodyTag::Npc(i as u16));
@@ -373,6 +384,13 @@ pub fn parse_color(s: &str) -> Option<u32> {
         return None;
     }
     u32::from_str_radix(s, 16).ok()
+}
+
+/// Amoeba colours: bright, edible-looking, all distinct from black stone.
+pub const AMOEBA_COLORS: [u32; 8] = [0x7cf5c1, 0xffe066, 0xff8fd8, 0x8fd3ff, 0xc6a3ff, 0xffb36b, 0xa6f56a, 0xff7a8a];
+
+pub fn amoeba_color(index: usize) -> u32 {
+    AMOEBA_COLORS[(index * 3 + index / 7) % AMOEBA_COLORS.len()]
 }
 
 /// The 12-colour player palette shared with the phone controller.

@@ -365,16 +365,32 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             sim.events.push(SimEvent::Checkpoint { index: i, pos: *cp });
         }
     }
-    for (i, p) in sim.level.pickups.clone().iter().enumerate() {
-        if sim.collected[i] {
-            continue;
+    // Amoebas squirm (pseudopod wiggles) and get eaten on touch.
+    let t = sim.time;
+    for i in 0..sim.amoebas.len() {
+        let Some(id) = sim.amoebas[i] else { continue };
+        let Some(b) = sim.world.body_mut(id) else { continue };
+        let c = b.centroid();
+        let n = b.boundary.len();
+        for k in 0..n {
+            let pi = b.boundary[k] as usize;
+            let ang = k as f32 / n as f32 * std::f32::consts::TAU;
+            let wave = (t * 3.1 + i as f32 * 1.7 + ang * 2.0).sin() * (t * 1.3 + i as f32).cos();
+            let out = (b.x[pi] - c).normalize_or_zero();
+            b.add_point_accel(pi, out * wave * 900.0);
         }
-        if let Some((slot, _, _)) = alive.iter().find(|(_, c, r)| c.distance(*p) < r + 18.0) {
+        let eaten_by = alive.iter().find(|(_, pc, r)| pc.distance(c) < r + 16.0).map(|a| a.0);
+        if let Some(slot) = eaten_by {
             sim.collected[i] = true;
-            if let Some(pl) = sim.player_mut(*slot) {
+            sim.amoebas[i] = None;
+            sim.tags.remove(&id);
+            sim.world.remove_body(id);
+            let color = crate::amoeba_color(i);
+            if let Some(pl) = sim.player_mut(slot) {
                 pl.pickups += 1;
+                pl.color = color;
             }
-            sim.events.push(SimEvent::Pickup { index: i, pos: *p, slot: *slot });
+            sim.events.push(SimEvent::Pickup { index: i, pos: c, slot, color });
         }
     }
     if let Some(goal) = sim.level.goal.as_ref().map(|g| g.outline()) {
