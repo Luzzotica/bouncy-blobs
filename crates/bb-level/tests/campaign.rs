@@ -385,7 +385,8 @@ impl Bot {
                 if at_prev || edge_ahead {
                     want_jump = true;
                 }
-                if !on_ground && feet < tgt.at.y + 120.0 {
+                // Puff to rise; ease off near the target height to hover.
+                if !on_ground && (feet < tgt.at.y - 40.0 || (vel.y < -100.0 && feet < tgt.at.y + 120.0)) {
                     button = true;
                 }
             }

@@ -93,3 +93,17 @@ Lulu (only in ch10).
 | `ch06_fountain` | A column of water rising straight up. Hint: float up it. Reg, faintly, from far below: "AND MIND THE FOUNTAIN!" |
 | `ch06_true_softness` | Pip, on the terrace, looks up: "True Softness…" Glimmer: "Every legend starts with someone silly enough to believe it." |
 | `ch06_outro` | A warm draught blows down from above, ruffling Glimmer. Wind whistles through tall flues. |
+
+## Chapter 7 — Windy Chimneys (Updraft Flues)
+
+| id | what happens |
+|---|---|
+| `ch07_intro` | A warm wind howls up through tall stone flues. Glimmer is blown about like a kite, giggling. |
+| `ch07_draft` | A strong updraft. Glimmer: "Hop in! The air wants to carry you." |
+| `ch07_puff` | This updraft is gentler. Hint: **hold the button to puff up** and float; let go to sink. Pip puffs into a balloon: "Pfff!" |
+| `ch07_gust` | A sideways gust over spikes. Glimmer: "Lean into it. Or rather, let it lean into you." |
+| `ch07_fans` | A flue full of slowly spinning fan blades. Hint: float up, steer around the blades. |
+| `ch07_geysers` | Puffing geysers over a spiky floor. Glimmer: "Hop, float, hop, float. Like a cloud with places to be." |
+| `ch07_sticky` | A chimney lined with sticky moss. Hint: touch a sticky wall in the air to cling; press the button to wall-jump. |
+| `ch07_giggle` | At the top of the great updraft, everything goes quiet… then, echoing down the flue from impossibly far above, a little girl's **giggle**. Pip freezes, then bounces so hard it squeaks. Glimmer, softly: "The Glow is real." |
+| `ch07_outro` | Beyond the flues: mountains of strange, bright, fallen things. A wind-up car rolls past on its own. |
