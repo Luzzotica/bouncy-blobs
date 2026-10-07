@@ -4,6 +4,7 @@ pub mod achievements;
 pub mod assets;
 pub mod audio;
 pub mod camera;
+pub mod cave;
 pub mod devtools;
 pub mod editor;
 pub mod flow;
@@ -59,7 +60,7 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(Color::srgb(0.1, 0.07, 0.14)))
+        app.insert_resource(ClearColor(Color::srgb(0.02, 0.015, 0.03)))
             .add_plugins((
                 assets::AssetsPlugin,
                 flow::FlowPlugin,
@@ -70,6 +71,7 @@ impl Plugin for GamePlugin {
                 camera::CameraPlugin,
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
+                cave::CavePlugin,
                 sandbox::SandboxPlugin,
             ))
             .add_plugins((
