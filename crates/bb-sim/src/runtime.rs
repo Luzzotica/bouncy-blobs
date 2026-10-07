@@ -253,6 +253,35 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
 pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
     let bodies = dynamic_bodies(sim);
 
+    // Crushers and drips: a softbody can always ooze around a slab's corner
+    // (puffed up, it wraps the crusher instead of flattening), so closing
+    // on a blob whose middle is underneath pops it outright.
+    let mut crushed = Vec::new();
+    for m in &sim.movers {
+        let bb_level::MoverMotion::Crusher { .. } = m.def.motion else { continue };
+        let Some(s) = sim.world.static_collider(m.id) else { continue };
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        for p in &s.poly {
+            lo = lo.min(*p);
+            hi = hi.max(*p);
+        }
+        let base_bottom = m.base.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        let closed_bottom = base_bottom + m.def.path.get(1).map_or(0.0, |d| d.y);
+        let blobs = sim.players.iter().filter(|p| p.dead.is_none()).map(|p| (p.ctl.body, p.ctl.radius)).chain(sim.npcs.iter().filter(|n| n.dead.is_none()).map(|n| (n.ctl.body, n.ctl.radius)));
+        for (id, r) in blobs {
+            let Some(b) = sim.world.body(id).filter(|b| b.enabled) else { continue };
+            let c = b.centroid();
+            let inside_x = c.x > lo.x + 6.0 && c.x < hi.x - 6.0;
+            let nearly_closed = lo.y < closed_bottom + r * 0.9;
+            if inside_x && nearly_closed && c.y < lo.y && c.y > closed_bottom - r * 3.0 {
+                crushed.push(id);
+            }
+        }
+    }
+    for id in crushed {
+        sim.pop(id);
+    }
+
     // Springs.
     for si in 0..sim.springs.len() {
         if sim.springs[si].cooldown > 0.0 {
