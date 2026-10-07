@@ -143,7 +143,7 @@ fn rounded_rect(center: PVec2, size: PVec2, r: f32) -> Vec<PVec2> {
 
 /// A jelly slab with a label. Tethered to where it was put, so it wobbles
 /// but never wanders off.
-fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble: f32) -> BodyId {
+pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble: f32) -> BodyId {
     // Wide tiles use a uniform grid: ear-clipping a long outline makes sliver
     // triangles whose area constraints fight each other and shear the body.
     let mut d = if size.x > size.y * 1.6 {
@@ -176,14 +176,21 @@ fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble:
 }
 
 fn label(commands: &mut Commands, assets: &GameAssets, body: BodyId, text: &str, size: f32, color: Color) {
-    commands.spawn((
+    label_with(commands, assets, body, text, size, color, MenuEntity);
+}
+
+/// A label riding on a jelly body, tagged with `marker` for cleanup.
+pub fn label_with<M: Component>(commands: &mut Commands, assets: &GameAssets, body: BodyId, text: &str, size: f32, color: Color, marker: M) -> Entity {
+    commands
+        .spawn((
         Text2d::new(text),
         TextFont { font: assets.font.clone().into(), font_size: size.into(), weight: FontWeight::BOLD, ..default() },
         TextColor(color),
         Transform::from_xyz(0.0, 0.0, z::FX - 0.5),
         BodyLabel { body, size },
-        MenuEntity,
-    ));
+        marker,
+    ))
+    .id()
 }
 
 fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u32)> {
@@ -222,7 +229,7 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
     }
 }
 
-fn button_style(color: u32, focused: bool) -> Style {
+pub fn button_style(color: u32, focused: bool) -> Style {
     let c = hex(color);
     let fill = if focused { lighten(c, 0.25) } else { c };
     Style { fill, rim: if focused { Color::WHITE } else { darken(c, 0.4) }, rim_w: if focused { 7.0 } else { 5.0 }, highlight: true, z: z::PROP + 1.0, top_rim_only: false }

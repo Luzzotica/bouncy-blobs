@@ -10,6 +10,8 @@ pub mod input;
 pub mod level_view;
 pub mod menu;
 pub mod palette;
+pub mod party;
+pub mod party_assets;
 pub mod render;
 pub mod sandbox;
 pub mod sim;
@@ -64,6 +66,7 @@ impl Plugin for GamePlugin {
                 sandbox::SandboxPlugin,
                 story::StoryPlugin,
                 menu::MenuPlugin,
+                party::PartyPlugin,
                 devtools::DevToolsPlugin,
             ));
     }
