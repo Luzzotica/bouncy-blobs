@@ -23,7 +23,6 @@ fn tramp(c: &mut Ch, x: f32, base_y: f32, cap_y: f32, power: f32) {
 pub fn build() -> Course {
     let mut c = Ch::new(3, "Mushroom Bounce", Theme::Fungus, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // ------------------------------------------- first boings
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);

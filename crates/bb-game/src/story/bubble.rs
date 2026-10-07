@@ -118,7 +118,7 @@ fn bubble_desc(anchor: PVec2, size: Vec2) -> (BodyDesc, Vec<usize>) {
 pub fn spawn_bubbles(
     mut commands: Commands,
     mut reqs: MessageReader<SayRequest>,
-    existing: Query<(Entity, &Bubble)>,
+    mut existing: Query<(Entity, &mut Bubble)>,
     mut game: Option<ResMut<Game>>,
     shared: Res<Shared>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -128,9 +128,15 @@ pub fn spawn_bubbles(
     let cam_p = cam.single().map(|t| t.translation.truncate()).unwrap_or_default();
     for r in reqs.read() {
         let Some(game) = game.as_mut() else { continue };
-        for (e, b) in existing.iter() {
+        for (e, mut b) in existing.iter_mut() {
             if b.speaker == r.speaker {
-                despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, b);
+                despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, &b);
+            } else {
+                // One voice at a time: anyone else still talking wraps up now.
+                let total = b.text.chars().count() as f32;
+                b.shown = total;
+                let typed = total / CHARS_PER_SEC;
+                b.linger = (b.age - typed).max(0.0);
             }
         }
         let Some(anchor) = speaker_anchor(game, &r.speaker, cam_p) else { continue };

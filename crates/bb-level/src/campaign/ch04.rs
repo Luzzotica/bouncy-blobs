@@ -25,7 +25,6 @@ fn rope_bridge(c: &mut Ch, a: Vec2, b: Vec2) {
 pub fn build() -> Course {
     let mut c = Ch::new(4, "Vine Gardens", Theme::Vines, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // ------------------------------------------------ the first swing
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);

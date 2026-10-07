@@ -15,13 +15,9 @@ pub fn build() -> Course {
     c.spawn(v(250.0, 40.0));
 
     // ------------------------------------------------ the Back Drip exit
-    // The Huddle (behind you) and the wall of the Hollow.
+    // The Bottom Puddle where Pip wakes up — alone — and the cave wall.
     c.wall(-1000.0, -650.0, -1200.0, 1600.0);
     c.floor(&[v(-650.0, 0.0), v(900.0, 0.0), v(1150.0, 45.0), v(1400.0, 0.0), v(1700.0, 30.0), v(2150.0, 0.0)]);
-    c.npc("granny", v(-380.0, 80.0), NpcRole::Granny, "", 72.0);
-    for (k, x) in [-560.0, -230.0, -140.0, -60.0].iter().enumerate() {
-        c.npc(&format!("huddle{k}"), v(*x, 40.0), NpcRole::Huddle, "", 28.0 + k as f32 * 2.0);
-    }
     c.say(520.0, 600.0, 0.0, "ch01_goodbye");
     c.pickup_arc(v(1000.0, 60.0), v(1300.0, 60.0), 90.0, 3);
     c.pickup_arc(v(1550.0, 70.0), v(1850.0, 70.0), 80.0, 3);

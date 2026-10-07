@@ -28,7 +28,6 @@ fn teacup(c: &mut Ch, x0: f32, x1: f32, y: f32, h: f32) {
 pub fn build() -> Course {
     let mut c = Ch::new(6, "Puddle Lake", Theme::Lake, -1400.0);
     c.spawn(v(0.0, 120.0));
-    c.npc("glimmer", v(-120.0, 300.0), NpcRole::Glimmer, "", 12.0);
 
     // -------------------------------------------- the shore and a paddle
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);

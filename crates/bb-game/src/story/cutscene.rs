@@ -16,6 +16,12 @@ use crate::sim::{Game, Inputs};
 
 #[derive(Clone, Debug)]
 pub enum Beat {
+    /// Eyes shut / open / roll into place (first awakening).
+    Eyes { who: String, state: EyeState },
+    /// Look in a direction (-1..1 each axis); `None` = back to natural.
+    Gaze { who: String, dir: Option<PVec2> },
+    /// Force an expression; `None` = back to natural.
+    Mood { who: String, mood: Option<crate::render::Mood> },
     /// Chapter title card.
     Title { title: String, sub: String },
     /// Speech bubble; waits until read (or the button is pressed).
@@ -41,6 +47,14 @@ pub enum Beat {
     Word { who: String, text: String },
     SpeedLines(bool),
     Fade { to: f32, secs: f32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EyeState {
+    Closed,
+    Open,
+    /// Pop open with pupils rolling round before they settle.
+    Roll,
 }
 
 pub struct Cutscene {
@@ -137,6 +151,7 @@ pub fn run(
     mut blub: MessageWriter<Blub>,
     mut prev_button: Local<bool>,
     mut word: MessageWriter<super::WordRequest>,
+    mut faces: ResMut<crate::render::FaceCues>,
 ) {
     let dt = time.delta_secs();
     cues.letterbox = true;
@@ -280,6 +295,23 @@ pub fn run(
                 Beat::Fade { to, secs } => {
                     cues.fade_target = *to;
                     cues.fade_speed = 1.0 / secs.max(0.01);
+                }
+                Beat::Eyes { who, state } => {
+                    if let Some(body) = game.sim.npc_by_id(who).map(|n| n.ctl.body) {
+                        let c = faces.0.entry(body).or_default();
+                        c.closed = *state == EyeState::Closed;
+                        c.roll = if *state == EyeState::Roll { 1.4 } else { 0.0 };
+                    }
+                }
+                Beat::Gaze { who, dir } => {
+                    if let Some(body) = game.sim.npc_by_id(who).map(|n| n.ctl.body) {
+                        faces.0.entry(body).or_default().look = dir.map(|d| Vec2::new(d.x, d.y));
+                    }
+                }
+                Beat::Mood { who, mood } => {
+                    if let Some(body) = game.sim.npc_by_id(who).map(|n| n.ctl.body) {
+                        faces.0.entry(body).or_default().mood = *mood;
+                    }
                 }
                 Beat::Wait(_) => {}
             }

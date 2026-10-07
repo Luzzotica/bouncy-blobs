@@ -11,9 +11,9 @@
 
 use super::*;
 
-/// A trapped Huddle blob sitting on the surface at (x, y).
+/// A trapped Grumble (grumpy grey rock-blob) on the surface at (x, y).
 fn trapped(c: &mut Ch, id: &str, x: f32, y: f32) {
-    c.npc(id, v(x, y + 30.0), NpcRole::Trapped, "", 28.0);
+    c.npc(id, v(x, y + 30.0), NpcRole::Trapped, "#8a8f86", 28.0);
 }
 
 /// Falling rubble: a stone block that drops from the roof onto the floor.
@@ -24,7 +24,6 @@ fn rubble(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
 pub fn build() -> Course {
     let mut c = Ch::new(9, "The Cave-In", Theme::CaveIn, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // ---------------------------------------------- the collapse
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);
@@ -111,7 +110,8 @@ pub fn build() -> Course {
     c.vine(v(9700.0, 2600.0), 560.0);
     c.pickup_arc(v(9450.0, 1950.0), v(10050.0, 1950.0), 220.0, 4);
     c.floor(&[v(10000.0, 1900.0), v(11000.0, 1900.0)]);
-    c.npc("granny", v(10350.0, 1980.0), NpcRole::Trapped, "#7e6bd6", 72.0);
+    // Old Grumbletop: the biggest, grumpiest Grumble.
+    c.npc("grumbletop", v(10350.0, 1980.0), NpcRole::Trapped, "#6f746c", 72.0);
     c.say(10150.0, 10200.0, 1900.0, "ch09_granny");
     c.wp(Move::Walk, 9420.0, 1850.0).wp(Move::Rope, 10120.0, 1900.0).wp(Move::Walk, 10350.0, 1900.0);
     c.say(10550.0, 10600.0, 1900.0, "ch09_all_together");

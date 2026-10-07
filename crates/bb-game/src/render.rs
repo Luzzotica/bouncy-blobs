@@ -118,6 +118,22 @@ pub enum Mood {
 #[derive(Resource, Default)]
 pub struct BodyEntities(pub HashMap<BodyId, Entity>);
 
+/// Cutscene direction for a character's face.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FaceCue {
+    /// Eyes shut (asleep / not yet awake).
+    pub closed: bool,
+    /// Seconds left of an eye-roll: pupils spin in wide circles that
+    /// settle into place (waking up for the first time).
+    pub roll: f32,
+    /// Forced gaze, -1..1 each axis.
+    pub look: Option<Vec2>,
+    pub mood: Option<Mood>,
+}
+
+#[derive(Resource, Default)]
+pub struct FaceCues(pub HashMap<BodyId, FaceCue>);
+
 /// Per-body style overrides (menu focus highlights, kids colour changes).
 #[derive(Resource, Default)]
 pub struct StyleOverrides(pub HashMap<BodyId, Style>);
@@ -141,6 +157,7 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BodyEntities>()
             .init_resource::<StyleOverrides>()
+            .init_resource::<FaceCues>()
             .init_resource::<crate::cave::Spores>()
             .add_systems(Startup, setup_shared)
             .add_systems(PostUpdate, (sync_bodies, update_faces).chain().run_if(resource_exists::<Game>))
@@ -849,6 +866,7 @@ fn update_faces(
     overrides: Res<StyleOverrides>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut faces: Query<(Entity, &mut Face, &mut Transform)>,
+    mut cues: ResMut<FaceCues>,
 ) {
     let dt = time.delta_secs();
     let t = time.elapsed_secs();
@@ -875,8 +893,19 @@ fn update_faces(
         let aspect = w / h;
         let r = (b.area().abs() / std::f32::consts::PI).sqrt();
         let v = b.velocity();
-        let target = Vec2::new((v.x / 400.0).clamp(-1.0, 1.0), (v.y / 600.0).clamp(-1.0, 1.0));
+        let cue = cues.0.get(&face.body).copied();
+        let mut target = Vec2::new((v.x / 400.0).clamp(-1.0, 1.0), (v.y / 600.0).clamp(-1.0, 1.0));
+        if let Some(l) = cue.and_then(|c| c.look) {
+            target = l;
+        }
         face.look = face.look.lerp(target, (dt * 8.0).min(1.0));
+        // Waking up: pupils roll round in shrinking circles, then settle.
+        if let Some(c) = cues.0.get_mut(&face.body).filter(|c| c.roll > 0.0) {
+            c.roll = (c.roll - dt).max(0.0);
+            let amp = (c.roll / 1.4).min(1.0);
+            let a = t * 9.0;
+            face.look = Vec2::new(a.cos(), a.sin()) * (0.25 + amp);
+        }
         face.blink -= dt;
         if face.blink < -0.12 {
             face.blink = 2.0 + (c.x * 0.013).sin().abs() * 3.0;
@@ -890,6 +919,7 @@ fn update_faces(
             None if aspect > 1.4 => Mood::Squash,
             _ => Mood::Idle,
         };
+        let mood = cue.and_then(|c| c.mood).unwrap_or(mood);
         face.hold -= dt;
         if mood != face.mood && face.hold <= 0.0 {
             face.mood = mood;
@@ -899,7 +929,7 @@ fn update_faces(
         face.open = (face.open + dt * 9.0).min(1.0);
         let style = overrides.0.get(&face.body).copied().unwrap_or_else(|| style_for(&game, face.body, &theme));
         tf.translation.z = style.z + 0.0005;
-        let blinking = face.blink < 0.0;
+        let blinking = face.blink < 0.0 || cue.is_some_and(|c| c.closed);
         draw_face(&mut buf, &FaceParams {
             c,
             r,

@@ -26,7 +26,6 @@ fn updraft(c: &mut Ch, x0: f32, x1: f32, y0: f32, y1: f32, accel: f32) {
 pub fn build() -> Course {
     let mut c = Ch::new(7, "Windy Chimneys", Theme::Chimney, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // -------------------------------------- the first warm breath
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);

@@ -31,7 +31,6 @@ fn lift(c: &mut Ch, x: f32, y0: f32, y1: f32, width: f32, period: f32, phase: f3
 pub fn build() -> Course {
     let mut c = Ch::new(5, "The Crusher Hall", Theme::Stoneworks, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // ------------------------------------------------ the thumping hall
     c.wall(-1300.0, -500.0, -1400.0, 1800.0);

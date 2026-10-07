@@ -39,7 +39,6 @@ fn toy_block(c: &mut Ch, x: f32, top: f32, size: f32, color: &str) {
 pub fn build() -> Course {
     let mut c = Ch::new(8, "The Toy Pile", Theme::Toys, -1400.0);
     c.spawn(v(0.0, 40.0));
-    c.npc("glimmer", v(-120.0, 220.0), NpcRole::Glimmer, "", 12.0);
 
     // ----------------------------------------------------- the midden
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);

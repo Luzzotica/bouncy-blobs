@@ -146,6 +146,7 @@ fn exit(mut commands: Commands, mut cues: ResMut<Cues>, mut cam: ResMut<CameraDi
 
 fn start_cutscene(id: &str, progress: &StoryProgress, commands: &mut Commands, load: &mut MessageWriter<LoadLevel>) -> bool {
     let Some(cs) = scripts::cutscene(id, progress.pip_color) else { return false };
+    commands.insert_resource(crate::render::FaceCues::default());
     commands.insert_resource(Runner::new(&cs));
     load.write(LoadLevel { level: cs.stage, players: Vec::new() });
     true

@@ -41,12 +41,7 @@ fn block(c: &mut Ch, x: f32, top: f32, color: &str) {
 pub fn build() -> Course {
     let mut c = Ch::new(10, "The Light Well", Theme::Well, -1400.0);
     c.spawn(v(-1350.0, 40.0));
-    c.npc("glimmer", v(-1400.0, 240.0), NpcRole::Glimmer, "", 12.0);
-    // The whole Huddle follows Pip up. Granny brings up the rear.
-    c.npc("granny", v(-1460.0, 70.0), NpcRole::Follower, "#7e6bd6", 40.0);
-    for (k, x) in [-1400.0, -1300.0, -1240.0, -1180.0, -1130.0].iter().enumerate() {
-        c.npc(&format!("huddle{k}"), v(*x, 40.0), NpcRole::Follower, "", 22.0 + (k % 3) as f32 * 2.0);
-    }
+    // Pip climbs alone, toward the light.
 
     // ------------------------------- the tunnel and a sagging bridge
     c.floor(&[v(-1500.0, 0.0), v(-1100.0, 0.0), v(-1050.0, -120.0), v(-750.0, -120.0), v(-700.0, 0.0), v(0.0, 0.0)]);
