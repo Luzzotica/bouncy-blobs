@@ -14,6 +14,7 @@ pub mod menu;
 pub mod palette;
 pub mod party;
 pub mod party_assets;
+pub mod pause;
 pub mod render;
 pub mod sandbox;
 pub mod save;
@@ -86,6 +87,7 @@ impl Plugin for GamePlugin {
                 story::StoryPlugin,
                 menu::MenuPlugin,
                 party::PartyPlugin,
+                pause::PausePlugin,
                 devtools::DevToolsPlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,

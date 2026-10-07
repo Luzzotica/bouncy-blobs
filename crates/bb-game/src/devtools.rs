@@ -17,6 +17,9 @@ impl Plugin for DevToolsPlugin {
         if std::env::var("BB_SHOT").is_ok() {
             app.add_systems(PostStartup, offscreen).add_systems(Update, shoot);
         }
+        if std::env::var("BB_PRESS").is_ok() {
+            app.add_systems(PreUpdate, press.after(bevy::input::InputSystems));
+        }
         if std::env::var("BB_AUTOPLAY").is_ok() {
             app.add_systems(PreUpdate, autoplay.after(crate::input::InputPlugin::gather_set()));
         }
@@ -63,4 +66,27 @@ fn autoplay(time: Res<Time>, mut inputs: ResMut<Inputs>) {
     let t = time.elapsed_secs();
     inputs.slots[0].stick.x = 1.0;
     inputs.slots[0].button = t.fract() < 0.35;
+}
+
+/// `BB_PRESS=escape@60,enter@90` taps keys at given frames.
+fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
+    *frame += 1;
+    let spec = std::env::var("BB_PRESS").unwrap_or_default();
+    for item in spec.split(',') {
+        let Some((k, f)) = item.split_once('@') else { continue };
+        let Ok(f) = f.parse::<u32>() else { continue };
+        let key = match k {
+            "escape" => KeyCode::Escape,
+            "enter" => KeyCode::Enter,
+            "space" => KeyCode::Space,
+            "down" => KeyCode::ArrowDown,
+            "right" => KeyCode::ArrowRight,
+            _ => continue,
+        };
+        if *frame == f {
+            keys.press(key);
+        } else if *frame == f + 1 {
+            keys.release(key);
+        }
+    }
 }

@@ -10,8 +10,7 @@ pub struct SandboxPlugin;
 
 impl Plugin for SandboxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, start)
-            .add_systems(Update, back_to_title.run_if(in_state(AppState::Playing).or_else(in_state(AppState::Story))));
+        app.add_systems(Startup, start);
     }
 }
 
@@ -56,10 +55,3 @@ fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState
     }
 }
 
-/// Esc (or Back on Android) from free play returns to the title.
-fn back_to_title(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>, mut unload: MessageWriter<crate::sim::UnloadLevel>) {
-    if keys.just_pressed(KeyCode::Escape) {
-        unload.write(crate::sim::UnloadLevel);
-        next.set(AppState::Title);
-    }
-}
