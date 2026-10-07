@@ -40,6 +40,12 @@ pub fn sandbox_level() -> bb_level::Level {
     b.build()
 }
 
-fn start(mut load: MessageWriter<LoadLevel>) {
+fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<crate::flow::AppState>>) {
+    if let Ok(s) = std::env::var("BB_START") {
+        if s == "story" {
+            next.set(crate::flow::AppState::Story);
+            return;
+        }
+    }
     load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
 }

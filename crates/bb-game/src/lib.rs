@@ -12,6 +12,7 @@ pub mod palette;
 pub mod render;
 pub mod sandbox;
 pub mod sim;
+pub mod story;
 
 use bevy::prelude::*;
 
@@ -52,6 +53,7 @@ impl Plugin for GamePlugin {
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
+                story::StoryPlugin,
                 devtools::DevToolsPlugin,
             ));
     }

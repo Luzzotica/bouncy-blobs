@@ -69,6 +69,8 @@ pub struct Controller {
     pub stuck: Option<Vec2>,
     /// Movement strength multiplier (NPCs are a bit slower).
     pub strength: f32,
+    /// Scripted puff: inflate toward this scale without jumping.
+    pub puff: Option<f32>,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -111,6 +113,7 @@ impl Controller {
             climb_timer: 0.0,
             stuck: None,
             strength: 1.0,
+            puff: None,
         }
     }
 
@@ -153,7 +156,7 @@ impl Controller {
         let vel = body.velocity();
 
         // Expand / relax.
-        let target = if self.input.button { tune::EXPAND_SCALE } else { 1.0 };
+        let target = self.puff.unwrap_or(if self.input.button { tune::EXPAND_SCALE } else { 1.0 });
         let rate = if target > self.expand { tune::EXPAND_RATE } else { tune::RELAX_RATE };
         self.expand += (target - self.expand) * (1.0 - (-rate * dt).exp());
 
