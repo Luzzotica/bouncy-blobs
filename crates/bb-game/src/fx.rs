@@ -164,6 +164,13 @@ fn react(
                     word(&mut commands, &assets, "grab!", Vec2::new(c.x, c.y + 60.0), hex(0xc6f68d), 34.0);
                 }
             }
+            SimEvent::Phew { body } => {
+                if let Some(b) = game.sim.world.body(*body) {
+                    let c = b.centroid();
+                    burst(&mut commands, &shared, &mut cache, &mut mats, Burst { pos: Vec2::new(c.x, c.y), color: 0xfff3a3, count: 8, speed: 200.0, size: 4.0, life: 0.6, gravity: 0.0, implode: 0.0 }, seed + 7);
+                    word(&mut commands, &assets, "phew!", Vec2::new(c.x, c.y + 60.0), hex(0xc6f68d), 36.0);
+                }
+            }
             SimEvent::NpcFreed { index } => {
                 if let Some(b) = game.sim.npcs.get(*index as usize).and_then(|n| game.sim.world.body(n.ctl.body)) {
                     let c = b.centroid();

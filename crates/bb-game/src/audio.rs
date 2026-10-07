@@ -257,6 +257,9 @@ fn sim_sounds(
                 Action::Jump => {}
             },
             SimEvent::Story { .. } => {}
+            SimEvent::Phew { .. } => {
+                out.write(PlaySfx::new("powerup-sparkle", 0.4, 1.5));
+            }
         }
     }
 }

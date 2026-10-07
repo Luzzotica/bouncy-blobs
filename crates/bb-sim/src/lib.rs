@@ -93,6 +93,8 @@ pub enum SimEvent {
     Spring { index: usize },
     Action { who: Who, action: Action },
     NpcFreed { index: u16 },
+    /// A blob was squeezed next to a crush but spared.
+    Phew { body: BodyId },
 }
 
 pub struct Sim {
@@ -295,6 +297,7 @@ impl Sim {
         for e in self.world.drain_events() {
             match e {
                 Event::Popped { body, position, .. } => self.on_popped(body, position),
+                Event::Spared { body } => self.events.push(SimEvent::Phew { body }),
                 Event::Impact { body, point, speed, .. } => {
                     self.events.push(SimEvent::Impact { body, pos: point, speed })
                 }
