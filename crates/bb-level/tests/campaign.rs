@@ -226,12 +226,13 @@ struct Bot {
     dashing: bool,
     riding: bool,
     last_hit: Option<f32>,
+    float_t: f32,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None, float_t: 0.0 }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -466,6 +467,25 @@ impl Bot {
             }
         }
 
+        // Floating (in water) below a non-swim target: get out from under
+        // it and puff up to bob beside it.
+        if self.since_ground > 0.6 && feet < tgt.at.y && vel.y.abs() < 300.0 && p.ctl.grab.is_none()
+            && matches!(tgt.how, Move::Jump | Move::Walk | Move::Drop)
+        {
+            button = true;
+            if dx.abs() < 110.0 {
+                stick.x = if pos.x >= tgt.at.x { 1.0 } else { -1.0 };
+            }
+            // Can't climb back onto it from the water: aim for the next one
+            // (currents and beaches lead onwards).
+            self.float_t += dt;
+            if self.float_t > 3.0 && self.i + 1 < path.len() {
+                self.float_t = 0.0;
+                self.i += 1;
+            }
+        } else {
+            self.float_t = 0.0;
+        }
         if want_jump && on_ground && self.hold <= 0.0 && !self.prev_button {
             self.hold = 0.55;
             self.jumped = true;

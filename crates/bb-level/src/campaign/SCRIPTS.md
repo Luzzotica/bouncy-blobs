@@ -78,3 +78,18 @@ Lulu (only in ch10).
 | `ch05_whole_trick` | The low point turns. Pip, after yet another pop, reforms and *laughs*. Glimmer: "You popped. You came back. That's the whole trick." Pip bounces at full size again. |
 | `ch05_light` | Out of the works; damp air and the shimmer of water ahead. A distant, pompous voice echoes: "HALT! Who approaches the Royal Lake?!" |
 | `ch05_outro` | Pip and Glimmer peek out at a vast underground lake. On an island far away: a teacup, and in it, a sock. |
+
+## Chapter 6 — Puddle Lake (Underground Lake)
+
+| id | what happens |
+|---|---|
+| `ch06_intro` | A vast, still, glittering lake. Somewhere across it, a teacup on an island, and a sock in the teacup, posing. |
+| `ch06_lake` | Pip has never seen so much water. Wobble of nerves. Glimmer: "Jelly floats, silly. You're basically a boat." |
+| `ch06_float` | Hint: in water you float; hold the button to puff up and bob higher. Paddle to the far bank. |
+| `ch06_reg_hail` | (Approaching the island.) A booming voice: "HALT! You approach the court of HIS ROYAL SOFTNESS, KING REGINALD SOCK THE FIRST!" Glimmer: "That's Reg." |
+| `ch06_reg_tale` | **Reg's court.** Reg, lounging in his teacup: he fell down the well years ago from *the surface*. He tells of the Glow, a crack of daylight at the top of the Old Well, and of **the Girl** who lost him, "the warmest, softest thing in the world." True Softness! He gets the details hilariously wrong (the Girl is "approximately the size of a mountain and made entirely of pillows"). Completely unreliable; also completely right. He points the way: "Follow the current, little jelly. Up the fountain. Tell her Reg sends his regards." |
+| `ch06_current` | The river grabs Pip and whooshes along; crates bob past. Pip: "Wheee!" |
+| `ch06_against` | The current now runs the wrong way. Glimmer: "When the water says no, hop on the lily pads and say yes." |
+| `ch06_fountain` | A column of water rising straight up. Hint: float up it. Reg, faintly, from far below: "AND MIND THE FOUNTAIN!" |
+| `ch06_true_softness` | Pip, on the terrace, looks up: "True Softness…" Glimmer: "Every legend starts with someone silly enough to believe it." |
+| `ch06_outro` | A warm draught blows down from above, ruffling Glimmer. Wind whistles through tall flues. |
