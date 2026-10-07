@@ -78,6 +78,10 @@ pub struct Runner {
     pub puffs: Vec<(String, f32)>,
     pub hops: Vec<(String, f32)>,
     pub strolls: Vec<(String, f32)>,
+    /// Who spoke last, and the extra wait before the current line (a new
+    /// speaker waits for the old bubble to close).
+    pub last_speaker: Option<String>,
+    pub say_gap: f32,
 }
 
 impl Runner {
@@ -94,6 +98,8 @@ impl Runner {
             puffs: Vec::new(),
             hops: Vec::new(),
             strolls: Vec::new(),
+            last_speaker: None,
+            say_gap: 0.0,
         }
     }
 }
@@ -240,6 +246,8 @@ pub fn run(
             match &beat {
                 Beat::Title { title, sub } => cues.title = Some((title.clone(), sub.clone(), 2.6)),
                 Beat::Say { who, text } | Beat::Aside { who, text } => {
+                    runner.say_gap = if runner.last_speaker.as_ref().is_some_and(|l| l != who) { super::bubble::speaker_change_delay() } else { 0.0 };
+                    runner.last_speaker = Some(who.clone());
                     let voice = voice_for(&game, who);
                     let speaker = if who == "lulu" { Speaker::Offscreen } else { Speaker::Actor(who.clone()) };
                     say.write(SayRequest { speaker, text: text.clone(), voice, linger: linger_secs(text) });
@@ -320,7 +328,7 @@ pub fn run(
         let t = runner.timer;
         let complete = match &beat {
             Beat::Title { .. } => t > 2.4 || (tapped && t > 0.4),
-            Beat::Say { text, .. } => t > say_wait(text) || (tapped && t > 0.25),
+            Beat::Say { text, .. } => t > runner.say_gap + say_wait(text) || (tapped && t > runner.say_gap + 0.25),
             Beat::Walk { who, .. } => !runner.strolls.iter().any(|s| &s.0 == who) || t > 4.0,
             Beat::Wait(s) => t >= *s,
             Beat::Fade { secs, .. } => t >= *secs,

@@ -27,6 +27,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch02_hello` | Glimmer, from the intro, greets you (grumpily). |
 | `ch02_intro` | Drippy tunnels; Pip, still a bit sad, rolls in. A drip plops on Pip's head. Pip laughs despite itself. |
 | `ch02_drips` | Plip… plop. Hint: drips fall in a rhythm; time your roll. |
 | `ch02_meet_glimmer` | A glowworm uncurls from the ceiling: **Glimmer**. "Ooh! A bouncy one! A wobble is just a hug that hasn't found its person yet!" Glimmer decides to tag along. |
@@ -41,6 +42,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch03_hello` | The Puffcaps tease you at the start. |
 | `ch03_intro` | The Fungus Caverns glow orange and pink; giant caps wobble. Pip's eyes go huge (sparkle eyes). Glimmer: "Go on. Bounce. Nobody here minds." |
 | `ch03_fungus` | Pip bounces once, cautiously, then again, bigger. A tiny squeal. |
 | `ch03_first_trampoline` | Hint: land on a mushroom cap to get **launched**. Glimmer: "Some floors push back. Those are the good ones." |
@@ -55,6 +57,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch04_hello` | The Tangles warn you off their vines. |
 | `ch04_intro` | Glowing roots and dangling vines sway like they're listening. Glimmer swings on one, giggling. "Grab on! Vines love a hug." |
 | `ch04_vines` | Hint: jump into a vine to **grab** it; stick to swing; button to **let go** (with a big fling). A soft basin waits below the first one. |
 | `ch04_swing_chain` | Two vines over spikes. Glimmer: "Let go at the top of the swing. Trust the swing." |
@@ -69,6 +72,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch05_hello` | Clonk: "CLONK." |
 | `ch05_intro` | The Old Stone Works: huge, cold, rhythmic. THUMP. THUMP. Pip's bounce gets small. Glimmer's light flickers nervously. |
 | `ch05_thump` | Pip flinches at every thump. Hint: pistons slam, wait, then rise; go when they're rising. |
 | `ch05_crusher` | A piston squashes a crate flat (it wobbles back, offended). Pip: "…eep." |
@@ -83,6 +87,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch06_hello` | Reg shoos you toward the lake. |
 | `ch06_intro` | A vast, still, glittering lake. Somewhere across it, a teacup on an island, and a sock in the teacup, posing. |
 | `ch06_lake` | Pip has never seen so much water. Wobble of nerves. Glimmer: "Jelly floats, silly. You're basically a boat." |
 | `ch06_float` | Hint: in water you float; hold the button to puff up and bob higher. Paddle to the far bank. |
@@ -98,6 +103,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch07_hello` | The Gusties are back. |
 | `ch07_intro` | A warm wind howls up through tall stone flues. Glimmer is blown about like a kite, giggling. |
 | `ch07_draft` | A strong updraft. Glimmer: "Hop in! The air wants to carry you." |
 | `ch07_puff` | This updraft is gentler. Hint: **hold the button to puff up** and float; let go to sink. Pip puffs into a balloon: "Pfff!" |
@@ -112,6 +118,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch08_hello` | Button the teddy, gruff but kind. |
 | `ch08_intro` | Mountains of fallen toys, bright and bonkers: blocks, balls, crayons, a wind-up car whirring in circles. Glimmer: "Everything that falls down the well ends up here. Including, apparently, us." |
 | `ch08_midden` | Pip boings off a rubber ball, giggles, boings off another. The crazy chapter begins. |
 | `ch08_ball_bridge` | A huge bouncy ball and a spiky V-shaped pit too wide to jump. Hint: **push** the ball into the pit, then hop across on top of it. |
@@ -127,6 +134,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
+| `ch09_hello` | A Grumble at the cave-in mouth. |
 | `ch09_intro` | (Continues from ch08's rumble.) The tunnels shudder; rocks rain down. Pip races back the way it came, toward the sound of familiar murmurs. |
 | `ch09_rumble` | Dust, cracks, a muffled chorus of "help… help…" in soft Huddle voices. Pip's eyes go wide. |
 | `ch09_first_rescue` | A Huddle blob wedged in a dip. Hint: **touch** a trapped blob to free it; it follows you. The blob, sheepish: "We… followed you." |

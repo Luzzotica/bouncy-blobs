@@ -60,9 +60,19 @@ pub(crate) fn apply_forces(b: &mut Body, fm: &crate::body::ForceModel, h: f32) {
         }
         let rot = Vec2::new(s_dot, s_cross).normalize_or(Vec2::X);
         let v_com = b.v.iter().copied().sum::<Vec2>() / n as f32;
+        // Rigid spin (ω about the centroid). `spin_damp` = 1 damps it like
+        // any wobble (2.x); 0 lets the blob roll freely.
+        let (mut l, mut inertia) = (0.0, 0.0);
+        for i in 0..n {
+            let r = b.x[i] - c;
+            l += r.perp_dot(b.v[i] - v_com);
+            inertia += r.length_squared();
+        }
+        let omega = if inertia > 1e-6 { l / inertia } else { 0.0 } * (1.0 - fm.spin_damp);
         for i in 0..n {
             let goal = c + rot.rotate(b.rest[i] * b.rest_scale) * b.squash;
-            acc[i] += (goal - b.x[i]) * fm.shape_k - (b.v[i] - v_com) * fm.shape_damp;
+            let rigid = v_com + (b.x[i] - c).perp() * omega;
+            acc[i] += (goal - b.x[i]) * fm.shape_k - (b.v[i] - rigid) * fm.shape_damp;
         }
     }
     for i in 0..n {

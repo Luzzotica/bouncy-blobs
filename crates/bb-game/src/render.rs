@@ -1243,7 +1243,8 @@ fn sync_bodies(
     overrides: Res<StyleOverrides>,
     mut spores: ResMut<crate::cave::Spores>,
     lip: Res<LipGlow>,
-    mut visuals: Query<&mut BodyVisual>,
+    interp: Res<crate::sim::Interp>,
+    mut visuals: Query<(&mut BodyVisual, &mut Transform)>,
 ) {
     let theme = palette::theme(game.sim.level.theme);
     let t = time.elapsed_secs();
@@ -1310,7 +1311,10 @@ fn sync_bodies(
         .filter_map(|p| game.sim.world.body(p.ctl.body).map(|b| (b.centroid(), p.ctl.radius)))
         .collect();
     // Rebuild meshes.
-    for mut v in visuals.iter_mut() {
+    for (mut v, mut tf) in visuals.iter_mut() {
+        let off = interp.offset(&game, v.id);
+        tf.translation.x = off.x;
+        tf.translation.y = off.y;
         if let Some(s) = overrides.0.get(&v.id) {
             v.style = *s;
         } else if let Some(BodyTag::Player(slot)) = game.sim.tag(v.id) {
@@ -1363,6 +1367,7 @@ fn update_faces(
     mut meshes: ResMut<Assets<Mesh>>,
     mut faces: Query<(Entity, &mut Face, &mut Transform)>,
     mut cues: ResMut<FaceCues>,
+    interp: Res<crate::sim::Interp>,
 ) {
     let dt = time.delta_secs();
     let t = time.elapsed_secs();
@@ -1425,6 +1430,9 @@ fn update_faces(
         face.open = (face.open + dt * 9.0).min(1.0);
         let style = overrides.0.get(&face.body).copied().unwrap_or_else(|| style_for(&game, face.body, &theme));
         tf.translation.z = style.z + 0.0005;
+        let off = interp.offset(&game, face.body);
+        tf.translation.x = off.x;
+        tf.translation.y = off.y;
         let blinking = face.blink < 0.0 || cue.is_some_and(|c| c.closed);
         draw_face(&mut buf, &FaceParams {
             c,

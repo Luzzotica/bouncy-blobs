@@ -109,6 +109,9 @@ pub struct ForceModel {
     /// damping of velocity relative to the body (1/s).
     pub shape_k: f32,
     pub shape_damp: f32,
+    /// How much of `shape_damp` also brakes rigid rotation (1 = 2.x, rolling
+    /// is braked hard; 0 = free rolling).
+    pub spin_damp: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -670,6 +673,19 @@ impl Body {
                 *v += dv;
             }
         }
+    }
+
+    /// Best-fit rigid angular velocity (radians/s) about the centroid.
+    pub fn angular_velocity(&self) -> f32 {
+        let c = self.centroid();
+        let vc = self.velocity();
+        let (mut l, mut i) = (0.0, 0.0);
+        for (p, v) in self.x.iter().zip(&self.v) {
+            let r = *p - c;
+            l += r.perp_dot(*v - vc);
+            i += r.length_squared();
+        }
+        if i > 1e-6 { l / i } else { 0.0 }
     }
 
     /// Instantly add angular velocity (radians/s) about the centroid.

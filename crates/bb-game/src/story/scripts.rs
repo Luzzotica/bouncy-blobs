@@ -557,6 +557,14 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
 /// "lulu" (off-screen), "tip" (a gameplay hint bubble).
 pub fn level_lines(id: &str) -> Vec<(&'static str, &'static str)> {
     let l: &[(&str, &str)] = match id {
+        "ch02_hello" => &[("glimmer", "You AGAIN? Stop following my light."), ("pip", "I'm not following! I'm going UP!")],
+        "ch03_hello" => &[("cap2", "Ooh, a blob! A wobbly one!"), ("cap1", "Bet it can't bounce like US!"), ("pip", "Watch me!")],
+        "ch04_hello" => &[("tangle1", "Don't touch the vines."), ("tangle2", "Ever. EVER."), ("pip", "...noted!")],
+        "ch05_hello" => &[("clonk", "CLONK."), ("pip", "Hi Clonk! Still a no-clonk?"), ("clonk", "...CLONK.")],
+        "ch06_hello" => &[("reg", "Commoner! The lake is THAT way. Go AWAY that way."), ("pip", "Thanks, Your Softness!")],
+        "ch07_hello" => &[("gust1", "Wheee! The blob's back!"), ("gust2", "Blow it! Blow it!"), ("pip", "Please don't blow it.")],
+        "ch08_hello" => &[("button", "You again. Still looking for friends?"), ("pip", "Yep!"), ("button", "...Hmph. Good luck, kid.")],
+        "ch09_hello" => &[("grumble", "Don't go in there. It's all rocks."), ("pip", "Is anybody stuck?"), ("grumble", "...maybe. Ugh. Fine. YES.")],
         "ch01_goodbye" => &[("pip", "Hello? Anybody?"), ("pip", "...just me, then.")],
         "ch01_first_hop" => &[("tip", "Tap the button to hop. Hold it to swell up big and jump higher!")],
         "ch01_pointy" => &[("pip", "Pointy."), ("tip", "Run and jump over the spikes!")],

@@ -52,6 +52,9 @@ impl Npc {
             world.remove_body(c.body);
             c.body = body;
             c.radius = radius;
+            // The sock isn't a 2.x blob: a full fast swell would launch it.
+            // Its hop is a small puff.
+            c.expand_scale = Some(1.12);
             c
         } else {
             Controller::spawn(world, def.pos, radius, layer::NPC)
@@ -122,7 +125,17 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
         .collect();
     let mut freed = Vec::new();
     for n in sim.npcs.iter_mut() {
-        if n.dead.is_some() || n.scripted {
+        if n.dead.is_some() {
+            continue;
+        }
+        if n.role == NpcRole::Reg {
+            // Socks stand up (scripted or not): a gentle righting spin.
+            if let Some(bm) = sim.world.body_mut(n.ctl.body) {
+                let (a, spin) = (bm.angle(), bm.angular_velocity());
+                bm.add_spin((-a * 8.0 - spin * 2.0) * dt);
+            }
+        }
+        if n.scripted {
             continue;
         }
         let Some(b) = sim.world.body(n.ctl.body) else { continue };
@@ -153,6 +166,7 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
                 continue;
             }
             NpcRole::Huddle | NpcRole::Granny | NpcRole::Reg if !n.following => {
+
                 if n.timer <= 0.0 {
                     n.timer = 1.5 + n.rand() * 3.0;
                     input.button = n.rand() < 0.5;

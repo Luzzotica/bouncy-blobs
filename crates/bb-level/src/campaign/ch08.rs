@@ -43,6 +43,9 @@ pub fn build() -> Course {
     // ----------------------------------------------------- the midden
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);
     c.floor(&[v(-500.0, 0.0), v(1600.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("button", v(-260.0, 80.0), NpcRole::Granny, "#b07a4f", 46.0);
+    c.say(-80.0, 80.0, 0.0, "ch08_hello");
     c.say(250.0, 320.0, 0.0, "ch08_midden");
     c.ball(v(450.0, 40.0), 28.0, "#ff6b6b");
     c.ball(v(700.0, 40.0), 22.0, "#4d96ff");

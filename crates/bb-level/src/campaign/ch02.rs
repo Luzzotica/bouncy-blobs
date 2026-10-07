@@ -21,6 +21,9 @@ pub fn build() -> Course {
     // ------------------------------------------------ plip, plop, drip
     c.wall(-1300.0, -500.0, -1400.0, 1700.0);
     c.floor(&[v(-500.0, 0.0), v(560.0, 0.0), v(700.0, -30.0), v(850.0, 0.0), v(2000.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("glimmer_start", v(-200.0, 200.0), NpcRole::Glimmer, "", 12.0);
+    c.say(-80.0, 80.0, 0.0, "ch02_hello");
     c.say(250.0, 320.0, 0.0, "ch02_drips");
     // Drips: first one well clear of the path to show the rhythm.
     c.drip_hazard(v(480.0, 560.0), 520.0, 30.0, 0.0);

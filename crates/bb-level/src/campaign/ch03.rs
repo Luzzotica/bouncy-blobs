@@ -27,6 +27,11 @@ pub fn build() -> Course {
     // ------------------------------------------- first boings
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);
     c.floor(&[v(-500.0, 0.0), v(740.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    for (k, x) in [-330.0, -240.0, -150.0].iter().enumerate() {
+        c.npc(&format!("cap{}", k + 1), v(*x, 40.0), NpcRole::Huddle, "#ff6fa8", 26.0);
+    }
+    c.say(-80.0, 80.0, 0.0, "ch03_hello");
     c.say(150.0, 220.0, 0.0, "ch03_fungus");
     // Secret: a spring behind the start up to a hidden shelf.
     c.spring(v(-400.0, 0.0), 90.0, 1300.0);

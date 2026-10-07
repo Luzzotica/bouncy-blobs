@@ -47,6 +47,7 @@ fn spawn_camera(mut commands: Commands) {
 
 fn follow(
     game: Option<Res<Game>>,
+    interp: Option<Res<crate::sim::Interp>>,
     mut dir: ResMut<CameraDirector>,
     time: Res<Time>,
     mut cam: Query<(&mut Transform, &mut Projection), With<MainCamera>>,
@@ -62,11 +63,14 @@ fn follow(
                 .players
                 .iter()
                 .filter(|p| p.dead.is_none())
-                .filter_map(|p| game.sim.world.body(p.ctl.body))
-                .map(|b| {
+                .filter_map(|p| game.sim.world.body(p.ctl.body).map(|b| (p.ctl.body, b)))
+                .map(|(id, b)| {
+                    // Follow where the blob is DRAWN (interpolated), so the
+                    // camera and the blob move in lockstep.
                     let c = b.centroid();
                     let v = b.velocity();
-                    (Vec2::new(c.x, c.y), Vec2::new(v.x, v.y))
+                    let off = interp.as_ref().map_or(Vec2::ZERO, |i| i.offset(game, id));
+                    (Vec2::new(c.x, c.y) + off, Vec2::new(v.x, v.y))
                 })
                 .collect();
             if !pts.is_empty() {

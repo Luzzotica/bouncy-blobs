@@ -56,6 +56,8 @@ impl Plugin for SimPlugin {
             .add_message::<LoadLevel>()
             .add_message::<UnloadLevel>()
             .add_systems(PreUpdate, (unload_levels, load_levels).chain())
+            .init_resource::<Interp>()
+            .add_systems(PreUpdate, update_interp)
             .add_systems(FixedUpdate, step.run_if(resource_exists::<Game>));
     }
 }
@@ -103,9 +105,48 @@ fn unload_levels(mut commands: Commands, mut reader: MessageReader<UnloadLevel>)
     }
 }
 
-fn step(mut game: ResMut<Game>, inputs: Res<Inputs>, mut out: MessageWriter<SimMsg>) {
+/// Render interpolation. The sim steps at a fixed 60 Hz but frames are
+/// drawn at the display rate (120 Hz on ProMotion), so moving bodies are
+/// drawn between their previous and current step positions, otherwise a
+/// moving blob stutters against the smooth camera and reads as doubled.
+#[derive(Resource, Default)]
+pub struct Interp {
+    /// Centroid of each moving body before the latest step.
+    pub prev: std::collections::HashMap<bb_sim::BodyId, Vec2>,
+    /// 0..1: how far the display time is between the last two steps.
+    pub alpha: f32,
+}
+
+impl Interp {
+    /// Offset to draw `id` at (added to its current-step position).
+    pub fn offset(&self, game: &Game, id: bb_sim::BodyId) -> Vec2 {
+        let (Some(p), Some(b)) = (self.prev.get(&id), game.sim.world.body(id)) else { return Vec2::ZERO };
+        let c = b.centroid();
+        let d = Vec2::new(p.x - c.x, p.y - c.y);
+        // A teleport (respawn, snap) shouldn't smear.
+        if d.length() > 200.0 {
+            return Vec2::ZERO;
+        }
+        d * (1.0 - self.alpha)
+    }
+}
+
+/// Update the blend factor each frame (after fixed steps have run).
+pub fn update_interp(mut interp: ResMut<Interp>, fixed: Res<Time<Fixed>>) {
+    interp.alpha = fixed.overstep_fraction().clamp(0.0, 1.0);
+}
+
+fn step(mut game: ResMut<Game>, inputs: Res<Inputs>, mut out: MessageWriter<SimMsg>, mut interp: ResMut<Interp>) {
     if game.paused {
         return;
+    }
+    interp.prev.clear();
+    for (id, b) in game.sim.world.bodies() {
+        if matches!(game.sim.tag(id), Some(bb_sim::BodyTag::Jelly) | None) || !b.enabled {
+            continue;
+        }
+        let c = b.centroid();
+        interp.prev.insert(id, Vec2::new(c.x, c.y));
     }
     let slots: Vec<u8> = game.sim.players.iter().filter(|p| p.local).map(|p| p.slot).collect();
     for s in slots {

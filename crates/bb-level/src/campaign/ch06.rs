@@ -33,6 +33,9 @@ pub fn build() -> Course {
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);
     // The near bank is a beach: anyone who falls in the lake drifts back to it.
     c.floor(&[v(-500.0, 80.0), v(1000.0, 80.0), v(1150.0, -120.0), v(1550.0, -120.0), v(1800.0, 80.0), v(2050.0, 80.0), v(2400.0, -220.0), v(3400.0, -220.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("reg_start", v(-250.0, 160.0), NpcRole::Reg, "", 30.0);
+    c.say(-80.0, 80.0, 80.0, "ch06_hello");
     c.water(v(1000.0, -120.0), v(1800.0, 40.0));
     c.say(300.0, 360.0, 80.0, "ch06_lake");
     c.say(880.0, 940.0, 80.0, "ch06_float");

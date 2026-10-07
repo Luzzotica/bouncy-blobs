@@ -515,6 +515,7 @@ struct MoverTemplate {
 
 fn update_movers(
     game: Res<Game>,
+    time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     q: Query<&MoverVisual>,
     mut templates: Local<std::collections::HashMap<usize, MoverTemplate>>,
@@ -562,6 +563,22 @@ fn update_movers(
                 let c = geom::centroid(&o);
                 let r = (geom::signed_area_slice(&o).abs() / std::f32::consts::PI).sqrt();
                 buf.halo(c, PVec2::splat(r * 2.4), -0.002, la(theme.jelly, 0.3));
+                // Spikes: this drop hurts. A ring of hot-pink thorns, slowly
+                // turning, behind the drop.
+                let danger = palette::hex(0xff3d6e);
+                let spin = time.elapsed_secs() * 0.6 + *i as f32;
+                let n = 12;
+                for k in 0..n {
+                    let a = spin + k as f32 / n as f32 * std::f32::consts::TAU;
+                    let d = PVec2::from_angle(a);
+                    let w = PVec2::from_angle(a + std::f32::consts::FRAC_PI_2) * r * 0.2;
+                    let base = c + d * r * 0.82;
+                    let tip = c + d * r * 1.5;
+                    let i0 = buf.vert(base - w, -0.001, lin(mix(danger, Color::BLACK, 0.35)));
+                    let i1 = buf.vert(base + w, -0.001, lin(mix(danger, Color::BLACK, 0.35)));
+                    let i2 = buf.vert(tip, -0.001, lin(lighten(danger, 0.25)));
+                    buf.tri(i0, i1, i2);
+                }
                 buf.fan(&o, c + PVec2::new(-0.2, 0.3) * r, 0.0, lin(lighten(theme.jelly, 0.3)), lin(mix(Color::BLACK, theme.jelly, 0.6)));
                 buf.ring(&o, 2.5, 1.0, 0.001, lin(lighten(theme.jelly, 0.5)));
                 buf.ellipse(c + PVec2::new(-0.35, 0.35) * r, PVec2::new(0.22, 0.14) * r, 0.6, 0.002, la(Color::WHITE, 0.8));

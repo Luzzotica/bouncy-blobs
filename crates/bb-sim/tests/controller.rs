@@ -56,7 +56,7 @@ fn runs_at_top_speed() {
     println!("run: first second {} px, steady {} px/s", x1 - x0, speed);
     // 2.x has no hard top speed (it keeps building on long flats); just
     // check we're in its range after two seconds.
-    assert!(speed > 600.0 && speed < 1800.0, "steady speed {speed}");
+    assert!(speed > 550.0 && speed < 1100.0, "steady speed {speed}");
 }
 
 #[test]

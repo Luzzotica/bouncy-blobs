@@ -14,7 +14,8 @@ use super::*;
 
 /// A crusher hanging from a roof at `roof` that slams down onto `floor`.
 fn piston(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
-    c.crusher(v(x, roof), 150.0, roof - 120.0 - floor - 4.0, phase);
+    // Wide enough that puffing up can't squeeze you out from under it.
+    c.crusher(v(x, roof), 210.0, roof - 120.0 - floor - 4.0, phase);
 }
 
 /// A ferry platform (top surface at y) ping-ponging between x0 and x1.
@@ -35,6 +36,9 @@ pub fn build() -> Course {
     // ------------------------------------------------ the thumping hall
     c.wall(-1300.0, -500.0, -1400.0, 1800.0);
     c.floor(&[v(-500.0, 0.0), v(2600.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("clonk", v(-280.0, 90.0), NpcRole::Granny, "#7d7a74", 76.0);
+    c.say(-80.0, 80.0, 0.0, "ch05_hello");
     c.say(250.0, 320.0, 0.0, "ch05_thump");
     // A crate under the first piston shows what it does.
     piston(&mut c, 650.0, 560.0, 0.0, 0.0);

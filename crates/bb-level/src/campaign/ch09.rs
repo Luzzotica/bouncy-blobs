@@ -18,7 +18,7 @@ fn trapped(c: &mut Ch, id: &str, x: f32, y: f32) {
 
 /// Falling rubble: a stone block that drops from the roof onto the floor.
 fn rubble(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
-    c.crusher(v(x, roof), 150.0, roof - 120.0 - floor - 4.0, phase);
+    c.crusher(v(x, roof), 210.0, roof - 120.0 - floor - 4.0, phase);
 }
 
 pub fn build() -> Course {
@@ -28,6 +28,9 @@ pub fn build() -> Course {
     // ---------------------------------------------- the collapse
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);
     c.floor(&[v(-500.0, 0.0), v(700.0, 0.0), v(800.0, -80.0), v(1000.0, -80.0), v(1100.0, 0.0), v(2600.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("grumble", v(-240.0, 40.0), NpcRole::Huddle, "#8a8f86", 26.0);
+    c.say(-80.0, 80.0, 0.0, "ch09_hello");
     c.say(250.0, 320.0, 0.0, "ch09_rumble");
     trapped(&mut c, "t1", 900.0, -80.0);
     c.say(760.0, 820.0, 0.0, "ch09_first_rescue");

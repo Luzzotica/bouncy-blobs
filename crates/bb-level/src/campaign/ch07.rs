@@ -30,6 +30,10 @@ pub fn build() -> Course {
     // -------------------------------------- the first warm breath
     c.wall(-1300.0, -500.0, -1400.0, 2400.0);
     c.floor(&[v(-500.0, 0.0), v(1100.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("gust1", v(-300.0, 40.0), NpcRole::Huddle, "#bfe8ff", 20.0);
+    c.npc("gust2", v(-180.0, 40.0), NpcRole::Huddle, "#bfe8ff", 20.0);
+    c.say(-80.0, 80.0, 0.0, "ch07_hello");
     c.say(300.0, 360.0, 0.0, "ch07_draft");
     updraft(&mut c, 900.0, 1100.0, 0.0, 640.0, 2300.0);
     c.pickups(v(1000.0, 150.0), v(1000.0, 550.0), 3);

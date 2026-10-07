@@ -54,6 +54,8 @@ pub struct Controller {
     jump_buffer: f32,
     pub grab: Option<Grab>,
     grab_cooldown: f32,
+    /// The vine just let go of (only it is blocked during the cooldown).
+    last_rope: Option<usize>,
     climb_timer: f32,
     pub stuck: Option<Vec2>,
     /// Movement strength multiplier (NPCs are a bit slower).
@@ -70,6 +72,8 @@ pub struct Controller {
     sticky_count: usize,
     sticky_normal: Vec2,
     stick_grace: f32,
+    /// Seconds of roof-cling memory left (survives a one-frame bounce).
+    ceiling_t: f32,
     /// 0..1 squash amount (stick down).
     pub crouch: f32,
     swim_cooldown: f32,
@@ -110,6 +114,7 @@ impl Controller {
             jump_buffer: 0.0,
             grab: None,
             grab_cooldown: 0.0,
+            last_rope: None,
             climb_timer: 0.0,
             stuck: None,
             strength: 1.0,
@@ -122,6 +127,7 @@ impl Controller {
             sticky_count: 0,
             sticky_normal: Vec2::Y,
             stick_grace: 0.0,
+            ceiling_t: 0.0,
             crouch: 0.0,
             expand_scale: None,
         }
@@ -150,6 +156,7 @@ impl Controller {
     pub fn release_grab(&mut self, world: &mut World) {
         if let Some(g) = self.grab.take() {
             world.remove_joint(g.joint);
+            self.last_rope = Some(g.rope);
             self.grab_cooldown = tune::GRAB_COOLDOWN;
         }
     }
@@ -265,8 +272,30 @@ impl Controller {
 
         // Lateral: along the gravity-relative floor tangent; full on a floor,
         // throttled on walls/ceilings and in the air.
-        let lateral = if on_floor { 1.0 } else if self.touching { t.movement.wall } else { t.movement.air };
-        b.add_accel(right * stick.x * t.movement.accel * strength * lateral);
+        // Clinging under a roof (stick up, something overhead, roof-ish
+        // contact, not standing on anything).
+        if self.overhead && !on_floor && up_dot < -0.3 {
+            self.ceiling_t = 0.3;
+        } else {
+            self.ceiling_t = (self.ceiling_t - dt).max(0.0);
+        }
+        let under_ceiling = stick.y > 0.1 && self.ceiling_t > 0.0 && !on_floor;
+        let lateral = if on_floor {
+            1.0
+        } else if under_ceiling {
+            t.movement.ceiling
+        } else if self.touching {
+            t.movement.wall
+        } else {
+            t.movement.air
+        };
+        // Soft top speed: the stick pushes less as you approach max_speed in
+        // the direction you're steering (gravity, slopes and springs can
+        // still take you faster).
+        let along = vel.dot(right) * stick.x.signum();
+        let frac = (along / t.movement.max_speed).max(0.0);
+        let room = (1.0 - frac * frac).clamp(0.0, 1.0);
+        b.add_accel(right * stick.x * t.movement.accel * strength * lateral * room);
 
         // Stick down: press into the floor (fall faster) and squash flat.
         // Stick up: float — gentle in the air, a clamber when something's
@@ -274,9 +303,17 @@ impl Controller {
         if stick.y < -0.1 {
             b.add_accel(down * t.stick.down_accel * -stick.y * strength);
         } else if stick.y > 0.1 {
-            let mult = if self.overhead { t.stick.ledge_up_mult } else { 1.0 };
-            let climb = if self.touching && up_dot.abs() < 0.5 && !self.overhead { t.stick.wall_climb_mult } else { 1.0 };
-            b.add_accel(up * t.stick.up_accel * mult * climb * stick.y * strength);
+            if under_ceiling {
+                // Just enough to stay stuck: pressing harder only adds
+                // friction (it's what made ceilings crawl).
+                // Plus a catch that cancels bouncing away from the roof.
+                let away = (-vel.dot(up)).max(0.0);
+                b.add_accel(up * (t.gravity.gravity * t.stick.ceiling_hold + away * 15.0));
+            } else {
+                let mult = if self.overhead { t.stick.ledge_up_mult } else { 1.0 };
+                let climb = if self.touching && up_dot.abs() < 0.5 && !self.overhead { t.stick.wall_climb_mult } else { 1.0 };
+                b.add_accel(up * t.stick.up_accel * mult * climb * stick.y * strength);
+            }
         }
         self.crouch = (-stick.y).max(0.0);
         // Squash in the gravity frame (wide along `right`, flat along `up`).
@@ -352,22 +389,26 @@ impl Controller {
         }
 
         // Grab a vine when touching one in the air.
-        if self.grab.is_none() && !self.grounded && self.grab_cooldown <= 0.0 {
+        if self.grab.is_none() && !self.grounded {
             let c = body.centroid();
+            // Swept: test the path since last step, so a fast blob can't
+            // pass through a vine between frames.
+            let from = c - vel * _dt;
             // Generous: grabbing a vine you brushed should just work.
             let reach = self.radius * self.expand.min(1.3) + 18.0;
             let mut best: Option<(usize, u32, f32)> = None;
             for (ri, r) in ropes.iter().enumerate() {
-                if !r.grabbable {
+                if !r.grabbable || (self.grab_cooldown > 0.0 && self.last_rope == Some(ri)) {
                     continue;
                 }
                 let Some(rope) = world.rope(r.rope) else { continue };
                 let Some(chain) = world.body(rope.body) else { continue };
-                if !chain.aabb.expand(reach).contains(c) {
+                let sweep = bb_physics::Aabb::from_points([from, c].into_iter()).expand(reach);
+                if !chain.aabb.overlaps(&sweep) {
                     continue;
                 }
                 for (i, p) in chain.x.iter().enumerate().skip(1) {
-                    let d = p.distance(c);
+                    let d = bb_physics::geom::closest_on_segment(*p, from, c).0.distance(*p);
                     if d < reach && best.is_none_or(|b| d < b.2) {
                         best = Some((ri, i as u32, d));
                     }
@@ -375,6 +416,21 @@ impl Controller {
             }
             if let Some((ri, node, _)) = best {
                 let rb = world.rope(ropes[ri].rope).unwrap().body;
+                // Catch gently: lose a little speed, and pre-swing the vine
+                // with the blob (anchor still, grab point at our speed) so it
+                // swings as a whole instead of whipping one segment.
+                let catch = vel * 0.8;
+                if let Some(b) = world.body_mut(self.body) {
+                    b.add_velocity(catch - vel);
+                }
+                if let Some(chain) = world.body_mut(rb) {
+                    let k = node.max(1) as f32;
+                    for i in 0..chain.v.len() {
+                        if chain.w[i] > 0.0 {
+                            chain.v[i] = catch * (i as f32 / k).min(1.0);
+                        }
+                    }
+                }
                 let anchor = Anchor::centre(world, self.body).unwrap();
                 let joint = world.add_joint(Joint::pin(anchor, Anchor::particle(rb, node)).with_compliance(2e-6));
                 self.grab = Some(Grab { rope: ri, node, joint });

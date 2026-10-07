@@ -266,8 +266,28 @@ fn level_lines(
 ) {
     for SimMsg(e) in events.read() {
         let SimEvent::Story { script, slot } = e else { continue };
+        // Speakers resolve to the nearest suitable NPC to the player who
+        // triggered the line (levels can have several of a kind).
+        let here = game.sim.player(*slot).and_then(|p| game.sim.world.body(p.ctl.body)).map(|b| b.centroid()).unwrap_or_default();
+        let nearest = |ok: &dyn Fn(&bb_sim::npc::Npc) -> bool| {
+            game.sim
+                .npcs
+                .iter()
+                .filter(|n| n.dead.is_none() && ok(n))
+                .min_by(|a, b| {
+                    let d = |n: &bb_sim::npc::Npc| game.sim.world.body(n.ctl.body).map_or(f32::MAX, |b| b.centroid().distance(here));
+                    d(a).total_cmp(&d(b))
+                })
+                .map(|n| (Speaker::Actor(n.id.clone()), n.role.clone()))
+        };
+        let role_voice = |role: bb_level::NpcRole| match role {
+            bb_level::NpcRole::Granny => Voice::Granny,
+            bb_level::NpcRole::Reg => Voice::Reg,
+            bb_level::NpcRole::Glimmer => Voice::Glimmer,
+            _ => Voice::Huddle,
+        };
         for (who, text) in scripts::level_lines(script) {
-            let role_npc = |role: bb_level::NpcRole| game.sim.npcs.iter().find(|n| n.role == role && n.dead.is_none()).map(|n| Speaker::Actor(n.id.clone()));
+            let role_npc = |role: bb_level::NpcRole| nearest(&|n| n.role == role).map(|s| s.0);
             let (speaker, voice) = match who {
                 "pip" => (Speaker::Player(*slot), Voice::Pip),
                 "lulu" => (Speaker::Offscreen, Voice::Lulu),
@@ -275,15 +295,15 @@ fn level_lines(
                 "glimmer" => (role_npc(bb_level::NpcRole::Glimmer).unwrap_or(Speaker::Tip), Voice::Glimmer),
                 "granny" => (role_npc(bb_level::NpcRole::Granny).unwrap_or(Speaker::Offscreen), Voice::Granny),
                 "reg" => (role_npc(bb_level::NpcRole::Reg).unwrap_or(Speaker::Offscreen), Voice::Reg),
-                _ => (
-                    game.sim
-                        .npcs
-                        .iter()
-                        .find(|n| matches!(n.role, bb_level::NpcRole::Trapped | bb_level::NpcRole::Huddle | bb_level::NpcRole::Follower) && n.dead.is_none())
-                        .map(|n| Speaker::Actor(n.id.clone()))
-                        .unwrap_or(Speaker::Player(*slot)),
-                    Voice::Huddle,
-                ),
+                // A named NPC (e.g. "clonk", "cap1").
+                id if game.sim.npcs.iter().any(|n| n.id == id && n.dead.is_none()) => {
+                    let role = game.sim.npcs.iter().find(|n| n.id == id).map(|n| n.role.clone()).unwrap_or_default();
+                    (Speaker::Actor(id.to_string()), role_voice(role))
+                }
+                _ => match nearest(&|n| n.role != bb_level::NpcRole::Glimmer) {
+                    Some((s, role)) => (s, role_voice(role)),
+                    None => (Speaker::Player(*slot), Voice::Huddle),
+                },
             };
             queue.pending.push_back((speaker, voice, text.to_string()));
         }

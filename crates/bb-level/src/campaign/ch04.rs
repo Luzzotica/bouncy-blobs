@@ -29,6 +29,10 @@ pub fn build() -> Course {
     // ------------------------------------------------ the first swing
     c.wall(-1300.0, -500.0, -1400.0, 2200.0);
     c.floor(&[v(-500.0, 0.0), v(650.0, 0.0)]);
+    // The cast from the intro cutscene greets you at the start.
+    c.npc("tangle1", v(-300.0, 40.0), NpcRole::Huddle, "#6fd36a", 24.0);
+    c.npc("tangle2", v(-170.0, 40.0), NpcRole::Huddle, "#6fd36a", 24.0);
+    c.say(-80.0, 80.0, 0.0, "ch04_hello");
     c.say(250.0, 320.0, 0.0, "ch04_vines");
     vine(&mut c, 900.0, 620.0, 400.0);
     // A soft basin under the first vine; a ramp leads back out.

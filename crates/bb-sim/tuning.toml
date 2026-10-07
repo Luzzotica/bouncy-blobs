@@ -28,10 +28,15 @@ gravity = 2613.0
 
 [move]
 # Stick left/right. Full on a floor; × air in the air; × wall when touching
-# only walls/ceilings. There's no top speed (2.x): rolling keeps building.
+# only walls/ceilings.
 accel = 2667.0
+# Soft top speed for steering: the push fades to nothing at this speed (falls,
+# slopes and springs can still carry you faster).
+max_speed = 1000.0
 air = 0.6
 wall = 0.4
+# Rolling along under a roof while holding up.
+ceiling = 1.0
 
 [stick]
 # Stick DOWN presses into the floor / falls faster, and squashes the blob
@@ -43,6 +48,9 @@ squash_y = 0.30
 up_accel = 1067.0
 # × when something is on top of you (clamber up a ledge / stick to a roof).
 ledge_up_mult = 12.0
+# Under a roof: lift = gravity × this (just over 1 sticks you; more only
+# grinds you into it with friction).
+ceiling_hold = 1.3
 # × when pressing up a bare wall (so you can't rocket up walls).
 wall_climb_mult = 0.35
 
@@ -64,6 +72,9 @@ pressure_k = 4.5
 # Pull back toward the round rest shape, and damping of wobble.
 shape_k = 2024.0
 shape_damp = 25.0
+# How much that damping also brakes ROLLING (1 = 2.x: rolling is braked
+# hard, so ramps, bumps and ceilings grind; 0 = rolls freely like a ball).
+spin_damp = 0.0
 static_friction = 1.0
 dynamic_friction = 0.8
 

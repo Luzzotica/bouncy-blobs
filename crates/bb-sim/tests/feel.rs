@@ -130,3 +130,89 @@ fn probe_mechanics() {
     println!("vine grabbed at frame {grabbed:?}, pos {:?}", body(&sim).centroid());
     assert!(grabbed.is_some(), "vine grab");
 }
+
+/// Ramp climb, bump crossing and ceiling crawl (2.x friction issues).
+#[test]
+fn probe_surfaces() {
+    if let Ok(t) = std::env::var("TUNE") { bb_sim::tuning::set_live(bb_sim::tuning::Tuning::parse(&t.replace(';', "\n")).unwrap()); }
+    use bb_level::{Material, Shape};
+    // 30° ramp up from x=200.
+    let rise = (30f32).to_radians().tan();
+    let mut b = LevelBuilder::new("r", "R", Theme::Hollow);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-600.0, 0.0), v(200.0, 0.0), v(1400.0, 1200.0 * rise), v(3000.0, 1200.0 * rise)], 300.0);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    for _ in 0..60 { sim.step(); }
+    let mut log = vec![];
+    for f in 0..240 { set(&mut sim, Vec2::new(1.0, 0.0), false); sim.step(); if f % 30 == 29 { let c = body(&sim).centroid(); log.push(format!("({:.0},{:.0} v{:.0})", c.x, c.y, body(&sim).velocity().length())); } }
+    println!("ramp30: {log:?}");
+    let ramp_x = body(&sim).centroid().x;
+
+    // Flat run into a 12 px bump and a 24 px step.
+    let mut b = LevelBuilder::new("b", "B", Theme::Hollow);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-600.0, 0.0), v(600.0, 0.0), v(620.0, 12.0), v(660.0, 12.0), v(680.0, 0.0), v(1200.0, 0.0), v(1200.0, 24.0), v(3000.0, 24.0)], 300.0);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    for _ in 0..60 { sim.step(); }
+    let mut log = vec![];
+    for f in 0..240 { set(&mut sim, Vec2::new(1.0, 0.0), false); sim.step(); if f % 30 == 29 { let c = body(&sim).centroid(); log.push(format!("({:.0} v{:.0})", c.x, body(&sim).velocity().x)); } }
+    println!("bumps: {log:?}");
+    let bump_x = body(&sim).centroid().x;
+
+    // Ceiling crawl: jump (holding up) into a roof at y=230, then up+right.
+    let mut b = LevelBuilder::new("c", "C", Theme::Hollow);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-600.0, 0.0), v(3000.0, 0.0)], 300.0);
+    b.terrain(Shape::rect(v(-600.0, 230.0), v(3000.0, 500.0)), Material::Ground);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    for _ in 0..60 { sim.step(); }
+    for f in 0..60 { set(&mut sim, Vec2::new(0.0, 1.0), f < 8); sim.step(); }
+    println!("ceiling stuck: y {:.0} overhead {}", body(&sim).centroid().y, sim.players[0].ctl.overhead);
+    let x0 = body(&sim).centroid().x;
+    let mut log = vec![];
+    for f in 0..180 { set(&mut sim, Vec2::new(1.0, 1.0), false); sim.step(); if f % 30 == 29 { let c = body(&sim).centroid(); log.push(format!("({:.0},{:.0}{})", c.x, c.y, if sim.players[0].ctl.overhead { "^" } else { "" })); } }
+    let moved = body(&sim).centroid().x - x0;
+    println!("ceiling: {log:?} moved {moved:.0}");
+    assert!(log[1].ends_with("^)") && moved > 400.0, "ceiling cling + roll");
+    println!("SUMMARY ramp_x {ramp_x:.0} bump_x {bump_x:.0}");
+    assert!(ramp_x > 900.0, "30° ramp climb");
+    assert!(bump_x > 1600.0, "rolls over bumps");
+}
+
+#[test]
+fn probe_reg() {
+    for scripted in [true, false] {
+        let mut b = LevelBuilder::new("r", "R", Theme::Lake);
+        b.spawn(v(-600.0, 40.0)).ground(&[v(-1000.0, 0.0), v(1000.0, 0.0)], 300.0);
+        b.npc("reg", v(0.0, 80.0), bb_level::NpcRole::Reg, "", 36.0);
+        let mut sim = Sim::new(b.build());
+        if scripted { for n in sim.npcs.iter_mut() { n.scripted = true; } }
+        let id = sim.npcs[0].ctl.body;
+        let mut log = vec![];
+        for f in 0..600 {
+            sim.step();
+            if f % 60 == 59 { let bd = sim.world.body(id).unwrap(); let c = bd.centroid(); log.push(format!("({:.0},{:.0} a{:.0} e{:.2})", c.x, c.y, bd.angle().to_degrees(), sim.npcs[0].ctl.expand)); }
+        }
+        println!("reg scripted={scripted}: {log:?}");
+        let bd = sim.world.body(id).unwrap();
+        assert!(bd.angle().abs() < 0.8 && bd.centroid().x.abs() < 200.0 && bd.centroid().y < 120.0, "sock flipped out: {log:?}");
+    }
+}
+
+/// A puffed-up blob under a (210 px) crusher still gets popped.
+#[test]
+fn puffed_blob_is_crushed() {
+    let mut b = LevelBuilder::new("k", "K", Theme::Stoneworks);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-800.0, 0.0), v(800.0, 0.0)], 300.0);
+    b.stone(v(-800.0, 560.0), v(800.0, 900.0));
+    b.crusher(v(0.0, 560.0), 210.0, 560.0 - 120.0 - 4.0, 0.0);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    let mut popped = false;
+    for _ in 0..400 {
+        set(&mut sim, Vec2::ZERO, true);
+        sim.step();
+        if sim.players[0].dead.is_some() { popped = true; break; }
+    }
+    assert!(popped, "puffed blob survived the crusher");
+}

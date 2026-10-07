@@ -41,12 +41,19 @@ pub struct SayRequest {
 
 /// Typewriter speed. Slow enough to read along comfortably.
 pub const CHARS_PER_SEC: f32 = 17.0;
-const WRAP: f32 = 440.0;
-const FONT: f32 = 30.0;
-const PAD: Vec2 = Vec2::new(44.0, 34.0);
+const WRAP: f32 = 540.0;
+const FONT: f32 = 38.0;
+const PAD: Vec2 = Vec2::new(50.0, 38.0);
 /// Gap between the speaker's top and the bubble's bottom edge.
 const LIFT: f32 = 46.0;
 const CLOSE: f32 = 0.28;
+/// Quiet beat between different speakers, after the last bubble closes.
+pub const SPEAKER_GAP: f32 = 0.75;
+
+/// How long a new speaker waits when someone else is still talking.
+pub fn speaker_change_delay() -> f32 {
+    CLOSE + SPEAKER_GAP
+}
 /// Above everything in the world, front decor included.
 const BUBBLE_Z: f32 = z::DECOR_FRONT + 2.0;
 
@@ -124,19 +131,48 @@ pub fn spawn_bubbles(
     mut meshes: ResMut<Assets<Mesh>>,
     mut overrides: ResMut<StyleOverrides>,
     cam: Query<&Transform, With<MainCamera>>,
+    time: Res<Time>,
+    mut delayed: Local<Vec<(f32, SayRequest)>>,
 ) {
     let cam_p = cam.single().map(|t| t.translation.truncate()).unwrap_or_default();
+    // One voice at a time: a new speaker first asks everyone else to wrap
+    // up, then waits for their bubbles to close plus a short beat, so
+    // bubbles never overlap.
+    let dt = time.delta_secs();
+    for d in delayed.iter_mut() {
+        d.0 -= dt;
+    }
+    let mut ready: Vec<SayRequest> = Vec::new();
+    delayed.retain(|(t, r)| {
+        if *t <= 0.0 {
+            ready.push(r.clone());
+            false
+        } else {
+            true
+        }
+    });
     for r in reqs.read() {
-        let Some(game) = game.as_mut() else { continue };
-        for (e, mut b) in existing.iter_mut() {
-            if b.speaker == r.speaker {
-                despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, &b);
-            } else {
-                // One voice at a time: anyone else still talking wraps up now.
+        let mut others = false;
+        for (_, mut b) in existing.iter_mut() {
+            if b.speaker != r.speaker {
+                others = true;
                 let total = b.text.chars().count() as f32;
                 b.shown = total;
                 let typed = total / CHARS_PER_SEC;
-                b.linger = (b.age - typed).max(0.0);
+                b.linger = b.linger.min((b.age - typed).max(0.0));
+            }
+        }
+        if others || delayed.iter().any(|(_, d)| d.speaker != r.speaker) {
+            delayed.push((speaker_change_delay(), r.clone()));
+        } else {
+            ready.push(r.clone());
+        }
+    }
+    for r in ready.iter() {
+        let Some(game) = game.as_mut() else { continue };
+        for (e, b) in existing.iter() {
+            if b.speaker == r.speaker {
+                despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, b);
             }
         }
         let Some(anchor) = speaker_anchor(game, &r.speaker, cam_p) else { continue };

@@ -42,6 +42,8 @@ pub struct Move {
     pub accel: f32,
     pub air: f32,
     pub wall: f32,
+    pub ceiling: f32,
+    pub max_speed: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,6 +53,7 @@ pub struct Stick {
     pub squash_y: f32,
     pub up_accel: f32,
     pub ledge_up_mult: f32,
+    pub ceiling_hold: f32,
     pub wall_climb_mult: f32,
 }
 
@@ -69,6 +72,7 @@ pub struct BodyTune {
     pub pressure_k: f32,
     pub shape_k: f32,
     pub shape_damp: f32,
+    pub spin_damp: f32,
     pub static_friction: f32,
     pub dynamic_friction: f32,
 }
@@ -134,6 +138,7 @@ impl Tuning {
             pressure_k: b.pressure_k,
             shape_k: b.shape_k,
             shape_damp: b.shape_damp,
+            spin_damp: b.spin_damp,
         }
     }
 
