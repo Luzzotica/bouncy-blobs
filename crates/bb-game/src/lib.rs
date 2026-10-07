@@ -5,6 +5,7 @@ pub mod assets;
 pub mod audio;
 pub mod camera;
 pub mod devtools;
+pub mod dropin;
 pub mod editor;
 pub mod flow;
 pub mod fx;
@@ -24,6 +25,7 @@ pub mod render;
 pub mod sandbox;
 pub mod save;
 pub mod sim;
+pub mod softtext;
 pub mod story;
 pub mod story_iface;
 
@@ -71,6 +73,7 @@ impl Plugin for GamePlugin {
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
+                softtext::SoftTextPlugin,
             ))
             .add_plugins((
                 story::StoryPlugin,

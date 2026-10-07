@@ -46,11 +46,12 @@ fn offscreen(
     commands.insert_resource(ShotTarget(handle));
 }
 
-fn shoot(mut commands: Commands, mut frame: Local<u32>, mut exit: MessageWriter<AppExit>, target: Option<Res<ShotTarget>>) {
+fn shoot(mut commands: Commands, mut frame: Local<u32>, mut exit: MessageWriter<AppExit>, target: Option<Res<ShotTarget>>, time: Res<Time>) {
     *frame += 1;
     let at: u32 = std::env::var("BB_SHOT_FRAME").ok().and_then(|s| s.parse().ok()).unwrap_or(150);
     if *frame == at {
         let path = std::env::var("BB_SHOT").unwrap();
+        info!("BB_SHOT frame {} at {:.2}s", *frame, time.elapsed_secs());
         let shot = match &target {
             Some(t) => Screenshot::image(t.0.clone()),
             None => Screenshot::primary_window(),

@@ -27,6 +27,7 @@ bb-physics = { path = "../bb-physics" }
 bb-level = { path = "../bb-level" }
 bb-sim = { path = "../bb-sim" }
 bb-net = { path = "../bb-net" }
+ttf-parser = "0.25"
 qrcode = { version = "0.14", default-features = false }
 glam.workspace = true
 steamworks = { version = "0.13", optional = true }

@@ -494,6 +494,7 @@ dependencies = [
  "serde",
  "serde_json",
  "steamworks",
+ "ttf-parser",
  "web-sys",
 ]
 
