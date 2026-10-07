@@ -74,7 +74,14 @@ fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
     let spec = std::env::var("BB_PRESS").unwrap_or_default();
     for item in spec.split(',') {
         let Some((k, f)) = item.split_once('@') else { continue };
-        let Ok(f) = f.parse::<u32>() else { continue };
+        // `key@frame` taps; `key@from-to` holds.
+        let (f, until) = match f.split_once('-') {
+            Some((a, b)) => (a.parse::<u32>().unwrap_or(0), b.parse::<u32>().unwrap_or(0)),
+            None => {
+                let a = f.parse::<u32>().unwrap_or(0);
+                (a, a)
+            }
+        };
         let key = match k {
             "escape" => KeyCode::Escape,
             "enter" => KeyCode::Enter,
@@ -83,9 +90,9 @@ fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
             "right" => KeyCode::ArrowRight,
             _ => continue,
         };
-        if *frame == f {
+        if *frame >= f && *frame <= until {
             keys.press(key);
-        } else if *frame == f + 1 {
+        } else if *frame == until + 1 {
             keys.release(key);
         }
     }
