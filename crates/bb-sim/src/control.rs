@@ -27,7 +27,7 @@ pub mod tune {
     pub const COYOTE: f32 = 0.1;
     pub const JUMP_BUFFER: f32 = 0.12;
     pub const EXPAND_SCALE: f32 = 1.28;
-    pub const EXPAND_RATE: f32 = 14.0;
+    pub const EXPAND_RATE: f32 = 30.0;
     pub const RELAX_RATE: f32 = 7.0;
     pub const SWING_ACCEL: f32 = 1100.0;
     pub const CLIMB_INTERVAL: f32 = 0.09;
@@ -35,6 +35,15 @@ pub mod tune {
     pub const ROPE_JUMP: Vec2 = Vec2::new(380.0, 720.0);
     pub const WALL_JUMP: Vec2 = Vec2::new(560.0, 860.0);
     pub const SWIM_KICK: f32 = 720.0;
+    /// Launch speed per unit of rest-scale growth while touching a surface:
+    /// expanding pushes you off whatever you're pressed against.
+    pub const LAUNCH_PER_EXPAND: f32 = 5600.0;
+    /// Cap on launch speed from one press (stacks on top of springs etc.).
+    pub const LAUNCH_MAX: f32 = 900.0;
+    /// Crouch: wide and flat on the ground, narrow dive in the air.
+    pub const CROUCH_SQUASH: Vec2 = Vec2::new(1.32, 0.6);
+    pub const DIVE_SQUASH: Vec2 = Vec2::new(0.84, 1.2);
+    pub const FAST_FALL: f32 = 2600.0;
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -74,6 +83,14 @@ pub struct Controller {
     pub puff: Option<f32>,
     /// Fraction of the outline under water this step (set by the runtime).
     pub in_water: f32,
+    /// Average normal of everything we're touching (floor, walls, ceiling,
+    /// springs, other blobs), for expand-launches.
+    pub contact_normal: Vec2,
+    since_contact: f32,
+    /// Velocity added by expansion during the current press.
+    launch_given: f32,
+    /// 0..1 crouch amount (stick down), smoothed.
+    pub crouch: f32,
     swim_cooldown: f32,
     /// Rest-scale target while the button is held (Kids Mode puffs a
     /// picked-up blob bigger than a normal expand).
@@ -123,6 +140,10 @@ impl Controller {
             puff: None,
             in_water: 0.0,
             swim_cooldown: 0.0,
+            contact_normal: Vec2::Y,
+            since_contact: 1.0,
+            launch_given: 0.0,
+            crouch: 0.0,
             expand_scale: tune::EXPAND_SCALE,
         }
     }
@@ -168,7 +189,16 @@ impl Controller {
         // Expand / relax.
         let target = self.puff.unwrap_or(if self.input.button { self.expand_scale } else { 1.0 });
         let rate = if target > self.expand { tune::EXPAND_RATE } else { tune::RELAX_RATE };
+        let before = self.expand;
         self.expand += (target - self.expand) * (1.0 - (-rate * dt).exp());
+        let grew = (self.expand - before).max(0.0);
+        if pressed {
+            self.launch_given = 0.0;
+        }
+
+        // Crouch (stick down): squash flat on the ground, dive in the air.
+        let want_crouch = if stick.y < -0.5 && self.grab.is_none() { 1.0 } else { 0.0 };
+        self.crouch += (want_crouch - self.crouch) * (1.0 - (-14.0 * dt).exp());
 
         // Rope swinging.
         if let Some(g) = self.grab.clone() {
@@ -203,6 +233,32 @@ impl Controller {
 
         let b = world.body_mut(self.body).unwrap();
         b.rest_scale = self.expand;
+        let shape = if self.grounded { tune::CROUCH_SQUASH } else { tune::DIVE_SQUASH };
+        b.squash = Vec2::ONE.lerp(shape, self.crouch);
+        if !self.grounded && self.crouch > 0.5 && self.in_water < 0.2 {
+            b.add_accel(Vec2::new(0.0, -tune::FAST_FALL * self.crouch));
+        }
+
+        // Expanding while pressed against something pushes you off it: on
+        // the floor that's a jump, in a corner a diagonal throw, on a spring
+        // an extra-big launch, under a ceiling a shove downward.
+        if grew > 0.0 && self.since_contact < tune::COYOTE && self.puff.is_none() && self.stuck.is_none() {
+            let room = (tune::LAUNCH_MAX * strength - self.launch_given).max(0.0);
+            let dv = (grew * tune::LAUNCH_PER_EXPAND * strength).min(room);
+            if dv > 0.0 {
+                let n = self.contact_normal;
+                // Don't fight speed we already have along the push.
+                let along = vel.dot(n).max(0.0);
+                let add = (dv - along * 0.25).max(0.0);
+                b.add_velocity(n * add);
+                self.launch_given += dv;
+                if !self.jumping {
+                    self.jumping = true;
+                    action = Some(Action::Jump);
+                }
+                self.since_ground = 1.0;
+            }
+        }
 
         // Sticky cling + wall jump.
         if let Some(n) = self.stuck {
@@ -260,16 +316,6 @@ impl Controller {
             return Some(Action::Jump);
         }
 
-        // Jump.
-        let can_jump = self.grounded || self.since_ground < tune::COYOTE;
-        if self.jump_buffer > 0.0 && can_jump && !self.jumping {
-            let vy = vel.y.max(0.0);
-            b.add_velocity(Vec2::new(0.0, tune::JUMP_SPEED * strength - vy));
-            self.jump_buffer = 0.0;
-            self.jumping = true;
-            self.since_ground = 1.0;
-            action = Some(Action::Jump);
-        }
         if self.jumping && released && vel.y > 0.0 {
             b.add_velocity(Vec2::new(0.0, -vel.y * (1.0 - tune::JUMP_CUT)));
             self.jumping = false;
@@ -287,7 +333,11 @@ impl Controller {
         let mut ground = Vec2::ZERO;
         let mut count = 0;
         let mut stick_n: Option<Vec2> = None;
+        let mut all = Vec2::ZERO;
+        let mut touching = 0;
         for c in world.contacts_of(self.body) {
+            all += c.normal;
+            touching += 1;
             if c.normal.y > 0.45 {
                 ground += c.normal;
                 count += 1;
@@ -295,6 +345,12 @@ impl Controller {
             if sticky(c.other) && c.normal.y < 0.6 {
                 stick_n = Some(c.normal);
             }
+        }
+        if touching > 0 {
+            self.contact_normal = all.normalize_or(Vec2::Y);
+            self.since_contact = 0.0;
+        } else {
+            self.since_contact += dt;
         }
         let was = self.grounded;
         self.grounded = count > 0;
@@ -313,7 +369,8 @@ impl Controller {
         // Grab a vine when touching one in the air.
         if self.grab.is_none() && !self.grounded && self.grab_cooldown <= 0.0 {
             let c = body.centroid();
-            let reach = self.radius * self.expand + 8.0;
+            // Generous: grabbing a vine you brushed should just work.
+            let reach = self.radius * self.expand + 18.0;
             let mut best: Option<(usize, u32, f32)> = None;
             for (ri, r) in ropes.iter().enumerate() {
                 if !r.grabbable {

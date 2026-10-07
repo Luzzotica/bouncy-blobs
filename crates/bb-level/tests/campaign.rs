@@ -694,7 +694,8 @@ fn mini(name: &str) -> Course {
             b.vine(v(700.0, 600.0), 340.0);
             b.ground(&[v(1250.0, 0.0), v(1900.0, 0.0)], 1000.0);
             b.kill(v(400.0, -1100.0), v(1250.0, -300.0));
-            path.extend([w(360.0, 0.0, Move::Walk), w(1400.0, 0.0, Move::Rope)]);
+            // Take off at the ledge edge, like a player would.
+            path.extend([w(385.0, 0.0, Move::Walk), w(1400.0, 0.0, Move::Rope)]);
         }
         "wind" => {
             b.wind(v(420.0, -100.0), v(620.0, 900.0), v(0.0, 1400.0));

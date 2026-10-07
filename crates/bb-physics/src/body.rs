@@ -438,6 +438,9 @@ pub struct Body {
     pub params: BodyParams,
     /// Uniform scale applied to the rest shape (the "expand" mechanic).
     pub rest_scale: f32,
+    /// World-axis squash of the shape-matching goal (x, y), e.g. a crouch
+    /// (wide and flat) or a dive (narrow and tall). (1, 1) = none.
+    pub squash: Vec2,
     /// Extra pressure on top of `rest_scale` (1 = neutral).
     pub inflate: f32,
     pub layer: u32,
@@ -508,6 +511,7 @@ impl Body {
             rest_area,
             params: d.params,
             rest_scale: 1.0,
+            squash: Vec2::ONE,
             inflate: 1.0,
             layer: d.layer,
             mask: d.mask,

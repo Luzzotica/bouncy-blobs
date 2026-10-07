@@ -219,7 +219,8 @@ fn shape_match(b: &mut Body, alpha: f32) {
         if w == 0.0 {
             continue;
         }
-        let goal = c + rot.rotate(b.rest[i] * scale);
+        let g = rot.rotate(b.rest[i] * scale);
+        let goal = c + g * b.squash;
         let k = w / (w + alpha);
         let xi = b.x[i];
         b.x[i] = xi + (goal - xi) * k;

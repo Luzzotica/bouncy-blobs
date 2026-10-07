@@ -63,10 +63,9 @@ fn jump_height_matches_metrics() {
     let h = peak - y0;
     println!("full jump height {h}");
     assert!(h > metrics::JUMP_H * 0.9 && h < metrics::JUMP_H * 1.5, "jump {h}");
-    // A tap is a hop.
-    settle(&mut sim);
+    // A tap is a hop (relax first: you can only launch by growing).
     sim.set_input(0, Input { stick: Vec2::ZERO, button: false });
-    sim.step();
+    settle(&mut sim);
     let y0 = centre(&sim).y;
     sim.set_input(0, Input { stick: Vec2::ZERO, button: true });
     sim.step();
