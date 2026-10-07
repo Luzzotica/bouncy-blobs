@@ -1,131 +1,87 @@
-# Bouncy Blobs — Story Bible
+# Bouncy Blobs — Up & Out (Story Bible, 3.0)
 
-Tone goal: **light, weird, a little dumb on purpose.** Saturday-morning cartoon, not grimdark mad-scientist tale. Every grand pronouncement should be one notch dumber than expected.
+> *You were never too much. You were just in the wrong-shaped place.*
 
-## The Premise
+**Tone:** hope, joy, and a little crazy. A Saturday-morning cartoon about a
+tiny jelly who bounces too much. Never grim. When things are sad they're
+*squishy* sad, and the next beat is always a bounce. Everything in this world
+is soft: the ground jiggles, the walls wobble, and even the menu buttons
+squish when you tap them.
 
-**His Royal Bounciness, King Reginald Plopp the First**, declared himself king on a Tuesday, in a basement, alone.
+## The World
 
-A king needs subjects. Reg did not have any. So he did the only thing a reasonable, slightly-cracked self-appointed monarch could do:
+**Dimple Cave** sits deep under a backyard. At the bottom, in the warm, dark
+**Huddle Hollow**, lives **the Huddle**: a pack of softbodies whose highest
+virtue is *stillness*. Every night they practise **the Great Stillness**,
+where everyone squishes together into one quiet, perfect blob-pile.
 
-**He created life.**
+High above, so far up that it's a legend, is **the Glow**: a crack of daylight
+at the top of an old well. Huddle grannies say the Glow is where "True
+Softness" lives, a softness so warm you never have to hold still again. Nobody
+believes it.
 
-(He genuinely did. Nobody knows how. He probably doesn't either. The blobs are real, they are alive, they are indestructible, and they are, against all odds, a working civilization.)
+## Characters
 
-Now Reg runs his subjects through a series of **royal trials** — races, team climbs, royal rumbles — to determine which blob is the most loyal, the most worthy, the most *king-adjacent*. The winner gets to serve at his side. The losers also get to serve at his side. There is a lot of serving. Reg has a lot of feelings about serving.
+**Pip (the player).** A gumdrop-sized blob who cannot. Stop. Bouncing. Pip
+laughs with the whole body, wobbles when nervous, and boings when happy (which
+is always). The player picks Pip's color; co-op friends are Pip's
+**Bounce-Buddies**, other blobs who tag along.
 
-The blobs love it. They have no idea this is auditions.
+**Granny Gloop.** The enormous, ancient Elder of the Huddle, wise-ish, strict,
+and secretly scared. She lost someone to "too much bouncing" long ago (a blob
+who bounced up the well and never came back). She banishes Pip for the
+Huddle's own good. She is wrong, and she'll say so.
 
-## The King
+**Glimmer.** A glowworm who lives on the cave ceiling and speaks only in
+cheerful fortune-cookie wisdom ("A wobble is just a hug that hasn't found its
+person yet!"). Glimmer lights checkpoints and shows up between levels.
 
-**Name:** His Royal Bounciness, Reginald Plopp the First. Everyone calls him Reg. He hates this.
+**Reg (His Royal Softness, King Reginald Sock the First).** A lost sock who
+fell down the well years ago and declared himself king of the underground
+lake. He is loud, theatrical, and confidently wrong about everything, but
+he's the only one down here who has *seen the surface*. He knows about
+**"the Girl."** (A wink to the King Reg of 1.x–2.x.)
 
-**Vibe:** loud, theatrical, deeply confident, completely wrong about almost everything. The kind of king who thinks "diplomacy" is when he yells louder. The kind of king who declares national holidays on the spot and forgets them by lunch.
+**Lulu.** A little girl who lives in the house above the cave. She lost a
+sock. She loves things that bounce. She is the warmest, softest thing in the
+world, and she is looking for friends to play with forever.
 
-**Voice direction** (for recording):
+## The Arc (10 chapters)
 
-- Big. Always projecting to the back of a throne room that does not exist.
-- Slightly out of breath, like every sentence is a victory speech.
-- Mispronounces medium-difficulty words with total confidence ("EX-per-i-MENT-ation," "ROY-yull DEE-cree").
-- Self-corrects mid-sentence to something even more wrong.
-- Refers to himself in the third person at least 30% of the time.
-- Takes credit for everything the blobs do. Invented bouncing, apparently. Invented gravity, possibly.
+Each chapter is a long level (JellyCar length, ~4–8 minutes) with 3–5
+**glow-mushroom checkpoints**. Between chapters there is an in-engine
+softbody cutscene. Each chapter adds a toy to the toolbox and then remixes the
+earlier ones.
 
-**What he wears:** A cape that is too long. A crown that is too small. A monocle on a string that he forgets to use. A lab coat that he refuses to acknowledge as a lab coat ("ROYAL ROBES, peasant").
+| # | Chapter | Place | New mechanics | Story beat |
+|---|---|---|---|---|
+| 1 | **Too Bouncy** | Huddle Hollow | roll, jump (expand), squish under low ceilings, jelly ground | **Intro:** the Great Stillness. Pip sneezes and *boings*, setting off a cascade, and the whole Huddle wobbles for an hour. Granny Gloop rolls Pip out the Back Drip: "Go bounce somewhere else, little one." The level is Pip's sad roll through the outskirts, then the first look upward. |
+| 2 | **The Drip** | Drip Tunnels | falling jelly drops, sagging soft bridges, one-way jelly membranes | Pip meets **Glimmer**, who lights the first mushroom: "Up is a direction AND a feeling!" |
+| 3 | **Mushroom Bounce** | Fungus Caverns | trampoline mushrooms (bouncy), spring pads, momentum chains | Pip discovers that bouncing is how you go *up*. Pure joy. |
+| 4 | **Vine Gardens** | Glowroot Grotto | **ropes**: grab and swing on vines, rope bridges, pulley weights | Bounce-Buddies (co-op) can tie together. "Friends are just ropes you choose." |
+| 5 | **The Crusher Hall** | Old Stone Works | pistons (pop limits!), moving platforms, conveyor roots | The low point. Pip gets popped and reforms at a mushroom, again and again. Glimmer: "You popped. You came back. That's the whole trick." |
+| 6 | **Puddle Lake** | Underground Lake | water (buoyancy and drag), floating jelly lily pads, currents | **Reg** on his island throne (a teacup). He tells of the Girl, the Glow, and True Softness. Completely unreliable; also completely right. |
+| 7 | **Windy Chimneys** | Updraft Flues | updrafts, inflate-to-float, fans, gusts | Pip hears a faraway giggle echo down the flue. The Glow is real. |
+| 8 | **The Toy Pile** | Lost-Toy Midden | everything fallen from above: wind-up cars, slinky ropes, bouncy balls, block towers, seesaws | A crayon drawing in the junk: *LULU ♥ BOUNCY THINGS*. The crazy chapter. |
+| 9 | **The Cave-In** | Collapsed Hollow | rescue: pull trapped Huddle blobs out with ropes, carry them, crushers | A rumble. The Huddle had *followed Pip up* ("It was too quiet without you") and got trapped. Pip saves them one by one. Granny Gloop: "We were scared of how much you bounce. Turns out bouncing is how you get UP." |
+| 10 | **The Light Well** | The Old Well | a long vertical climb that remixes everything; the whole Huddle follows you | **Finale:** daylight. Two enormous, gentle hands. Lulu scoops up every blob ("SO SQUISHY!") and carries them to her playroom: pillows, blankets, a trampoline bed. True Softness. Play, forever. Credits roll in a softbody playroom you can bounce around in. |
 
-**What he doesn't know:** how to be a king. He has never met another king. He has never seen a king. He has read one (1) Wikipedia article on kingship and most of his understanding comes from that article, which he misremembered.
+## Cutscene language
 
-**What he can do:** somehow, genuinely, create life. This is the one thing he is unambiguously good at. He treats it as the least impressive thing he does. ("Yes, yes, I MADE LIFE, fine, but have you seen my hat?")
+* **In-engine puppetry.** Actors are real softbodies driven by a script:
+  roll to, hop, squash, stretch, inflate, wobble, look at, and say.
+* **Speech bubbles** with gibberish "blub" voices, pitched per character
+  (Pip high and squeaky, Granny low and wobbly, Reg pompous, Glimmer chimes).
+* **Camera:** pans, push-ins, and a big whip-pan for jokes. Letterbox bars
+  wobble in.
+* **Anime beats:** speed lines on big moments, sparkle eyes, sweat drops, and
+  a giant "!?" pop-in.
+* Every cutscene is skippable (hold to skip) and under 60 s.
 
-## The Blobs
+## Rules of the world
 
-**Scale:** tiny. **Petri-dish size.** Maybe a marble. Maybe a gumdrop. The arenas are tabletop. The kiddie pool is a teaspoon. Props are sourced from the kitchen drawer. This is a kingdom, and the kingdom fits on a placemat.
-
-**They are:**
-
-- Soft. Squishy. Bouncy. Made of something halfway between gelatin and tire rubber.
-- Indestructible. Cannot be killed. Will go *boing* off a wall and come back wiggling.
-- Earnest. They are trying their absolute best. They have been trying their absolute best since Monday.
-- Procedurally colored — Reg ran out of red dye on day three.
-- Faceless-by-default, but each one gets a tiny doodled face. Some are smiling. Some are crying happy tears. One has a single, terrifying tooth.
-- Loyal to Reg. They do not understand that this is a competition. They think Reg is their dad. He kind of is.
-
-**They are not:**
-
-- Smart.
-- Aware that they are being evaluated.
-- Aware that they are weapons in any sense. They are not weapons. Reg thinks they are weapons. The blobs are friends.
-
-## The Royal Trials (Game Modes)
-
-Reg's trials are how he picks the worthiest subject. The blobs think it's recess.
-
-- **Time Trial — "The Solo Audience."** A blob, an obstacle course, a stopwatch. Reg times them and pronounces them either "PROMISING" or "PROMISING-ER." All blobs pass.
-- **Classic Race — "The Royal Procession."** Multiple blobs sprint toward a finish line. Reg calls the winner "Speaker of the Bounce" and forgets the title by the next race.
-- **Chained Climb — "Trials of Synergy."** Two or more blobs roped together, climbing. Reg believes this measures "team-shippiness." It does not. They get there anyway.
-- **King of the Hill — "Royal Selection."** The winner is briefly declared King of the Hill, given a tiny foil crown, and immediately deposed by another blob. Reg insists this is *exactly* how real kingship works.
-- **Party Arena — "Court is in Session."** Reg dumps everyone in at once and watches. He claims he's grading them. He's mostly just enjoying it.
-
-The foil crown is canon. It is also, by accident, indestructible. Reg cannot explain this. He has stopped trying.
-
-## Tone & Voice
-
-The humor lives in:
-
-- **Reg taking himself entirely seriously.** A teaspoon of pudding is "Phase Three of the Coronation." He means it.
-- **The blobs being deeply earnest.** They are not in on the joke. They love their dad.
-- **Scale mismatch.** Grand royal pronouncements about a kingdom that fits on a kitchen table.
-- **Reg being wildly wrong with maximum confidence.** "As we ALL know, the noblest direction is DIAGONAL."
-- **Mundane in the absurd.** The throne is a stack of books. The royal seal is a cookie cutter. The lab smells like lavender; Reg uses essential oils ("for the THROUGHPUT").
-
-Avoid:
-
-- Real menace. Reg is never scary, only annoying-adjacent.
-- Body horror. Blobs squish; they never split, bleed, or die unhappily.
-- Punishing the player. Bouncy Blobs does not punish. It launches.
-
-## Marketing Hooks
-
-Pick what fits each capsule / trailer beat.
-
-- *"A soft-body physics party game."* (literal tagline)
-- *"He wanted subjects. He made friends."*
-- *"Tiny blobs. Tiny kingdom. Tiny crown."*
-- *"Indestructible. Inconvenient. Adorable."*
-- *"All hail the bounce."*
-- *"The king has no idea what he's doing. The blobs don't either. It's going great."*
-
-## Voice Line Seeds
-
-Stuff Reg might say, organized by moment. These are seeds, not scripts — riff freely when recording.
-
-**On startup / menu:**
-- "Ahhh, my subjects RETURN. Or — wait. They never left. *I* returned. Excellent."
-- "Welcome, welcome, welcome. To the kingdom. Of which I am the king. Of."
-- "Today we shall determine ROYAL EXCELLENCE. By bouncing."
-
-**Pre-race / pre-trial:**
-- "Begin the trial of, uh, the trial. The royal one."
-- "Whichever of you bounces hardest shall be CLOSEST to my heart. Spatially."
-
-**Mid-trial reactions:**
-- "YES. YES. That's what *I* would have done."
-- "A bold strategy. Bold and round. Like ME."
-- "Did you SEE that? *I* did that. With my mind."
-
-**Win / loss:**
-- "VICTORY! For me. By proxy. Through you. Whom I love. A normal amount."
-- "A noble effort. We don't speak of it again."
-
-**Idle (Reg getting distracted):**
-- "Is — is anyone else hungry? No? Just me? Royal hunger then. Carry on."
-- "I have just had a thought. It was about hats. Never mind."
-
-## Open Questions
-
-Stuff we haven't decided. Flagged so we don't forget.
-
-- **Does Reg appear on-screen?** Recommend: yes, but as a goofy oversized head/portrait/silhouette overlooking the arena like a museum portrait that talks. Hand-drawn vibe. Cheaper to produce than full animation, funnier than a voice-only character.
-- **A rival?** "Queen Linda Florp" lives in the next apartment. She has a cat. She is winning at life. Reg pretends not to care. Save her for the full release.
-- **Does the kingdom have a name?** Working title: **Plopptopia.** It is on the kitchen table. We do not need to commit yet.
-- **Blob names?** Unnamed by default, named via customization. Reg refers to all of them as "subject."
+1. Nothing is hard. Ground, walls, and bridges all wobble.
+2. Popping isn't death. You splat into droplets that rush back together at
+   the last mushroom.
+3. Being crushed pops only *you*. Friends next to you get a "phew!" sparkle.
+4. Bouncing is always the answer, eventually.
