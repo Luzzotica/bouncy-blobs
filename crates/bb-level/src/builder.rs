@@ -340,11 +340,13 @@ impl LevelBuilder {
         self
     }
 
-    /// A floating jelly lily pad bobbing on water at `surface`.
+    /// A floating jelly lily pad on water at `surface`. It rides just above
+    /// the waterline (top at surface + 42) so a floating blob can paddle
+    /// underneath instead of getting stuck against its edge.
     pub fn lily(&mut self, surface: Vec2, width: f32) -> &mut Self {
         self.level.platforms.push(SoftPlatform {
             id: String::new(),
-            center: surface + v(0.0, 4.0),
+            center: surface + v(0.0, 30.0),
             size: v(width, 24.0),
             angle: 0.0,
             pins: Pins::Home,

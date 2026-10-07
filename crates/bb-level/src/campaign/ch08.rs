@@ -75,6 +75,9 @@ pub fn build() -> Course {
     c.seesaw("saw", v(3400.0, -49.0), 790.0, 2.0);
     c.pickups(v(3150.0, 40.0), v(3650.0, 40.0), 4);
     c.floor(&[v(3800.0, -20.0), v(4600.0, -20.0)]);
+    c.drops(3950.0, 4400.0, -20.0, 3);
+    // Secret: bounce on the pit balls to find a stash under the see-saw.
+    c.pickups(v(3080.0, -260.0), v(3320.0, -260.0), 3);
     c.wp(Move::Walk, 2985.0, -20.0).wp(Move::Walk, 3400.0, -20.0).wp(Move::Walk, 3880.0, -20.0);
 
     // --------------------------------------- the wind-up car track
@@ -117,6 +120,7 @@ pub fn build() -> Course {
     }
     c.wp(Move::Jump, 8560.0, 2000.0);
     c.cp(8700.0, 2000.0);
+    c.drops(8800.0, 9050.0, 2000.0, 2);
 
     // ------------------------------------------------- the toy box
     c.say(8900.0, 8950.0, 2000.0, "ch08_toybox");

@@ -122,3 +122,18 @@ Lulu (only in ch10).
 | `ch08_toybox` | A big toy box with a spring on top. Pip boings up onto the lid. |
 | `ch08_lulu_drawing` | On the lid: a crayon drawing, wobbly letters: **LULU ♥ BOUNCY THINGS**, with a stick-figure girl hugging a round, smiling blob. Pip stares. Glimmer, very quietly: "…She likes bouncy things." Pip bounces once, slowly, then very fast. |
 | `ch08_outro` | A deep RUMBLE. Dust falls. From far behind and below: the faint, familiar murmur of many blobs. |
+
+## Chapter 9 — The Cave-In (Collapsed Hollow)
+
+| id | what happens |
+|---|---|
+| `ch09_intro` | (Continues from ch08's rumble.) The tunnels shudder; rocks rain down. Pip races back the way it came, toward the sound of familiar murmurs. |
+| `ch09_rumble` | Dust, cracks, a muffled chorus of "help… help…" in soft Huddle voices. Pip's eyes go wide. |
+| `ch09_first_rescue` | A Huddle blob wedged in a dip. Hint: **touch** a trapped blob to free it; it follows you. The blob, sheepish: "We… followed you." |
+| `ch09_too_quiet` | Freed blobs bunch up behind Pip. One whispers: "It was too quiet without you." Another: "Nobody sneezed for DAYS." |
+| `ch09_rubble` | Falling rubble with a blob trapped between drops. Glimmer: "Same trick as the pistons. Wait for the rise." |
+| `ch09_flooded` | A flooded hall. The Huddle has never swum. Pip demonstrates: float, puff, paddle. They copy, badly, adorably. |
+| `ch09_climb` | The climb to where Granny was last seen. The Huddle chant "boing… boing… BOING" as Pip hops each step. |
+| `ch09_granny` | **Granny Gloop**, pinned under a fallen slab, too big to wriggle free. Pip touches her; she pops loose and wobbles, then says, quietly: "We were scared of how much you bounce. Turns out bouncing is how you get UP." A long, squishy hug. |
+| `ch09_all_together` | The whole Huddle lines up behind Pip. Granny: "Lead the way, little one." Above them: the bottom of an old stone well, and a faint ring of daylight far, far up. |
+| `ch09_outro` | Everyone looks up the Old Well. Glimmer: "Well, well, well." (Nobody laughs. Glimmer laughs anyway.) |

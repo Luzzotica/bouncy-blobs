@@ -35,6 +35,9 @@ pub fn build() -> Course {
     updraft(&mut c, 900.0, 1100.0, 0.0, 640.0, 2300.0);
     c.pickups(v(1000.0, 150.0), v(1000.0, 550.0), 3);
     c.floor(&[v(1100.0, 450.0), v(1800.0, 450.0)]);
+    // Secret: drift left off the top of the first updraft onto a hidden shelf.
+    c.shelf(680.0, 880.0, 600.0, 50.0);
+    c.pickups(v(710.0, 650.0), v(850.0, 650.0), 4);
     c.wp(Move::Walk, 0.0, 0.0).wp(Move::Walk, 820.0, 0.0).wp(Move::Wind, 1000.0, 520.0).wp(Move::Drop, 1250.0, 450.0);
     // Now one that only lifts you when you puff up.
     c.say(1500.0, 1560.0, 450.0, "ch07_puff");
@@ -75,6 +78,10 @@ pub fn build() -> Course {
         c.pickup(v(x + 100.0, 2500.0));
     }
     c.floor(&[v(6300.0, 2400.0), v(7400.0, 2400.0)]);
+    for x in [5175.0, 5525.0, 5875.0] {
+        c.pickup(v(x, 2300.0));
+    }
+    c.drops(6450.0, 6950.0, 2400.0, 3);
     c.wp(Move::Walk, 4760.0, 2400.0);
     for x in [4900.0, 5250.0, 5600.0, 5950.0] {
         c.wp(Move::Wind, x + 100.0, 2420.0);
@@ -100,6 +107,7 @@ pub fn build() -> Course {
     c.wind(v(8600.0, 4400.0), v(9000.0, 4620.0), v(500.0, 0.0));
     c.pickups(v(8800.0, 3900.0), v(8800.0, 4450.0), 4);
     c.floor(&[v(9000.0, 4500.0), v(10000.0, 4500.0)]);
+    c.drops(9250.0, 9550.0, 4500.0, 3);
     c.say(9100.0, 9160.0, 4500.0, "ch07_giggle");
     c.goal(v(9600.0, 4500.0), v(9800.0, 4720.0));
     c.wp(Move::Walk, 8550.0, 3650.0).wp(Move::Wind, 8800.0, 4560.0).wp(Move::Drop, 9200.0, 4500.0).wp(Move::Walk, 9700.0, 4500.0);

@@ -227,15 +227,15 @@ struct Bot {
     dashing: bool,
     riding: bool,
     last_hit: Option<f32>,
-    float_t: f32,
     last_stick: f32,
     plat_x: Option<f32>,
+    was_in_water: bool,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None, float_t: 0.0, last_stick: 0.0, plat_x: None }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None, last_stick: 0.0, plat_x: None, was_in_water: false }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -491,25 +491,23 @@ impl Bot {
             }
         }
 
-        // Floating (in water) below a non-swim target: get out from under
-        // it and puff up to bob beside it.
         let in_water = sim.level.zones.iter().any(|z| matches!(z.kind, ZoneKind::Water { .. }) && geom::point_in_polygon(pos - Vec2::new(0.0, 40.0), &z.shape.outline()));
-        if in_water && self.since_ground > 0.6 && feet < tgt.at.y && vel.y.abs() < 300.0 && p.ctl.grab.is_none()
-            && matches!(tgt.how, Move::Jump | Move::Walk | Move::Drop)
-        {
-            button = true;
-            if dx.abs() < 110.0 {
-                stick.x = if pos.x >= tgt.at.x { 1.0 } else { -1.0 };
-            }
-            // Can't climb back onto it from the water: aim for the next one
-            // (currents and beaches lead onwards).
-            self.float_t += dt;
-            if self.float_t > 3.0 && self.i + 1 < path.len() {
-                self.float_t = 0.0;
-                self.i += 1;
-            }
-        } else {
-            self.float_t = 0.0;
+        // Climbed out of the water: work out where we are on the path again.
+        if self.was_in_water && !in_water && grounded {
+            let hi = (self.i + 3).min(path.len() - 1);
+            self.i = (nearest_wp(&path[..=hi], pos - Vec2::new(0.0, R)) + 1).min(path.len() - 1);
+        }
+        self.was_in_water = in_water;
+        // Fell in the water on the way to a dry target: paddle back to the
+        // beach behind us (crossings are built with one) and try again.
+        if in_water && matches!(tgt.how, Move::Jump | Move::Walk | Move::Drop) {
+            // Head for the last waypoint we know is on dry, walkable ground.
+            let shore = (0..self.i).rev().find(|&j| path[j].how == Move::Walk).map_or(prev.at.x, |j| path[j].at.x);
+            stick.x = if shore >= pos.x { 1.0 } else { -1.0 };
+        }
+        if in_water && !matches!(tgt.how, Move::Swim | Move::Wind) {
+            // Paddle ashore rather than hopping back into the water.
+            want_jump = false;
         }
         if want_jump && on_ground && self.hold <= 0.0 && !self.prev_button {
             self.hold = 0.55;

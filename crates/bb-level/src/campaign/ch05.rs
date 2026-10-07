@@ -97,6 +97,7 @@ pub fn build() -> Course {
     c.wp(Move::Walk, 7060.0, 600.0).wp(Move::Ride, 7150.0, 600.0).wp(Move::Ride, 7400.0, 1050.0);
     c.wp(Move::Walk, 7510.0, 1050.0).wp(Move::Ride, 7600.0, 1050.0).wp(Move::Ride, 7850.0, 1500.0);
     c.cp(8050.0, 1500.0);
+    c.drops(7900.0, 8300.0, 1500.0, 3);
     c.say(8150.0, 8210.0, 1500.0, "ch05_whole_trick");
 
     // ------------------------------------------- the grand crusher hall
@@ -124,6 +125,10 @@ pub fn build() -> Course {
     c.wp(Move::Jump, 10880.0, cap).wp(Move::Spring, 11150.0, 1950.0);
     c.say(11250.0, 11300.0, 1950.0, "ch05_light");
     c.goal(v(11500.0, 1950.0), v(11700.0, 2170.0));
+    // Secret: a little shelf above the exit with a stash of drops.
+    c.shelf(11780.0, 11960.0, 2130.0, 40.0);
+    c.pickups(v(11800.0, 2180.0), v(11940.0, 2180.0), 4);
+    c.drops(11150.0, 11400.0, 1950.0, 3);
     c.wp(Move::Walk, 11600.0, 1950.0);
     c.wall(12000.0, 12800.0, -1400.0, 3500.0);
 
