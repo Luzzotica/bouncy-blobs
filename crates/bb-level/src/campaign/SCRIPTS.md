@@ -107,3 +107,18 @@ Lulu (only in ch10).
 | `ch07_sticky` | A chimney lined with sticky moss. Hint: touch a sticky wall in the air to cling; press the button to wall-jump. |
 | `ch07_giggle` | At the top of the great updraft, everything goes quiet… then, echoing down the flue from impossibly far above, a little girl's **giggle**. Pip freezes, then bounces so hard it squeaks. Glimmer, softly: "The Glow is real." |
 | `ch07_outro` | Beyond the flues: mountains of strange, bright, fallen things. A wind-up car rolls past on its own. |
+
+## Chapter 8 — The Toy Pile (Lost-Toy Midden)
+
+| id | what happens |
+|---|---|
+| `ch08_intro` | Mountains of fallen toys, bright and bonkers: blocks, balls, crayons, a wind-up car whirring in circles. Glimmer: "Everything that falls down the well ends up here. Including, apparently, us." |
+| `ch08_midden` | Pip boings off a rubber ball, giggles, boings off another. The crazy chapter begins. |
+| `ch08_ball_bridge` | A huge bouncy ball and a spiky V-shaped pit too wide to jump. Hint: **push** the ball into the pit, then hop across on top of it. |
+| `ch08_seesaw` | A see-saw plank over a ball pit. Pip walks it; it tips; Pip squeaks; it tips back. "Wheee-oh-no-wheee!" |
+| `ch08_car` | A wind-up car trundles back and forth over a spiky track. Hint: hop on the roof and ride it across (lean into its motion). |
+| `ch08_slinky` | Slinkies dangle from the heap. Glimmer: "Same as vines, just more… slinky." |
+| `ch08_blocks` | A staircase of giant toy blocks, each with a letter. They wobble, but they hold. |
+| `ch08_toybox` | A big toy box with a spring on top. Pip boings up onto the lid. |
+| `ch08_lulu_drawing` | On the lid: a crayon drawing, wobbly letters: **LULU ♥ BOUNCY THINGS**, with a stick-figure girl hugging a round, smiling blob. Pip stares. Glimmer, very quietly: "…She likes bouncy things." Pip bounces once, slowly, then very fast. |
+| `ch08_outro` | A deep RUMBLE. Dust falls. From far behind and below: the faint, familiar murmur of many blobs. |

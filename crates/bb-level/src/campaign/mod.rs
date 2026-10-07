@@ -57,6 +57,8 @@ pub enum Move {
     Swim,
     /// Wall-jump up sticky walls.
     Wall,
+    /// Cross using a prop you put in place (a ball pushed into a gap).
+    Prop,
 }
 
 impl Move {

@@ -145,7 +145,8 @@ fn reach(rise: f32) -> f32 {
 }
 
 fn ground_below(sim: &Sim, p: Vec2, depth: f32) -> bool {
-    let mask = bb_sim::load::layer::WORLD;
+    // Props (see-saw planks, balls, toy blocks) count as ground too.
+    let mask = bb_sim::load::layer::WORLD | bb_sim::load::layer::PROP;
     sim.world.raycast(p + Vec2::new(0.0, 100.0), Vec2::NEG_Y, 100.0 + depth, mask, None).is_some()
 }
 
@@ -227,12 +228,14 @@ struct Bot {
     riding: bool,
     last_hit: Option<f32>,
     float_t: f32,
+    last_stick: f32,
+    plat_x: Option<f32>,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None, float_t: 0.0 }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None, float_t: 0.0, last_stick: 0.0, plat_x: None }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -290,7 +293,7 @@ impl Bot {
 
         // Blocked while pushing?
         self.vx_avg += (vel.x - self.vx_avg) * 0.1;
-        if self.since_ground < 0.3 && stick.x.abs() > 0.5 && self.vx_avg.abs() < 60.0 {
+        if self.since_ground < 0.3 && self.last_stick.abs() > 0.5 && self.vx_avg.abs() < 60.0 && vel.x.abs() < 80.0 {
             self.blocked += dt;
         } else {
             self.blocked = 0.0;
@@ -322,6 +325,11 @@ impl Bot {
 
         match tgt.how {
             Move::Walk | Move::Push | Move::Squeeze | Move::Drop => {}
+            Move::Prop => {
+                if at_prev || edge_ahead {
+                    want_jump = true;
+                }
+            }
             Move::Dash => {
                 // Wait at the start until whatever hangs over the run is
                 // on its way back up, then go.
@@ -434,7 +442,22 @@ impl Bot {
                     stick.x = ((prev.at.x - pos.x) / 40.0).clamp(-1.0, 1.0);
                     want_jump = true;
                 } else if riding && !close {
-                    stick.x = if vertical { ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0) } else { 0.0 };
+                    stick.x = if vertical {
+                        ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0)
+                    } else {
+                        // Stay centred on the ferry: blobs roll, so lean
+                        // into its motion like a player would.
+                        let under = sim.world.raycast(pos, Vec2::NEG_Y, 90.0, bb_sim::load::layer::WORLD, Some(p.ctl.body));
+                        match under.map(|h| h.0) {
+                            Some(bb_sim::physics::Collider::Static(sid)) => {
+                                let cx = sim.world.static_collider(sid).map_or(pos.x, |st| geom::centroid(&st.poly).x);
+                                let pv = self.plat_x.map_or(0.0, |lx| (cx - lx) / dt);
+                                self.plat_x = Some(cx);
+                                ((cx - pos.x) / 80.0 + (pv - vel.x) / 200.0).clamp(-1.0, 1.0)
+                            }
+                            _ => 0.0,
+                        }
+                    };
                     want_jump = false;
                 } else if !riding && !there && on_ground && dx.abs() > 90.0 {
                     // Hold at the boarding spot until the platform arrives.
@@ -470,7 +493,8 @@ impl Bot {
 
         // Floating (in water) below a non-swim target: get out from under
         // it and puff up to bob beside it.
-        if self.since_ground > 0.6 && feet < tgt.at.y && vel.y.abs() < 300.0 && p.ctl.grab.is_none()
+        let in_water = sim.level.zones.iter().any(|z| matches!(z.kind, ZoneKind::Water { .. }) && geom::point_in_polygon(pos - Vec2::new(0.0, 40.0), &z.shape.outline()));
+        if in_water && self.since_ground > 0.6 && feet < tgt.at.y && vel.y.abs() < 300.0 && p.ctl.grab.is_none()
             && matches!(tgt.how, Move::Jump | Move::Walk | Move::Drop)
         {
             button = true;
@@ -499,6 +523,7 @@ impl Bot {
             }
         }
         self.prev_button = button;
+        self.last_stick = stick.x;
         Input { stick, button }
     }
 }
@@ -528,9 +553,10 @@ fn bot_segment(c: &Course, k: usize, limit: f32) -> (bool, f32, u32) {
         was_dead = dead;
         if !dead {
             let i = bot.think(&sim, &c.path);
-            if trace && f % 6 == 0 {
+            if trace && (f % 6 == 0 || std::env::var("BOT_EVERY").is_ok()) {
                 let b = sim.world.body(sim.players[0].ctl.body).unwrap();
-                println!("t{:.1} wp{} {:?} pos {:.0},{:.0} v {:.0},{:.0} g{} in {:?}", f as f32 / 60.0, bot.i, c.path[bot.i].how, b.centroid().x, b.centroid().y, b.velocity().x, b.velocity().y, sim.players[0].ctl.grounded as u8, i);
+                let props: Vec<String> = sim.props.iter().take(4).filter_map(|p| sim.world.body(*p)).map(|b| format!("{:.0},{:.0}", b.centroid().x, b.centroid().y)).collect();
+                println!("t{:.1} wp{} {:?} pos {:.0},{:.0} v {:.0},{:.0} g{} in {:?} props {:?}", f as f32 / 60.0, bot.i, c.path[bot.i].how, b.centroid().x, b.centroid().y, b.velocity().x, b.velocity().y, sim.players[0].ctl.grounded as u8, i, props);
             }
             sim.set_input(0, i);
         }
