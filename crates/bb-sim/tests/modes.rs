@@ -4,7 +4,7 @@ use bb_sim::{DT, Input, Sim};
 
 fn arena(goal: bool, hills: bool) -> Sim {
     let mut b = LevelBuilder::new("a", "A", Theme::Party);
-    b.spawn(v(0.0, 60.0)).ground(&[v(-2000.0, 0.0), v(3000.0, 0.0)], 300.0);
+    b.spawn(v(0.0, 60.0)).ground(&[v(-20000.0, 0.0), v(20000.0, 0.0)], 300.0);
     if goal {
         b.goal(v(900.0, 0.0), v(1100.0, 300.0));
     }
@@ -77,3 +77,4 @@ fn chained_players_are_roped_together() {
     m.cleanup(&mut sim);
     assert_eq!(sim.world.ropes().count(), 0);
 }
+

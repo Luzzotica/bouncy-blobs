@@ -9,7 +9,73 @@ use glam::Vec2;
 use crate::body::Body;
 use crate::geom;
 
+/// 2.x-style force model: accelerate particles with spring, pressure and
+/// shape-matching forces (symplectic Euler, applied before integration).
+pub(crate) fn apply_forces(b: &mut Body, fm: &crate::body::ForceModel, h: f32) {
+    let n = b.x.len();
+    if n < 3 {
+        return;
+    }
+    let mut acc = vec![Vec2::ZERO; n];
+    // Edge springs (rest lengths are NOT scaled by expansion, as in 2.x:
+    // the ring resists the swell, which is part of the feel).
+    let ring = b.boundary.len();
+    for (k, e) in b.edges.iter().enumerate() {
+        let (ia, ib) = (e.a as usize, e.b as usize);
+        let d = b.x[ib] - b.x[ia];
+        let dist = d.length();
+        if dist < 1e-4 {
+            continue;
+        }
+        let dir = d / dist;
+        let ks = fm.spring_k * b.spring_scale * if k >= ring { fm.shear } else { 1.0 };
+        let rel_v = (b.v[ib] - b.v[ia]).dot(dir);
+        let f = dir * (ks * (dist - e.rest) + fm.spring_damp * rel_v);
+        acc[ia] += f;
+        acc[ib] -= f;
+    }
+    // Pressure toward the (expanded) rest area.
+    if b.closed && b.rest_area > 0.0 && fm.pressure_k > 0.0 {
+        let target = b.rest_area * b.rest_scale * b.rest_scale;
+        let area = b.area();
+        let err = target - area;
+        for k in 0..ring {
+            let i = b.boundary[k] as usize;
+            let prev = b.x[b.boundary[(k + ring - 1) % ring] as usize];
+            let next = b.x[b.boundary[(k + 1) % ring] as usize];
+            let grad = Vec2::new((next.y - prev.y) * 0.5, (prev.x - next.x) * 0.5);
+            acc[i] += grad * (fm.pressure_k * err);
+        }
+    }
+    // Shape matching toward the scaled (and squashed) rest pose.
+    if fm.shape_k > 0.0 {
+        let c = crate::geom::centroid(&b.x);
+        let mut s_dot = 0.0;
+        let mut s_cross = 0.0;
+        for i in 0..n {
+            let r = b.rest[i];
+            let q = b.x[i] - c;
+            s_dot += r.dot(q);
+            s_cross += r.perp_dot(q);
+        }
+        let rot = Vec2::new(s_dot, s_cross).normalize_or(Vec2::X);
+        let v_com = b.v.iter().copied().sum::<Vec2>() / n as f32;
+        for i in 0..n {
+            let goal = c + rot.rotate(b.rest[i] * b.rest_scale) * b.squash;
+            acc[i] += (goal - b.x[i]) * fm.shape_k - (b.v[i] - v_com) * fm.shape_damp;
+        }
+    }
+    for i in 0..n {
+        if b.w[i] > 0.0 {
+            b.v[i] += acc[i] * h;
+        }
+    }
+}
+
 pub(crate) fn solve_internal(b: &mut Body, h: f32) {
+    if b.params.forces.is_some() {
+        return; // shape held by forces (see `apply_forces`)
+    }
     let inv_h2 = 1.0 / (h * h);
     let scale = b.rest_scale;
 

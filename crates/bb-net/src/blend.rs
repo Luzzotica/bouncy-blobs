@@ -27,7 +27,7 @@ pub struct BlendParams {
 
 impl Default for BlendParams {
     fn default() -> Self {
-        BlendParams { pos_time: 0.15, vel_time: 0.08, snap: 120.0, dead_zone: 0.75, max_extrapolate: 0.25 }
+        BlendParams { pos_time: 0.06, vel_time: 0.04, snap: 120.0, dead_zone: 0.75, max_extrapolate: 0.25 }
     }
 }
 
@@ -152,7 +152,7 @@ mod tests {
         for tick in 0..360u32 {
             // Run right, then turn around and run back (+ optional hops).
             let stick = if tick < 180 { v(1.0, 0.0) } else { v(-1.0, 0.0) };
-            let button = hops && tick % 70 < 12;
+            let button = hops && tick % 120 < 12; // 2.x airtime is ~1.3 s
             a.set_input(0, Input { stick, button });
             a.step();
 
@@ -217,9 +217,11 @@ mod tests {
         let r = mirror(4, 7, true);
         // Softer blobs settle a touch slower under latency; tracking error
         // (worst / rms below) is what players feel.
-        assert!(r.converged_tick.is_some_and(|t| t <= 60), "converge within 1 s");
-        assert!(r.worst < 110.0, "worst {}", r.worst);
-        assert!(r.rms < 25.0, "rms {}", r.rms);
+        // 2.x blobs launch near-instantly at ~1000 px/s, so a jump is ~70 px
+        // of news per 67 ms of latency (the 3.0 jump was ~1.6× gentler).
+        assert!(r.converged_tick.is_some_and(|t| t <= 90), "converge within 1.5 s");
+        assert!(r.worst < 180.0, "worst {}", r.worst);
+        assert!(r.rms < 45.0, "rms {}", r.rms);
         let r = mirror(0, 0, true);
         assert!(r.rms < 12.0, "rms {}", r.rms);
     }

@@ -94,6 +94,23 @@ impl Default for StrainLimits {
     }
 }
 
+/// Force-model constants, per unit mass (accelerations), as in 2.x's
+/// spring/pressure/shape-match blob.
+#[derive(Copy, Clone, Debug)]
+pub struct ForceModel {
+    /// Edge spring stiffness (1/s²) and damping (1/s). Skip-one "shear"
+    /// edges use `shear` × stiffness.
+    pub spring_k: f32,
+    pub spring_damp: f32,
+    pub shear: f32,
+    /// Outline-area pressure (1/(px²·s²)).
+    pub pressure_k: f32,
+    /// Shape-matching pull toward the rigid best-fit rest pose (1/s²) and
+    /// damping of velocity relative to the body (1/s).
+    pub shape_k: f32,
+    pub shape_damp: f32,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct BodyParams {
     /// XPBD compliance (inverse stiffness) of edges. 0 = inextensible.
@@ -115,6 +132,10 @@ pub struct BodyParams {
     pub limits: StrainLimits,
     /// Gravity multiplier for this body.
     pub gravity_scale: f32,
+    /// Classic force-based softbody (the 2.x blob model): springs, pressure
+    /// and shape-matching *forces* integrated each substep instead of XPBD
+    /// position constraints. Collisions and strain limits stay XPBD.
+    pub forces: Option<ForceModel>,
 }
 
 impl Default for BodyParams {
@@ -130,6 +151,7 @@ impl Default for BodyParams {
             material: Material::default(),
             limits: StrainLimits::default(),
             gravity_scale: 1.0,
+            forces: None,
         }
     }
 }
@@ -441,6 +463,9 @@ pub struct Body {
     /// World-axis squash of the shape-matching goal (x, y), e.g. a crouch
     /// (wide and flat) or a dive (narrow and tall). (1, 1) = none.
     pub squash: Vec2,
+    /// Multiplier on force-model spring stiffness (2.x stiffens while
+    /// expanding).
+    pub spring_scale: f32,
     /// Extra pressure on top of `rest_scale` (1 = neutral).
     pub inflate: f32,
     pub layer: u32,
@@ -512,6 +537,7 @@ impl Body {
             params: d.params,
             rest_scale: 1.0,
             squash: Vec2::ONE,
+            spring_scale: 1.0,
             inflate: 1.0,
             layer: d.layer,
             mask: d.mask,

@@ -214,18 +214,21 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
                 continue;
             }
             let frac = inside as f32 / n as f32;
-            // Puffing up floats you more, but cap it: a full swell is 2.3×.
+            // Puffing up floats you more, but cap it.
             let puff = (b.rest_scale * b.rest_scale).min(1.7);
             let v = b.velocity();
+            // Blobs fall at 2.x's stronger gravity (gravity_scale > 1); zone
+            // forces were authored against world gravity, so scale them too.
+            let gs = gadget_gravity(b);
             match &z.kind {
-                ZoneKind::Wind { accel } => b.add_accel(*accel * frac * puff),
+                ZoneKind::Wind { accel } => b.add_accel(*accel * frac * puff * gs),
                 ZoneKind::Water { buoyancy, drag, current } => {
                     wet.push((id, frac));
                     let density = (b.mass() / (b.rest_area.max(1.0) / 3200.0)).max(0.2);
-                    b.add_accel(Vec2::new(0.0, buoyancy * frac * puff / density));
+                    b.add_accel(Vec2::new(0.0, buoyancy * frac * puff * gs / density));
                     b.add_accel((*current - v) * (*drag * frac));
                 }
-                ZoneKind::Gravity { gravity: g } => b.add_accel((*g - gravity) * frac),
+                ZoneKind::Gravity { gravity: g } => b.add_accel((*g - gravity) * gs * frac),
                 ZoneKind::Goo { drag } => b.add_accel(-v * (*drag * frac)),
                 ZoneKind::Conveyor { speed } => b.add_accel(Vec2::new((speed - v.x) * 6.0 * frac, 0.0)),
                 ZoneKind::Kill => {}
@@ -264,6 +267,8 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             if hit {
                 let b = sim.world.body_mut(id).unwrap();
                 let v = b.velocity();
+                // Same launch height whatever the body's gravity.
+                let power = power * gadget_gravity(b).sqrt();
                 b.add_velocity(dir * (power - v.dot(dir)));
                 fired = true;
             }
@@ -425,4 +430,10 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             }
         }
     }
+}
+
+/// How much stronger than world gravity this body falls (blobs use 2.x's
+/// gravity). Clinging bodies (scale 0) count as 1.
+pub(crate) fn gadget_gravity(b: &bb_physics::Body) -> f32 {
+    if b.params.gravity_scale > 0.0 { b.params.gravity_scale } else { 1.0 }
 }

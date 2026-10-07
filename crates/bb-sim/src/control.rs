@@ -13,46 +13,58 @@
 use bb_physics::{Anchor, BodyDesc, BodyId, Collider, Joint, JointId, Vec2, World};
 
 
+/// A straight port of the 2.x blob (`src/physics/slimeBlob.ts` + its Rust
+/// engine), scaled from the 48 px TS blob to our 32 px one: every length and
+/// acceleration × 2/3, times unchanged. TS forces were per particle with
+/// hull mass 0.06, so they're stored here as accelerations (force / 0.06).
 pub mod tune {
     use bb_physics::Vec2;
+    /// Length scale from the TS world (48 px blob → 32 px).
+    pub const L: f32 = 2.0 / 3.0;
     pub const RADIUS: f32 = 32.0;
-    pub const SEGMENTS: usize = 22;
+    /// TS `circle16`.
+    pub const SEGMENTS: usize = 16;
     pub const MASS: f32 = 1.0;
-    pub const GROUND_ACCEL: f32 = 2400.0;
-    pub const AIR_ACCEL: f32 = 1300.0;
-    pub const TREAD_ACCEL: f32 = 1500.0;
-    pub const MAX_SPEED: f32 = 560.0;
-    pub const JUMP_SPEED: f32 = 930.0;
-    pub const JUMP_CUT: f32 = 0.5;
-    pub const COYOTE: f32 = 0.1;
-    pub const JUMP_BUFFER: f32 = 0.12;
-    /// Full swell (2.x swelled to 3.0; this body is softer, 2.3 reads big).
-    pub const EXPAND_SCALE: f32 = 2.3;
-    /// Linear swell speed while the button is held (scale units / s):
-    /// ~0.08 s to full size, like 2.x's press rate.
-    pub const SWELL_RATE: f32 = 16.0;
-    /// Linear shrink speed when released.
-    pub const RELAX_RATE: f32 = 5.0;
-    /// Shape-matching compliance while swelling: much stiffer than the
-    /// resting 3e-3, so the swell shoves off what you're pressed against
-    /// (the spring-loaded part of the jump).
-    pub const SWELL_COMPLIANCE: f32 = 6e-4;
+    /// TS world gravity 980 × 4.
+    pub const GRAVITY: f32 = 3920.0 * L;
+    /// TS MOVE_FORCE 240; × 0.6 in the air, × 0.4 touching a wall/ceiling.
+    pub const MOVE_ACCEL: f32 = 240.0 / 0.06 * L;
+    pub const AIR_MOVE: f32 = 0.6;
+    pub const NONFLOOR_MOVE: f32 = 0.4;
+    /// TS DOWN_FORCE 180: stick down presses you into the floor / falls faster.
+    pub const DOWN_ACCEL: f32 = 180.0 / 0.06 * L;
+    /// TS UP_FORCE 96: stick up is a gentle float (≈ 40% less gravity).
+    pub const UP_ACCEL: f32 = 96.0 / 0.06 * L;
+    /// Clambering up something overhead (ledge / roof / blob above).
+    pub const LEDGE_UP_MULT: f32 = 12.0;
+    /// Up on a vertical wall is weaker so you can't shoot straight up it.
+    pub const WALL_CLIMB_MULT: f32 = 0.35;
+    /// Expand: the jump IS the swell pushing off the ground.
+    pub const EXPAND_SCALE: f32 = 3.0;
+    pub const EXPAND_RATE_PRESS: f32 = 28.0;
+    pub const EXPAND_RATE_RELEASE: f32 = 18.0;
+    pub const EXPAND_SPRING_MULT: f32 = 1.45;
+    /// Stick down squashes the rest shape wide and flat.
+    pub const SQUASH_X: f32 = 0.35;
+    pub const SQUASH_Y: f32 = 0.30;
+    /// Sticky walls: cling, then the button launches along the stick.
+    pub const STICK_MIN_CONTACTS: usize = 2;
+    pub const STICK_RELEASE_GRACE: f32 = 0.25;
+    pub const STICK_JUMP: f32 = 1400.0 * L;
+    /// Softbody (TS Tuning × PLAYER_K_MULT 0.92 / hull mass 0.06).
+    pub const SPRING_K: f32 = 55.0 * 0.92 / 0.06;
+    pub const SPRING_DAMP: f32 = 3.5 / 0.06;
+    pub const PRESSURE_K: f32 = 0.12 / 0.06 / (L * L);
+    pub const SHAPE_K: f32 = 132.0 * 0.92 / 0.06;
+    pub const SHAPE_DAMP: f32 = 1.5 / 0.06;
+    // 3.0 additions (no TS equivalent): vines and swimming. Tuned against
+    // the 1800 px/s² world gravity; launches scale by √(gravity ratio).
     pub const SWING_ACCEL: f32 = 1100.0;
     pub const CLIMB_INTERVAL: f32 = 0.09;
     pub const GRAB_COOLDOWN: f32 = 0.35;
     pub const ROPE_JUMP: Vec2 = Vec2::new(380.0, 720.0);
-    pub const WALL_JUMP: Vec2 = Vec2::new(560.0, 860.0);
     pub const SWIM_KICK: f32 = 720.0;
-    /// Mario-style launch: pressing while touching something kicks you off
-    /// it, then holding keeps adding a decaying push for up to LAUNCH_HOLD
-    /// seconds. Releasing just stops adding.
-    pub const LAUNCH_KICK: f32 = 380.0;
-    pub const LAUNCH_ACCEL: f32 = 12000.0;
-    pub const LAUNCH_HOLD: f32 = 0.32;
-    /// Crouch: wide and flat on the ground, narrow dive in the air.
-    pub const CROUCH_SQUASH: Vec2 = Vec2::new(1.32, 0.6);
-    pub const DIVE_SQUASH: Vec2 = Vec2::new(0.84, 1.2);
-    pub const FAST_FALL: f32 = 2600.0;
+    pub const JUMP_BUFFER: f32 = 0.12;
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -79,9 +91,7 @@ pub struct Controller {
     pub expand: f32,
     pub grounded: bool,
     pub ground_normal: Vec2,
-    since_ground: f32,
     jump_buffer: f32,
-    jumping: bool,
     pub grab: Option<Grab>,
     grab_cooldown: f32,
     climb_timer: f32,
@@ -92,18 +102,15 @@ pub struct Controller {
     pub puff: Option<f32>,
     /// Fraction of the outline under water this step (set by the runtime).
     pub in_water: f32,
-    /// Average normal of everything we're touching (floor, walls, ceiling,
-    /// springs, other blobs), for expand-launches.
+    /// Average normal of everything we're touching.
     pub contact_normal: Vec2,
-    since_contact: f32,
-    /// Active launch: (push direction, seconds held).
-    launch: Option<(Vec2, f32)>,
-    /// Speed along the surface when the launch began (kept through the jump
-    /// so the swell's friction against the ground doesn't eat a run-up).
-    launch_carry: Vec2,
-    /// Resting shape compliance (restored after a swell).
-    base_shape: Option<f32>,
-    /// 0..1 crouch amount (stick down), smoothed.
+    /// Touching anything / something on our upper half / sticky contacts.
+    pub touching: bool,
+    pub overhead: bool,
+    sticky_count: usize,
+    sticky_normal: Vec2,
+    stick_grace: f32,
+    /// 0..1 squash amount (stick down).
     pub crouch: f32,
     swim_cooldown: f32,
     /// Rest-scale target while the button is held (Kids Mode puffs a
@@ -123,14 +130,17 @@ pub enum Action {
 impl Controller {
     pub fn spawn(world: &mut World, at: Vec2, radius: f32, layer_bits: u32) -> Controller {
         let mut d = BodyDesc::blob(at, radius, tune::SEGMENTS, tune::MASS * (radius / tune::RADIUS).powi(2));
-        // Shape matching is what makes a blob feel rigid: at 720 Hz substeps
-        // a compliance around 1e-5 snaps ~50% back to shape every substep.
-        // 3e-3 gives a ~1.5× squash on a hard landing and still recovers.
-        d.params.volume_compliance = 1e-6;
-        d.params.shape_compliance = Some(3e-3);
-        d.params.edge_compliance = 1e-5;
-        d.params.internal_damping = 3.0;
+        // The 2.x force model (springs + pressure + shape matching); see `tune`.
+        d.params.forces = Some(bb_physics::ForceModel {
+            spring_k: tune::SPRING_K,
+            spring_damp: tune::SPRING_DAMP,
+            shear: 0.85,
+            pressure_k: tune::PRESSURE_K,
+            shape_k: tune::SHAPE_K,
+            shape_damp: tune::SHAPE_DAMP,
+        });
         d.params.linear_damping = 0.0;
+        d.params.internal_damping = 0.0;
         d.params.radius = 2.0;
         d.params.material = bb_physics::Material { static_friction: 1.0, dynamic_friction: 0.8, restitution: 0.0 };
         d.layer = layer_bits;
@@ -143,9 +153,7 @@ impl Controller {
             expand: 1.0,
             grounded: false,
             ground_normal: Vec2::Y,
-            since_ground: 1.0,
             jump_buffer: 0.0,
-            jumping: false,
             grab: None,
             grab_cooldown: 0.0,
             climb_timer: 0.0,
@@ -155,10 +163,11 @@ impl Controller {
             in_water: 0.0,
             swim_cooldown: 0.0,
             contact_normal: Vec2::Y,
-            since_contact: 1.0,
-            launch: None,
-            launch_carry: Vec2::ZERO,
-            base_shape: None,
+            touching: false,
+            overhead: false,
+            sticky_count: 0,
+            sticky_normal: Vec2::Y,
+            stick_grace: 0.0,
             crouch: 0.0,
             expand_scale: tune::EXPAND_SCALE,
         }
@@ -168,9 +177,8 @@ impl Controller {
         self.prev_button = self.input.button;
         self.expand = 1.0;
         self.grounded = false;
-        self.since_ground = 1.0;
         self.jump_buffer = 0.0;
-        self.jumping = false;
+        self.crouch = 0.0;
         self.grab = None;
         self.stuck = None;
     }
@@ -182,49 +190,45 @@ impl Controller {
         }
     }
 
-    /// Apply input before the physics step.
+    /// Apply input before the physics step (2.x `SlimeBlob.update`).
     pub fn pre_step(&mut self, world: &mut World, ropes: &[crate::RopeState], dt: f32) -> Option<Action> {
         let mut action = None;
         let pressed = self.input.button && !self.prev_button;
-        let released = !self.input.button && self.prev_button;
         self.prev_button = self.input.button;
         self.grab_cooldown = (self.grab_cooldown - dt).max(0.0);
-        if pressed {
-            self.jump_buffer = tune::JUMP_BUFFER;
-        } else {
-            self.jump_buffer = (self.jump_buffer - dt).max(0.0);
-        }
+        self.stick_grace = (self.stick_grace - dt).max(0.0);
+        self.jump_buffer = if pressed { tune::JUMP_BUFFER } else { (self.jump_buffer - dt).max(0.0) };
         let stick = self.input.stick.clamp_length_max(1.0);
         let strength = self.strength;
+        let g_world = world.config.gravity;
         let Some(body) = world.body(self.body) else { return None };
         if !body.enabled {
             return None;
         }
         let vel = body.velocity();
+        // The player blob falls at 2.x's (scaled) gravity whatever the level's.
+        let g_len = g_world.length().max(1.0);
+        let g_scale = tune::GRAVITY / g_len;
+        let down = g_world / g_len;
+        let up = -down;
+        let right = Vec2::new(-down.y, down.x);
 
-        // Swell / relax: linear ramps, like 2.x.
+        // Expand ramp (press is faster than release), as 2.x.
         let mut target = self.puff.unwrap_or(if self.input.button { self.expand_scale } else { 1.0 });
-        // Clinging to a sticky wall or a vine: a small puff only, so the
-        // swell doesn't shove you off what you're holding.
         if self.stuck.is_some() || self.grab.is_some() {
             target = target.min(1.3);
         }
-        let swelling = target > self.expand + 1e-4;
-        let rate = if swelling { tune::SWELL_RATE } else { tune::RELAX_RATE };
+        let rate = if target > self.expand { tune::EXPAND_RATE_PRESS } else { tune::EXPAND_RATE_RELEASE };
         let step = rate * dt;
         self.expand = if (target - self.expand).abs() <= step { target } else { self.expand + step * (target - self.expand).signum() };
 
-        // Crouch (stick down): squash flat on the ground, dive in the air.
-        let want_crouch = if stick.y < -0.5 && self.grab.is_none() { 1.0 } else { 0.0 };
-        self.crouch += (want_crouch - self.crouch) * (1.0 - (-14.0 * dt).exp());
-
-        // Rope swinging.
+        // Rope swinging (3.0).
         if let Some(g) = self.grab.clone() {
             if pressed {
                 self.release_grab(world);
                 let dir = if stick.x.abs() > 0.2 { stick.x.signum() } else { vel.x.signum() };
                 let b = world.body_mut(self.body).unwrap();
-                b.add_velocity(Vec2::new(dir * tune::ROPE_JUMP.x, tune::ROPE_JUMP.y));
+                b.add_velocity(Vec2::new(dir * tune::ROPE_JUMP.x, tune::ROPE_JUMP.y) * g_scale.sqrt());
                 self.jump_buffer = 0.0;
                 return Some(Action::Release);
             }
@@ -244,123 +248,97 @@ impl Controller {
                 }
             }
             let b = world.body_mut(self.body).unwrap();
+            b.params.gravity_scale = g_scale;
             b.add_accel(Vec2::new(stick.x * tune::SWING_ACCEL * strength, 0.0));
             b.rest_scale = self.expand;
+            b.squash = Vec2::ONE;
             return None;
         }
 
         let b = world.body_mut(self.body).unwrap();
         b.rest_scale = self.expand;
-        let shape = if self.grounded { tune::CROUCH_SQUASH } else { tune::DIVE_SQUASH };
-        b.squash = Vec2::ONE.lerp(shape, self.crouch);
-        if !self.grounded && self.crouch > 0.5 && self.in_water < 0.2 {
-            b.add_accel(Vec2::new(0.0, -tune::FAST_FALL * self.crouch));
-        }
 
-        // Spring-loaded body: stiffen while swelling so the jelly itself
-        // shoves off whatever it's pressed against.
-        let base = *self.base_shape.get_or_insert(b.params.shape_compliance.unwrap_or(3e-3));
-        b.params.shape_compliance = Some(if swelling && self.puff.is_none() { tune::SWELL_COMPLIANCE.min(base) } else { base });
-
-        // Launch: press while touching something (or just after leaving it)
-        // to kick off along the contact normal — the floor sends you up, a
-        // corner throws you diagonally, a spring stacks, a ceiling shoves you
-        // down. Holding keeps adding a decaying push; releasing stops it.
-        if pressed && self.since_contact < tune::COYOTE && self.puff.is_none() && self.stuck.is_none() {
-            // Full strength straight up; sideways/downward pushes (walls,
-            // ceilings) are gentler, since nothing like gravity fights them.
-            let n = self.contact_normal;
-            let push = n * (0.55 + 0.45 * n.y.max(0.0));
-            let along = vel.dot(n).max(0.0);
-            b.add_velocity(push * (tune::LAUNCH_KICK * strength - along * 0.3).max(0.0));
-            self.launch = Some((push, 0.0));
-            self.launch_carry = vel - n * vel.dot(n);
-            self.jumping = true;
-            self.since_ground = 1.0;
-            self.since_contact = 1.0;
-            action = Some(Action::Jump);
+        // ── Sticky walls: cling (no gravity, held still) until the button
+        // launches you along the stick (or straight off the wall).
+        if self.stuck.is_none() && self.stick_grace <= 0.0 && self.sticky_count >= tune::STICK_MIN_CONTACTS {
+            self.stuck = Some(self.sticky_normal);
         }
-        if let Some((n, t)) = self.launch {
-            // Keep the run-up: restore lost speed along the launch surface.
-            if t < 0.2 {
-                let dir = n.normalize_or(Vec2::Y);
-                let now_t = vel - dir * vel.dot(dir);
-                let lost = self.launch_carry - now_t;
-                if lost.dot(self.launch_carry) > 0.0 {
-                    b.add_accel(lost * 9.0);
-                }
-            }
-            if !self.input.button || t >= tune::LAUNCH_HOLD {
-                self.launch = None;
-            } else {
-                let k = 1.0 - t / tune::LAUNCH_HOLD;
-                b.add_accel(n * tune::LAUNCH_ACCEL * strength * k * k);
-                self.launch = Some((n, t + dt));
-            }
-        }
-
-        // Sticky cling + wall jump.
         if let Some(n) = self.stuck {
-            b.params.gravity_scale = 0.12;
-            if self.jump_buffer > 0.0 {
-                b.add_velocity(-vel * 0.8);
-                b.add_velocity(Vec2::new(n.x.signum() * tune::WALL_JUMP.x, tune::WALL_JUMP.y));
-                self.jump_buffer = 0.0;
+            let n = if self.sticky_count > 0 { self.sticky_normal } else { n };
+            self.stuck = Some(n);
+            b.params.gravity_scale = 0.0;
+            b.add_velocity(-vel);
+            b.squash = Vec2::ONE;
+            if pressed {
+                let mut aim = stick;
+                if aim.length() < 0.1 {
+                    aim = n;
+                } else {
+                    aim = aim.normalize();
+                    let into = aim.dot(n);
+                    if into < 0.0 {
+                        aim -= n * into;
+                        aim = if aim.length() < 0.05 { n } else { aim.normalize() };
+                    }
+                }
+                b.add_velocity(aim * tune::STICK_JUMP * strength);
+                b.params.gravity_scale = g_scale;
                 self.stuck = None;
-                self.jumping = true;
-                b.params.gravity_scale = 1.0;
+                self.stick_grace = tune::STICK_RELEASE_GRACE;
+                self.jump_buffer = 0.0;
                 return Some(Action::WallJump);
             }
-        } else {
-            b.params.gravity_scale = 1.0;
+            return None;
+        }
+        b.params.gravity_scale = g_scale;
+
+        // Springs stiffen while expanding.
+        b.spring_scale = if self.input.button { tune::EXPAND_SPRING_MULT } else { 1.0 };
+
+        // Contact frame: +1 floor, ~0 wall, -1 ceiling.
+        let on_floor = self.grounded;
+        let up_dot = if self.touching { self.contact_normal.dot(up) } else if on_floor { 1.0 } else { 0.0 };
+
+        // Lateral: along the gravity-relative floor tangent; full on a floor,
+        // throttled on walls/ceilings and in the air.
+        let lateral = if on_floor { 1.0 } else if self.touching { tune::NONFLOOR_MOVE } else { tune::AIR_MOVE };
+        b.add_accel(right * stick.x * tune::MOVE_ACCEL * strength * lateral);
+
+        // Stick down: press into the floor (fall faster) and squash flat.
+        // Stick up: float — gentle in the air, a clamber when something's
+        // overhead, weaker up a bare wall.
+        if stick.y < -0.1 {
+            b.add_accel(down * tune::DOWN_ACCEL * -stick.y * strength);
+        } else if stick.y > 0.1 {
+            let mult = if self.overhead { tune::LEDGE_UP_MULT } else { 1.0 };
+            let climb = if self.touching && up_dot.abs() < 0.5 && !self.overhead { tune::WALL_CLIMB_MULT } else { 1.0 };
+            b.add_accel(up * tune::UP_ACCEL * mult * climb * stick.y * strength);
+        }
+        self.crouch = (-stick.y).max(0.0);
+        // Squash in the gravity frame (wide along `right`, flat along `up`).
+        let sx = 1.0 + tune::SQUASH_X * self.crouch;
+        let sy = 1.0 - tune::SQUASH_Y * self.crouch;
+        b.squash = Vec2::new((right.x * sx).abs() + (up.x * sy).abs(), (right.y * sx).abs() + (up.y * sy).abs());
+
+        if pressed && (self.touching || on_floor) && self.puff.is_none() {
+            action = Some(Action::Jump);
         }
 
-        // Run: direct accel (speed-limited) + tread so the outline rolls.
-        let accel = if self.grounded { tune::GROUND_ACCEL } else { tune::AIR_ACCEL } * strength;
-        let along = if self.grounded { self.ground_normal.perp() * -1.0 } else { Vec2::X };
-        let along = if along.x < 0.0 { -along } else { along };
-        let speed_along = vel.dot(along);
-        let want = stick.x * tune::MAX_SPEED * strength;
-        let push = if stick.x.abs() > 0.05 {
-            let headroom = if want > 0.0 { (want - speed_along).max(0.0) } else { (want - speed_along).min(0.0) };
-            (headroom / tune::MAX_SPEED).clamp(-1.0, 1.0) * accel
-        } else if self.grounded {
-            // Gentle braking so blobs don't skate forever.
-            (-speed_along / tune::MAX_SPEED).clamp(-1.0, 1.0) * accel * 0.35
-        } else {
-            0.0
-        };
-        b.add_accel(along * push);
-        if self.grounded && stick.x.abs() > 0.05 {
-            let c = b.centroid();
-            for k in 0..b.boundary.len() {
-                let i = b.boundary[k] as usize;
-                let r = b.x[i] - c;
-                // Clockwise tangent rolls right for +x.
-                let t = Vec2::new(r.y, -r.x).normalize_or_zero();
-                b.add_point_accel(i, t * stick.x * tune::TREAD_ACCEL * strength);
-            }
-        }
-
-        // Swim kick: in water the button kicks you up and out (so you can
-        // climb out onto a bank), with a short cooldown.
+        // Swim kick (3.0): in water the button kicks you up and out.
         self.swim_cooldown = (self.swim_cooldown - dt).max(0.0);
-        // Holding the button while pushing into a bank also climbs out.
         let pushing_bank = self.input.button && stick.x.abs() > 0.5 && vel.x.abs() < 60.0;
-        if self.in_water > 0.2 && !self.grounded && (self.jump_buffer > 0.0 || pushing_bank) && self.swim_cooldown <= 0.0 {
+        if self.in_water > 0.2 && !on_floor && (self.jump_buffer > 0.0 || pushing_bank) && self.swim_cooldown <= 0.0 {
             let vy = vel.y.max(0.0);
-            b.add_velocity(Vec2::new(stick.x * 120.0, tune::SWIM_KICK * strength - vy));
+            b.add_velocity(Vec2::new(stick.x * 120.0, tune::SWIM_KICK * g_scale.sqrt() * strength - vy));
             self.jump_buffer = 0.0;
             self.swim_cooldown = 0.45;
             return Some(Action::Jump);
         }
-
-        let _ = released;
         action
     }
 
     /// Read contacts after the physics step.
-    pub fn post_step(&mut self, world: &mut World, ropes: &[crate::RopeState], sticky: &dyn Fn(Collider) -> bool, dt: f32) -> Option<Action> {
+    pub fn post_step(&mut self, world: &mut World, ropes: &[crate::RopeState], sticky: &dyn Fn(Collider) -> bool, _dt: f32) -> Option<Action> {
         let Some(body) = world.body(self.body) else { return None };
         if !body.enabled {
             return None;
@@ -368,9 +346,12 @@ impl Controller {
         let vel = body.velocity();
         let mut ground = Vec2::ZERO;
         let mut count = 0;
-        let mut stick_n: Option<Vec2> = None;
+        let mut sticky_n = Vec2::ZERO;
+        let mut sticky_count = 0;
         let mut all = Vec2::ZERO;
         let mut touching = 0;
+        let mut overhead = false;
+        let c0 = body.centroid();
         for c in world.contacts_of(self.body) {
             all += c.normal;
             touching += 1;
@@ -378,29 +359,33 @@ impl Controller {
                 ground += c.normal;
                 count += 1;
             }
-            if sticky(c.other) && c.normal.y < 0.6 {
-                stick_n = Some(c.normal);
+            // Something pressing on our upper half (ledge, roof, blob above).
+            if c.normal.y < -0.3 || (c.point.y > c0.y + self.radius * 0.3 && c.normal.y < 0.3) {
+                overhead = true;
+            }
+            if sticky(c.other) {
+                sticky_n += c.normal;
+                sticky_count += 1;
             }
         }
+        self.touching = touching > 0;
+        self.overhead = overhead;
         if touching > 0 {
             self.contact_normal = all.normalize_or(Vec2::Y);
-            self.since_contact = 0.0;
-        } else {
-            self.since_contact += dt;
         }
-        let was = self.grounded;
+        self.sticky_count = sticky_count;
+        if sticky_count > 0 {
+            self.sticky_normal = sticky_n.normalize_or(Vec2::Y);
+        }
         self.grounded = count > 0;
         if self.grounded {
             self.ground_normal = (ground / count as f32).normalize_or(Vec2::Y);
-            self.since_ground = 0.0;
-            if vel.y <= 50.0 {
-                self.jumping = false;
-            }
-        } else {
-            self.since_ground += dt;
         }
-        let _ = was;
-        self.stuck = if self.grounded { None } else { stick_n };
+        let _ = vel;
+        if self.stuck.is_some() && sticky_count == 0 && !self.grounded {
+            // Lost the wall (e.g. it moved away): fall.
+            self.stuck = None;
+        }
 
         // Grab a vine when touching one in the air.
         if self.grab.is_none() && !self.grounded && self.grab_cooldown <= 0.0 {
@@ -429,7 +414,6 @@ impl Controller {
                 let anchor = Anchor::centre(world, self.body).unwrap();
                 let joint = world.add_joint(Joint::pin(anchor, Anchor::particle(rb, node)).with_compliance(2e-6));
                 self.grab = Some(Grab { rope: ri, node, joint });
-                self.jumping = false;
                 return Some(Action::Grab);
             }
         }

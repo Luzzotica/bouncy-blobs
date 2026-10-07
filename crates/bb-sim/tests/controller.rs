@@ -54,7 +54,9 @@ fn runs_at_top_speed() {
     let x2 = centre(&sim).x;
     let speed = x2 - x1;
     println!("run: first second {} px, steady {} px/s", x1 - x0, speed);
-    assert!(speed > 400.0 && speed < 650.0, "steady speed {speed}");
+    // 2.x has no hard top speed (it keeps building on long flats); just
+    // check we're in its range after two seconds.
+    assert!(speed > 600.0 && speed < 1800.0, "steady speed {speed}");
 }
 
 #[test]
@@ -70,7 +72,8 @@ fn jump_height_matches_metrics() {
     }
     let h = peak - y0;
     println!("full jump height {h}");
-    assert!(h > metrics::JUMP_H * 0.9 && h < metrics::JUMP_H * 1.5, "jump {h}");
+    // 2.x ground truth (legacy engine, scaled to 32 px): 427.
+    assert!(h > metrics::JUMP_H && (h - 427.0).abs() < 50.0, "jump {h}");
     // A tap is a hop (relax first: you can only launch by growing).
     sim.set_input(0, Input { stick: Vec2::ZERO, button: false });
     settle(&mut sim);
@@ -86,7 +89,7 @@ fn jump_height_matches_metrics() {
         hop = hop.max(feet(&sim).y);
     }
     println!("tap hop height {}", hop - y0);
-    assert!(hop - y0 < h * 0.7, "hop {} not shorter than jump {h}", hop - y0);
+    assert!(hop - y0 < h * 0.8, "hop {} not shorter than jump {h}", hop - y0);
 }
 
 #[test]

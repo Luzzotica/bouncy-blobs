@@ -567,6 +567,9 @@ impl World {
         for slot in self.slots.iter_mut() {
             let Some(b) = slot.body.as_mut().filter(|b| b.enabled) else { continue };
             let p = b.params;
+            if let Some(fm) = p.forces {
+                constraints::apply_forces(b, &fm, h);
+            }
             let lin = (1.0 - p.linear_damping * h).max(0.0);
             let internal = (1.0 - p.internal_damping * h).max(0.0);
             let mean_v = if p.internal_damping > 0.0 { b.velocity() } else { Vec2::ZERO };

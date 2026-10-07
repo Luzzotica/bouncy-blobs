@@ -448,8 +448,34 @@ impl MeshBuf {
     }
 }
 
+/// A closed ring drawn as a smooth curve through its points (uniform
+/// Catmull-Rom, `sub` samples per edge), so a 16-point blob reads round even
+/// when it swells to 3×.
+pub fn smooth_ring(p: &[PVec2], sub: usize) -> Vec<PVec2> {
+    let n = p.len();
+    if n < 4 || sub < 2 {
+        return p.to_vec();
+    }
+    let mut out = Vec::with_capacity(n * sub);
+    for i in 0..n {
+        let (p0, p1, p2, p3) = (p[(i + n - 1) % n], p[i], p[(i + 1) % n], p[(i + 2) % n]);
+        for k in 0..sub {
+            let t = k as f32 / sub as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            out.push(0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3));
+        }
+    }
+    out
+}
+
+/// The outline to draw: ring blobs are smoothed, everything else as is.
+fn draw_outline(b: &Body) -> Vec<PVec2> {
+    let raw: Vec<PVec2> = b.outline().collect();
+    if b.closed && b.tris.is_empty() && b.kind != BodyKind::Rope { smooth_ring(&raw, 4) } else { raw }
+}
+
 pub fn body_mesh(b: &Body, s: &Style, buf: &mut MeshBuf) {
-    let outline: Vec<PVec2> = b.outline().collect();
+    let outline: Vec<PVec2> = draw_outline(b);
     match b.kind {
         BodyKind::Rope => {
             buf.stroke(&b.x, b.params.radius * 2.4, 0.0, lin(s.rim));
@@ -516,7 +542,7 @@ pub fn body_mesh_look(b: &Body, s: &Style, look: Look, ctx: &LookCtx, buf: &mut 
             body_mesh(b, s, buf);
         }
         Look::Blob { halo } if ctx.dark && halo > 0.0 && b.closed => {
-            let outline = ccw(b.outline().collect());
+            let outline = ccw(draw_outline(b));
             let r = (b.area().abs() / std::f32::consts::PI).sqrt();
             buf.ring2(&outline, r * 0.15, r * 0.75, -0.004, la(s.fill, halo), la(s.fill, 0.0));
             body_mesh(b, s, buf);
