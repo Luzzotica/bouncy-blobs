@@ -4,7 +4,7 @@
 # Prereqs:
 #   - Xcode signed into the Apple ID that owns team 74874V9Z5H
 #   - ASC app record for me.sterlinglong.bouncyblobs
-#   - An .ipa from `npm run ios:build` (export method app-store-connect)
+#   - An .ipa from `scripts/ios-build.sh` (export method app-store-connect)
 #
 # Auth (pick one):
 #   A) App Store Connect API key (CI-friendly):
@@ -16,8 +16,8 @@
 #        export APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
 #
 # Usage:
-#   npm run ios:upload
-#   bash scripts/ios-upload-testflight.sh path/to/Bouncy\ Blobs.ipa
+#   scripts/ios-upload-testflight.sh                 # newest .ipa under build/ios
+#   scripts/ios-upload-testflight.sh path/to/Bouncy\ Blobs.ipa
 
 set -euo pipefail
 
@@ -30,13 +30,13 @@ find_ipa() {
     echo "$1"
     return
   fi
-  # Prefer the newest ipa under gen/apple or tauri target
+  # Newest ipa exported by scripts/ios-build.sh
   local candidates=()
   while IFS= read -r -d '' f; do candidates+=("$f"); done < <(
-    find "$ROOT/src-tauri" -name '*.ipa' -type f -print0 2>/dev/null
+    find "$ROOT/build/ios" -name '*.ipa' -type f -print0 2>/dev/null
   )
   if [[ ${#candidates[@]} -eq 0 ]]; then
-    echo "error: no .ipa found under src-tauri/. Run: npm run ios:build" >&2
+    echo "error: no .ipa found under build/ios/. Run: scripts/ios-build.sh" >&2
     exit 1
   fi
   # Newest by mtime

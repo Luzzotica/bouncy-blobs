@@ -62,3 +62,6 @@ crates/softbody-wasm/pkg/
 /marketing/shorts/
 /marketing/clips/
 /target
+
+# Platform build outputs (scripts/ios-build.sh, build-macos.sh, android-build.sh)
+/build/

@@ -1,0 +1,109 @@
+name: build
+
+on:
+  push:
+    branches: [main, bevy-port]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  native:
+    name: ${{ matrix.os }} — test + release build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libudev-dev libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+      - name: Test (headless)
+        run: cargo test --workspace --locked
+      - name: Release build
+        if: runner.os != 'macOS'
+        run: cargo build --release --locked -p bb-game --bin bouncy-blobs
+      - name: macOS universal .app
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          scripts/build-macos.sh --zip
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/bouncy-blobs
+          cp target/release/bouncy-blobs dist/bouncy-blobs/
+          cp -R crates/bb-game/assets dist/bouncy-blobs/assets
+          tar -C dist -czf bouncy-blobs-linux-x86_64.tar.gz bouncy-blobs
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/BouncyBlobs | Out-Null
+          Copy-Item target/release/bouncy-blobs.exe dist/BouncyBlobs/
+          Copy-Item -Recurse crates/bb-game/assets dist/BouncyBlobs/assets
+          Compress-Archive -Path dist/BouncyBlobs -DestinationPath bouncy-blobs-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bouncy-blobs-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            bouncy-blobs-linux-x86_64.tar.gz
+            bouncy-blobs-windows-x86_64.zip
+            build/macos/*.zip
+
+  web:
+    name: web (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build web/dist
+        run: scripts/web-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bouncy-blobs-web
+          path: web/dist
+
+  mobile-check:
+    name: mobile (iOS simulator + Android APK)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: iOS simulator app (unsigned)
+        run: |
+          xcodebuild -project ios/BouncyBlobs.xcodeproj -scheme BouncyBlobs \
+            -sdk iphonesimulator -configuration Debug -derivedDataPath target/xcode \
+            CODE_SIGNING_ALLOWED=NO build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Android debug APK (runner ships the SDK + NDK)
+        env:
+          ABIS: arm64-v8a
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          scripts/android-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bouncy-blobs-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
