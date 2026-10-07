@@ -334,7 +334,7 @@ impl LevelBuilder {
             motion: MoverMotion::Crusher { slam: 0.45, hold: 0.3, rise: 1.6, wait: 1.2 },
             period: 3.55,
             phase,
-            material: Material::Ground,
+            material: Material::Ice, // renders as a pale jelly drop
             trigger: String::new(),
         });
         self

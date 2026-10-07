@@ -118,6 +118,8 @@ pub(crate) struct Ch {
     pub path: Vec<Waypoint>,
     /// Solid ground is filled down to here.
     pub bottom: f32,
+    /// Roof undersides, for hanging decor.
+    roofs: Vec<Vec<Vec2>>,
 }
 
 impl Deref for Ch {
@@ -138,7 +140,7 @@ impl Ch {
         let id = format!("ch{n:02}");
         let mut b = LevelBuilder::new(&id, name, theme);
         b.intro(&format!("{id}_intro")).outro(&format!("{id}_outro")).kill_y(bottom + 200.0);
-        Ch { b, path: Vec::new(), bottom }
+        Ch { b, path: Vec::new(), bottom, roofs: Vec::new() }
     }
 
     /// Jelly-skinned ground following `top`, solid down to the level bottom.
@@ -162,6 +164,33 @@ impl Ch {
     /// Cave roof whose underside follows `bottom` (left to right).
     pub fn roof(&mut self, bottom: &[Vec2]) -> &mut Self {
         self.b.ceiling(bottom, 500.0);
+        self.roofs.push(bottom.to_vec());
+        self
+    }
+
+    /// Height of the roof underside at `x` (lowest roof covering x).
+    pub fn roof_at(&self, x: f32) -> Option<f32> {
+        self.roofs
+            .iter()
+            .flat_map(|r| r.windows(2))
+            .filter(|w| w[0].x <= x && x <= w[1].x && w[1].x > w[0].x)
+            .map(|w| w[0].y + (w[1].y - w[0].y) * (x - w[0].x) / (w[1].x - w[0].x))
+            .reduce(f32::min)
+    }
+
+    /// Hang decor `kind` from the roof along x0..x1 every `step` px.
+    pub fn hang(&mut self, kind: &str, x0: f32, x1: f32, step: f32) -> &mut Self {
+        let mut x = x0;
+        let mut k = 0;
+        while x <= x1 {
+            if let Some(y) = self.roof_at(x) {
+                let s = 0.8 + ((k * 37) % 5) as f32 * 0.1;
+                let dy = if kind == "glowworm" { 14.0 + ((k * 53) % 4) as f32 * 10.0 } else { 0.0 };
+                self.b.decor(kind, v(x, y - dy), s, -1.0);
+            }
+            x += step;
+            k += 1;
+        }
         self
     }
 

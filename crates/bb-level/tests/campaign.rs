@@ -239,11 +239,17 @@ impl Bot {
         self.since_ground = if grounded { 0.0 } else { self.since_ground + dt };
         let on_ground = self.since_ground < 0.15;
         // Advance through reached waypoints.
-        while self.i < path.len() - 1 {
-            let t = path[self.i];
+        let reached = |t: Waypoint| {
             let near = (pos.x - t.at.x).abs() < 50.0 && feet > t.at.y - 45.0 && feet < t.at.y + 140.0;
-            if near && (on_ground || matches!(t.how, Move::Swim | Move::Wind)) {
+            near && (on_ground || matches!(t.how, Move::Swim | Move::Wind))
+        };
+        while self.i < path.len() - 1 {
+            if reached(path[self.i]) {
                 self.i += 1;
+                self.rope_t = 0.0;
+            } else if self.i + 1 < path.len() - 1 && reached(path[self.i + 1]) {
+                // Overshot a waypoint (e.g. bounced past it): skip ahead.
+                self.i += 2;
                 self.rope_t = 0.0;
             } else {
                 break;
@@ -268,6 +274,10 @@ impl Bot {
         let edge_ahead = on_ground
             && !sim.world.raycast(pos + Vec2::new(dir * 50.0, 0.0), Vec2::NEG_Y, 150.0, bb_sim::load::layer::WORLD, Some(p.ctl.body)).is_some();
         let mut want_jump = blocked;
+        // Target right above us: just jump.
+        if tgt.at.y > feet + 40.0 && dx.abs() < 150.0 && !matches!(tgt.how, Move::Ride | Move::Swim | Move::Wall) {
+            want_jump = true;
+        }
         // A jump that landed back short of a higher target: back up for a run-up.
         if self.jumped && grounded && self.hold <= 0.0 {
             self.jumped = false;
