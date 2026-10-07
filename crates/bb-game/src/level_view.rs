@@ -30,6 +30,16 @@ pub struct GoalVisual(pub Handle<Mesh>);
 #[derive(Component)]
 pub struct Sky;
 
+/// Moves with the camera by this fraction (0 = world-fixed, 1 = screen-fixed).
+#[derive(Component)]
+pub struct Parallax(pub f32);
+
+/// A drifting glow spore.
+#[derive(Component)]
+pub struct Mote {
+    seed: f32,
+}
+
 pub struct LevelViewPlugin;
 
 impl Plugin for LevelViewPlugin {
@@ -37,7 +47,7 @@ impl Plugin for LevelViewPlugin {
         app.add_systems(PostUpdate, spawn_level_view.run_if(resource_added::<Game>))
             .add_systems(
                 PostUpdate,
-                (update_movers, update_springs, update_checkpoints, update_pickups, update_goal, follow_sky)
+                (update_movers, update_springs, update_checkpoints, update_pickups, update_goal, follow_sky, parallax, motes)
                     .run_if(resource_exists::<Game>),
             )
             .add_systems(PostUpdate, despawn_level_view.run_if(resource_removed::<Game>));
@@ -124,6 +134,7 @@ pub fn spawn_level_view(
         Mesh2d(meshes.add(far.into_mesh())),
         MeshMaterial2d(shared.vertex.clone()),
         Transform::from_xyz(0.0, 0.0, z::FAR),
+        Parallax(0.45),
         LevelEntity,
     ));
 
@@ -385,6 +396,58 @@ fn follow_sky(cam: Query<&Transform, (With<Camera2d>, Without<Sky>)>, mut sky: Q
     for mut s in sky.iter_mut() {
         s.translation.x = c.translation.x;
         s.translation.y = c.translation.y;
+    }
+}
+
+fn parallax(cam: Query<&Transform, (With<Camera2d>, Without<Parallax>)>, mut q: Query<(&Parallax, &mut Transform)>) {
+    let Ok(c) = cam.single() else { return };
+    for (p, mut tf) in q.iter_mut() {
+        tf.translation.x = c.translation.x * p.0;
+        tf.translation.y = c.translation.y * p.0;
+    }
+}
+
+/// Glow spores drifting through the cave, wrapping around the view.
+fn motes(
+    mut commands: Commands,
+    time: Res<Time>,
+    game: Res<Game>,
+    shared: Res<Shared>,
+    mut mats: ResMut<Assets<ColorMaterial>>,
+    cam: Query<&Transform, (With<Camera2d>, Without<Mote>)>,
+    mut q: Query<(&Mote, &mut Transform)>,
+) {
+    let Ok(c) = cam.single() else { return };
+    let centre = c.translation.truncate();
+    if q.is_empty() {
+        let theme = palette::theme(game.sim.level.theme);
+        let mut glow = theme.glow;
+        glow.set_alpha(0.55);
+        let mat = mats.add(ColorMaterial { color: glow, alpha_mode: bevy::sprite_render::AlphaMode2d::Blend, ..default() });
+        for i in 0..40 {
+            let seed = i as f32 * 12.9898;
+            let p = centre + Vec2::new((seed.sin() * 43758.5).fract() * 1800.0 - 900.0, (seed.cos() * 23421.6).fract() * 1100.0 - 550.0);
+            commands.spawn((
+                Mesh2d(shared.circle.clone()),
+                MeshMaterial2d(mat.clone()),
+                Transform::from_xyz(p.x, p.y, z::DECOR_BACK + 1.0).with_scale(Vec3::splat(2.0 + (seed * 3.1).sin().abs() * 3.0)),
+                Mote { seed },
+                LevelEntity,
+            ));
+        }
+        return;
+    }
+    let t = time.elapsed_secs();
+    let dt = time.delta_secs();
+    for (m, mut tf) in q.iter_mut() {
+        tf.translation.x += ((t * 0.3 + m.seed).sin() * 14.0 + 6.0) * dt;
+        tf.translation.y += ((t * 0.21 + m.seed * 1.7).cos() * 10.0 + 9.0) * dt;
+        // Wrap around the view so there are always some on screen.
+        let d = tf.translation.truncate() - centre;
+        if d.x > 1000.0 { tf.translation.x -= 2000.0; }
+        if d.x < -1000.0 { tf.translation.x += 2000.0; }
+        if d.y > 650.0 { tf.translation.y -= 1300.0; }
+        if d.y < -650.0 { tf.translation.y += 1300.0; }
     }
 }
 
