@@ -85,6 +85,26 @@ fn cave_terrain(mat: bb_level::Material, one_way: bool, theme: &palette::ThemeCo
     }
 }
 
+/// Craggy-rock colours for a terrain material in the black cave.
+pub fn rock_look(mat: bb_level::Material, theme: &palette::ThemeColors) -> crate::crag::RockLook {
+    let (fill, rim, rim_w) = cave_terrain(mat, false, theme);
+    let tinted = !matches!(mat, bb_level::Material::Ground | bb_level::Material::Stone);
+    crate::crag::RockLook {
+        fill,
+        rim,
+        rim_w,
+        lit: if tinted { rim } else { mix(Color::BLACK, lighten(theme.jelly, 0.25), 0.42) },
+        crack: mix(Color::BLACK, theme.jelly, 0.16),
+        fleck: theme.crystal,
+        rough: match mat {
+            bb_level::Material::Ground => 1.0,
+            bb_level::Material::Stone => 0.75,
+            _ => 0.45,
+        },
+        detail: !tinted,
+    }
+}
+
 pub fn spawn_level_view(
     mut commands: Commands,
     game: Res<Game>,
@@ -114,12 +134,17 @@ pub fn spawn_level_view(
         LevelEntity,
     ));
 
-    // Far cave silhouettes: soft bumps behind the play area.
+    // Far cave silhouettes. The black cave gets layered craggy rock and
+    // pulsing bioluminescence; daylight themes keep soft bumps.
     let (min, max) = level.bounds();
+    if theme.dark {
+        let seed = level.id.bytes().fold(0x9e37_79b9u32, |h, b| h.rotate_left(5) ^ b as u32);
+        crate::backdrop::spawn(&mut commands, &mut meshes, &mut mats, &shared, &theme, min, max, seed);
+    }
     let mut far = MeshBuf::default();
     let mut x = min.x - 1500.0;
     let mut k = 0;
-    while x < max.x + 1500.0 {
+    while x < max.x + 1500.0 && !theme.dark {
         let w = 260.0 + ((k * 37) % 7) as f32 * 60.0;
         let h = 300.0 + ((k * 53) % 5) as f32 * 140.0;
         let base_y = min.y - 400.0 + ((k * 29) % 9) as f32 * 120.0;
@@ -173,11 +198,15 @@ pub fn spawn_level_view(
 
     // Terrain.
     let mut terrain = MeshBuf::default();
-    for (t, (_, mat, one_way)) in level.terrain.iter().zip(&sim.terrain) {
+    for (i, (t, (_, mat, one_way))) in level.terrain.iter().zip(&sim.terrain).enumerate() {
         let poly = t.shape.outline();
         if theme.dark {
             let (fill, rim, w) = cave_terrain(*mat, *one_way, &theme);
-            poly_mesh(&poly, fill, rim, w, &mut terrain);
+            if *one_way {
+                poly_mesh(&poly, fill, rim, w, &mut terrain);
+            } else {
+                crate::crag::rock_mesh(&poly, &rock_look(*mat, &theme), 0x5eed + i as u32 * 7919, &mut terrain);
+            }
             continue;
         }
         let fill = palette::material_tint(*mat, theme.rock);
@@ -190,7 +219,7 @@ pub fn spawn_level_view(
     }
     commands.spawn((
         Mesh2d(meshes.add(terrain.into_mesh())),
-        MeshMaterial2d(shared.vertex.clone()),
+        MeshMaterial2d(shared.blend.clone()),
         Transform::from_xyz(0.0, 0.0, z::TERRAIN),
         LevelEntity,
     ));
@@ -198,13 +227,13 @@ pub fn spawn_level_view(
     // Movers.
     for i in 0..sim.movers.len() {
         let h = meshes.add(empty_mesh());
-        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::TERRAIN + 0.5), MoverVisual(i, h), LevelEntity));
+        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::TERRAIN + 0.5 + (i % 200) as f32 * 0.001), MoverVisual(i, h), LevelEntity));
     }
 
     // Springs.
     for i in 0..sim.springs.len() {
         let h = meshes.add(empty_mesh());
-        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS), SpringVisual(i, h), LevelEntity));
+        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS + 0.05 + (i % 100) as f32 * 0.001), SpringVisual(i, h), LevelEntity));
     }
 
     // Spikes (static). In the dark: black teeth with hot red glowing tips.
@@ -322,7 +351,7 @@ pub fn spawn_level_view(
     // Checkpoints: lantern flowers.
     for i in 0..level.checkpoints.len() {
         let h = meshes.add(empty_mesh());
-        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS - 0.2), CheckpointVisual(i, h, None, false), LevelEntity));
+        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS - 0.2 + (i % 100) as f32 * 0.001), CheckpointVisual(i, h, None, false), LevelEntity));
     }
 
     // Pickups are amoebas now: real softbodies drawn by render.rs.
@@ -359,7 +388,7 @@ pub fn spawn_level_view(
         }
     }
     crate::cave::spawn_reactive(&mut commands, &mut meshes, &mut mats, &shared, level, &theme);
-    for (buf, zz) in [(glow_back, z::DECOR_BACK - 0.5), (spill, z::SPILL), (back, z::DECOR_BACK), (glow_front, z::DECOR_FRONT - 0.05), (front, z::DECOR_FRONT)] {
+    for (buf, zz) in [(glow_back, z::DECOR_BACK - 0.5), (spill, z::SPILL - 0.05), (back, z::DECOR_BACK), (glow_front, z::DECOR_FRONT - 0.05), (front, z::DECOR_FRONT)] {
         commands.spawn((Mesh2d(meshes.add(buf.into_mesh())), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, zz), LevelEntity));
     }
 }
@@ -476,14 +505,57 @@ pub fn decor(buf: &mut MeshBuf, kind: &str, p: PVec2, s: f32, theme: &palette::T
     let _ = accent;
 }
 
-fn update_movers(game: Res<Game>, mut meshes: ResMut<Assets<Mesh>>, q: Query<&MoverVisual>) {
+/// A mover's craggy mesh, built once against a reference pose and moved
+/// rigidly with the collider afterwards.
+struct MoverTemplate {
+    r0: PVec2,
+    r1: PVec2,
+    buf: MeshBuf,
+}
+
+fn update_movers(
+    game: Res<Game>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    q: Query<&MoverVisual>,
+    mut templates: Local<std::collections::HashMap<usize, MoverTemplate>>,
+    mut level_id: Local<String>,
+) {
     let theme = palette::theme(game.sim.level.theme);
+    if *level_id != game.sim.level.id || game.is_added() {
+        templates.clear();
+        *level_id = game.sim.level.id.clone();
+    }
     for MoverVisual(i, h) in q.iter() {
         let Some(m) = game.sim.movers.get(*i) else { continue };
         let Some(s) = game.sim.world.static_collider(m.id) else { continue };
         let Some(mut mesh) = meshes.get_mut(h) else { continue };
         let mut buf = MeshBuf::default();
-        if theme.dark {
+        if theme.dark && m.def.material != bb_level::Material::Ice && s.poly.len() >= 2 {
+            // Moving stone: craggy like the walls, with a slightly stronger
+            // edge so it reads as "this one moves".
+            let tpl = templates.entry(*i).or_insert_with(|| {
+                let mut look = rock_look(bb_level::Material::Stone, &theme);
+                look.rim = mix(Color::BLACK, lighten(theme.jelly, 0.3), 0.32);
+                look.rim_w = 3.0;
+                look.lit = mix(Color::BLACK, lighten(theme.jelly, 0.3), 0.5);
+                let mut b = MeshBuf::default();
+                crate::crag::rock_mesh(&s.poly, &look, 0xa11e + *i as u32 * 104_729, &mut b);
+                MoverTemplate { r0: s.poly[0], r1: s.poly[1], buf: b }
+            });
+            let (c0, c1) = (s.poly[0], s.poly[1]);
+            let rot = PVec2::from_angle((c1 - c0).to_angle() - (tpl.r1 - tpl.r0).to_angle());
+            buf.pos = tpl
+                .buf
+                .pos
+                .iter()
+                .map(|p| {
+                    let q = c0 + rot.rotate(PVec2::new(p[0], p[1]) - tpl.r0);
+                    [q.x, q.y, p[2]]
+                })
+                .collect();
+            buf.col = tpl.buf.col.clone();
+            buf.idx = tpl.buf.idx.clone();
+        } else if theme.dark {
             if m.def.material == bb_level::Material::Ice {
                 // Falling jelly drip: a luminous drop.
                 let o = ccw(s.poly.clone());

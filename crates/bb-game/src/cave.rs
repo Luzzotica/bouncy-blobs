@@ -157,14 +157,14 @@ pub fn spawn_reactive(
         let mut buf = MeshBuf::default();
         draw_mushroom(&mut buf, d.scale, 0.0, 0.0, 0.0, theme.dark, col);
         let mesh = meshes.add(buf.into_mesh());
-        let zz = if d.depth < 0.0 { z::DECOR_BACK + (i % 50) as f32 * 0.001 } else { z::DECOR_FRONT };
+        let zz = if d.depth < 0.0 { z::DECOR_BACK + 0.0005 + (i % 50) as f32 * 0.001 } else { z::DECOR_FRONT + 0.0005 + (i % 50) as f32 * 0.001 };
         let spill = mats.add(ColorMaterial { color: spill_color(col, 0.0, theme.dark), alpha_mode: bevy::sprite_render::AlphaMode2d::Blend, ..default() });
         let cap = d.pos + PVec2::new(0.0, 46.0 * d.scale);
         if theme.dark {
             commands.spawn((
                 Mesh2d(shared.halo.clone()),
                 MeshMaterial2d(spill.clone()),
-                Transform::from_xyz(cap.x, cap.y, z::SPILL).with_scale(Vec3::splat(120.0 * d.scale)),
+                Transform::from_xyz(cap.x, cap.y, z::SPILL + (i % 100) as f32 * 0.0005).with_scale(Vec3::splat(120.0 * d.scale)),
                 LevelEntity,
             ));
         }

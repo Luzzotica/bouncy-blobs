@@ -3,8 +3,10 @@
 pub mod achievements;
 pub mod assets;
 pub mod audio;
+pub mod backdrop;
 pub mod camera;
 pub mod cave;
+pub mod crag;
 pub mod devtools;
 pub mod dropin;
 pub mod editor;
@@ -73,6 +75,7 @@ impl Plugin for GamePlugin {
                 camera::CameraPlugin,
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
+                backdrop::BackdropPlugin,
                 cave::CavePlugin,
                 sandbox::SandboxPlugin,
                 softtext::SoftTextPlugin,

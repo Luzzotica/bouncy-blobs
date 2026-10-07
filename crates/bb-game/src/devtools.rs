@@ -1,7 +1,8 @@
 //! Developer hooks for automated visual checks.
 //!
 //! * `BB_SHOT=/path.png` — save a screenshot after `BB_SHOT_FRAME` frames
-//!   (default 150) and exit.
+//!   (default 150) and exit. `BB_SHOT_COUNT=n BB_SHOT_EVERY=k` saves a
+//!   flipbook of n shots k frames apart.
 //! * `BB_AUTOPLAY=1` — slot 0 holds right and jumps every second.
 //! * `BB_START=kids` — boot straight into Kids Mode (skips the sandbox).
 
@@ -48,9 +49,24 @@ fn offscreen(
 
 fn shoot(mut commands: Commands, mut frame: Local<u32>, mut exit: MessageWriter<AppExit>, target: Option<Res<ShotTarget>>, time: Res<Time>) {
     *frame += 1;
-    let at: u32 = std::env::var("BB_SHOT_FRAME").ok().and_then(|s| s.parse().ok()).unwrap_or(150);
-    if *frame == at {
+    let env = |k: &str, d: u32| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
+    let at = env("BB_SHOT_FRAME", 150);
+    // `BB_SHOT_COUNT=n BB_SHOT_EVERY=k`: n shots k frames apart, saved as
+    // `<stem>_<i>.png` (a cheap flipbook for checking animation).
+    let count = env("BB_SHOT_COUNT", 1).max(1);
+    let every = env("BB_SHOT_EVERY", 5).max(1);
+    let last = at + (count - 1) * every;
+    if *frame >= at && *frame <= last && (*frame - at) % every == 0 {
         let path = std::env::var("BB_SHOT").unwrap();
+        let path = if count > 1 {
+            let i = (*frame - at) / every;
+            match path.rsplit_once('.') {
+                Some((stem, ext)) => format!("{stem}_{i:02}.{ext}"),
+                None => format!("{path}_{i:02}"),
+            }
+        } else {
+            path
+        };
         info!("BB_SHOT frame {} at {:.2}s", *frame, time.elapsed_secs());
         let shot = match &target {
             Some(t) => Screenshot::image(t.0.clone()),
@@ -58,7 +74,7 @@ fn shoot(mut commands: Commands, mut frame: Local<u32>, mut exit: MessageWriter<
         };
         commands.spawn(shot).observe(save_to_disk(path));
     }
-    if *frame == at + 20 {
+    if *frame == last + 20 {
         exit.write(AppExit::Success);
     }
 }
