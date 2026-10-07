@@ -15,7 +15,17 @@ pub const IS_MOBILE: bool = cfg!(any(target_os = "ios", target_os = "android"));
 pub fn default_plugins() -> PluginGroupBuilder {
     DefaultPlugins
         .set(WindowPlugin { primary_window: Some(primary_window()), ..default() })
-        .set(AssetPlugin { file_path: asset_file_path(), ..default() })
+        .set(AssetPlugin {
+            file_path: asset_file_path(),
+            // No `.meta` files ship; on web/Android probing for them costs a
+            // request (a 404 console error on web) per asset.
+            meta_check: if cfg!(any(target_arch = "wasm32", target_os = "android")) {
+                bevy::asset::AssetMetaCheck::Never
+            } else {
+                bevy::asset::AssetMetaCheck::default()
+            },
+            ..default()
+        })
 }
 
 /// The main window for the current target.

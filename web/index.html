@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Bouncy Blobs</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <style>
+    html, body { margin: 0; height: 100%; background: #1a1224; overflow: hidden; }
+    body { display: flex; align-items: center; justify-content: center; }
+    /* Bevy sizes the canvas to its parent (fit_canvas_to_parent). */
+    #game { position: fixed; inset: 0; }
+    #bevy { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+    #loading { position: fixed; color: #fffae6; font: 600 20px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="game"><canvas id="bevy" tabindex="0"></canvas></div>
+  <div id="loading">Loading Bouncy Blobs…</div>
+  <script type="module">
+    import init from "./bouncy-blobs.js";
+    const loading = document.getElementById("loading");
+    // winit throws a control-flow "exception" to hand the loop to the
+    // browser; it is not an error.
+    init().catch((e) => {
+      if (!String(e).includes("Using exceptions for control flow")) {
+        loading.textContent = "Failed to start: " + e;
+        throw e;
+      }
+    });
+    const hide = () => { if (document.getElementById("bevy").width > 0) loading.remove(); else requestAnimationFrame(hide); };
+    requestAnimationFrame(hide);
+  </script>
+</body>
+</html>
