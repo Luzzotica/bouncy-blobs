@@ -502,6 +502,7 @@ name = "bb-level"
 version = "3.0.0"
 dependencies = [
  "bb-physics",
+ "bb-sim",
  "glam 0.30.10",
  "serde",
  "serde_json",

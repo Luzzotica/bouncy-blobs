@@ -3,8 +3,10 @@
 
 pub mod builder;
 pub mod legacy;
+pub mod campaign;
 pub mod types;
 
 pub use builder::{LevelBuilder, metrics, v};
 pub use legacy::{import_legacy, load_any};
 pub use types::*;
+pub use campaign::{campaign, chapter};

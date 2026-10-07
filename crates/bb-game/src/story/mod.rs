@@ -92,13 +92,9 @@ pub struct StoryFlow {
     pub goal_timer: Option<f32>,
 }
 
-/// Where chapter levels come from (the campaign crate, once merged).
+/// The campaign chapter (crates/bb-level/src/campaign).
 pub fn chapter_level(n: u8) -> Level {
-    let mut l = crate::sandbox::sandbox_level();
-    l.id = format!("ch{n:02}");
-    l.intro = format!("ch{n:02}_intro");
-    l.outro = format!("ch{n:02}_outro");
-    l
+    bb_level::campaign::chapter(n)
 }
 
 pub struct StoryPlugin;
@@ -110,6 +106,7 @@ impl Plugin for StoryPlugin {
             .add_message::<SayRequest>()
             .init_resource::<StoryProgress>()
             .init_resource::<Cues>()
+            .init_resource::<LineQueue>()
             .add_systems(OnEnter(AppState::Story), enter)
             .add_systems(OnExit(AppState::Story), exit)
             .add_systems(
@@ -238,35 +235,61 @@ fn advance(
     }
 }
 
-/// Mid-level story triggers → speech bubbles.
+/// Queue of mid-level lines, spoken one after another.
+#[derive(Resource, Default)]
+pub struct LineQueue {
+    pending: std::collections::VecDeque<(Speaker, Voice, String)>,
+    wait: f32,
+}
+
+/// Mid-level story triggers → queued speech bubbles.
 fn level_lines(
     mut events: MessageReader<SimMsg>,
     game: Res<Game>,
     runner: Option<Res<Runner>>,
+    mut queue: ResMut<LineQueue>,
+    time: Res<Time>,
     mut say: MessageWriter<SayRequest>,
     mut blub: MessageWriter<Blub>,
 ) {
+    for SimMsg(e) in events.read() {
+        let SimEvent::Story { script, slot } = e else { continue };
+        for (who, text) in scripts::level_lines(script) {
+            let role_npc = |role: bb_level::NpcRole| game.sim.npcs.iter().find(|n| n.role == role && n.dead.is_none()).map(|n| Speaker::Actor(n.id.clone()));
+            let (speaker, voice) = match who {
+                "pip" => (Speaker::Player(*slot), Voice::Pip),
+                "lulu" => (Speaker::Offscreen, Voice::Lulu),
+                "tip" => (Speaker::Tip, Voice::Glimmer),
+                "glimmer" => (role_npc(bb_level::NpcRole::Glimmer).unwrap_or(Speaker::Tip), Voice::Glimmer),
+                "granny" => (role_npc(bb_level::NpcRole::Granny).unwrap_or(Speaker::Offscreen), Voice::Granny),
+                "reg" => (role_npc(bb_level::NpcRole::Reg).unwrap_or(Speaker::Offscreen), Voice::Reg),
+                _ => (
+                    game.sim
+                        .npcs
+                        .iter()
+                        .find(|n| matches!(n.role, bb_level::NpcRole::Trapped | bb_level::NpcRole::Huddle | bb_level::NpcRole::Follower) && n.dead.is_none())
+                        .map(|n| Speaker::Actor(n.id.clone()))
+                        .unwrap_or(Speaker::Player(*slot)),
+                    Voice::Huddle,
+                ),
+            };
+            queue.pending.push_back((speaker, voice, text.to_string()));
+        }
+    }
     if runner.is_some() {
         return;
     }
-    for SimMsg(e) in events.read() {
-        let SimEvent::Story { script, slot } = e else { continue };
-        for (who, voice, text) in scripts::level_lines(script) {
-            let speaker = match who {
-                "player" => Speaker::Player(*slot),
-                "lulu" => Speaker::Offscreen,
-                id => {
-                    // Speak from an NPC with that role if one exists in the level, else from the player.
-                    let found = game.sim.npcs.iter().find(|n| n.id == id || format!("{:?}", n.role).to_lowercase() == id);
-                    match found {
-                        Some(n) => Speaker::Actor(n.id.clone()),
-                        None => Speaker::Player(*slot),
-                    }
-                }
-            };
-            say.write(SayRequest { speaker, text: text.to_string(), voice, linger: 2.0 });
+    queue.wait -= time.delta_secs();
+    if queue.wait > 0.0 {
+        return;
+    }
+    if let Some((speaker, voice, text)) = queue.pending.pop_front() {
+        let read = 0.9 + text.len() as f32 * 0.05;
+        queue.wait = read + 0.3;
+        if voice != Voice::Glimmer || speaker != Speaker::Tip {
             blub.write(Blub { voice, syllables: (text.len() / 3).clamp(2, 14) as u8 });
         }
+        say.write(SayRequest { speaker, text, voice, linger: read });
     }
 }
 

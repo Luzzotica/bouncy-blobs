@@ -1,0 +1,136 @@
+//! Chapter 1 — **Too Bouncy** (Huddle Hollow).
+//!
+//! Pip has just been rolled out of the Back Drip. A sad roll through the
+//! outskirts that keeps turning into a happy one: roll, hop, full jump,
+//! wobbly jelly stepping stones over the first pointy pit, a squish through
+//! a low crawlspace, a staircase up to a ridge, a huge jelly slope with a
+//! kicker leap, and finally the first look *up* a shaft towards the Glow.
+//!
+//! Mechanics: roll, jump (expand), squish under low ceilings, jelly ground.
+
+use super::*;
+
+pub fn build() -> Course {
+    let mut c = Ch::new(1, "Too Bouncy", Theme::Hollow, -1200.0);
+    c.spawn(v(250.0, 40.0));
+
+    // ------------------------------------------------ the Back Drip exit
+    // The Huddle (behind you) and the wall of the Hollow.
+    c.wall(-1000.0, -650.0, -1200.0, 1600.0);
+    c.floor(&[v(-650.0, 0.0), v(900.0, 0.0), v(1150.0, 45.0), v(1400.0, 0.0), v(1700.0, 30.0), v(2150.0, 0.0)]);
+    c.npc("granny", v(-380.0, 80.0), NpcRole::Granny, "", 72.0);
+    for (k, x) in [-560.0, -230.0, -140.0, -60.0].iter().enumerate() {
+        c.npc(&format!("huddle{k}"), v(*x, 40.0), NpcRole::Huddle, "", 28.0 + k as f32 * 2.0);
+    }
+    c.say(520.0, 600.0, 0.0, "ch01_goodbye");
+    c.pickup_arc(v(1000.0, 60.0), v(1300.0, 60.0), 90.0, 3);
+    c.pickup_arc(v(1550.0, 70.0), v(1850.0, 70.0), 80.0, 3);
+    c.wp(Move::Walk, 250.0, 0.0).wp(Move::Walk, 2030.0, 0.0);
+
+    // --------------------------------------------------- hop lessons
+    c.say(1950.0, 2000.0, 0.0, "ch01_first_hop");
+    c.ledge(2150.0, 2700.0, 80.0); // hop (+80)
+    c.drops(2300.0, 2600.0, 80.0, 3);
+    c.wp(Move::Jump, 2290.0, 80.0).wp(Move::Walk, 2560.0, 80.0);
+    c.ledge(2700.0, 3200.0, 230.0); // full jump (+150)
+    c.wp(Move::Jump, 2800.0, 230.0);
+    c.cp(3000.0, 230.0);
+    // A soft valley (safe), with a secret shelf above it.
+    c.floor(&[v(3200.0, 230.0), v(3330.0, 110.0), v(3570.0, 110.0), v(3700.0, 230.0), v(4000.0, 230.0)]);
+    c.drops(3360.0, 3540.0, 110.0, 3);
+    c.shelf(3330.0, 3530.0, 400.0, 70.0);
+    c.pickups(v(3360.0, 450.0), v(3500.0, 450.0), 4);
+    c.decor("crystal", v(3500.0, 400.0), 0.7, -1.0);
+    c.wp(Move::Walk, 3950.0, 230.0);
+
+    // --------------------------------------- the first pointy pit
+    c.say(3820.0, 3880.0, 230.0, "ch01_pointy");
+    c.ledge(4000.0, 4240.0, -200.0);
+    c.spikes(v(4000.0, -200.0), v(4240.0, -200.0));
+    c.ledge(4240.0, 4600.0, 230.0);
+    c.pickup_arc(v(3980.0, 280.0), v(4280.0, 280.0), 110.0, 3);
+    c.wp(Move::Jump, 4320.0, 230.0).wp(Move::Walk, 4560.0, 230.0);
+    // Wobbly jelly stepping stones over a wider spiky pit.
+    c.ledge(4600.0, 5760.0, -260.0);
+    c.spikes(v(4600.0, -260.0), v(5760.0, -260.0));
+    c.jelly(v(4760.0, 180.0), v(4960.0, 260.0), 0.8);
+    c.jelly(v(5120.0, 220.0), v(5320.0, 300.0), 0.8);
+    c.jelly(v(5440.0, 180.0), v(5620.0, 260.0), 0.8);
+    c.pickup(v(4860.0, 310.0)).pickup(v(5220.0, 350.0)).pickup(v(5530.0, 310.0));
+    c.wp(Move::Jump, 4860.0, 260.0).wp(Move::Jump, 5220.0, 300.0).wp(Move::Jump, 5530.0, 260.0);
+    c.floor(&[v(5760.0, 230.0), v(7950.0, 230.0)]);
+    c.wp(Move::Jump, 5850.0, 230.0);
+    c.cp(6150.0, 230.0);
+
+    // ----------------------------------------------- the crawlspace
+    c.say(6350.0, 6400.0, 230.0, "ch01_squish");
+    c.roof(&[v(6300.0, 760.0), v(6500.0, 440.0), v(6650.0, 302.0), v(7350.0, 302.0), v(7500.0, 440.0), v(7700.0, 760.0)]);
+    c.drops(6700.0, 7300.0, 220.0, 6);
+    c.wp(Move::Walk, 6550.0, 230.0).wp(Move::Squeeze, 7450.0, 230.0).wp(Move::Walk, 7800.0, 230.0);
+
+    // ---------------------------------------- stairs up to the ridge
+    c.ledge(7950.0, 8200.0, 380.0);
+    c.ledge(8200.0, 8450.0, 530.0);
+    c.ledge(8450.0, 8700.0, 680.0);
+    c.floor(&[v(8700.0, 830.0), v(9150.0, 830.0), v(9300.0, 815.0), v(10600.0, 100.0), v(11000.0, 0.0), v(11300.0, 40.0), v(11450.0, 140.0)]);
+    for (x, y) in [(8075.0, 380.0), (8325.0, 530.0), (8575.0, 680.0)] {
+        c.pickup(v(x, y + 60.0));
+    }
+    c.wp(Move::Jump, 8040.0, 380.0).wp(Move::Jump, 8290.0, 530.0).wp(Move::Jump, 8540.0, 680.0).wp(Move::Jump, 8800.0, 830.0);
+    c.cp(8950.0, 830.0);
+    c.say(9100.0, 9160.0, 830.0, "ch01_big_slope");
+    c.decor("lantern", v(13820.0, 3300.0), 0.6, -1.0); // a first glint of the Glow (seen from the ridge)
+
+    // -------------------------------------- the big jelly slope + kicker
+    c.pickups(v(9500.0, 760.0), v(10500.0, 220.0), 6);
+    c.wp(Move::Walk, 9300.0, 815.0).wp(Move::Walk, 10600.0, 100.0).wp(Move::Walk, 11000.0, 0.0).wp(Move::Walk, 11400.0, 125.0);
+    // Leap off the kicker (it's downhill, so it carries further than a
+    // flat jump). A soft basin catches short hops; steps lead back out.
+    c.pickup_arc(v(11480.0, 200.0), v(11850.0, 40.0), 200.0, 5);
+    c.ledge(11450.0, 11650.0, -350.0);
+    c.ledge(11650.0, 11750.0, -200.0);
+    c.ledge(11750.0, 11850.0, -60.0);
+    c.drops(11480.0, 11620.0, -350.0, 2);
+    c.floor(&[v(11850.0, 0.0), v(14400.0, 0.0)]);
+    c.wp(Move::Jump, 11860.0, 0.0);
+    c.cp(12300.0, 0.0);
+
+    // ----------------------------------------------- the first look up
+    c.say(13150.0, 13250.0, 0.0, "ch01_look_up");
+    c.drops(12600.0, 13500.0, 0.0, 4);
+    c.wall(14400.0, 15600.0, -1200.0, 4600.0);
+    c.wall(12000.0, 13250.0, 1150.0, 4600.0);
+    c.goal(v(13760.0, 0.0), v(13960.0, 220.0));
+    c.wp(Move::Walk, 13860.0, 0.0);
+    c.decor("sun", v(13850.0, 3900.0), 1.4, -1.0);
+    for k in 0..7 {
+        let y = 900.0 + k as f32 * 420.0;
+        c.decor("glowworm", v(13262.0, y), 1.2, -1.0);
+        c.decor("glowworm", v(14345.0, y + 210.0), 1.2, -1.0);
+    }
+    c.scatter("crystal", 13300.0, 13600.0, 0.0, 150.0, -1.0);
+    c.scatter("crystal", 14100.0, 14350.0, 0.0, 120.0, -1.0);
+
+    // ---------------------------------------------------------- roof
+    c.roof(&[
+        v(-1000.0, 600.0),
+        v(600.0, 660.0),
+        v(1800.0, 700.0),
+        v(2600.0, 780.0),
+        v(3400.0, 860.0),
+        v(4400.0, 820.0),
+        v(5600.0, 860.0),
+        v(6300.0, 760.0),
+    ]);
+    c.roof(&[v(7700.0, 760.0), v(7950.0, 1100.0), v(8700.0, 1450.0), v(9400.0, 1500.0), v(10600.0, 950.0), v(11400.0, 900.0), v(12200.0, 760.0), v(13250.0, 700.0)]);
+
+    // ---------------------------------------------------------- decor
+    c.hang("glowworm", -500.0, 6200.0, 430.0);
+    c.scatter("mushroom", -600.0, 1900.0, 0.0, 380.0, -1.0);
+    c.hang("drip", 400.0, 6000.0, 700.0);
+    c.scatter("crystal", 2300.0, 3100.0, 230.0, 400.0, -1.0);
+    c.scatter("mushroom", 5800.0, 6300.0, 230.0, 160.0, -1.0);
+    c.hang("glowworm", 7800.0, 12800.0, 520.0);
+    c.scatter("mushroom", 12200.0, 13600.0, 0.0, 300.0, -1.0);
+    c.finish()
+}

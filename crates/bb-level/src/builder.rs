@@ -279,6 +279,91 @@ impl LevelBuilder {
         self
     }
 
+    // ---------------------------------------------------------- contraptions
+
+    /// A see-saw: a terrain wedge with a plank prop balanced on its tip,
+    /// held at its centre by a short hidden rope (the pivot). `pivot` is the
+    /// tip of the wedge (the plank's centre rests just above it).
+    pub fn seesaw(&mut self, id: &str, pivot: Vec2, length: f32, mass: f32) -> &mut Self {
+        let base = pivot.y - 70.0;
+        self.poly(&[v(pivot.x - 46.0, base - 40.0), v(pivot.x + 46.0, base - 40.0), v(pivot.x + 10.0, pivot.y), v(pivot.x - 10.0, pivot.y)]);
+        let centre = pivot + v(0.0, 16.0);
+        self.prop(id, PropKind::Block, centre, v(length, 26.0), mass, "#ffd166");
+        self.level.ropes.push(RopeDef {
+            id: format!("{id}_pivot"),
+            from: RopeEnd::World { at: centre },
+            to: RopeEnd::Body { id: id.into() },
+            length: 1.0,
+            grabbable: false,
+            style: RopeStyle::Rope,
+        });
+        self
+    }
+
+    /// A stone conveyor belt strip from `a` (left end of its top surface),
+    /// `length` long, pushing things along x at `speed` px/s.
+    pub fn conveyor(&mut self, a: Vec2, length: f32, speed: f32) -> &mut Self {
+        self.stone(a - v(0.0, 40.0), a + v(length, 0.0));
+        self.zone(a, a + v(length, 70.0), ZoneKind::Conveyor { speed })
+    }
+
+    /// A solid ramp (wedge) rising from `a` to `b` (bottom-left to top-right
+    /// or top-left to bottom-right), filled down to the lower end's height.
+    pub fn ramp(&mut self, a: Vec2, b: Vec2) -> &mut Self {
+        let low = a.y.min(b.y);
+        if a.y < b.y {
+            self.poly(&[a, v(b.x, low), b])
+        } else {
+            self.poly(&[v(a.x, low), b, a])
+        }
+    }
+
+    /// A trampoline mushroom: a jelly mushroom with a spring pad on its cap
+    /// that launches you `power` px/s straight up.
+    pub fn trampoline(&mut self, base: Vec2, height: f32, cap_w: f32, power: f32) -> &mut Self {
+        self.mushroom(base, height, cap_w);
+        let top = base + v(0.0, height + cap_w * 0.28 - 4.0);
+        self.level.springs.push(SpringPad { pos: top, angle: std::f32::consts::FRAC_PI_2, width: (cap_w * 0.45).max(50.0), power });
+        self
+    }
+
+    /// A falling jelly drip: a blob of goo that waits on the ceiling at
+    /// `top`, drops `fall` px fast, then slowly slurps back up.
+    pub fn drip_hazard(&mut self, top: Vec2, fall: f32, radius: f32, phase: f32) -> &mut Self {
+        self.level.movers.push(Mover {
+            id: String::new(),
+            shape: Shape::Circle { center: top - v(0.0, radius), radius },
+            path: vec![Vec2::ZERO, v(0.0, -fall)],
+            motion: MoverMotion::Crusher { slam: 0.45, hold: 0.3, rise: 1.6, wait: 1.2 },
+            period: 3.55,
+            phase,
+            material: Material::Ice, // renders as a pale jelly drop
+            trigger: String::new(),
+        });
+        self
+    }
+
+    /// A floating jelly lily pad on water at `surface`. It rides just above
+    /// the waterline (top at surface + 42) so a floating blob can paddle
+    /// underneath instead of getting stuck against its edge.
+    pub fn lily(&mut self, surface: Vec2, width: f32) -> &mut Self {
+        self.level.platforms.push(SoftPlatform {
+            id: String::new(),
+            center: surface + v(0.0, 30.0),
+            size: v(width, 24.0),
+            angle: 0.0,
+            pins: Pins::Home,
+            stiffness: 0.35,
+            material: Material::Ground,
+        });
+        self
+    }
+
+    /// A water body with a current.
+    pub fn current(&mut self, min: Vec2, max: Vec2, current: Vec2) -> &mut Self {
+        self.zone(min, max, ZoneKind::Water { buoyancy: 2600.0, drag: 1.6, current })
+    }
+
     // ------------------------------------------------------------ hazards
 
     pub fn spring(&mut self, pos: Vec2, angle_deg: f32, power: f32) -> &mut Self {
@@ -358,6 +443,10 @@ impl LevelBuilder {
         self.level.decor.push(Decor { kind: kind.into(), pos, scale, angle: 0.0, depth });
         self
     }
+
+    pub fn npc_at(&mut self, pos: Vec2, role: NpcRole) -> &mut Self {
+        self.npc("", pos, role, "", 30.0)
+    }
 }
 
 #[cfg(test)]
@@ -375,5 +464,34 @@ mod tests {
         let json = l.to_json();
         let back = Level::from_json(&json).unwrap();
         assert_eq!(back.jelly.len(), 5);
+    }
+
+    #[test]
+    fn contraption_helpers_emit_parts() {
+        let mut b = LevelBuilder::new("t", "T", Theme::Toys);
+        b.seesaw("saw", v(0.0, 100.0), 400.0, 2.0)
+            .conveyor(v(1000.0, 0.0), 400.0, 250.0)
+            .ramp(v(1500.0, 0.0), v(1800.0, 150.0))
+            .ramp(v(1900.0, 150.0), v(2200.0, 0.0))
+            .trampoline(v(2400.0, 0.0), 100.0, 160.0, 1150.0)
+            .drip_hazard(v(2600.0, 600.0), 400.0, 30.0, 0.0)
+            .lily(v(2900.0, 0.0), 160.0)
+            .current(v(2700.0, -200.0), v(3100.0, 0.0), v(200.0, 0.0));
+        let l = b.build();
+        assert_eq!(l.props.len(), 1);
+        assert_eq!(l.ropes.len(), 1);
+        assert!(!l.ropes.iter().any(|r| r.grabbable), "contraption ropes are not vines");
+        assert_eq!(l.springs.len(), 1);
+        assert_eq!(l.movers.len(), 1);
+        assert_eq!(l.platforms.len(), 1);
+        assert_eq!(l.zones.len(), 2);
+        // Ramps are counter-clockwise-agnostic but non-degenerate.
+        for t in &l.terrain {
+            let o = t.shape.outline();
+            let area: f32 = (0..o.len()).map(|i| o[i].perp_dot(o[(i + 1) % o.len()])).sum();
+            assert!(area.abs() > 1.0);
+        }
+        let back = Level::from_json(&l.to_json()).unwrap();
+        assert_eq!(back.ropes[0].length, l.ropes[0].length);
     }
 }

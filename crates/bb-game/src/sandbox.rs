@@ -1,4 +1,10 @@
 //! Physics playground used during development (`--sandbox`).
+//!
+//! Dev env vars:
+//! * `BB_LEVEL=chNN` — play campaign chapter NN instead of the sandbox.
+//! * `BB_CHECKPOINT=k` — start at respawn point k (0 = level spawn).
+//! * `BB_ZOOM=z` — camera zoom-out factor (e.g. 3 for an overview).
+//! * `BB_CAM=x,y` — pin the camera at a world position.
 
 use bb_level::{LevelBuilder, PropKind, RopeEnd, RopeStyle, Theme, v};
 use bevy::prelude::*;
@@ -10,7 +16,8 @@ pub struct SandboxPlugin;
 
 impl Plugin for SandboxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, start);
+        app.add_systems(Startup, start)
+            .add_systems(PostUpdate, start_at_checkpoint.run_if(resource_added::<crate::sim::Game>));
     }
 }
 
@@ -41,17 +48,52 @@ pub fn sandbox_level() -> bb_level::Level {
     b.build()
 }
 
-fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+fn start(mut load: MessageWriter<LoadLevel>, mut dir: ResMut<crate::camera::CameraDirector>, mut next: ResMut<NextState<AppState>>) {
     match std::env::var("BB_START").as_deref() {
-        Ok("story") => next.set(AppState::Story),
-        Ok("sandbox") => {
-            load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
-            next.set(AppState::Playing);
-        }
-        Ok("kids") => next.set(AppState::Kids),
-        Ok("editor") => next.set(AppState::Editor),
-        Ok("party") => next.set(AppState::Party),
-        _ => {}
+        Ok("story") => return next.set(AppState::Story),
+        Ok("kids") => return next.set(AppState::Kids),
+        Ok("editor") => return next.set(AppState::Editor),
+        Ok("party") => return next.set(AppState::Party),
+        Ok("sandbox") => {}
+        _ if std::env::var("BB_LEVEL").is_ok() => {}
+        _ => return, // Boot → Title.
+    }
+    next.set(AppState::Playing);
+    let level = std::env::var("BB_LEVEL")
+        .ok()
+        .and_then(|id| {
+            let l = bb_level::campaign::by_id(&id);
+            if l.is_none() {
+                warn!("BB_LEVEL={id}: no such chapter, using the sandbox");
+            }
+            l
+        })
+        .unwrap_or_else(sandbox_level);
+    if let Some(z) = std::env::var("BB_ZOOM").ok().and_then(|s| s.parse::<f32>().ok()) {
+        dir.zoom = Some(z);
+    }
+    if let Some((x, y)) = std::env::var("BB_CAM").ok().and_then(|s| {
+        let (x, y) = s.split_once(',')?;
+        Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
+    }) {
+        dir.target = Some(Vec2::new(x, y));
+    }
+    load.write(LoadLevel { level, players: vec![(0, "Pip".into(), 0xff5d73)] });
+}
+
+/// `BB_CHECKPOINT=k`: move everyone to respawn point k right after loading.
+fn start_at_checkpoint(mut game: ResMut<crate::sim::Game>, mut done: Local<bool>) {
+    if std::mem::replace(&mut *done, true) {
+        return;
+    }
+    let Some(k) = std::env::var("BB_CHECKPOINT").ok().and_then(|s| s.parse::<usize>().ok()) else { return };
+    let sim = &mut game.sim;
+    let pts = sim.level.respawn_points();
+    sim.checkpoint = k.min(pts.len() - 1);
+    let at = sim.respawn_point();
+    let bodies: Vec<_> = sim.players.iter().map(|p| p.ctl.body).collect();
+    for (i, b) in bodies.into_iter().enumerate() {
+        sim.world.respawn(b, at + bb_sim::Vec2::new(i as f32 * 20.0, 30.0));
     }
 }
 

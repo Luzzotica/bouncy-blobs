@@ -19,6 +19,8 @@ pub enum Speaker {
     Player(u8),
     /// A voice from off-screen (Lulu from above).
     Offscreen,
+    /// A gameplay tip, shown near the top of the screen.
+    Tip,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -103,6 +105,7 @@ fn speaker_pos(game: &Game, s: &Speaker, cam: Vec2) -> Option<(Vec2, f32)> {
             (b.centroid(), p.ctl.radius * p.ctl.expand)
         }
         Speaker::Offscreen => return Some((cam + Vec2::new(0.0, 260.0), 0.0)),
+        Speaker::Tip => return Some((cam + Vec2::new(0.0, 230.0), 0.0)),
     };
     Some((Vec2::new(c.x, c.y), r))
 }
@@ -151,7 +154,7 @@ pub fn update_bubbles(
         if (target - b.size).length() > 0.5 {
             b.size = target;
             if let Some(mut mesh) = meshes.get_mut(&b.mesh) {
-                bubble_mesh(target + Vec2::new(36.0, 24.0), b.speaker == Speaker::Offscreen).write(&mut mesh);
+                bubble_mesh(target + Vec2::new(36.0, 24.0), b.speaker == Speaker::Offscreen, b.speaker == Speaker::Tip).write(&mut mesh);
             }
         }
         if let Ok(mut btf) = bgs.get_mut(b.bg) {
@@ -162,7 +165,7 @@ pub fn update_bubbles(
     }
 }
 
-fn bubble_mesh(size: Vec2, offscreen: bool) -> MeshBuf {
+fn bubble_mesh(size: Vec2, offscreen: bool, tip: bool) -> MeshBuf {
     let mut buf = MeshBuf::default();
     let h = size * 0.5;
     let r = 22.0f32.min(h.y);
@@ -174,9 +177,15 @@ fn bubble_mesh(size: Vec2, offscreen: bool) -> MeshBuf {
         }
     }
     let ink = lin(Color::srgb(0.17, 0.13, 0.21));
-    let paper = if offscreen { lin(Color::srgb(1.0, 0.92, 0.96)) } else { lin(Color::srgb(1.0, 0.98, 0.93)) };
+    let paper = if tip {
+        lin(Color::srgb(0.86, 0.97, 0.88))
+    } else if offscreen {
+        lin(Color::srgb(1.0, 0.92, 0.96))
+    } else {
+        lin(Color::srgb(1.0, 0.98, 0.93))
+    };
     // Tail.
-    if !offscreen {
+    if !offscreen && !tip {
         let a = buf.vert(PVec2::new(-16.0, -h.y + 2.0), -0.01, ink);
         let b = buf.vert(PVec2::new(14.0, -h.y + 2.0), -0.01, ink);
         let c = buf.vert(PVec2::new(-4.0, -h.y - 28.0), -0.01, ink);

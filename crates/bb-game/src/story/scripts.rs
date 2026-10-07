@@ -3,7 +3,6 @@
 use bb_level::{LevelBuilder, NpcRole, PropKind, Theme, v};
 use bb_sim::Vec2 as PVec2;
 
-use super::Voice;
 use super::cutscene::{Beat, Cutscene};
 
 fn say(who: &str, text: &str) -> Beat {
@@ -475,23 +474,106 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
     Some(Cutscene { id: id.into(), stage: stage_level, beats })
 }
 
-/// Short lines spoken during a level when a story trigger fires.
-/// Unknown ids are silently ignored so levels can be authored ahead of
-/// the script.
-pub fn level_lines(id: &str) -> Vec<(&'static str, Voice, &'static str)> {
-    let lines: &[(&str, Voice, &str)] = match id {
-        _ if id.contains("glimmer_bounce") => &[("glimmer", Voice::Glimmer, "Boing! See? The mushroom WANTS you to bounce.")],
-        _ if id.contains("glimmer_vine") => &[("glimmer", Voice::Glimmer, "Grab on in the air! Push the stick to swing, tap to let go!")],
-        _ if id.contains("glimmer_crusher") => &[("glimmer", Voice::Glimmer, "Wait for the thump... then GO!")],
-        _ if id.contains("glimmer_wind") => &[("glimmer", Voice::Glimmer, "Hold the button to puff up! Big blobs float!")],
-        _ if id.contains("glimmer_water") => &[("glimmer", Voice::Glimmer, "Puff up to float, let go to sink!")],
-        _ if id.contains("glimmer") => &[("glimmer", Voice::Glimmer, "You're doing great, little wobble!")],
-        _ if id.contains("reg") => &[("reg", Voice::Reg, "ONWARD, subject! Er. Friend. Subject-friend!")],
-        _ if id.contains("granny") => &[("granny", Voice::Granny, "Careful now. ...But not TOO careful.")],
-        _ if id.contains("huddle") || id.contains("trapped") => &[("player", Voice::Huddle, "Help! Over here! Come squish us free!")],
-        _ if id.contains("lulu") || id.contains("giggle") => &[("lulu", Voice::Lulu, "hee hee!")],
-        _ if id.contains("squeeze") => &[("player", Voice::Pip, "Squish... squish... SQUEEZE!")],
+/// Lines spoken during a level when a story trigger fires, in order.
+/// Speakers: "pip" (the player who triggered it), "glimmer", "granny",
+/// "reg", "huddle" (a nearby Huddle blob), "lulu" (off-screen), "tip".
+pub fn level_lines(id: &str) -> Vec<(&'static str, &'static str)> {
+    let l: &[(&str, &str)] = match id {
+        "ch01_goodbye" => &[("granny", "...and mind the pointy bits."), ("pip", "*sniff* ...boing.")],
+        "ch01_first_hop" => &[("tip", "Tap the button for a hop. Hold it to puff up and BOING!"), ("pip", "...hee.")],
+        "ch01_pointy" => &[("pip", "Pointy."), ("tip", "Run and jump over the spikes!")],
+        "ch01_squish" => &[("pip", "Squish... squish... heh. SQUISH.")],
+        "ch01_big_slope" => &[("pip", "Ooooooh."), ("tip", "Roll down fast and jump at the bottom!")],
+        "ch01_look_up" => &[("pip", "Is that... light? All the way up there?")],
+        "ch02_drips" => &[("pip", "Plip... plop..."), ("tip", "Drips fall in a rhythm. Time your roll!")],
+        "ch02_meet_glimmer" => &[("glimmer", "Ooh! A bouncy one!"), ("glimmer", "A wobble is just a hug that hasn't found its person yet!"), ("glimmer", "I'm Glimmer. I'm coming with you. That's decided.")],
+        "ch02_first_light" => &[("glimmer", "Mushrooms remember you. Pop all you like!")],
+        "ch02_bridge_wobble" => &[("glimmer", "Wobbly isn't broken. Wobbly is just thinking.")],
+        "ch02_membranes" => &[("glimmer", "Jelly doors only open one way... UP!"), ("tip", "Jump up through the membranes.")],
+        "ch02_up_feeling" => &[("glimmer", "Up is a direction AND a feeling!"), ("pip", "WHEEE!")],
+        "ch02_mushroom_glow" => &[("glimmer", "Smell that? Mushrooms. Bouncy ones.")],
+        "ch03_fungus" => &[("pip", "Boing? ...BOING! *squeal*")],
+        "ch03_first_trampoline" => &[("tip", "Land on a mushroom cap to get launched!"), ("glimmer", "Some floors push back. Those are the good ones.")],
+        "ch03_spring" => &[("tip", "Roll onto the spring pad!"), ("pip", "WHEEEEEE!")],
+        "ch03_chain" => &[("glimmer", "One bounce leads to another. That's called momentum. Or friendship."), ("tip", "Steer in the air!")],
+        "ch03_angled" => &[("pip", "*gulp*"), ("pip", "...okay. OKAY!")],
+        "ch03_cavern" => &[("glimmer", "Up, up, UP!")],
+        "ch03_bouncing_up" => &[("pip", "Bouncing is how you go UP!"), ("glimmer", "Told you.")],
+        "ch04_vines" => &[("tip", "Jump into a vine to grab it. Stick to swing. Button to let go!")],
+        "ch04_swing_chain" => &[("glimmer", "Let go at the top of the swing. Trust the swing.")],
+        "ch04_climb" => &[("tip", "Stick up and down to climb."), ("pip", "Hup... hup... hup!")],
+        "ch04_traverse" => &[("glimmer", "Friends are just ropes you choose.")],
+        "ch04_well" => &[("pip", "That's a long way up."), ("pip", "...up is a feeling. Up is a FEELING!")],
+        "ch04_remix" => &[("glimmer", "Everything you learned, all at once! That's called LIFE.")],
+        "ch04_friends" => &[("glimmer", "You swing like you were born upside down!")],
+        "ch05_thump" => &[("pip", "*flinch*"), ("tip", "Pistons slam, wait, then rise. Go while they rise!")],
+        "ch05_crusher" => &[("pip", "...eep.")],
+        "ch05_popped" => &[("glimmer", "Still you? Still you.")],
+        "ch05_ferry" => &[("tip", "Wait for the ferry, hop on, and hold still.")],
+        "ch05_rush" => &[("glimmer", "Sometimes the floor decides for you. Bounce anyway.")],
+        "ch05_whole_trick" => &[("pip", "Hee... heehee... HAHA!"), ("glimmer", "You popped. You came back. That's the whole trick.")],
+        "ch05_light" => &[("reg", "HALT! Who approaches the Royal Lake?!")],
+        "ch06_lake" => &[("pip", "That's... a LOT of water."), ("glimmer", "Jelly floats, silly. You're basically a boat.")],
+        "ch06_float" => &[("tip", "You float in water. Hold the button to puff up and bob higher!")],
+        "ch06_reg_hail" => &[("reg", "HALT! You approach the court of HIS ROYAL SOFTNESS, KING REGINALD SOCK THE FIRST!"), ("glimmer", "That's Reg.")],
+        "ch06_reg_tale" => &[("reg", "I fell from the SURFACE, you know. Years ago. On purpose. Probably."), ("reg", "Up there is the Glow. And a GIRL who loves bouncy things."), ("reg", "She'd love you. Not as much as me, obviously.")],
+        "ch06_current" => &[("pip", "Wheeeee!")],
+        "ch06_against" => &[("glimmer", "When the water says no, hop on the lily pads and say yes.")],
+        "ch06_fountain" => &[("tip", "Float up the fountain!"), ("reg", "...AND MIND THE FOUNTAIN!")],
+        "ch06_true_softness" => &[("pip", "True Softness..."), ("glimmer", "Every legend starts with someone silly enough to believe it.")],
+        "ch07_draft" => &[("glimmer", "Hop in! The air wants to carry you.")],
+        "ch07_puff" => &[("tip", "Hold the button to puff up and float. Let go to sink."), ("pip", "Pfffff!")],
+        "ch07_gust" => &[("glimmer", "Lean into it. Or rather... let it lean into you.")],
+        "ch07_fans" => &[("tip", "Float up and steer around the blades!")],
+        "ch07_geysers" => &[("glimmer", "Hop, float, hop, float. Like a cloud with places to be.")],
+        "ch07_sticky" => &[("tip", "Touch a sticky wall in the air to cling. Press the button to wall-jump!")],
+        "ch07_giggle" => &[("lulu", "hee hee!"), ("pip", "...!!"), ("pip", "Somebody's UP there!")],
+        "ch08_midden" => &[("pip", "Boing! Hee! Boing!")],
+        "ch08_ball_bridge" => &[("tip", "Push the big ball into the pit, then hop across on top!")],
+        "ch08_seesaw" => &[("pip", "Wheee-oh-no-wheee!")],
+        "ch08_car" => &[("tip", "Hop on the car's roof and ride it across!")],
+        "ch08_slinky" => &[("glimmer", "Same as vines, just more... slinky.")],
+        "ch08_blocks" => &[("pip", "Wobbly... but they hold!")],
+        "ch08_toybox" => &[("pip", "Boing! Up we go!")],
+        "ch08_lulu_drawing" => &[("pip", "L... U... L... U... loves... BOUNCY THINGS!"), ("pip", "That's ME! I'm a bouncy thing!"), ("glimmer", "We must be close.")],
+        "ch09_rumble" => &[("huddle", "help... help..."), ("pip", "That sounds like... the Huddle!")],
+        "ch09_first_rescue" => &[("tip", "Touch a trapped blob to free it. It'll follow you!"), ("huddle", "We... followed you.")],
+        "ch09_too_quiet" => &[("huddle", "It was too quiet without you."), ("huddle", "Nobody sneezed for DAYS.")],
+        "ch09_rubble" => &[("glimmer", "Same trick as the pistons. Wait for the rise.")],
+        "ch09_flooded" => &[("pip", "Float, puff, paddle! Like this!"), ("huddle", "Like... this? *glub*")],
+        "ch09_climb" => &[("huddle", "Boing... boing... BOING!")],
+        "ch09_granny" => &[("granny", "We were scared of how much you bounce, Pip."), ("granny", "Turns out bouncing is how you get UP.")],
+        "ch09_all_together" => &[("granny", "Lead the way, little one.")],
+        "ch10_well" => &[("huddle", "Conga line! Hee hee!")],
+        "ch10_huddle" => &[("huddle", "Yaaay! ...quietly. Yay."), ("tip", "Jump up through the old boards. A slip only drops you one floor.")],
+        "ch10_halfway" => &[("granny", "In my day we never went higher than a TOE.")],
+        "ch10_giggle" => &[("lulu", "hmm hmm hmmm~ hee hee!"), ("glimmer", "I've never glowed this bright!")],
+        "ch10_daylight" => &[("pip", "...it's warm."), ("tip", "Puff up into the light!")],
+        "ch10_lulu" => &[("lulu", "OH! You're SO SQUISHY!")],
         _ => &[],
     };
-    lines.to_vec()
+    l.to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_campaign_beat_has_words() {
+        let mut missing = Vec::new();
+        for level in bb_level::campaign::campaign() {
+            for t in &level.story {
+                if level_lines(&t.script).is_empty() {
+                    missing.push(t.script.clone());
+                }
+            }
+            for id in [&level.intro, &level.outro] {
+                if !id.is_empty() && cutscene(id, 0xff5d73).is_none() {
+                    missing.push(id.clone());
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no script for: {missing:?}");
+    }
 }
