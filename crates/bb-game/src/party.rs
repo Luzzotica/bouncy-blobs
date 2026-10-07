@@ -378,7 +378,7 @@ fn hud(
             font(24.0),
             TextColor(Color::WHITE),
             TextShadow::default(),
-            Node { position_type: PositionType::Absolute, right: px(24.0), top: px(18.0), ..default() },
+            Node { position_type: PositionType::Absolute, right: px(24.0 + crate::platform::SAFE_SIDE), top: px(18.0), ..default() },
             MatchHud,
             HudText::Scores,
         ));

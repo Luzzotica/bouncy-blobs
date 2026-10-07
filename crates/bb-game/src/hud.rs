@@ -30,7 +30,7 @@ fn spawn(mut commands: Commands, assets: Res<GameAssets>, game: Res<Game>) {
     commands
         .spawn((
             HudRoot,
-            Node { position_type: PositionType::Absolute, left: px(24.0), top: px(18.0), column_gap: px(10.0), align_items: AlignItems::Center, ..default() },
+            Node { position_type: PositionType::Absolute, left: px(24.0 + crate::platform::SAFE_SIDE), top: px(18.0), column_gap: px(10.0), align_items: AlignItems::Center, ..default() },
         ))
         .with_children(|p| {
             p.spawn((

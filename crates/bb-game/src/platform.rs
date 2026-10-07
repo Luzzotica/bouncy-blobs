@@ -11,6 +11,11 @@ use bevy::window::{ScreenEdge, WindowMode};
 /// True on iOS and Android.
 pub const IS_MOBILE: bool = cfg!(any(target_os = "ios", target_os = "android"));
 
+/// Conservative landscape safe-area inset (logical px) for screen-edge UI.
+/// Bevy 0.19 doesn't expose real insets; phones' notch / Dynamic Island and
+/// rounded corners sit within ~60 px of the side edges in landscape.
+pub const SAFE_SIDE: f32 = if IS_MOBILE { 60.0 } else { 0.0 };
+
 /// `DefaultPlugins` configured for the current target.
 pub fn default_plugins() -> PluginGroupBuilder {
     DefaultPlugins

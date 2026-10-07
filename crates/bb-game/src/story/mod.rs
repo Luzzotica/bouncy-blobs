@@ -354,7 +354,7 @@ fn setup_cues_ui(mut commands: Commands, assets: Res<GameAssets>) {
         Text::new(""),
         TextFont { font: assets.font.clone().into(), font_size: 22.0.into(), ..default() },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
-        Node { position_type: PositionType::Absolute, right: px(28.0), bottom: px(18.0), ..default() },
+        Node { position_type: PositionType::Absolute, right: px(28.0 + crate::platform::SAFE_SIDE), bottom: px(18.0), ..default() },
         GlobalZIndex(65),
         SkipHint,
     ));
