@@ -1,0 +1,765 @@
+{
+  "version": 3,
+  "id": "showcase",
+  "name": "Showcase Arena",
+  "theme": "party",
+  "modes": [
+    "race",
+    "koth"
+  ],
+  "spawn": [
+    166.66667,
+    -1213.3334
+  ],
+  "kill_y": -1666.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          266.6667,
+          -1266.6667
+        ],
+        "size": [
+          466.6667,
+          40.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          633.3334,
+          -1213.3334
+        ],
+        "size": [
+          133.33334,
+          20.0
+        ],
+        "angle": 0.3
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          833.3334,
+          -1400.0
+        ],
+        "size": [
+          160.0,
+          33.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1133.3334,
+          -1133.3334
+        ],
+        "size": [
+          133.33334,
+          33.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1666.6667,
+          -1133.3334
+        ],
+        "size": [
+          133.33334,
+          33.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2000.0,
+          -1266.6667
+        ],
+        "size": [
+          400.0,
+          40.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2466.6667,
+          -1333.3334
+        ],
+        "size": [
+          266.6667,
+          40.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          433.33334,
+          -853.3334
+        ],
+        "size": [
+          240.0,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ice",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          600.0,
+          -600.0
+        ],
+        "size": [
+          26.666668,
+          266.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "sticky",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          933.3334,
+          -853.3334
+        ],
+        "size": [
+          133.33334,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "material": "bouncy",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            2733.3335,
+            -1600.0
+          ],
+          [
+            2733.3335,
+            -1586.6667
+          ],
+          [
+            -66.66667,
+            -1586.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -0.0
+          ],
+          [
+            2733.3335,
+            -0.0
+          ],
+          [
+            2733.3335,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            0.0,
+            -1600.0
+          ],
+          [
+            0.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2666.6667,
+            -1600.0
+          ],
+          [
+            2733.3335,
+            -1600.0
+          ],
+          [
+            2733.3335,
+            66.66667
+          ],
+          [
+            2666.6667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "toggle-lift",
+      "shape": {
+        "type": "rect",
+        "center": [
+          2133.3335,
+          -1000.0
+        ],
+        "size": [
+          146.66667,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          466.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.6,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "plate-switch#toggle"
+    },
+    {
+      "id": "and-open-gate",
+      "shape": {
+        "type": "rect",
+        "center": [
+          2333.3335,
+          -600.0
+        ],
+        "size": [
+          26.666668,
+          133.33334
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          266.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.2,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "plate-and-a&plate-and-b"
+    },
+    {
+      "id": "raise-bridge",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1213.3334,
+            -1120.0
+          ],
+          [
+            1300.0,
+            -1133.3334
+          ],
+          [
+            1386.6667,
+            -1133.3334
+          ],
+          [
+            1473.3334,
+            -1133.3334
+          ],
+          [
+            1560.0,
+            -1133.3334
+          ],
+          [
+            1600.0,
+            -1120.0
+          ]
+        ]
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          253.33334
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.4,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "plate-bridge"
+    },
+    {
+      "id": "release-kite",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1733.3334,
+            -400.0
+          ],
+          [
+            1800.0,
+            -480.0
+          ],
+          [
+            1866.6667,
+            -400.0
+          ],
+          [
+            1800.0,
+            -333.33334
+          ]
+        ]
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          200.0
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 4.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "plate-kite#once"
+    }
+  ],
+  "ropes": [],
+  "zones": [
+    {
+      "id": "blackhole_0",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -400.0
+          ],
+          [
+            1233.3334,
+            -633.3334
+          ],
+          [
+            1700.0001,
+            -633.3334
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          3600.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_1",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -400.0
+          ],
+          [
+            1700.0001,
+            -633.3334
+          ],
+          [
+            1700.0001,
+            -166.66666
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -3600.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_2",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -400.0
+          ],
+          [
+            1700.0001,
+            -166.66666
+          ],
+          [
+            1233.3334,
+            -166.66666
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          -3600.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_3",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -400.0
+          ],
+          [
+            1233.3334,
+            -166.66666
+          ],
+          [
+            1233.3334,
+            -633.3334
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          3600.0,
+          0.0
+        ]
+      }
+    }
+  ],
+  "springs": [
+    {
+      "pos": [
+        833.33325,
+        -1344.6667
+      ],
+      "angle": 1.5708,
+      "width": 160.0,
+      "power": 909.99994
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        893.3333,
+        -1573.3334
+      ],
+      "b": [
+        1106.6666,
+        -1573.3334
+      ]
+    },
+    {
+      "a": [
+        1480.0,
+        -93.33313
+      ],
+      "b": [
+        1320.0,
+        -93.33354
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [
+    [
+      1400.0,
+      -1066.6667
+    ],
+    [
+      2466.6667,
+      -1133.3334
+    ]
+  ],
+  "npcs": [
+    {
+      "id": "npc-circle",
+      "pos": [
+        333.33334,
+        -1213.3334
+      ],
+      "role": "huddle",
+      "color": "#dba657",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-square",
+      "pos": [
+        386.6667,
+        -1213.3334
+      ],
+      "role": "huddle",
+      "color": "#71db57",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-triangle",
+      "pos": [
+        440.0,
+        -1213.3334
+      ],
+      "role": "huddle",
+      "color": "#57b4db",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-star",
+      "pos": [
+        200.0,
+        -1000.0
+      ],
+      "role": "huddle",
+      "color": "#9957db",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-diamond",
+      "pos": [
+        253.33334,
+        -1000.0
+      ],
+      "role": "huddle",
+      "color": "#db57ce",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-hexagon",
+      "pos": [
+        306.6667,
+        -1000.0
+      ],
+      "role": "huddle",
+      "color": "#db577e",
+      "radius": 32.0
+    }
+  ],
+  "goal": {
+    "type": "rect",
+    "center": [
+      2466.6667,
+      -1213.3334
+    ],
+    "size": [
+      240.0,
+      186.66667
+    ],
+    "angle": 0.0
+  },
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        2000.0,
+        -1206.6667
+      ],
+      "size": [
+        400.0,
+        120.0
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          833.3334,
+          -1253.3334
+        ],
+        "size": [
+          146.66667,
+          16.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:plate-bridge",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1800.0,
+          -1253.3334
+        ],
+        "size": [
+          120.0,
+          16.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:plate-kite",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2133.3335,
+          -1253.3334
+        ],
+        "size": [
+          120.0,
+          16.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:plate-switch",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2333.3335,
+          -1253.3334
+        ],
+        "size": [
+          53.333336,
+          16.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:plate-and-a",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2466.6667,
+          -1253.3334
+        ],
+        "size": [
+          53.333336,
+          16.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:plate-and-b",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

@@ -1,0 +1,139 @@
+{
+  "version": 3,
+  "id": "jump",
+  "name": "Jump",
+  "theme": "party",
+  "modes": [
+    "race",
+    "koth"
+  ],
+  "spawn": [
+    -1253.3334,
+    -666.6667
+  ],
+  "kill_y": -1320.0,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -260.0,
+          -986.6667
+        ],
+        "size": [
+          2093.3335,
+          506.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -306.6667,
+          -620.0
+        ],
+        "size": [
+          480.0,
+          226.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1560.0,
+          -633.3334
+        ],
+        "size": [
+          533.3334,
+          1240.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -360.0,
+          206.66667
+        ],
+        "size": [
+          2933.3335,
+          440.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          946.6667,
+          -626.6667
+        ],
+        "size": [
+          320.0,
+          1226.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      560.0,
+      -553.3334
+    ],
+    "size": [
+      453.33334,
+      360.0
+    ],
+    "angle": 0.0
+  },
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        -306.6667,
+        -373.33334
+      ],
+      "size": [
+        480.0,
+        266.6667
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

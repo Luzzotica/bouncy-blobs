@@ -1,0 +1,196 @@
+{
+  "version": 3,
+  "id": "crush-test",
+  "name": "Crush Test",
+  "theme": "party",
+  "modes": [
+    "race"
+  ],
+  "spawn": [
+    -40.0,
+    253.33334
+  ],
+  "kill_y": -40.000008,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -40.0,
+          100.0
+        ],
+        "size": [
+          693.3334,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          933.3334,
+          100.0
+        ],
+        "size": [
+          586.6667,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_311",
+      "shape": {
+        "type": "rect",
+        "center": [
+          -40.0,
+          480.0
+        ],
+        "size": [
+          613.3334,
+          293.33334
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -453.33334
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_313#toggle"
+    },
+    {
+      "id": "act_312",
+      "shape": {
+        "type": "rect",
+        "center": [
+          1120.0,
+          373.33334
+        ],
+        "size": [
+          400.0,
+          186.66667
+        ],
+        "angle": -0.2617994
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          -26.666668,
+          -386.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_314#toggle"
+    },
+    {
+      "id": "act_312",
+      "shape": {
+        "type": "rect",
+        "center": [
+          746.6667,
+          400.0
+        ],
+        "size": [
+          506.6667,
+          213.33334
+        ],
+        "angle": 0.2617994
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          13.333334,
+          -413.33334
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_314#toggle"
+    }
+  ],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": null,
+  "hills": [],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -40.0,
+          233.33334
+        ],
+        "size": [
+          613.3334,
+          120.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_313",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          933.3334,
+          233.33334
+        ],
+        "size": [
+          586.6667,
+          120.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_314",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

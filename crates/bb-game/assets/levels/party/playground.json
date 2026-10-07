@@ -1,0 +1,924 @@
+{
+  "version": 3,
+  "id": "playground",
+  "name": "Physics Playground",
+  "theme": "party",
+  "modes": [
+    "race"
+  ],
+  "spawn": [
+    200.0,
+    -1480.0
+  ],
+  "kill_y": -2066.6667,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          333.33334,
+          -1533.3334
+        ],
+        "size": [
+          533.3334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1533.3334,
+          -1533.3334
+        ],
+        "size": [
+          466.6667,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ice",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2933.3335,
+          -1266.6667
+        ],
+        "size": [
+          40.0,
+          533.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "sticky",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3333.3335,
+          -1266.6667
+        ],
+        "size": [
+          40.0,
+          533.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "sticky",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3133.3335,
+          -986.6667
+        ],
+        "size": [
+          400.0,
+          40.0
+        ],
+        "angle": 0.0
+      },
+      "material": "sticky",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3700.0,
+          -1433.3334
+        ],
+        "size": [
+          400.0,
+          26.666668
+        ],
+        "angle": -0.3
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3700.0,
+          -1133.3334
+        ],
+        "size": [
+          333.33334,
+          26.666668
+        ],
+        "angle": 0.4
+      },
+      "material": "ice",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4200.0,
+          -1533.3334
+        ],
+        "size": [
+          266.6667,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "bouncy",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4866.667,
+          -1600.0
+        ],
+        "size": [
+          186.66667,
+          33.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          5666.667,
+          -1533.3334
+        ],
+        "size": [
+          466.6667,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          6466.667,
+          -1533.3334
+        ],
+        "size": [
+          333.33334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          7100.0,
+          -1533.3334
+        ],
+        "size": [
+          266.6667,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          7320.0,
+          -1266.6667
+        ],
+        "size": [
+          26.666668,
+          533.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          8666.667,
+          -1533.3334
+        ],
+        "size": [
+          2666.6667,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -133.33334,
+            -2000.0
+          ],
+          [
+            10133.334,
+            -2000.0
+          ],
+          [
+            10133.334,
+            -1800.0
+          ],
+          [
+            -133.33334,
+            -1800.0
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -133.33334,
+            133.33334
+          ],
+          [
+            10133.334,
+            133.33334
+          ],
+          [
+            10133.334,
+            266.6667
+          ],
+          [
+            -133.33334,
+            266.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -266.6667,
+            -2000.0
+          ],
+          [
+            -133.33334,
+            -2000.0
+          ],
+          [
+            -133.33334,
+            266.6667
+          ],
+          [
+            -266.6667,
+            266.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            10000.0,
+            -2000.0
+          ],
+          [
+            10133.334,
+            -2000.0
+          ],
+          [
+            10133.334,
+            266.6667
+          ],
+          [
+            10000.0,
+            266.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [
+    {
+      "id": "soft-platform",
+      "center": [
+        2300.0,
+        -1300.0
+      ],
+      "size": [
+        373.33334,
+        40.0
+      ],
+      "angle": -0.0,
+      "pins": "corners",
+      "stiffness": 0.5,
+      "material": "ground"
+    },
+    {
+      "id": "sloped-soft",
+      "center": [
+        3700.0,
+        -1600.0
+      ],
+      "size": [
+        400.0,
+        33.333336
+      ],
+      "angle": -0.3,
+      "pins": "corners",
+      "stiffness": 0.5,
+      "material": "ground"
+    },
+    {
+      "id": "tilting-platform",
+      "center": [
+        5666.667,
+        -1366.6667
+      ],
+      "size": [
+        266.6667,
+        33.333336
+      ],
+      "angle": -0.0,
+      "pins": "corners",
+      "stiffness": 0.5,
+      "material": "ground"
+    }
+  ],
+  "props": [],
+  "movers": [
+    {
+      "id": "switch-lift",
+      "shape": {
+        "type": "rect",
+        "center": [
+          7733.3335,
+          -1466.6667
+        ],
+        "size": [
+          133.33334,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          533.3334
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.6,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig-switch#toggle"
+    },
+    {
+      "id": "hold-gate",
+      "shape": {
+        "type": "rect",
+        "center": [
+          8266.667,
+          -1486.6667
+        ],
+        "size": [
+          26.666668,
+          186.66667
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          286.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.2,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig-continuous"
+    },
+    {
+      "id": "drop-bridge",
+      "shape": {
+        "type": "rect",
+        "center": [
+          8800.0,
+          -1800.0
+        ],
+        "size": [
+          186.66667,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          266.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 3.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig-oneshot#once"
+    },
+    {
+      "id": "charged-lift",
+      "shape": {
+        "type": "rect",
+        "center": [
+          9333.334,
+          -1466.6667
+        ],
+        "size": [
+          133.33334,
+          20.0
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          466.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.6,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig-charged"
+    },
+    {
+      "id": "and-gate-open",
+      "shape": {
+        "type": "rect",
+        "center": [
+          9800.0,
+          -1600.0
+        ],
+        "size": [
+          26.666668,
+          66.66667
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          200.0
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 1.2,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig-and-a&trig-and-b"
+    }
+  ],
+  "ropes": [],
+  "zones": [
+    {
+      "id": "blackhole_0",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2300.0,
+            -800.0
+          ],
+          [
+            2066.6667,
+            -1033.3334
+          ],
+          [
+            2533.3333,
+            -1033.3334
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          3600.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_1",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2300.0,
+            -800.0
+          ],
+          [
+            2533.3333,
+            -1033.3334
+          ],
+          [
+            2533.3333,
+            -566.6666
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -3600.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_2",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2300.0,
+            -800.0
+          ],
+          [
+            2533.3333,
+            -566.6666
+          ],
+          [
+            2066.6667,
+            -566.6666
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          -3600.0
+        ]
+      }
+    },
+    {
+      "id": "blackhole_3",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2300.0,
+            -800.0
+          ],
+          [
+            2066.6667,
+            -566.6666
+          ],
+          [
+            2066.6667,
+            -1033.3334
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          3600.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "id": "zerog",
+      "shape": {
+        "type": "rect",
+        "center": [
+          6466.667,
+          -1066.6667
+        ],
+        "size": [
+          333.33334,
+          800.0
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          -0.0
+        ]
+      }
+    },
+    {
+      "id": "sideways",
+      "shape": {
+        "type": "rect",
+        "center": [
+          7100.0,
+          -1066.6667
+        ],
+        "size": [
+          266.6667,
+          800.0
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          1800.0,
+          -0.0
+        ]
+      }
+    }
+  ],
+  "springs": [
+    {
+      "pos": [
+        4866.667,
+        -1538.0
+      ],
+      "angle": 1.5708,
+      "width": 160.0,
+      "power": 1949.9999
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        1053.3334,
+        -1533.3334
+      ],
+      "b": [
+        1213.3334,
+        -1533.3334
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [
+    [
+      800.0,
+      -1433.3334
+    ],
+    [
+      1533.3334,
+      -1433.3334
+    ]
+  ],
+  "npcs": [
+    {
+      "id": "npc-circle",
+      "pos": [
+        433.33334,
+        -1480.0
+      ],
+      "role": "huddle",
+      "color": "#dba657",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-star",
+      "pos": [
+        533.3334,
+        -1480.0
+      ],
+      "role": "huddle",
+      "color": "#9957db",
+      "radius": 32.0
+    }
+  ],
+  "goal": {
+    "type": "rect",
+    "center": [
+      9866.667,
+      -1400.0
+    ],
+    "size": [
+      186.66667,
+      240.0
+    ],
+    "angle": 0.0
+  },
+  "hills": [],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          5666.667,
+          -1480.0
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-tilt",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          7733.3335,
+          -1754.6667
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-switch",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          8266.667,
+          -1754.6667
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-continuous",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          8800.0,
+          -1754.6667
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-oneshot",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          9333.334,
+          -1754.6667
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-charged",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          9700.0,
+          -1754.6667
+        ],
+        "size": [
+          66.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-and-a",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          9900.0,
+          -1754.6667
+        ],
+        "size": [
+          66.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig-and-b",
+      "once": false
+    }
+  ],
+  "decor": [
+    {
+      "kind": "pencil",
+      "pos": [
+        400.0,
+        -1493.3334
+      ],
+      "scale": 1.0,
+      "angle": -0.0,
+      "depth": -1.0
+    },
+    {
+      "kind": "goal_flag",
+      "pos": [
+        9866.667,
+        -1520.0
+      ],
+      "scale": 1.0,
+      "angle": -0.0,
+      "depth": -1.0
+    },
+    {
+      "kind": "powerup_orb",
+      "pos": [
+        2000.0,
+        -1366.6667
+      ],
+      "scale": 0.5,
+      "angle": -0.0,
+      "depth": -1.0
+    }
+  ],
+  "intro": "",
+  "outro": ""
+}

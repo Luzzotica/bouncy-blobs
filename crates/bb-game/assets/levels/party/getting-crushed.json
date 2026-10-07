@@ -1,0 +1,235 @@
+{
+  "version": 3,
+  "id": "getting-crushed",
+  "name": "Getting Crushed",
+  "theme": "party",
+  "modes": [
+    "race"
+  ],
+  "spawn": [
+    0.0,
+    -253.33334
+  ],
+  "kill_y": -746.6667,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          20.0,
+          -453.33334
+        ],
+        "size": [
+          786.6667,
+          266.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1100.0,
+          -526.6667
+        ],
+        "size": [
+          1480.0,
+          306.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2013.3334,
+          -486.6667
+        ],
+        "size": [
+          1200.0,
+          306.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1393.3334,
+          366.6667
+        ],
+        "size": [
+          733.3334,
+          333.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          693.3334,
+          513.3334
+        ],
+        "size": [
+          666.6667,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -386.6667,
+            -573.3334
+          ],
+          [
+            -386.6667,
+            -320.0
+          ],
+          [
+            -453.33334,
+            13.333334
+          ],
+          [
+            -773.3334,
+            226.66667
+          ],
+          [
+            -453.33334,
+            560.0
+          ],
+          [
+            -186.66667,
+            800.0
+          ],
+          [
+            -106.66667,
+            1040.0
+          ],
+          [
+            -386.6667,
+            1026.6667
+          ],
+          [
+            -880.0,
+            626.6667
+          ],
+          [
+            -1053.3334,
+            -120.0
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_281",
+      "shape": {
+        "type": "rect",
+        "center": [
+          1220.0,
+          73.333336
+        ],
+        "size": [
+          386.6667,
+          253.33334
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          6.666667,
+          -580.0
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_280"
+    }
+  ],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [
+    {
+      "id": "npc_293",
+      "pos": [
+        573.3334,
+        693.3334
+      ],
+      "role": "huddle",
+      "color": "#dba557",
+      "radius": 32.0
+    }
+  ],
+  "goal": {
+    "type": "rect",
+    "center": [
+      2393.3335,
+      -200.0
+    ],
+    "size": [
+      440.0,
+      266.6667
+    ],
+    "angle": 0.0
+  },
+  "hills": [],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1220.0,
+          -213.33334
+        ],
+        "size": [
+          386.6667,
+          320.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_280",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

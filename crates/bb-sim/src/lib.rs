@@ -55,6 +55,12 @@ pub struct MoverState {
     pub id: StaticId,
     pub base: Vec<Vec2>,
     pub active: bool,
+    /// Plate-driven movers: 0 = authored pose, 1 = end of the path.
+    pub progress: f32,
+    /// Plate-driven movers: latched open (`#toggle` / `#once`).
+    pub latched: bool,
+    /// Plate condition last step (edge detection for `#toggle`).
+    pub pressed: bool,
 }
 
 #[derive(Clone, Debug)]

@@ -396,6 +396,7 @@ dependencies = [
  "bb-level",
  "bb-physics",
  "glam 0.30.10",
+ "serde_json",
 ]
 
 [[package]]

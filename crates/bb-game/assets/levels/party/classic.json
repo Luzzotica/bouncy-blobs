@@ -1,0 +1,476 @@
+{
+  "version": 3,
+  "id": "classic",
+  "name": "Classic Race",
+  "theme": "party",
+  "modes": [
+    "race"
+  ],
+  "spawn": [
+    133.33334,
+    -1133.3334
+  ],
+  "kill_y": -1533.3334,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          266.6667,
+          -1200.0
+        ],
+        "size": [
+          533.3334,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          733.3334,
+          -1100.0
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1000.0,
+          -1000.0
+        ],
+        "size": [
+          133.33334,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1266.6667,
+          -1066.6667
+        ],
+        "size": [
+          200.0,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1600.0,
+          -966.6667
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1833.3334,
+          -866.6667
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2066.6667,
+          -766.6667
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2366.6667,
+          -866.6667
+        ],
+        "size": [
+          133.33334,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2733.3335,
+          -800.0
+        ],
+        "size": [
+          133.33334,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3066.6667,
+          -933.3334
+        ],
+        "size": [
+          233.33334,
+          60.0
+        ],
+        "angle": 0.2
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3400.0,
+          -833.3334
+        ],
+        "size": [
+          233.33334,
+          60.0
+        ],
+        "angle": -0.15
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3733.3335,
+          -933.3334
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4000.0,
+          -866.6667
+        ],
+        "size": [
+          166.66667,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4266.667,
+          -966.6667
+        ],
+        "size": [
+          133.33334,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4800.0,
+          -1066.6667
+        ],
+        "size": [
+          400.0,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -133.33334,
+            -1466.6667
+          ],
+          [
+            5466.667,
+            -1466.6667
+          ],
+          [
+            5466.667,
+            -1400.0
+          ],
+          [
+            -133.33334,
+            -1400.0
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -133.33334,
+            -1466.6667
+          ],
+          [
+            0.0,
+            -1466.6667
+          ],
+          [
+            0.0,
+            133.33334
+          ],
+          [
+            -133.33334,
+            133.33334
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            5333.3335,
+            -1466.6667
+          ],
+          [
+            5466.667,
+            -1466.6667
+          ],
+          [
+            5466.667,
+            133.33334
+          ],
+          [
+            5333.3335,
+            133.33334
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -133.33334,
+            -0.0
+          ],
+          [
+            5466.667,
+            -0.0
+          ],
+          [
+            5466.667,
+            133.33334
+          ],
+          [
+            -133.33334,
+            133.33334
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [
+    {
+      "pos": [
+        600.0,
+        -1171.3334
+      ],
+      "angle": 1.5707964,
+      "width": 213.33334,
+      "power": 780.0
+    },
+    {
+      "pos": [
+        1610.8423,
+        -942.4911
+      ],
+      "angle": 0.7853982,
+      "width": 213.33334,
+      "power": 650.0
+    },
+    {
+      "pos": [
+        3066.6667,
+        -904.6667
+      ],
+      "angle": 1.5707964,
+      "width": 213.33334,
+      "power": 715.0
+    },
+    {
+      "pos": [
+        4274.3335,
+        -940.0543
+      ],
+      "angle": 1.0471976,
+      "width": 213.33334,
+      "power": 650.0
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        1300.0,
+        -1373.3334
+      ],
+      "b": [
+        1500.0,
+        -1373.3334
+      ]
+    },
+    {
+      "a": [
+        2426.6667,
+        -846.6667
+      ],
+      "b": [
+        2306.6667,
+        -846.6667
+      ]
+    },
+    {
+      "a": [
+        3150.0002,
+        -1373.3334
+      ],
+      "b": [
+        3316.6667,
+        -1373.3334
+      ]
+    },
+    {
+      "a": [
+        4466.667,
+        -1373.3334
+      ],
+      "b": [
+        4600.0,
+        -1373.3334
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [
+    [
+      1000.0,
+      -933.3334
+    ],
+    [
+      2066.6667,
+      -700.0
+    ],
+    [
+      3400.0,
+      -733.3334
+    ]
+  ],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      4800.0,
+      -933.3334
+    ],
+    "size": [
+      266.6667,
+      266.6667
+    ],
+    "angle": 0.0
+  },
+  "hills": [],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

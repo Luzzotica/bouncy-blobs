@@ -1,0 +1,331 @@
+{
+  "name": "Blob Hill",
+  "version": 1,
+  "levelTypes": [
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_1",
+      "x": -1890,
+      "y": 1400,
+      "width": 700,
+      "height": 480,
+      "rotation": 0
+    },
+    {
+      "id": "plat_2",
+      "x": -50,
+      "y": 1270,
+      "width": 1380,
+      "height": 220,
+      "rotation": 0
+    },
+    {
+      "id": "plat_3",
+      "x": 1610,
+      "y": 980,
+      "width": 1260,
+      "height": 280,
+      "rotation": 0
+    },
+    {
+      "id": "plat_5",
+      "x": -1160,
+      "y": 210,
+      "width": 960,
+      "height": 140,
+      "rotation": 0
+    },
+    {
+      "id": "plat_13",
+      "x": -40,
+      "y": -450,
+      "width": 120,
+      "height": 420,
+      "rotation": 0
+    },
+    {
+      "id": "plat_27",
+      "x": -260,
+      "y": 1310,
+      "width": 480,
+      "height": 180,
+      "rotation": 2.879793265790644
+    },
+    {
+      "id": "plat_29",
+      "x": 120,
+      "y": 1330,
+      "width": 480,
+      "height": 180,
+      "rotation": -2.879793265790643
+    }
+  ],
+  "walls": [
+    {
+      "id": "floor",
+      "points": [
+        {
+          "x": -2200,
+          "y": 1600
+        },
+        {
+          "x": 2200,
+          "y": 1600
+        },
+        {
+          "x": 2200,
+          "y": 1650
+        },
+        {
+          "x": -2200,
+          "y": 1650
+        }
+      ]
+    },
+    {
+      "id": "ceiling",
+      "points": [
+        {
+          "x": -2200,
+          "y": -700
+        },
+        {
+          "x": 2200,
+          "y": -700
+        },
+        {
+          "x": 2200,
+          "y": -650
+        },
+        {
+          "x": -2200,
+          "y": -650
+        }
+      ]
+    },
+    {
+      "id": "left",
+      "points": [
+        {
+          "x": -2250,
+          "y": -700
+        },
+        {
+          "x": -2200,
+          "y": -700
+        },
+        {
+          "x": -2200,
+          "y": 1650
+        },
+        {
+          "x": -2250,
+          "y": 1650
+        }
+      ]
+    },
+    {
+      "id": "right",
+      "points": [
+        {
+          "x": 2200,
+          "y": -700
+        },
+        {
+          "x": 2250,
+          "y": -700
+        },
+        {
+          "x": 2250,
+          "y": 1650
+        },
+        {
+          "x": 2200,
+          "y": 1650
+        }
+      ]
+    }
+  ],
+  "spawnPoints": [
+    {
+      "id": "sp_6",
+      "x": -1980,
+      "y": 980,
+      "type": "player"
+    },
+    {
+      "id": "sp_7",
+      "x": 1260,
+      "y": 540,
+      "type": "player"
+    },
+    {
+      "id": "sp_8",
+      "x": 1640,
+      "y": 600,
+      "type": "player"
+    },
+    {
+      "id": "sp_2",
+      "x": -1740,
+      "y": 980,
+      "type": "player"
+    },
+    {
+      "id": "sp_3",
+      "x": -1300,
+      "y": -60,
+      "type": "player"
+    },
+    {
+      "id": "sp_4",
+      "x": -980,
+      "y": -60,
+      "type": "player"
+    },
+    {
+      "id": "sp_14",
+      "x": 1460,
+      "y": 360,
+      "type": "player"
+    },
+    {
+      "id": "sp_15",
+      "x": 1780,
+      "y": 360,
+      "type": "player"
+    },
+    {
+      "id": "sp_16",
+      "x": -1160,
+      "y": -220,
+      "type": "player"
+    },
+    {
+      "id": "sp_17",
+      "x": -800,
+      "y": -220,
+      "type": "player"
+    },
+    {
+      "id": "sp_18",
+      "x": -2120,
+      "y": 680,
+      "type": "player"
+    },
+    {
+      "id": "sp_19",
+      "x": -1840,
+      "y": 680,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "hillZones": [
+    {
+      "id": "hill_4",
+      "x": -60,
+      "y": 920,
+      "width": 820,
+      "height": 460
+    }
+  ],
+  "spikes": [
+    {
+      "id": "spike_1",
+      "x": 330,
+      "y": 1597.5,
+      "width": 3740,
+      "height": 35,
+      "rotation": 0
+    }
+  ],
+  "springPads": [
+    {
+      "id": "spring_6",
+      "x": -1090,
+      "y": 1300,
+      "width": 100,
+      "height": 40,
+      "rotation": -1.5707963267948957,
+      "force": 500
+    },
+    {
+      "id": "spring_12",
+      "x": 2070,
+      "y": 800,
+      "width": 100,
+      "height": 40,
+      "rotation": -2.094395102393195,
+      "force": 500,
+      "fireSpeed": 2500
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trig_31",
+      "x": 990,
+      "y": -70,
+      "width": 500,
+      "height": 340,
+      "rotation": 0
+    },
+    {
+      "id": "trig_35",
+      "x": -760,
+      "y": 80,
+      "width": 160,
+      "height": 120,
+      "rotation": 0
+    }
+  ],
+  "actions": [
+    {
+      "id": "act_32",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_29",
+          "endX": 180,
+          "endY": 740
+        }
+      ],
+      "duration": 0.25,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_31",
+        "trig_35"
+      ],
+      "requireMode": "any",
+      "mode": "continuous"
+    },
+    {
+      "id": "act_34",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_27",
+          "endX": -260,
+          "endY": 740
+        }
+      ],
+      "duration": 0.25,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_31",
+        "trig_35"
+      ],
+      "requireMode": "any",
+      "mode": "continuous"
+    }
+  ],
+  "deathZones": []
+}

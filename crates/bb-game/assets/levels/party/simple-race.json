@@ -1,0 +1,388 @@
+{
+  "version": 3,
+  "id": "simple-race",
+  "name": "Simple Race",
+  "theme": "party",
+  "modes": [
+    "race"
+  ],
+  "spawn": [
+    -1360.0,
+    -266.6667
+  ],
+  "kill_y": -1466.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -953.3334,
+          -680.0
+        ],
+        "size": [
+          1080.0,
+          586.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1646.6667,
+          -46.666668
+        ],
+        "size": [
+          440.0,
+          173.33334
+        ],
+        "angle": -2.6179938
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -346.6667,
+          -733.3334
+        ],
+        "size": [
+          373.33334,
+          480.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          420.0,
+          -680.0
+        ],
+        "size": [
+          1346.6667,
+          586.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -473.33334,
+          340.0
+        ],
+        "size": [
+          146.66667,
+          333.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -200.0,
+          -1333.3334
+        ],
+        "size": [
+          3253.3335,
+          133.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1540.0,
+          -166.66667
+        ],
+        "size": [
+          226.66667,
+          2253.3335
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1813.3334,
+          -740.0
+        ],
+        "size": [
+          133.33334,
+          1053.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -326.6667,
+          833.3334
+        ],
+        "size": [
+          3533.3335,
+          253.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -2000.0,
+          380.0
+        ],
+        "size": [
+          186.66667,
+          653.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            293.33334,
+            360.0
+          ],
+          [
+            160.0,
+            120.0
+          ],
+          [
+            226.66667,
+            -66.66667
+          ],
+          [
+            800.0,
+            13.333334
+          ],
+          [
+            826.6667,
+            293.33334
+          ],
+          [
+            586.6667,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_27",
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1853.3334,
+          13.333334
+        ],
+        "size": [
+          186.66667,
+          133.33334
+        ],
+        "angle": -1.0471976
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          400.0,
+          226.66667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 0.5,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_26"
+    }
+  ],
+  "ropes": [],
+  "zones": [
+    {
+      "id": "grav_25",
+      "shape": {
+        "type": "rect",
+        "center": [
+          1273.3334,
+          -600.0
+        ],
+        "size": [
+          306.6667,
+          986.6667
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          459.18365,
+          -0.0
+        ]
+      }
+    },
+    {
+      "id": "death_35",
+      "shape": {
+        "type": "rect",
+        "center": [
+          -440.0,
+          -2506.6667
+        ],
+        "size": [
+          6773.3335,
+          1066.6667
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "kill"
+      }
+    }
+  ],
+  "springs": [
+    {
+      "pos": [
+        -59.333336,
+        382.7128
+      ],
+      "angle": 2.0943952,
+      "width": 260.0,
+      "power": 3250.0
+    },
+    {
+      "pos": [
+        -222.0,
+        -218.33334
+      ],
+      "angle": 3.1415925,
+      "width": 260.0,
+      "power": 3250.0
+    },
+    {
+      "pos": [
+        -222.0,
+        115.0
+      ],
+      "angle": 3.1415925,
+      "width": 260.0,
+      "power": 3250.0
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        -986.66675,
+        -1273.3334
+      ],
+      "b": [
+        -400.00003,
+        -1273.3334
+      ]
+    },
+    {
+      "a": [
+        493.33334,
+        -966.6667
+      ],
+      "b": [
+        -93.33334,
+        -966.6667
+      ]
+    },
+    {
+      "a": [
+        1420.0,
+        -873.3334
+      ],
+      "b": [
+        1420.0,
+        -460.0
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      966.6667,
+      -340.0
+    ],
+    "size": [
+      253.33334,
+      93.333336
+    ],
+    "angle": 0.0
+  },
+  "hills": [],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1740.0,
+          53.333336
+        ],
+        "size": [
+          173.33334,
+          133.33334
+        ],
+        "angle": -1.0471976
+      },
+      "script": "plate:trig_26",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

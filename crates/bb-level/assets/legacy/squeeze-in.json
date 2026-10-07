@@ -1,0 +1,235 @@
+{
+  "name": "Squeeze In",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_220",
+      "x": -90,
+      "y": 640,
+      "width": 940,
+      "height": 240,
+      "rotation": 0
+    },
+    {
+      "id": "plat_252",
+      "x": 2050,
+      "y": -430,
+      "width": 1100,
+      "height": 300,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": -460,
+      "y": 400,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [
+    {
+      "id": "npc_255",
+      "x": 1500,
+      "y": -860,
+      "hullPreset": "circle16",
+      "hue": 0.4316832222129099
+    },
+    {
+      "id": "npc_256",
+      "x": 1580,
+      "y": -880,
+      "hullPreset": "triangle",
+      "hue": 0.18760855244478214
+    },
+    {
+      "id": "npc_257",
+      "x": 1660,
+      "y": -860,
+      "hullPreset": "circle16",
+      "hue": 0.7393545889199464
+    },
+    {
+      "id": "npc_258",
+      "x": 280,
+      "y": -1320,
+      "hullPreset": "circle16",
+      "hue": 0.564620547540428
+    },
+    {
+      "id": "npc_259",
+      "x": 1520,
+      "y": -940,
+      "hullPreset": "circle16",
+      "hue": 0.3077994005443164
+    },
+    {
+      "id": "npc_260",
+      "x": 1600,
+      "y": -940,
+      "hullPreset": "circle16",
+      "hue": 0.35360666757414905
+    },
+    {
+      "id": "npc_261",
+      "x": 1680,
+      "y": -940,
+      "hullPreset": "circle16",
+      "hue": 0.7990499514893723
+    }
+  ],
+  "pointShapes": [
+    {
+      "id": "shape_249",
+      "points": [
+        {
+          "x": 1400,
+          "y": -1060,
+          "anchored": false
+        },
+        {
+          "x": 1400,
+          "y": -840,
+          "anchored": false
+        },
+        {
+          "x": 1520,
+          "y": -740,
+          "anchored": false
+        },
+        {
+          "x": 1500,
+          "y": -800,
+          "anchored": false
+        },
+        {
+          "x": 1460,
+          "y": -860,
+          "anchored": false
+        },
+        {
+          "x": 1460,
+          "y": -1000,
+          "anchored": false
+        },
+        {
+          "x": 1740,
+          "y": -1000,
+          "anchored": false
+        },
+        {
+          "x": 1740,
+          "y": -860,
+          "anchored": false
+        },
+        {
+          "x": 1700,
+          "y": -800,
+          "anchored": false
+        },
+        {
+          "x": 1680,
+          "y": -740,
+          "anchored": false
+        },
+        {
+          "x": 1800,
+          "y": -860,
+          "anchored": false
+        },
+        {
+          "x": 1800,
+          "y": -1060,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": false,
+      "frameLocked": false
+    },
+    {
+      "id": "shape_254",
+      "points": [
+        {
+          "x": 500,
+          "y": -1260,
+          "anchored": false
+        },
+        {
+          "x": -40,
+          "y": -1100,
+          "anchored": false
+        },
+        {
+          "x": -380,
+          "y": -780,
+          "anchored": false
+        },
+        {
+          "x": -20,
+          "y": -300,
+          "anchored": false
+        },
+        {
+          "x": 840,
+          "y": -1120,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    }
+  ],
+  "softPlatforms": [],
+  "actions": [
+    {
+      "id": "act_266",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "moveShape",
+          "shapeId": "shape_249",
+          "endX": 280,
+          "endY": 360
+        }
+      ],
+      "duration": 10,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [],
+      "requireMode": "any",
+      "mode": "timer",
+      "intervalSeconds": 5
+    }
+  ],
+  "goalZones": [
+    {
+      "id": "goal_253",
+      "x": 2380,
+      "y": -760,
+      "width": 440,
+      "height": 360
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_267",
+      "x": 840,
+      "y": -250,
+      "width": 680,
+      "height": 660
+    }
+  ]
+}

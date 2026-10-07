@@ -1,0 +1,355 @@
+{
+  "version": 3,
+  "id": "blob-hill",
+  "name": "Blob Hill",
+  "theme": "party",
+  "modes": [
+    "koth"
+  ],
+  "spawn": [
+    -1320.0,
+    -653.3334
+  ],
+  "kill_y": -1166.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1260.0,
+          -933.3334
+        ],
+        "size": [
+          466.6667,
+          320.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -33.333336,
+          -846.6667
+        ],
+        "size": [
+          920.0,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1073.3334,
+          -653.3334
+        ],
+        "size": [
+          840.0,
+          186.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -773.3334,
+          -140.0
+        ],
+        "size": [
+          640.0,
+          93.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -26.666668,
+          300.0
+        ],
+        "size": [
+          80.0,
+          280.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1466.6667,
+            -1100.0
+          ],
+          [
+            1466.6667,
+            -1100.0
+          ],
+          [
+            1466.6667,
+            -1066.6667
+          ],
+          [
+            -1466.6667,
+            -1066.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1466.6667,
+            433.33334
+          ],
+          [
+            1466.6667,
+            433.33334
+          ],
+          [
+            1466.6667,
+            466.6667
+          ],
+          [
+            -1466.6667,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1500.0,
+            -1100.0
+          ],
+          [
+            -1466.6667,
+            -1100.0
+          ],
+          [
+            -1466.6667,
+            466.6667
+          ],
+          [
+            -1500.0,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -1100.0
+          ],
+          [
+            1500.0,
+            -1100.0
+          ],
+          [
+            1500.0,
+            466.6667
+          ],
+          [
+            1466.6667,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_34",
+      "shape": {
+        "type": "rect",
+        "center": [
+          -173.33334,
+          -873.3334
+        ],
+        "size": [
+          320.0,
+          120.0
+        ],
+        "angle": -2.8797932
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          380.0
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 0.5,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_31|trig_35"
+    },
+    {
+      "id": "act_32",
+      "shape": {
+        "type": "rect",
+        "center": [
+          80.0,
+          -886.6667
+        ],
+        "size": [
+          320.0,
+          120.0
+        ],
+        "angle": 2.8797932
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          40.0,
+          393.33334
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 0.5,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_31|trig_35"
+    }
+  ],
+  "ropes": [],
+  "zones": [],
+  "springs": [
+    {
+      "pos": [
+        -726.6667,
+        -851.3334
+      ],
+      "angle": 1.5707964,
+      "width": 213.33334,
+      "power": 650.0
+    },
+    {
+      "pos": [
+        1372.3334,
+        -520.0543
+      ],
+      "angle": 2.0943952,
+      "width": 213.33334,
+      "power": 3250.0
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        -1026.6667,
+        -1065.0
+      ],
+      "b": [
+        1466.6667,
+        -1065.0
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": null,
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        -40.0,
+        -613.3334
+      ],
+      "size": [
+        546.6667,
+        306.6667
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          660.0,
+          46.666668
+        ],
+        "size": [
+          333.33334,
+          226.66667
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_31",
+      "once": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -506.6667,
+          -53.333336
+        ],
+        "size": [
+          106.66667,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_35",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

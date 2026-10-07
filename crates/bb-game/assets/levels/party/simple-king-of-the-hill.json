@@ -1,0 +1,248 @@
+{
+  "version": 3,
+  "id": "simple-king-of-the-hill",
+  "name": "Simple King of the Hill",
+  "theme": "party",
+  "modes": [
+    "koth"
+  ],
+  "spawn": [
+    280.0,
+    -786.6667
+  ],
+  "kill_y": -1666.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          422.20087,
+          -1003.3334
+        ],
+        "size": [
+          533.3334,
+          53.333336
+        ],
+        "angle": -0.5235988
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1066.6667,
+          -1133.3334
+        ],
+        "size": [
+          400.0,
+          53.333336
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1743.5726,
+          -1000.0
+        ],
+        "size": [
+          546.6667,
+          53.333336
+        ],
+        "angle": 0.5235988
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2026.6667,
+          -526.6667
+        ],
+        "size": [
+          640.0,
+          120.0
+        ],
+        "angle": 2.0943952
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          106.66667,
+          -653.3334
+        ],
+        "size": [
+          640.0,
+          120.0
+        ],
+        "angle": 1.0471976
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1586.6667
+          ],
+          [
+            -66.66667,
+            -1586.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            0.0,
+            -1600.0
+          ],
+          [
+            0.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2133.3335,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            2133.3335,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -0.0
+          ],
+          [
+            2200.0,
+            -0.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [
+    {
+      "a": [
+        666.6667,
+        -1586.6667
+      ],
+      "b": [
+        866.6667,
+        -1586.6667
+      ]
+    },
+    {
+      "a": [
+        1266.6667,
+        -1586.6667
+      ],
+      "b": [
+        1466.6667,
+        -1586.6667
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": null,
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        1066.6667,
+        -1073.3334
+      ],
+      "size": [
+        400.0,
+        120.0
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

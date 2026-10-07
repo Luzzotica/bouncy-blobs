@@ -1,0 +1,375 @@
+{
+  "version": 3,
+  "id": "det-test",
+  "name": "Determinism Test Arena",
+  "theme": "party",
+  "modes": [
+    "sandbox"
+  ],
+  "spawn": [
+    266.6667,
+    -133.33334
+  ],
+  "kill_y": -1666.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          266.6667,
+          -1533.3334
+        ],
+        "size": [
+          133.33334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          533.3334,
+          -1533.3334
+        ],
+        "size": [
+          133.33334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          800.0,
+          -1533.3334
+        ],
+        "size": [
+          133.33334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            1133.3334,
+            -1600.0
+          ],
+          [
+            1133.3334,
+            -1586.6667
+          ],
+          [
+            -66.66667,
+            -1586.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -0.0
+          ],
+          [
+            1133.3334,
+            -0.0
+          ],
+          [
+            1133.3334,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            0.0,
+            -1600.0
+          ],
+          [
+            0.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1066.6667,
+            -1600.0
+          ],
+          [
+            1133.3334,
+            -1600.0
+          ],
+          [
+            1133.3334,
+            66.66667
+          ],
+          [
+            1066.6667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [
+    {
+      "shape": {
+        "type": "circle",
+        "center": [
+          733.3334,
+          -1133.3334
+        ],
+        "radius": 40.0
+      },
+      "material": "bouncy",
+      "wobble": 0.8
+    }
+  ],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "move-floor",
+      "shape": {
+        "type": "rect",
+        "center": [
+          400.0,
+          -1200.0
+        ],
+        "size": [
+          533.3334,
+          26.666668
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          133.33334,
+          -66.66667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "fall-trigger#once"
+    }
+  ],
+  "ropes": [],
+  "zones": [
+    {
+      "id": "wind-1",
+      "shape": {
+        "type": "rect",
+        "center": [
+          200.0,
+          -666.6667
+        ],
+        "size": [
+          200.0,
+          266.6667
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "wind",
+        "accel": [
+          642.8571,
+          -0.0
+        ]
+      }
+    },
+    {
+      "id": "conv-1",
+      "shape": {
+        "type": "rect",
+        "center": [
+          466.6667,
+          -800.0
+        ],
+        "size": [
+          200.0,
+          33.333336
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "conveyor",
+        "speed": 250.0
+      }
+    },
+    {
+      "id": "sticky-1",
+      "shape": {
+        "type": "rect",
+        "center": [
+          333.33334,
+          -1000.0
+        ],
+        "size": [
+          133.33334,
+          40.0
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "goo",
+        "drag": 9.0
+      }
+    }
+  ],
+  "springs": [
+    {
+      "pos": [
+        266.6666,
+        -1464.6667
+      ],
+      "angle": 1.5708,
+      "width": 160.0,
+      "power": 2340.0
+    },
+    {
+      "pos": [
+        533.33325,
+        -1464.6667
+      ],
+      "angle": 1.5708,
+      "width": 160.0,
+      "power": 1560.0
+    },
+    {
+      "pos": [
+        66.66667,
+        -1133.3334
+      ],
+      "angle": -0.0,
+      "width": 66.66667,
+      "power": 1600.0
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        733.3333,
+        -1506.6667
+      ],
+      "b": [
+        866.6667,
+        -1506.6667
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [
+    [
+      400.0,
+      -1133.3334
+    ],
+    [
+      600.0,
+      -1133.3334
+    ]
+  ],
+  "npcs": [
+    {
+      "id": "npc-witness-1",
+      "pos": [
+        800.0,
+        -1000.0
+      ],
+      "role": "huddle",
+      "color": "#dba657",
+      "radius": 32.0
+    },
+    {
+      "id": "npc-witness-2",
+      "pos": [
+        133.33334,
+        -1000.0
+      ],
+      "role": "huddle",
+      "color": "#57dbdb",
+      "radius": 32.0
+    }
+  ],
+  "goal": null,
+  "hills": [],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          0.0,
+          -0.0
+        ],
+        "size": [
+          0.0,
+          0.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:fall-trigger",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

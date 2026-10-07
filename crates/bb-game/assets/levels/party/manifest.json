@@ -1,0 +1,390 @@
+{
+  "levels": [
+    {
+      "file": "classic.json",
+      "hidden": false,
+      "id": "classic",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "powerup spawns become glow-drop pickups"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Classic Race"
+    },
+    {
+      "file": "koth.json",
+      "hidden": true,
+      "id": "koth",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "npc npc1: hull preset 'star' becomes a round blob",
+        "powerup spawns become glow-drop pickups"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "King of the Hill Arena"
+    },
+    {
+      "file": "koth-moving-test.json",
+      "hidden": true,
+      "id": "koth-moving-test",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "hillRotation dropped (the KOTH mode decides how hills move)"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "KOTH Moving Hill (test)"
+    },
+    {
+      "file": "simple-koth.json",
+      "hidden": false,
+      "id": "simple-koth",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "Simple King of the Hill"
+    },
+    {
+      "file": "blob-hill.json",
+      "hidden": false,
+      "id": "blob-hill",
+      "import_notes": [
+        "11 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "Blob Hill"
+    },
+    {
+      "file": "default.json",
+      "hidden": true,
+      "id": "default",
+      "import_notes": [
+        "4 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "npc npc1: hull preset 'square' becomes a round blob",
+        "npc npc2: hull preset 'triangle' becomes a round blob",
+        "npc npc3: hull preset 'star' becomes a round blob",
+        "npc npc4: hull preset 'diamond' becomes a round blob",
+        "npc npc5: hull preset 'hexagon' becomes a round blob"
+      ],
+      "modes": [
+        "sandbox"
+      ],
+      "name": "Default Arena"
+    },
+    {
+      "file": "showcase.json",
+      "hidden": true,
+      "id": "showcase",
+      "import_notes": [
+        "1 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "npc npc-square: hull preset 'square' becomes a round blob",
+        "npc npc-triangle: hull preset 'triangle' becomes a round blob",
+        "npc npc-star: hull preset 'star' becomes a round blob",
+        "npc npc-diamond: hull preset 'diamond' becomes a round blob",
+        "npc npc-hexagon: hull preset 'hexagon' becomes a round blob",
+        "gravity zone blackhole: point field approximated by 4 inward uniform zones",
+        "powerup spawns become glow-drop pickups",
+        "point shape rope-bridge: moved by an action, so it becomes a rigid mover",
+        "point shape kite: moved by an action, so it becomes a rigid mover",
+        "trigger plate-kite: charge time dropped (plates fire instantly)"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Showcase Arena"
+    },
+    {
+      "file": "playground.json",
+      "hidden": true,
+      "id": "playground",
+      "import_notes": [
+        "npc npc-star: hull preset 'star' becomes a round blob",
+        "gravity zone blackhole: point field approximated by 4 inward uniform zones",
+        "powerup spawns become glow-drop pickups",
+        "trigger trig-charged: charge time dropped (plates fire instantly)",
+        "3 sprites become decor (sprite collision dropped)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Physics Playground"
+    },
+    {
+      "file": "det-test.json",
+      "hidden": true,
+      "id": "det-test",
+      "import_notes": [
+        "1 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "npc npc-witness-2: hull preset 'hexagon' becomes a round blob",
+        "powerup spawns become glow-drop pickups",
+        "cannon cannon-1: periodic launcher becomes a spring pad"
+      ],
+      "modes": [
+        "sandbox"
+      ],
+      "name": "Determinism Test Arena"
+    },
+    {
+      "file": "simple-race.json",
+      "hidden": false,
+      "id": "simple-race",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_33: large pinned soft hill becomes solid terrain",
+        "trigger trig_26: charge time dropped (plates fire instantly)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Simple Race"
+    },
+    {
+      "file": "chained-climb.json",
+      "hidden": false,
+      "id": "chained-climb",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Chained Together"
+    },
+    {
+      "file": "swervy.json",
+      "hidden": false,
+      "id": "swervy",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Swervy"
+    },
+    {
+      "file": "wall-climb.json",
+      "hidden": false,
+      "id": "wall-climb",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Wall Climb"
+    },
+    {
+      "file": "ceiling-crawl.json",
+      "hidden": false,
+      "id": "ceiling-crawl",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Ceiling Crawl"
+    },
+    {
+      "file": "moving-platforms.json",
+      "hidden": false,
+      "id": "moving-platforms",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_88: large pinned soft hill becomes solid terrain",
+        "point shape shape_89: large pinned soft hill becomes solid terrain",
+        "trigger trig_97: charge time dropped (plates fire instantly)",
+        "trigger trig_98: charge time dropped (plates fire instantly)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Moving Platforms"
+    },
+    {
+      "file": "gravity-drive.json",
+      "hidden": false,
+      "id": "gravity-drive",
+      "import_notes": [
+        "gravity zone grav_104: point field approximated by 4 inward uniform zones"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "Gravity Drive"
+    },
+    {
+      "file": "springy.json",
+      "hidden": false,
+      "id": "springy",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_139: large pinned soft hill becomes solid terrain",
+        "point shape shape_141: large pinned soft hill becomes solid terrain"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Springy"
+    },
+    {
+      "file": "simple-king-of-the-hill.json",
+      "hidden": false,
+      "id": "simple-king-of-the-hill",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "koth"
+      ],
+      "name": "Simple King of the Hill"
+    },
+    {
+      "file": "jump.json",
+      "hidden": false,
+      "id": "jump",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Jump"
+    },
+    {
+      "file": "cannon.json",
+      "hidden": false,
+      "id": "cannon",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_188: large pinned soft hill becomes solid terrain",
+        "point shape shape_189: large pinned soft hill becomes solid terrain",
+        "trigger trig_177: charge time dropped (plates fire instantly)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Cannon"
+    },
+    {
+      "file": "platforms-be-movin.json",
+      "hidden": false,
+      "id": "platforms-be-movin",
+      "import_notes": [
+        "action act_202: no source triggers and not a timer, so it never fires; dropped",
+        "action act_207: no source triggers and not a timer, so it never fires; dropped",
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_216: large pinned soft hill becomes solid terrain",
+        "point shape shape_219: large pinned soft hill becomes solid terrain"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Platforms Be MOVIN"
+    },
+    {
+      "file": "squeeze-up.json",
+      "hidden": false,
+      "id": "squeeze-up",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_235: large pinned soft hill becomes solid terrain",
+        "trigger trig_236: ignoreNpcs dropped"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Squeeze Up"
+    },
+    {
+      "file": "squeeze-in.json",
+      "hidden": false,
+      "id": "squeeze-in",
+      "import_notes": [
+        "npc npc_256: hull preset 'triangle' becomes a round blob",
+        "point shape shape_249: moved by an action, so it becomes a rigid mover",
+        "point shape shape_254: large pinned soft hill becomes solid terrain"
+      ],
+      "modes": [
+        "race",
+        "koth"
+      ],
+      "name": "Squeeze In"
+    },
+    {
+      "file": "getting-crushed.json",
+      "hidden": false,
+      "id": "getting-crushed",
+      "import_notes": [
+        "7 extra player spawns dropped (v3 has one spawn; players spread around it)",
+        "point shape shape_290: large pinned soft hill becomes solid terrain"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Getting Crushed"
+    },
+    {
+      "file": "crush-test.json",
+      "hidden": true,
+      "id": "crush-test",
+      "import_notes": [
+        "1 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Crush Test"
+    },
+    {
+      "file": "kids-playground.json",
+      "hidden": true,
+      "id": "kids-playground",
+      "import_notes": [
+        "npc friend-0: hull preset 'star' becomes a round blob",
+        "npc friend-1: hull preset 'square' becomes a round blob",
+        "npc friend-2: hull preset 'triangle' becomes a round blob",
+        "npc friend-3: hull preset 'star' becomes a round blob",
+        "npc friend-4: hull preset 'square' becomes a round blob",
+        "npc friend-5: hull preset 'triangle' becomes a round blob",
+        "npc friend-6: hull preset 'star' becomes a round blob",
+        "npc friend-7: hull preset 'square' becomes a round blob"
+      ],
+      "modes": [
+        "sandbox"
+      ],
+      "name": "Kids Playground"
+    },
+    {
+      "file": "party.json",
+      "hidden": true,
+      "id": "party",
+      "import_notes": [
+        "3 extra player spawns dropped (v3 has one spawn; players spread around it)"
+      ],
+      "modes": [
+        "race"
+      ],
+      "name": "Party Arena"
+    }
+  ],
+  "source": "legacy public/levels via bb_level::legacy (scale 2/3, y-up)"
+}

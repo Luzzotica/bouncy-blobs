@@ -1,0 +1,202 @@
+{
+  "version": 3,
+  "id": "platforms-be-movin",
+  "name": "Platforms Be MOVIN",
+  "theme": "party",
+  "modes": [
+    "race",
+    "koth"
+  ],
+  "spawn": [
+    -493.33334,
+    -280.0
+  ],
+  "kill_y": -666.66675,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -206.66667,
+          -466.6667
+        ],
+        "size": [
+          706.6667,
+          266.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1313.3334,
+          406.6667
+        ],
+        "size": [
+          546.6667,
+          226.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -700.0,
+          -66.66667
+        ],
+        "size": [
+          280.0,
+          1066.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -80.0,
+            386.6667
+          ],
+          [
+            -360.0,
+            106.66667
+          ],
+          [
+            26.666668,
+            -0.0
+          ],
+          [
+            280.0,
+            146.66667
+          ],
+          [
+            200.0,
+            346.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            773.3334,
+            1093.3334
+          ],
+          [
+            346.6667,
+            986.6667
+          ],
+          [
+            480.0,
+            680.0
+          ],
+          [
+            1186.6667,
+            866.6667
+          ],
+          [
+            1173.3334,
+            1240.0
+          ],
+          [
+            786.6667,
+            1253.3334
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_213",
+      "shape": {
+        "type": "rect",
+        "center": [
+          320.0,
+          -420.0
+        ],
+        "size": [
+          346.6667,
+          173.33334
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          546.6667,
+          860.0
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 14.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": ""
+    }
+  ],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      1420.0,
+      600.0
+    ],
+    "size": [
+      333.33334,
+      160.0
+    ],
+    "angle": 0.0
+  },
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        40.0,
+        466.6667
+      ],
+      "size": [
+        320.0,
+        240.0
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

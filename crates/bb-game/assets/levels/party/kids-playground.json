@@ -1,0 +1,263 @@
+{
+  "version": 3,
+  "id": "kids-playground",
+  "name": "Kids Playground",
+  "theme": "party",
+  "modes": [
+    "sandbox"
+  ],
+  "spawn": [
+    600.0,
+    -573.3334
+  ],
+  "kill_y": -826.6667,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          280.0,
+          -480.0
+        ],
+        "size": [
+          186.66667,
+          32.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          920.0,
+          -480.0
+        ],
+        "size": [
+          186.66667,
+          32.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          600.0,
+          -320.0
+        ],
+        "size": [
+          213.33334,
+          32.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -26.666668,
+            -760.0
+          ],
+          [
+            1226.6667,
+            -760.0
+          ],
+          [
+            1226.6667,
+            -653.3334
+          ],
+          [
+            -26.666668,
+            -653.3334
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -26.666668,
+            -53.333336
+          ],
+          [
+            1226.6667,
+            -53.333336
+          ],
+          [
+            1226.6667,
+            26.666668
+          ],
+          [
+            -26.666668,
+            26.666668
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -26.666668,
+            -760.0
+          ],
+          [
+            53.333336,
+            -760.0
+          ],
+          [
+            53.333336,
+            26.666668
+          ],
+          [
+            -26.666668,
+            26.666668
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1146.6667,
+            -760.0
+          ],
+          [
+            1226.6667,
+            -760.0
+          ],
+          [
+            1226.6667,
+            26.666668
+          ],
+          [
+            1146.6667,
+            26.666668
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [
+    {
+      "id": "friend-0",
+      "pos": [
+        213.33334,
+        -573.3334
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-1",
+      "pos": [
+        346.6667,
+        -426.6667
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-2",
+      "pos": [
+        600.0,
+        -266.6667
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-3",
+      "pos": [
+        853.3334,
+        -426.6667
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-4",
+      "pos": [
+        986.6667,
+        -573.3334
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-5",
+      "pos": [
+        466.6667,
+        -573.3334
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-6",
+      "pos": [
+        733.3334,
+        -573.3334
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    },
+    {
+      "id": "friend-7",
+      "pos": [
+        600.0,
+        -426.6667
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    }
+  ],
+  "goal": null,
+  "hills": [],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}
