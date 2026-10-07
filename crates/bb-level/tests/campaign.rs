@@ -222,12 +222,16 @@ struct Bot {
     vx_avg: f32,
     retreat_dir: f32,
     runup: bool,
+    last_clear: f32,
+    dashing: bool,
+    riding: bool,
+    last_hit: Option<f32>,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false, last_clear: 0.0, dashing: false, riding: false, last_hit: None }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -250,6 +254,8 @@ impl Bot {
             if reached(path[self.i]) {
                 self.i += 1;
                 self.rope_t = 0.0;
+                self.dashing = false;
+                self.riding = false;
             } else if self.i + 1 < path.len() - 1 && reached(path[self.i + 1]) {
                 // Overshot a waypoint (e.g. bounced past it): skip ahead.
                 self.i += 2;
@@ -315,6 +321,24 @@ impl Bot {
 
         match tgt.how {
             Move::Walk | Move::Push | Move::Squeeze | Move::Drop => {}
+            Move::Dash => {
+                // Wait at the start until whatever hangs over the run is
+                // on its way back up, then go.
+                let mid = (prev.at + tgt.at) * 0.5 + Vec2::new(0.0, 40.0);
+                let clear = sim
+                    .world
+                    .raycast(mid, Vec2::Y, 900.0, bb_sim::load::layer::WORLD, Some(p.ctl.body))
+                    .map_or(900.0, |h| h.3);
+                let rising = clear > self.last_clear + 0.5;
+                self.last_clear = clear;
+                if (pos.x - prev.at.x).abs() < 60.0 && on_ground && !self.dashing {
+                    if rising && clear > 60.0 {
+                        self.dashing = true;
+                    } else {
+                        stick.x = ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0);
+                    }
+                }
+            }
             Move::Jump => {
                 if at_prev || (edge_ahead && tgt.at.y > feet - 60.0) {
                     want_jump = true;
@@ -374,17 +398,45 @@ impl Bot {
             }
             Move::Ride => {
                 // Wait for the platform to be at the target before stepping on.
-                let there = sim
+                // ...and only while it's arriving or parked (not leaving).
+                let hit = sim
                     .world
                     .raycast(tgt.at + Vec2::new(0.0, 80.0), Vec2::NEG_Y, 130.0, bb_sim::load::layer::WORLD, None)
-                    .is_some_and(|h| (h.1.y - tgt.at.y).abs() < 40.0);
-                let riding = (pos.x - prev.at.x).abs() < 90.0 && on_ground && prev.how == Move::Ride;
-                let close = (tgt.at.y - feet) < 120.0 && dx.abs() < 360.0;
-                if riding && !close {
-                    stick.x = ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0);
+                    .map(|h| h.1.y);
+                let settling = match (hit, self.last_hit) {
+                    (Some(y), Some(l)) => (y - tgt.at.y).abs() <= (l - tgt.at.y).abs() + 0.5,
+                    _ => false,
+                };
+                self.last_hit = hit;
+                let there = hit.is_some_and(|y| (y - tgt.at.y).abs() < 30.0) && settling;
+                let vertical = (tgt.at.y - prev.at.y).abs() > (tgt.at.x - prev.at.x).abs();
+                let riding = if vertical {
+                    (pos.x - prev.at.x).abs() < 90.0 && on_ground && prev.how == Move::Ride && feet > prev.at.y - 30.0
+                } else {
+                    // Ferries carry you away from the boarding spot.
+                    if prev.how == Move::Ride && on_ground && (pos.x - prev.at.x).abs() < 60.0 && (feet - prev.at.y).abs() < 50.0 {
+                        self.riding = true;
+                    }
+                    self.riding && on_ground
+                };
+                let close = if vertical { (tgt.at.y - feet) < 120.0 && dx.abs() < 360.0 } else { dx.abs() < 320.0 };
+                if prev.how == Move::Ride && !riding && !close && grounded && self.i >= 2 {
+                    // Missed the platform: go back and wait to board again.
+                    self.i -= 1;
+                    self.riding = false;
+                    self.prev_button = false;
+                    return Input { stick: Vec2::ZERO, button: false };
+                }
+                if !riding && on_ground && feet < tgt.at.y - 40.0 && feet < prev.at.y - 40.0 && prev.how != Move::Ride {
+                    // Fell into a lift shaft: hop back out towards the ledge.
+                    stick.x = ((prev.at.x - pos.x) / 40.0).clamp(-1.0, 1.0);
+                    want_jump = true;
+                } else if riding && !close {
+                    stick.x = if vertical { ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0) } else { 0.0 };
                     want_jump = false;
-                } else if !there && on_ground && dx.abs() > 90.0 && !riding {
-                    stick.x = (-vel.x / 250.0).clamp(-1.0, 1.0);
+                } else if !riding && !there && on_ground && dx.abs() > 90.0 {
+                    // Hold at the boarding spot until the platform arrives.
+                    stick.x = ((prev.at.x - pos.x) / 50.0 - vel.x / 300.0).clamp(-1.0, 1.0);
                     want_jump = false;
                 } else if on_ground && tgt.at.y > feet + 30.0 && dx.abs() < 330.0 {
                     want_jump = true;

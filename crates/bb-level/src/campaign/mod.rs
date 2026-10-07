@@ -40,6 +40,9 @@ pub enum Move {
     Drop,
     /// Roll through a low tunnel.
     Squeeze,
+    /// Wait for a gap in a hazard's rhythm (crushers, drips), then roll
+    /// through underneath.
+    Dash,
     /// Push a prop ahead of you.
     Push,
     /// Launched by a spring pad or trampoline mushroom.
@@ -59,7 +62,7 @@ pub enum Move {
 impl Move {
     /// Assisted moves may exceed the plain jump metrics.
     pub fn assisted(self) -> bool {
-        !matches!(self, Move::Walk | Move::Jump | Move::Drop | Move::Squeeze | Move::Push)
+        !matches!(self, Move::Walk | Move::Jump | Move::Drop | Move::Squeeze | Move::Push | Move::Dash)
     }
 }
 

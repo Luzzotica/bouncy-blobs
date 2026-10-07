@@ -64,3 +64,17 @@ Lulu (only in ch10).
 | `ch04_remix` | Rope bridge over goo, with drips. Glimmer: "Everything you learned, all at once! That's called *life*." |
 | `ch04_friends` | Pip lands the big fling; Glimmer applauds (chimes). "You swing like you were born upside down." |
 | `ch04_outro` | Beyond the vines, a rhythmic THUMP… THUMP… of old stone machines. Pip's bounce falters. |
+
+## Chapter 5 — The Crusher Hall (Old Stone Works)
+
+| id | what happens |
+|---|---|
+| `ch05_intro` | The Old Stone Works: huge, cold, rhythmic. THUMP. THUMP. Pip's bounce gets small. Glimmer's light flickers nervously. |
+| `ch05_thump` | Pip flinches at every thump. Hint: pistons slam, wait, then rise; go when they're rising. |
+| `ch05_crusher` | A piston squashes a crate flat (it wobbles back, offended). Pip: "…eep." |
+| `ch05_popped` | (After the first crusher run, usually after a pop or two.) Pip reforms at the mushroom, dizzy. Glimmer, gently: "Still you? Still you." |
+| `ch05_ferry` | A rickety stone ferry slides over spikes. Hint: wait for it, ride it, stand still. |
+| `ch05_rush` | A conveyor rushes toward three pistons. Glimmer: "Sometimes the floor decides for you. Bounce anyway." |
+| `ch05_whole_trick` | The low point turns. Pip, after yet another pop, reforms and *laughs*. Glimmer: "You popped. You came back. That's the whole trick." Pip bounces at full size again. |
+| `ch05_light` | Out of the works; damp air and the shimmer of water ahead. A distant, pompous voice echoes: "HALT! Who approaches the Royal Lake?!" |
+| `ch05_outro` | Pip and Glimmer peek out at a vast underground lake. On an island far away: a teacup, and in it, a sock. |
