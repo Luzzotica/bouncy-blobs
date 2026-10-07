@@ -133,7 +133,7 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         };
         d.params.material = material(p.material);
         d.params.limits.poppable = false;
-        d.params.shape_compliance = Some(3e-6);
+        d.params.shape_compliance = Some(4e-4);
         d.layer = layer::PROP;
         let id = w.add_body(d);
         if p.pinned {
