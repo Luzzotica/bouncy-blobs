@@ -88,7 +88,11 @@ pub(crate) fn solve_internal(b: &mut Body, h: f32) {
 pub(crate) fn solve_limits(b: &mut Body) {
     let l = b.params.limits;
     let scale = b.rest_scale;
-    if b.closed && b.rest_area > 0.0 {
+    // Outline-area limits only make sense for ring blobs. A thin triangulated
+    // sheet (a soft bridge) can sag until its outline self-intersects, and a
+    // hard projection on that garbage "area" explodes it; meshes keep their
+    // area per triangle instead.
+    if b.closed && b.rest_area > 0.0 && b.tris.is_empty() {
         let rest = b.rest_area * scale * scale;
         let area = b.area();
         if area < rest * l.min_area {
@@ -127,7 +131,7 @@ pub(crate) fn measure_strain(b: &mut Body) -> Strain {
     let l = b.params.limits;
     let scale = b.rest_scale;
     let mut over: f32 = 0.0;
-    if b.closed && b.rest_area > 0.0 {
+    if b.closed && b.rest_area > 0.0 && b.tris.is_empty() {
         let ratio = b.area() / (b.rest_area * scale * scale);
         b.area_ratio = ratio;
         if ratio < l.min_area {

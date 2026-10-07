@@ -219,7 +219,12 @@ fn state_for(s: &NetSession, id: NetId, now: f64) -> Option<(BodyState, f64)> {
     let p = s.peers.get(owner)?;
     let (st, at) = p.rx.get(id)?;
     if now - at > STALE_S {
-        return None;
+        // Owners stop sending bodies that fall asleep; their last state IS
+        // the final resting pose, so keep converging to it (eventual
+        // consistency). A moving body that went quiet is a stall: let the
+        // local sim guess instead of extrapolating stale motion.
+        let at_rest = st.vel[0].abs() <= 4 && st.vel[1].abs() <= 4;
+        return at_rest.then_some((st, now));
     }
     // Back-date arrival by half the round trip: when the owner sent it.
     Some((st, at - p.rtt as f64 * 0.5))

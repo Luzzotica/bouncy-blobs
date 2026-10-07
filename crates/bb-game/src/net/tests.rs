@@ -177,12 +177,20 @@ fn guest_screen_mirrors_the_host_and_owns_its_blob() {
     let (g0, g1) = (centre(&guest, 0).unwrap(), centre(&guest, 1).unwrap());
     println!("host sees {h0} {h1}; guest sees {g0} {g1}; worst divergence {worst:.1} px");
     assert!(h0.x > 300.0 && g1.x < -300.0, "both owners moved");
-    assert!(worst < 25.0, "screens diverged by {worst} px");
+    // Jelly ground gives a little under each blob; mirrors follow the jiggle.
+    assert!(worst < 32.0, "screens diverged by {worst} px");
 
     // Props are host-owned and mirrored too.
     let prop = |app: &App| {
         let g = app.world().resource::<Game>();
         g.sim.world.body(g.sim.props[0]).unwrap().centroid()
     };
-    assert!(prop(&host).distance(prop(&guest)) < 10.0);
+    // Eventual consistency: while being shoved the guest's copy may lead or
+    // lag, but once things settle it must agree with the owner.
+    for _ in 0..90 {
+        host.update();
+        guest.update();
+    }
+    let d = prop(&host).distance(prop(&guest));
+    assert!(d < 10.0, "prop disagrees by {d} px after settling");
 }

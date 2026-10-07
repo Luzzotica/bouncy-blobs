@@ -59,6 +59,8 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         d.params.gravity_scale = 0.0;
         d.params.radius = 1.5;
         d.layer = layer::WORLD | layer::JELLY;
+        // Ground jelly rests on its terrain core (that contact gives it
+        // footing, so props and blobs don't skate across it).
         d.mask = !layer::JELLY;
         let id = w.add_body(d);
         // Wobble 0 → firm (1e-6), wobble 1 → very jiggly (4e-5).
@@ -86,7 +88,11 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         d.params.internal_damping = 4.0;
         d.params.radius = 1.5;
         d.layer = layer::WORLD | layer::JELLY;
-        d.mask = !layer::JELLY;
+        // Soft platforms hang from pins / home tethers and are authored with
+        // their ends embedded in terrain; terrain shoving those ends every
+        // substep made bridges jitter and, under load, explode. So they
+        // don't collide with terrain at all.
+        d.mask = layer::PLAYER | layer::PROP | layer::NPC | layer::ROPE;
         let pins = p.pins;
         let id = w.add_body(d);
         {
