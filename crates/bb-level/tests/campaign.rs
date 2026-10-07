@@ -219,12 +219,13 @@ struct Bot {
     /// Seconds left backing up for a run-up after a failed climb.
     retreat: f32,
     jumped: bool,
+    vx_avg: f32,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0 }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -241,7 +242,7 @@ impl Bot {
         while self.i < path.len() - 1 {
             let t = path[self.i];
             let near = (pos.x - t.at.x).abs() < 50.0 && feet > t.at.y - 45.0 && feet < t.at.y + 140.0;
-            if near && (on_ground || t.how == Move::Swim) {
+            if near && (on_ground || matches!(t.how, Move::Swim | Move::Wind)) {
                 self.i += 1;
                 self.rope_t = 0.0;
             } else {
@@ -257,7 +258,8 @@ impl Bot {
         let at_prev = (pos.x - prev.at.x).abs() < 35.0 && on_ground;
 
         // Blocked while pushing?
-        if on_ground && stick.x.abs() > 0.5 && vel.x.abs() < 40.0 {
+        self.vx_avg += (vel.x - self.vx_avg) * 0.1;
+        if self.since_ground < 0.3 && stick.x.abs() > 0.5 && self.vx_avg.abs() < 60.0 {
             self.blocked += dt;
         } else {
             self.blocked = 0.0;
@@ -326,10 +328,18 @@ impl Bot {
                 }
             }
             Move::Ride => {
-                let riding = (pos.x - prev.at.x).abs() < 70.0 && on_ground;
+                // Wait for the platform to be at the target before stepping on.
+                let there = sim
+                    .world
+                    .raycast(tgt.at + Vec2::new(0.0, 80.0), Vec2::NEG_Y, 130.0, bb_sim::load::layer::WORLD, None)
+                    .is_some_and(|h| (h.1.y - tgt.at.y).abs() < 40.0);
+                let riding = (pos.x - prev.at.x).abs() < 90.0 && on_ground && prev.how == Move::Ride;
                 let close = (tgt.at.y - feet) < 120.0 && dx.abs() < 360.0;
                 if riding && !close {
-                    stick.x = 0.0;
+                    stick.x = ((prev.at.x - pos.x) / 60.0).clamp(-1.0, 1.0);
+                    want_jump = false;
+                } else if !there && on_ground && dx.abs() > 90.0 && !riding {
+                    stick.x = (-vel.x / 250.0).clamp(-1.0, 1.0);
                     want_jump = false;
                 } else if on_ground && tgt.at.y > feet + 30.0 && dx.abs() < 330.0 {
                     want_jump = true;
@@ -337,13 +347,21 @@ impl Bot {
             }
             Move::Wall => {
                 if let Some(nrm) = p.ctl.stuck {
-                    self.wall_dir = nrm.x.signum();
-                    button = !self.prev_button;
-                    stick.x = self.wall_dir;
-                } else if on_ground {
-                    if dx.abs() < 120.0 {
+                    let away = nrm.x.signum();
+                    if feet < prev.at.y + 70.0 {
+                        // Stuck too low: peel off and take a proper jump.
+                        stick.x = away;
+                    } else if vel.y < 80.0 {
+                        self.wall_dir = away;
+                        button = !self.prev_button;
+                        stick.x = away;
+                    } else {
+                        stick.x = -away;
+                    }
+                } else if grounded {
+                    self.wall_dir = dir;
+                    if dx.abs() < 120.0 || (pos.x - prev.at.x).abs() < 100.0 {
                         want_jump = true;
-                        stick.x = self.wall_dir;
                     }
                 } else {
                     stick.x = self.wall_dir;
@@ -380,7 +398,7 @@ fn bot_segment(c: &Course, k: usize, limit: f32) -> (bool, f32, u32) {
     let mut deaths = 0;
     let mut was_dead = false;
     let steps = (limit / bb_sim::DT) as usize;
-    let trace = std::env::var("BOT_TRACE").ok() == Some(format!("{}:{k}", l.id));
+    let trace = std::env::var("BOT_TRACE").is_ok_and(|t| t == format!("{}:{k}", l.id) || t == format!("mini_{}:{k}", l.name));
     for f in 0..steps {
         let dead = sim.players[0].dead.is_some();
         if dead && !was_dead {
@@ -430,6 +448,10 @@ fn bot_report(n: u8) -> (usize, usize) {
 fn bot_one() {
     let Ok(t) = std::env::var("BOT_TRACE") else { return };
     let (id, k) = t.split_once(':').unwrap();
+    if let Some(name) = id.strip_prefix("mini_") {
+        println!("{:?}", bot_segment(&mini(name), 0, 25.0));
+        return;
+    }
     let n: u8 = id[2..].parse().unwrap();
     let k: usize = k.parse().unwrap();
     let r = bot_segment(&campaign::course(n), k, 30.0);
@@ -463,4 +485,74 @@ per_chapter! {
     8 => rest_ch08, bot_ch08;
     9 => rest_ch09, bot_ch09;
     10 => rest_ch10, bot_ch10;
+}
+
+// ------------------------------------------------- bot mechanics test bed
+
+/// Tiny courses, one per assisted move, to keep the bot honest.
+fn mini(name: &str) -> Course {
+    let mut b = LevelBuilder::new("mini", name, Theme::Hollow);
+    b.spawn(v(0.0, 40.0)).kill_y(-1200.0);
+    b.ground(&[v(-400.0, 0.0), v(400.0, 0.0)], 1000.0);
+    let w = |x: f32, y: f32, how: Move| Waypoint { at: v(x, y), how };
+    let mut path = vec![w(0.0, 0.0, Move::Walk)];
+    match name {
+        "spring" => {
+            b.spring(v(300.0, 0.0), 90.0, 1400.0);
+            b.ground(&[v(500.0, 400.0), v(1100.0, 400.0)], 200.0);
+            path.extend([w(300.0, 0.0, Move::Walk), w(650.0, 400.0, Move::Spring)]);
+        }
+        "trampoline" => {
+            b.trampoline(v(250.0, 0.0), 90.0, 160.0, 1200.0);
+            b.ground(&[v(500.0, 420.0), v(1100.0, 420.0)], 200.0);
+            path.extend([w(250.0, 135.0, Move::Jump), w(650.0, 420.0, Move::Spring)]);
+        }
+        "rope" => {
+            b.vine(v(700.0, 600.0), 340.0);
+            b.ground(&[v(1250.0, 0.0), v(1900.0, 0.0)], 1000.0);
+            b.kill(v(400.0, -1100.0), v(1250.0, -300.0));
+            path.extend([w(360.0, 0.0, Move::Walk), w(1400.0, 0.0, Move::Rope)]);
+        }
+        "wind" => {
+            b.wind(v(420.0, -100.0), v(620.0, 900.0), v(0.0, 1400.0));
+            b.ground(&[v(700.0, 700.0), v(1200.0, 700.0)], 200.0);
+            path.extend([w(380.0, 0.0, Move::Walk), w(520.0, 760.0, Move::Wind), w(800.0, 700.0, Move::Drop)]);
+            b.ground(&[v(400.0, -300.0), v(700.0, -300.0)], 300.0);
+        }
+        "swim" => {
+            b.ground(&[v(400.0, -400.0), v(1400.0, -400.0)], 600.0);
+            b.water(v(400.0, -400.0), v(1400.0, -40.0));
+            b.ground(&[v(1400.0, 0.0), v(1900.0, 0.0)], 1000.0);
+            path.extend([w(380.0, 0.0, Move::Walk), w(1000.0, -100.0, Move::Swim), w(1500.0, 0.0, Move::Swim)]);
+        }
+        "ride" => {
+            b.elevator(v(500.0, -13.0), v(500.0, 487.0), 160.0, 6.0);
+            b.ground(&[v(620.0, 500.0), v(1100.0, 500.0)], 200.0);
+            b.ground(&[v(400.0, -60.0), v(620.0, -60.0)], 600.0);
+            path.extend([w(350.0, 0.0, Move::Walk), w(500.0, 0.0, Move::Ride), w(750.0, 500.0, Move::Ride)]);
+        }
+        "wall" => {
+            b.terrain(Shape::rect(v(400.0, 0.0), v(460.0, 900.0)), Material::Sticky);
+            b.terrain(Shape::rect(v(140.0, 160.0), v(200.0, 900.0)), Material::Sticky);
+            b.ground(&[v(460.0, 900.0), v(900.0, 900.0)], 300.0);
+            path.extend([w(300.0, 0.0, Move::Walk), w(560.0, 900.0, Move::Wall)]);
+        }
+        _ => panic!("{name}"),
+    }
+    b.goal(path.last().unwrap().at, path.last().unwrap().at + v(150.0, 200.0));
+    Course { level: b.build(), path }
+}
+
+#[test]
+fn bot_handles_every_assist() {
+    let mut fails = Vec::new();
+    for name in ["spring", "trampoline", "rope", "wind", "swim", "ride", "wall"] {
+        let c = mini(name);
+        let r = bot_segment(&c, 0, 25.0);
+        println!("mini {name}: {r:?}");
+        if !r.0 {
+            fails.push(name);
+        }
+    }
+    assert!(fails.is_empty(), "bot failed {fails:?}");
 }
