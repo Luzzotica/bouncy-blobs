@@ -8,7 +8,9 @@ pub const DEFAULT_API: &str = "https://www.sterlinglong.me";
 /// `${window.location.origin}/controller/<room_id>`; a native host has no
 /// origin of its own, so this points at the deployed web app and can be
 /// overridden with `BB_CONTROLLER_URL` (anything ending in `/controller/`).
-pub const DEFAULT_CONTROLLER_URL: &str = "https://www.sterlinglong.me/bouncy-blobs/controller/";
+/// Production alias of the (2.x) web app, whose `/controller/:room` page is
+/// the phone controller. Verified live 2026-10-07.
+pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-sterling-longs-projects.vercel.app/controller/";
 
 #[derive(Clone, Debug)]
 pub struct NetConfig {
@@ -93,6 +95,6 @@ mod tests {
     #[test]
     fn controller_link_appends_room() {
         let c = NetConfig::default();
-        assert_eq!(c.controller_link("abc"), "https://www.sterlinglong.me/bouncy-blobs/controller/abc");
+        assert_eq!(c.controller_link("abc"), "https://bouncy-blobs-sterling-longs-projects.vercel.app/controller/abc");
     }
 }

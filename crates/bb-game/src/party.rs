@@ -34,6 +34,8 @@ pub struct Party {
     buttons: Vec<(BodyId, PartyButton, u32)>,
     pending_start: bool,
     built: bool,
+    /// Re-open the room for joins once back in the lobby.
+    reopen: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,7 +122,20 @@ fn lobby_level() -> Level {
     b.build()
 }
 
-fn enter(mut commands: Commands, mut load: MessageWriter<LoadLevel>, progress: Res<StoryProgress>, mut cam: ResMut<CameraDirector>) {
+fn enter(
+    mut commands: Commands,
+    mut load: MessageWriter<LoadLevel>,
+    progress: Res<StoryProgress>,
+    mut cam: ResMut<CameraDirector>,
+    mut net: MessageWriter<crate::net::NetCommand>,
+    session: Option<Res<crate::net::NetSession>>,
+) {
+    // Party = phones welcome: open a room (unless we're already in one).
+    if session.is_none() {
+        net.write(crate::net::NetCommand::Host(crate::net::HostOptions::default()));
+    }
+    let panel = crate::net::ui::spawn_join_panel(&mut commands);
+    commands.entity(panel).insert(PartyEntity);
     let roster = vec![(0u8, "Pip".to_string(), progress.pip_color)];
     load.write(LoadLevel { level: lobby_level(), players: roster.clone() });
     cam.target = Some(Vec2::new(0.0, 380.0));
@@ -135,10 +150,19 @@ fn enter(mut commands: Commands, mut load: MessageWriter<LoadLevel>, progress: R
         buttons: Vec::new(),
         pending_start: false,
         built: false,
+        reopen: false,
     });
 }
 
-fn exit(mut commands: Commands, q: Query<Entity, Or<(With<PartyEntity>, With<MatchHud>)>>, mut cam: ResMut<CameraDirector>, mut unload: MessageWriter<UnloadLevel>, mut overrides: ResMut<StyleOverrides>) {
+fn exit(
+    mut commands: Commands,
+    q: Query<Entity, Or<(With<PartyEntity>, With<MatchHud>)>>,
+    mut cam: ResMut<CameraDirector>,
+    mut unload: MessageWriter<UnloadLevel>,
+    mut overrides: ResMut<StyleOverrides>,
+    mut net: MessageWriter<crate::net::NetCommand>,
+) {
+    net.write(crate::net::NetCommand::Leave);
     commands.remove_resource::<Party>();
     for e in q.iter() {
         commands.entity(e).despawn();
@@ -218,6 +242,7 @@ fn lobby_input(
     mut load: MessageWriter<LoadLevel>,
     mut cam_dir: ResMut<CameraDirector>,
     inputs: Res<Inputs>,
+    mut joinable: MessageWriter<crate::net::NetCommand>,
 ) {
     // Drop-in: any slot (pads, phones) pressing its button joins the roster.
     for s in 1..8u8 {
@@ -226,6 +251,10 @@ fn lobby_input(
             game.sim.add_player(s, &format!("P{}", s + 1), color);
             party.roster.push((s, format!("P{}", s + 1), color));
         }
+    }
+    if party.reopen && party.phase == PartyPhase::Lobby {
+        party.reopen = false;
+        joinable.write(crate::net::NetCommand::SetJoinable(true));
     }
     if party.phase != PartyPhase::Lobby {
         if keys.just_pressed(KeyCode::Escape) {
@@ -286,6 +315,7 @@ fn lobby_input(
             party.roster = game.sim.players.iter().map(|p| (p.slot, p.name.clone(), p.color)).collect();
             party.phase = PartyPhase::Match;
             party.pending_start = true;
+            joinable.write(crate::net::NetCommand::SetJoinable(false));
             *cam_dir = CameraDirector::default();
             load.write(LoadLevel { level, players: party.roster.clone() });
         }
@@ -294,6 +324,7 @@ fn lobby_input(
 
 fn back_to_lobby(party: &mut Party, load: &mut MessageWriter<LoadLevel>, cam: &mut CameraDirector) {
     party.phase = PartyPhase::Lobby;
+    party.reopen = true;
     party.built = false;
     party.current = None;
     load.write(LoadLevel { level: lobby_level(), players: party.roster.clone() });
