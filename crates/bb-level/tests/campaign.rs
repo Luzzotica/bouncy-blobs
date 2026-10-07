@@ -108,7 +108,10 @@ fn goal_and_pickups_are_not_in_rock() {
 // --------------------------------------------------- resting at respawns
 
 fn rest_check(n: u8) {
-    let l = campaign::chapter(n);
+    let mut l = campaign::chapter(n);
+    // Followers teleport next to the player; this is a geometry check, so
+    // leave them out (the bot playtests keep them).
+    l.npcs.retain(|npc| npc.role != NpcRole::Follower);
     let solid = solids(&l);
     for (k, at) in l.respawn_points().iter().enumerate() {
         let mut sim = Sim::new(l.clone());
@@ -264,6 +267,15 @@ impl Bot {
                 // Overshot a waypoint (e.g. bounced past it): skip ahead.
                 self.i += 2;
                 self.rope_t = 0.0;
+            } else if self.i + 1 < path.len() - 1
+                && on_ground
+                && (feet - path[self.i + 1].at.y).abs() < 40.0
+                && (pos.x - path[self.i + 1].at.x).abs() < 400.0
+                && path[self.i].at.y < feet - 60.0
+            {
+                // Landed a step higher than planned, near the next mark.
+                self.i += 2;
+                self.rope_t = 0.0;
             } else {
                 break;
             }
@@ -276,18 +288,47 @@ impl Bot {
             let assisted_up = matches!(t.how, Move::Ride | Move::Wall | Move::Wind | Move::Swim | Move::Rope);
             if goal_y > feet + 260.0 && !assisted_up {
                 let near = (0..self.i)
-                    .filter(|&j| (path[j].at.y - feet).abs() < 70.0 && (path[j].at.x - pos.x).abs() < 600.0)
+                    .filter(|&j| (path[j].at.y - feet).abs() < 70.0 && (path[j].at.x - pos.x).abs() < 1500.0)
                     .min_by(|&a, &b| (path[a].at.x - pos.x).abs().total_cmp(&(path[b].at.x - pos.x).abs()));
                 if let Some(j) = near {
                     self.i = j + 1;
                 }
             }
         }
+        // Missed an assisted move (fell off a vine, launch went wide): walk
+        // back to its takeoff point and try again.
+        if grounded && self.i >= 1 {
+            let (t, p0) = (path[self.i], path[self.i - 1]);
+            if t.how.assisted()
+                && t.how != Move::Swim
+                && t.at.y > feet + 200.0
+                && (pos.x - p0.at.x).abs() > 150.0
+                && (p0.at.y - feet).abs() < 70.0
+                && !(t.how == Move::Ride && p0.how == Move::Ride)
+            {
+                self.i -= 1;
+            }
+        }
         let tgt = path[self.i];
         let prev = path[self.i.saturating_sub(1)];
+        // Grabbed a vine we didn't mean to: let go towards the target.
+        if p.ctl.grab.is_some() && tgt.how != Move::Rope {
+            self.rope_t += dt;
+            if self.rope_t > 0.4 {
+                self.rope_t = 0.0;
+                let d = if tgt.at.x >= pos.x { 1.0 } else { -1.0 };
+                let b = !self.prev_button;
+                self.prev_button = b;
+                return Input { stick: Vec2::new(d, 0.0), button: b };
+            }
+        }
         let dx = tgt.at.x - pos.x;
         let dir = if dx >= 0.0 { 1.0 } else { -1.0 };
         let mut stick = Vec2::new((dx / 80.0).clamp(-1.0, 1.0), 0.0);
+        // Short hops onto small platforms: don't take them at full tilt.
+        if on_ground && tgt.how == Move::Jump && tgt.at.y > feet - 40.0 && dx.abs() < 340.0 && (pos.x - prev.at.x).abs() < 80.0 {
+            stick.x = dir * (dx.abs() / 420.0).clamp(0.45, 1.0);
+        }
         let mut button = false;
         let at_prev = (pos.x - prev.at.x).abs() < 35.0 && on_ground;
 
@@ -350,6 +391,10 @@ impl Bot {
             }
             Move::Jump => {
                 if at_prev || (edge_ahead && tgt.at.y > feet - 60.0) {
+                    want_jump = true;
+                }
+                // Already within reach of a higher landing: go.
+                if tgt.at.y > feet + 30.0 && dx.abs() < 280.0 && vel.x * dir > -50.0 {
                     want_jump = true;
                 }
             }
@@ -530,7 +575,11 @@ impl Bot {
 /// Returns (success, seconds, deaths).
 fn bot_segment(c: &Course, k: usize, limit: f32) -> (bool, f32, u32) {
     let l = &c.level;
-    let mut sim = Sim::new(l.clone());
+    let mut level = l.clone();
+    if std::env::var("BOT_NO_FOLLOWERS").is_ok() {
+        level.npcs.retain(|npc| npc.role != NpcRole::Follower);
+    }
+    let mut sim = Sim::new(level);
     sim.checkpoint = k;
     sim.add_player(0, "Bot", 0x4d96ff);
     let start = l.respawn_points()[k];

@@ -137,3 +137,16 @@ Lulu (only in ch10).
 | `ch09_granny` | **Granny Gloop**, pinned under a fallen slab, too big to wriggle free. Pip touches her; she pops loose and wobbles, then says, quietly: "We were scared of how much you bounce. Turns out bouncing is how you get UP." A long, squishy hug. |
 | `ch09_all_together` | The whole Huddle lines up behind Pip. Granny: "Lead the way, little one." Above them: the bottom of an old stone well, and a faint ring of daylight far, far up. |
 | `ch09_outro` | Everyone looks up the Old Well. Glimmer: "Well, well, well." (Nobody laughs. Glimmer laughs anyway.) |
+
+## Chapter 10 — The Light Well (The Old Well)
+
+| id | what happens |
+|---|---|
+| `ch10_intro` | The bottom of the Old Well. A tiny circle of daylight, impossibly far up. The whole Huddle behind Pip. Granny: "Well? Go on. Bounce." |
+| `ch10_well` | A sagging bridge over goo on the way in; the Huddle crosses it in a wobbly conga line, giggling. |
+| `ch10_huddle` | First glow mushroom in the well. The Huddle cheers (softly; old habits). Hint: the well has old one-way boards; jump up through them, and a slip only drops you to the boards below. |
+| `ch10_halfway` | Halfway up. Pip looks down: the whole Huddle bouncing up behind. Granny, puffing: "In my day we never went higher than a TOE." |
+| `ch10_giggle` | The giggle again, much closer now, and humming. Light is warmer. Glimmer starts to glow brighter than ever. |
+| `ch10_daylight` | Sunlight floods the top of the well; everyone squints. Pip puffs up into the final updraft and floats. Slow motion, sparkles. |
+| `ch10_lulu` | At the lip: two enormous, gentle hands, and **Lulu's** face, eyes huge: "OH! You're SO SQUISHY!" |
+| `ch10_outro` | **Finale.** Lulu scoops up every blob (Granny last, who protests and then melts) and carries them to her playroom: pillows, blankets, a trampoline bed. True Softness. Play, forever. Reg's sock turns up in the laundry basket. Credits roll in a softbody playroom you can bounce around in. |

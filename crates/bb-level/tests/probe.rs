@@ -349,3 +349,54 @@ fn probe_step_climb() {
         }
     }
 }
+
+#[test]
+fn probe_oneway_jump() {
+    for thick in [20.0, 40.0, 80.0] {
+        for run in [false, true] {
+            let mut b = LevelBuilder::new("p", "P", Theme::Hollow);
+            b.spawn(v(0.0, 540.0)).ground(&[v(-3000.0, 0.0), v(8000.0, 0.0)], 300.0);
+            b.one_way(v(-400.0, 500.0 - thick), v(400.0, 500.0));
+            let mut s = Sim::new(b.build());
+            s.add_player(0, "P", 0);
+            run_n(&mut s, 90, inp(0.0, false));
+            let y0 = c(&s).y;
+            let mut hi = y0;
+            for k in 0..60 {
+                s.set_input(0, inp(if run { 1.0 } else { 0.0 }, k < 30));
+                s.step();
+                hi = hi.max(c(&s).y);
+            }
+            println!("oneway thick {thick} run {run}: rest {y0:.0} jump peak +{:.0}", hi - y0);
+        }
+    }
+}
+
+fn run_n(s: &mut Sim, n: usize, i: Input) {
+    s.set_input(0, i);
+    for _ in 0..n {
+        s.step();
+    }
+}
+
+#[test]
+fn probe_ch10_m8() {
+    let mut l = bb_level::campaign::chapter(10);
+    l.npcs.clear();
+    let mut s = Sim::new(l);
+    s.add_player(0, "P", 0);
+    let body = s.players[0].ctl.body;
+    let at: Vec<f32> = std::env::var("AT").unwrap_or("610,1480".into()).split(',').map(|x| x.parse().unwrap()).collect();
+    s.world.respawn(body, v(at[0], at[1]));
+    run_n(&mut s, 60, inp(0.0, false));
+    for k in 0..30 {
+        s.set_input(0, inp(-0.3, k < 25));
+        s.step();
+        let cs: Vec<String> = s.world.contacts_of(body).map(|c| format!("{:?} n({:.2},{:.2})", c.other, c.normal.x, c.normal.y)).take(3).collect();
+        println!("{k} pos {:?} v {:?} {:?}", c(&s), s.world.body(body).unwrap().velocity(), cs);
+    }
+    for (i, t) in s.level.terrain.iter().enumerate() {
+        let (mn, mx) = t.shape.bounds();
+        if mn.x < at[0] + 100.0 && mx.x > at[0] - 100.0 && mn.y < at[1] + 220.0 && mx.y > at[1] - 30.0 { println!("terrain {i} {mn} {mx} oneway {}", t.one_way); }
+    }
+}
