@@ -57,7 +57,8 @@ pub fn theme(t: Theme) -> ThemeColors {
         Theme::CaveIn => (0x1c1716, 0x3a2e2a, 0x5e4c45, 0xcf9b7a, 0xff6b6b),
         Theme::Well => (0x3a5a7a, 0xfff2c6, 0x6f7f8f, 0xa8e6cf, 0xfff27a),
         Theme::Playroom => (0xffd6e0, 0xfff5e1, 0xf4a6c0, 0xbde0fe, 0xffafcc),
-        Theme::Kids => (0xbde0fe, 0xfff5e1, 0x9ad0a0, 0xffd6a5, 0xff8fab),
+        // Cream paper with lilac card walls and mint jelly.
+        Theme::Kids => (0xfff3d6, 0xfffae6, 0xd9c8f5, 0xa8e6cf, 0xff8fab),
         Theme::Party => (0x232946, 0x3e4a89, 0x5b5f97, 0xeebbc3, 0xffd803),
     };
     let rock_c = hex(rock);

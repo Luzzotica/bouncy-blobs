@@ -69,6 +69,9 @@ pub struct Controller {
     pub stuck: Option<Vec2>,
     /// Movement strength multiplier (NPCs are a bit slower).
     pub strength: f32,
+    /// Rest-scale target while the button is held (Kids Mode puffs a
+    /// picked-up blob bigger than a normal expand).
+    pub expand_scale: f32,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -108,6 +111,7 @@ impl Controller {
             climb_timer: 0.0,
             stuck: None,
             strength: 1.0,
+            expand_scale: tune::EXPAND_SCALE,
         }
     }
 
@@ -150,7 +154,7 @@ impl Controller {
         let vel = body.velocity();
 
         // Expand / relax.
-        let target = if self.input.button { tune::EXPAND_SCALE } else { 1.0 };
+        let target = if self.input.button { self.expand_scale } else { 1.0 };
         let rate = if target > self.expand { tune::EXPAND_RATE } else { tune::RELAX_RATE };
         self.expand += (target - self.expand) * (1.0 - (-rate * dt).exp());
 
