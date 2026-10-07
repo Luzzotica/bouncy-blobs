@@ -43,7 +43,11 @@ pub fn run() {
 
 pub fn app() -> App {
     let mut app = App::new();
-    app.add_plugins(platform::default_plugins())
+    app.add_plugins(platform::default_plugins());
+    if platform::headless() {
+        app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 60.0)));
+    }
+    app
         .add_plugins(platform::PlatformPlugin)
         .add_plugins(GamePlugin);
     app
