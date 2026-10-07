@@ -18,9 +18,43 @@ pub struct MoverVisual(pub usize, pub Handle<Mesh>);
 #[derive(Component)]
 pub struct SpringVisual(pub usize, pub Handle<Mesh>);
 
-/// A checkpoint lantern flower. `lit_at` is when it bloomed.
+/// A checkpoint lantern flower: index, mesh, when it bloomed, whether it
+/// has been drawn yet, and how tall its light shaft may rise before it
+/// meets rock.
 #[derive(Component)]
-pub struct CheckpointVisual(pub usize, pub Handle<Mesh>, pub Option<f32>, pub bool);
+pub struct CheckpointVisual(pub usize, pub Handle<Mesh>, pub Option<f32>, pub bool, pub f32);
+
+/// No decor (mushrooms, crystals, hangers…) within this many px of a
+/// checkpoint horizontally, so the lantern flower always stands alone.
+pub const CHECKPOINT_CLEAR: f32 = 380.0;
+
+/// True if `p` is inside a checkpoint's clear zone.
+pub fn near_checkpoint(level: &bb_level::Level, p: PVec2) -> bool {
+    level.checkpoints.iter().any(|c| (p.x - c.pos.x).abs() < CHECKPOINT_CLEAR && (p.y - c.pos.y).abs() < 320.0)
+}
+
+/// How far up from `p` the air stays open (capped at `max`).
+pub fn open_above(level: &bb_level::Level, p: PVec2, max: f32) -> f32 {
+    let solids: Vec<Vec<PVec2>> = level
+        .terrain
+        .iter()
+        .filter(|t| !t.one_way)
+        .map(|t| t.shape.outline())
+        .filter(|o| {
+            let bb = bb_physics::Aabb::from_points(o.iter().copied());
+            bb.max.y > p.y && bb.min.x < p.x + 1.0 && bb.max.x > p.x - 1.0
+        })
+        .collect();
+    let mut h = 40.0;
+    while h < max {
+        let q = p + PVec2::new(0.0, h);
+        if solids.iter().any(|o| geom::point_in_polygon(q, o)) {
+            return h;
+        }
+        h += 20.0;
+    }
+    max
+}
 
 #[derive(Component)]
 pub struct GoalVisual(pub Handle<Mesh>);
@@ -138,8 +172,7 @@ pub fn spawn_level_view(
     // pulsing bioluminescence; daylight themes keep soft bumps.
     let (min, max) = level.bounds();
     if theme.dark {
-        let seed = level.id.bytes().fold(0x9e37_79b9u32, |h, b| h.rotate_left(5) ^ b as u32);
-        crate::backdrop::spawn(&mut commands, &mut meshes, &mut mats, &shared, &theme, min, max, seed);
+        crate::backdrop::spawn(&mut commands, &mut meshes, &shared, &theme);
     }
     let mut far = MeshBuf::default();
     let mut x = min.x - 1500.0;
@@ -349,9 +382,10 @@ pub fn spawn_level_view(
     commands.spawn((Mesh2d(meshes.add(zones.into_mesh())), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::FX + 0.5), LevelEntity));
 
     // Checkpoints: lantern flowers.
-    for i in 0..level.checkpoints.len() {
+    for (i, cp) in level.checkpoints.iter().enumerate() {
         let h = meshes.add(empty_mesh());
-        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS - 0.2 + (i % 100) as f32 * 0.001), CheckpointVisual(i, h, None, false), LevelEntity));
+        let shaft = open_above(level, cp.pos, 1400.0);
+        commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ITEMS - 0.2 + (i % 100) as f32 * 0.001), CheckpointVisual(i, h, None, false, shaft), LevelEntity));
     }
 
     // Pickups are amoebas now: real softbodies drawn by render.rs.
@@ -378,7 +412,10 @@ pub fn spawn_level_view(
     let mut glow_front = MeshBuf::default();
     let mut spill = MeshBuf::default();
     for d in &level.decor {
-        if crate::cave::is_reactive(&d.kind) || (d.kind == "mushroom_spots" && on_cap(d.pos)) {
+        if crate::cave::is_reactive(&d.kind) || crate::alive::is_hanger(&d.kind) || (d.kind == "mushroom_spots" && on_cap(d.pos)) {
+            continue;
+        }
+        if d.kind != "mushroom_spots" && near_checkpoint(level, d.pos) {
             continue;
         }
         let (buf, glow) = if d.depth < 0.0 { (&mut back, &mut glow_back) } else { (&mut front, &mut glow_front) };
@@ -637,18 +674,24 @@ fn sparkle(buf: &mut MeshBuf, p: PVec2, r: f32, col: [f32; 4]) {
     buf.ellipse(p, PVec2::new(r * 0.18, r), 0.0, 0.0, col);
 }
 
-/// The checkpoint: a tall lantern flower on a slender stalk, cool
-/// cyan-white. Unlit it droops, closed and sleepy; reached, it straightens
-/// and blooms with a pulsing halo and sparkles. `bloom` 0..~1.1.
-pub fn draw_lantern_flower(buf: &mut MeshBuf, ground: PVec2, bloom: f32, t: f32, seed: f32, theme: &palette::ThemeColors) {
+/// The checkpoint: a tall lantern flower on a slender stalk, in the
+/// theme's lantern colour (never a fungus colour). Unlit it droops, closed
+/// and sleepy — but it is the cave's beacon: a soft shaft of light rises
+/// from it with motes drifting up, and a slow ping ripples out along the
+/// ground. Reached, it straightens and blooms with a pulsing halo and
+/// sparkles, and the shaft settles to a calm glow. `bloom` 0..~1.1;
+/// `shaft` is how tall the light may rise before it meets rock.
+pub fn draw_lantern_flower(buf: &mut MeshBuf, ground: PVec2, bloom: f32, t: f32, seed: f32, shaft: f32, theme: &palette::ThemeColors) {
     let c = theme.lantern;
     let dark = theme.dark;
     let b = bloom.max(0.0);
     let bc = b.min(1.0);
-    let h = 118.0;
+    // A head taller than the fungus around it.
+    let s = 1.35;
+    let h = 118.0 * s;
     let sway = (t * 0.9 + seed).sin() * (3.0 + 3.0 * (1.0 - bc));
     // Drooping tip when asleep; upright when lit.
-    let tip = ground + PVec2::new(mix_f(30.0, 0.0, bc) + sway, mix_f(h - 26.0, h, bc));
+    let tip = ground + PVec2::new(mix_f(30.0 * s, 0.0, bc) + sway, mix_f(h - 26.0 * s, h, bc));
     let ctrl = ground + PVec2::new(sway * 0.3, h * 0.75);
     let stem: Vec<PVec2> = (0..=12)
         .map(|i| {
@@ -657,40 +700,84 @@ pub fn draw_lantern_flower(buf: &mut MeshBuf, ground: PVec2, bloom: f32, t: f32,
         })
         .collect();
     let dir = (tip - stem[10]).normalize_or(PVec2::Y);
-    let stalk = if dark { mix(mix(Color::BLACK, c, 0.3), c, 0.35 * bc) } else { mix(palette::hex(0x5c8a8f), c, 0.3 * bc) };
-    // Halo.
+    let stalk = if dark { mix(mix(Color::BLACK, c, 0.38), c, 0.35 * bc) } else { mix(palette::hex(0x5c8a8f), c, 0.3 * bc) };
     let pulse = 1.0 + (t * 2.6 + seed).sin() * 0.08;
-    let head = tip + dir * 16.0;
-    let sleepy = 0.5 + 0.5 * (t * 0.8 + seed).sin();
-    let halo_a = if dark { 0.04 + 0.03 * sleepy + 0.24 * bc } else { 0.03 + 0.2 * bc };
-    buf.halo(head, PVec2::splat((60.0 + 110.0 * bc) * pulse), -0.004, la(c, halo_a));
-    if bc > 0.0 {
-        buf.halo(ground + PVec2::new(0.0, 10.0), PVec2::new(150.0, 60.0) * pulse, -0.0035, la(c, 0.18 * bc));
+    let head = tip + dir * 16.0 * s;
+    let sleepy = 0.5 + 0.5 * (t * 1.4 + seed).sin();
+
+    // Beacon shaft: soft-edged column of light rising from the flower,
+    // brighter while it is waiting to be reached.
+    let beam_a = if dark { mix_f(0.17 + 0.07 * sleepy, 0.06, bc) } else { mix_f(0.18 + 0.06 * sleepy, 0.07, bc) };
+    let top_y = (shaft - 20.0).max(120.0);
+    let rows = 14;
+    let base = buf.pos.len() as u32;
+    for r in 0..=rows {
+        let u = r as f32 / rows as f32;
+        let y = ground.y + 20.0 + u * top_y;
+        let half = 34.0 + 70.0 * u;
+        // Fade in just above the head, out toward the top.
+        let a = beam_a * (u * 6.0).min(1.0) * (1.0 - u).powf(1.3);
+        let x = ground.x + sway * 0.3 * (1.0 - u);
+        buf.vert(PVec2::new(x - half, y), -0.005, la(c, 0.0));
+        buf.vert(PVec2::new(x, y), -0.005, la(lighten(c, 0.3), a));
+        buf.vert(PVec2::new(x + half, y), -0.005, la(c, 0.0));
     }
+    for r in 0..rows as u32 {
+        for k in 0..2u32 {
+            let (p0, p1, q0, q1) = (base + r * 3 + k, base + r * 3 + k + 1, base + (r + 1) * 3 + k, base + (r + 1) * 3 + k + 1);
+            buf.tri(p0, p1, q1);
+            buf.tri(p0, q1, q0);
+        }
+    }
+    // Motes drifting up the shaft.
+    for k in 0..6 {
+        let ph = ((t * 0.12 + k as f32 / 6.0 + seed * 0.13) % 1.0 + 1.0) % 1.0;
+        let y = ground.y + 60.0 + ph * top_y * 0.85;
+        let x = ground.x + (t * 0.8 + k as f32 * 2.1).sin() * (14.0 + 30.0 * ph);
+        let fade = (ph * 5.0).min(1.0) * (1.0 - ph) * mix_f(1.0, 0.45, bc);
+        buf.ellipse(PVec2::new(x, y), PVec2::splat(2.6), 0.0, -0.0045, la(lighten(c, 0.6), 0.8 * fade));
+        buf.halo(PVec2::new(x, y), PVec2::splat(12.0), -0.0046, la(c, 0.25 * fade));
+    }
+    // Ground ping: a slow ring rippling out along the floor.
+    let ping = ((t * 0.42 + seed * 0.1) % 1.0 + 1.0) % 1.0;
+    let ring_r = 40.0 + 190.0 * ping;
+    let ring_a = (1.0 - ping).powi(2) * mix_f(0.5, 0.18, bc);
+    let ring: Vec<PVec2> = (0..=48)
+        .map(|k| {
+            let a = k as f32 / 48.0 * std::f32::consts::TAU;
+            ground + PVec2::new(a.cos() * ring_r, 4.0 + a.sin() * ring_r * 0.16)
+        })
+        .collect();
+    buf.stroke(&ring, 2.5, -0.0035, la(lighten(c, 0.3), ring_a));
+
+    // Halos: a pool on the ground and a glow round the head.
+    let halo_a = if dark { 0.1 + 0.06 * sleepy + 0.2 * bc } else { 0.06 + 0.18 * bc };
+    buf.halo(head, PVec2::splat((90.0 + 100.0 * bc) * pulse), -0.004, la(c, halo_a));
+    buf.halo(ground + PVec2::new(0.0, 10.0), PVec2::new(170.0, 60.0) * pulse, -0.0035, la(c, 0.1 + 0.12 * bc));
     // Stem and leaves.
-    buf.stroke(&stem, 6.0, -0.002, lin(stalk));
+    buf.stroke(&stem, 7.0 * s, -0.002, lin(stalk));
     for side in [-1.0f32, 1.0] {
         let l0 = stem[2];
-        let tipl = l0 + PVec2::new(side * 26.0, 14.0 + 4.0 * bc);
-        buf.ellipse((l0 + tipl) * 0.5, PVec2::new(15.0, 5.0), side * 0.55, -0.0015, lin(stalk));
+        let tipl = l0 + PVec2::new(side * 26.0 * s, (14.0 + 4.0 * bc) * s);
+        buf.ellipse((l0 + tipl) * 0.5, PVec2::new(15.0, 5.0) * s, side * 0.55, -0.0015, lin(stalk));
     }
-    // Petals: a closed bell when asleep, open five-petal lantern when lit.
+    // Petals: a closed bell when asleep, an open five-petal lantern when lit.
     let ang = dir.y.atan2(dir.x);
     let spread = mix_f(0.14, 0.62, b);
-    let len = mix_f(26.0, 34.0, bc);
-    let petal_col = if dark { mix(mix(Color::BLACK, c, 0.42), lighten(c, 0.25), bc) } else { mix(palette::hex(0x7fb7c2), lighten(c, 0.2), bc) };
+    let len = mix_f(26.0, 34.0, bc) * s;
+    let petal_col = if dark { mix(mix(Color::BLACK, c, 0.6), lighten(c, 0.25), bc) } else { mix(palette::hex(0x7fb7c2), lighten(c, 0.2), bc) };
     for k in 0..5 {
         let a = ang + (k as f32 - 2.0) * spread;
         let d = PVec2::from_angle(a);
         let centre = tip + d * len * 0.5;
-        buf.ellipse(centre, PVec2::new(len * 0.55, mix_f(9.0, 8.0, bc)), a, 0.0 + k as f32 * 0.0001, lin(if k % 2 == 0 { petal_col } else { darken(petal_col, 0.12) }));
+        buf.ellipse(centre, PVec2::new(len * 0.55, mix_f(9.0, 8.0, bc) * s), a, k as f32 * 0.0001, lin(if k % 2 == 0 { petal_col } else { darken(petal_col, 0.12) }));
     }
     // Glowing core.
-    let core = if dark { mix(mix(Color::BLACK, c, 0.55), Color::WHITE, 0.85 * bc) } else { mix(c, Color::WHITE, 0.7 * bc) };
-    buf.ellipse(tip + dir * 12.0, PVec2::splat(mix_f(7.0, 11.0, bc) * if bc > 0.0 { pulse } else { 1.0 }), 0.0, 0.002, lin(core));
+    let core = if dark { mix(lighten(c, 0.2), Color::WHITE, 0.4 + 0.45 * bc) } else { mix(c, Color::WHITE, 0.7 * bc) };
+    buf.ellipse(tip + dir * 12.0 * s, PVec2::splat(mix_f(8.0, 11.0, bc) * s * pulse), 0.0, 0.002, lin(core));
     if bc <= 0.0 {
-        // Sleepy: a slow dim breathing glow inside the bud.
-        buf.ellipse(tip + dir * 12.0, PVec2::splat(3.5), 0.0, 0.003, la(lighten(c, 0.5), 0.35 + 0.4 * sleepy));
+        // Waiting: a heartbeat glow shining through the bud.
+        buf.halo(tip + dir * 12.0 * s, PVec2::splat(30.0), 0.003, la(lighten(c, 0.5), 0.35 + 0.4 * sleepy));
         return;
     }
     // Sparkles drifting up around the bloom.
@@ -726,7 +813,7 @@ fn update_checkpoints(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Asset
         let bloom = cv.2.map_or(0.0, |at| ease_out_back((t - at) / 0.9));
         let Some(mut mesh) = meshes.get_mut(&cv.1) else { continue };
         let mut buf = MeshBuf::default();
-        draw_lantern_flower(&mut buf, cp.pos - PVec2::new(0.0, 40.0), bloom, t, i as f32 * 1.7, &theme);
+        draw_lantern_flower(&mut buf, cp.pos - PVec2::new(0.0, 40.0), bloom, t, i as f32 * 1.7, cv.4, &theme);
         buf.write(&mut mesh);
     }
 }

@@ -49,8 +49,9 @@ pub struct ThemeColors {
     pub mush: Color,
     /// Crystal / glowworm colour.
     pub crystal: Color,
-    /// Checkpoint lantern flowers: cool cyan-white everywhere, so they never
-    /// read as mushrooms.
+    /// Checkpoint lantern flowers: cyan-white or warm gold-white, whichever
+    /// stands further from this theme's fungus and crystal light, so a
+    /// checkpoint never reads as one more mushroom.
     pub lantern: Color,
 }
 
@@ -87,9 +88,9 @@ pub fn theme(t: Theme) -> ThemeColors {
     };
     let rock_c = hex(rock);
     let jelly_c = hex(jelly);
-    let lantern = hex(0x8ff8ff);
     match cave {
         Some((jelly, mush, crystal, glow)) => {
+            let lantern = lantern_for(&[hex(jelly), hex(mush), hex(crystal), hex(glow)]);
             let j = hex(jelly);
             // A breath of the theme hue in the black so each chapter keeps
             // its mood without lifting the backdrop.
@@ -128,6 +129,19 @@ pub fn theme(t: Theme) -> ThemeColors {
             lantern: hex(0x5fd8ff),
         },
     }
+}
+
+/// The lantern candidate furthest (by its nearest neighbour) from `ambient`.
+fn lantern_for(ambient: &[Color]) -> Color {
+    let dist = |a: Color, b: Color| {
+        let (a, b) = (a.to_srgba(), b.to_srgba());
+        (a.red - b.red).powi(2) + (a.green - b.green).powi(2) + (a.blue - b.blue).powi(2)
+    };
+    [hex(0x8ff8ff), hex(0xffe58a)]
+        .into_iter()
+        .map(|c| (c, ambient.iter().map(|a| dist(c, *a)).fold(f32::MAX, f32::min)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or(hex(0x8ff8ff), |(c, _)| c)
 }
 
 pub fn material_tint(m: bb_level::Material, base: Color) -> Color {
