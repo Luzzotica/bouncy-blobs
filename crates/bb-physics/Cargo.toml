@@ -1,0 +1,10 @@
+[package]
+name = "bb-physics"
+description = "XPBD softbody physics for Bouncy Blobs: blobs, meshes, ropes, pop limits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+glam.workspace = true

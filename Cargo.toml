@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["crates/bb-physics"]
+# Legacy fixed-point crates + Tauri shell: reference only until the Bevy port
+# reaches parity, then deleted.
+exclude = ["crates/softbody", "crates/softbody-wasm", "src-tauri"]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Proprietary"
+
+[workspace.dependencies]
+glam = { version = "0.30", default-features = false, features = ["std"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
