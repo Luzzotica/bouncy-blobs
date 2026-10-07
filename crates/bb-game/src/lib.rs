@@ -14,6 +14,7 @@ pub mod kids;
 pub mod level_view;
 pub mod menu;
 pub mod net;
+pub mod online;
 pub mod palette;
 pub mod party;
 pub mod party_assets;
@@ -97,6 +98,7 @@ impl Plugin for GamePlugin {
                 kids::KidsPlugin,
                 editor::EditorPlugin,
                 net::NetPlugin,
+                online::OnlinePlugin,
             ));
     }
 }

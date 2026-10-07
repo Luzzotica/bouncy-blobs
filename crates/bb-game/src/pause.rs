@@ -55,7 +55,11 @@ fn toggle(
     mut meshes: ResMut<Assets<Mesh>>,
     shared: Res<Shared>,
     assets: Res<GameAssets>,
+    editor: Option<Res<crate::editor::Editor>>,
 ) {
+    if editor.is_some_and(|e| e.playtesting) {
+        return; // Esc returns to the editor during play-tests.
+    }
     let pressed = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyP) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
     if !pressed || runner.is_some() {
         return;

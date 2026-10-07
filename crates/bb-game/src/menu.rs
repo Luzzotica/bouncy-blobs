@@ -35,6 +35,7 @@ pub enum Action {
     Editor,
     Sandbox,
     PartyHost,
+    JoinFriend,
     Color,
     ToggleFullscreen,
     Quit,
@@ -215,6 +216,7 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
         }
         Page::Party => vec![
             ("Host with Phones".into(), Action::PartyHost, 0x6bcb77),
+            ("Join a Friend".into(), Action::JoinFriend, 0x5dd6ff),
             ("Level Editor".into(), Action::Editor, 0xffc75f),
             ("Sandbox".into(), Action::Sandbox, 0xff9f43),
             ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
@@ -318,8 +320,13 @@ fn interact(
     mut exit: MessageWriter<AppExit>,
     mut windows_mut: Query<&mut Window>,
     mut load: MessageWriter<LoadLevel>,
+    join: Option<Res<crate::online::JoinDialog>>,
+    mut commands: Commands,
 ) {
     let dt = time.delta_secs();
+    if join.is_some() {
+        return;
+    }
     // Fire a pending action once the squish has played.
     if let Some((action, t)) = menu.pending.as_mut() {
         *t -= dt;
@@ -340,6 +347,7 @@ fn interact(
                     next.set(AppState::Playing);
                 }
                 Action::PartyHost => next.set(AppState::Party),
+                Action::JoinFriend => commands.insert_resource(crate::online::JoinDialog::default()),
                 Action::Color => {
                     let i = bb_sim::PALETTE.iter().position(|c| *c == progress.pip_color).unwrap_or(0);
                     progress.pip_color = bb_sim::PALETTE[(i + 1) % bb_sim::PALETTE.len()];
