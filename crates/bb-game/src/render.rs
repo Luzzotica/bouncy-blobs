@@ -108,11 +108,13 @@ fn setup_shared(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     });
 }
 
+/// A placeholder mesh: one invisible degenerate triangle far off-screen.
+/// (Zero-sized vertex buffers upset Bevy's slab allocator.)
 pub fn empty_mesh() -> Mesh {
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<[f32; 4]>::new())
-        .with_inserted_indices(Indices::U32(Vec::new()))
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0, -1.0e6, 0.0]; 3])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0f32; 4]; 3])
+        .with_inserted_indices(Indices::U32(vec![0, 1, 2]))
 }
 
 /// Accumulates triangles with per-vertex colours.
@@ -337,11 +339,19 @@ fn sync_bodies(
     let theme = palette::theme(game.sim.level.theme);
     // Spawn / despawn.
     let mut alive = std::collections::HashSet::new();
+    let mut fresh = std::collections::HashSet::new();
     for (id, _) in game.sim.world.bodies() {
         alive.insert(id);
         if !map.0.contains_key(&id) {
-            let style = style_for(&game, id, &theme);
-            let mesh = meshes.add(empty_mesh());
+            let style = overrides.0.get(&id).copied().unwrap_or_else(|| style_for(&game, id, &theme));
+            // Create the mesh already filled: mutating a mesh in the same
+            // frame it was added trips Bevy's slab allocator.
+            let mut buf = MeshBuf::default();
+            if let Some(b) = game.sim.world.body(id).filter(|b| b.enabled) {
+                body_mesh(b, &style, &mut buf);
+            }
+            let mesh = meshes.add(buf.into_mesh());
+            fresh.insert(id);
             let e = commands
                 .spawn((
                     Mesh2d(mesh.clone()),
@@ -387,6 +397,9 @@ fn sync_bodies(
     for mut v in visuals.iter_mut() {
         if let Some(s) = overrides.0.get(&v.id) {
             v.style = *s;
+        }
+        if fresh.contains(&v.id) {
+            continue;
         }
         let Some(b) = game.sim.world.body(v.id) else { continue };
         let Some(mut mesh) = meshes.get_mut(&v.mesh) else { continue };
