@@ -227,19 +227,31 @@ paths are relative.
 Phones-as-controllers remain a separate web page and are not part of this
 build.
 
-## Verification status (2026-10-06, Apple M5, macOS 26.5, Xcode 17F113)
+## Verification status (2026-10-07, Apple M5, macOS 26.5, Xcode 17F113; after merging bevy-port with net, editor, kids and audio)
 
-| Target | Status | Evidence |
-|---|---|---|
-| macOS dev (`target/debug/bouncy-blobs`) | ✅ runs; Metal adapter; `asset pipeline OK` | |
-| macOS `.app` universal | see the summary in the platform commit | `scripts/build-macos.sh --run` |
-| iOS simulator (iPhone 17 Pro, iOS 26) | ✅ `xcodebuild … iphonesimulator build` succeeds; app launches, renders the sandbox level; os_log shows `asset pipeline OK` | screenshot taken during porting |
-| iOS archive + export | see the summary in the platform commit | `scripts/ios-build.sh` |
-| Web (Chromium headless, WebGL2 via ANGLE/Metal) | ✅ canvas 1280×720 renders the level; `asset pipeline OK`; **0 console errors** | |
-| Android | ⚠️ not built locally: `~/Library/Android/sdk` is empty (no SDK or NDK). The Gradle project and script are written. CI builds the APK on macOS runners | |
-| Windows / Linux | `cargo check` cross-target results are in the platform commit; full builds run in CI | |
+| Target | Status |
+|---|---|
+| `cargo test --workspace` | ✅ all pass (macOS host) |
+| macOS dev binary | ✅ runs on Metal; log shows `asset pipeline OK` |
+| macOS `.app` (`scripts/build-macos.sh`) | ✅ `lipo -info`: `x86_64 arm64`; launches from the bundle and loads assets from `Contents/Resources/assets`. Ad-hoc signed. The x86_64 slice has not been run on Intel hardware or under Rosetta |
+| iOS simulator (iPhone 17 Pro, iOS 26) | ✅ `xcodebuild … -sdk iphonesimulator … build` succeeds. The app launches to the title menu and os_log shows `asset pipeline OK`. Gilrs logs "does not support current platform" (harmless) |
+| iOS archive + export | ✅ `scripts/ios-build.sh` gave `ARCHIVE SUCCEEDED` and `EXPORT SUCCEEDED`. The `.ipa` is signed `Apple Distribution: Sterling Long (74874V9Z5H)` with version 3.0.0 (3.0.0.1). This ran **before** the bevy-port merge; the release device build after the merge was not repeated. **Not uploaded.** Not run on a physical device |
+| Web (headless Chromium, WebGL2 via ANGLE/Metal) | ✅ The title menu renders, `asset pipeline OK`, **0 console errors**. Warnings: AudioContext waits for a user gesture; OIT, motion vectors and egui texture arrays are unavailable on WebGL2 |
+| Android | ❌ **Not built.** `~/Library/Android/sdk` is empty: no SDK and no NDK. Even `cargo check --target aarch64-linux-android` fails: `android-activity@0.6.1: failed to find tool "aarch64-linux-android-clang++"` (it compiles GameActivity's C++ glue). The project and script are written; CI builds the APK on GitHub's macOS runner, which ships the SDK and NDK |
+| Windows | ⚠️ Not built locally. `cargo check --target x86_64-pc-windows-msvc` passed before the merge, with `CARGO_FEATURE_PURE=1` to skip blake3's asm. Without it: `blake3: failed to find tool "ml64.exe"`. Full builds run in CI |
+| Linux | ⚠️ Not built locally. `cargo check --target x86_64-unknown-linux-gnu` fails on macOS with `wayland-sys: pkg-config has not been configured to support cross-compilation` (it needs a Linux sysroot). Full builds run in CI |
+| CI workflow | Written, not yet run. It needs the repo secret `BB_MP_API_KEY` |
 
-Known: the game logs `bevy_render::slab_allocator: Use-after-free: attempted to
-copy element data for an unallocated key` on startup on every platform. This
-comes from the game's mesh updates, not from platform code. It is logged
-through `console.log`, so it doesn't count as a console error on web.
+### Known issues
+
+* **libc pin.** `crates/bb-mobile/Cargo.toml` pins `libc = "=0.2.189"` on iOS.
+  libc 0.2.190 made `SYSPROTO_CONTROL` and `UTUN_OPT_IFNAME` macOS-only, but
+  `nix` 0.31.3 (its `net` feature comes in through webrtc-rs →
+  `rtc-shared`) uses them on every Apple target. Remove the pin once nix ships
+  a fix. Until then, `cargo update` can't move libc past 0.2.189.
+* `bevy_render::slab_allocator: Use-after-free: attempted to copy element data
+  for an unallocated key` is logged at startup on every platform. It comes from
+  the game's mesh updates, not platform code. On web it goes to `console.log`,
+  so it doesn't count as a console error.
+* Safe areas: see the iOS section. The HUD coin counter sits at top-left,
+  beside the Dynamic Island.
