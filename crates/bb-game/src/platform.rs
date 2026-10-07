@@ -18,7 +18,15 @@ pub const SAFE_SIDE: f32 = if IS_MOBILE { 60.0 } else { 0.0 };
 
 /// `DefaultPlugins` configured for the current target.
 pub fn default_plugins() -> PluginGroupBuilder {
+    // Android: no GPU debug labels. Debug builds label every wgpu object, and
+    // the Android emulator's Vulkan driver (vulkan.ranchu) segfaults in
+    // vkSetDebugUtilsObjectNameEXT. Release builds don't label anyway.
+    let mut wgpu = bevy::render::settings::WgpuSettings::default();
+    if cfg!(target_os = "android") {
+        wgpu.instance_flags.remove(bevy::render::settings::InstanceFlags::DEBUG | bevy::render::settings::InstanceFlags::VALIDATION);
+    }
     DefaultPlugins
+        .set(bevy::render::RenderPlugin { render_creation: wgpu.into(), ..default() })
         .set(bevy::log::LogPlugin {
             filter: "wgpu=error,naga=warn,webrtc=warn,rtc=warn,rtc_ice=error,webrtc_ice=error,webrtc_mdns=error"
                 .into(),

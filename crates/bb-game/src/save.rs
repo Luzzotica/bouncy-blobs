@@ -6,6 +6,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn path() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
+    #[allow(unused_variables)] // unused on Android
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     #[cfg(target_os = "android")]
     let dir = bevy::android::ANDROID_APP.get().and_then(|a| a.internal_data_path());

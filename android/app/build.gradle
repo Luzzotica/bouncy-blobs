@@ -70,6 +70,9 @@ android {
 }
 
 dependencies {
+    // Align kotlin-stdlib-jdk7/jdk8 (pulled in transitively at 1.6.x) with
+    // kotlin-stdlib 1.8.x; otherwise the build fails on duplicate classes.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation libs.appcompat
     implementation libs.games.activity
 }

@@ -8,7 +8,7 @@
     "dev:mobile": "VITE_MOBILE=1 vite",
     "build": "tsc -b && vite build",
     "build:mobile": "tsc -b && VITE_MOBILE=1 vite build",
-    "build:wasm": "cd crates && cargo build --target wasm32-unknown-unknown --release -p softbody-wasm && cd .. && wasm-bindgen --target web --out-dir src/physics/wasm crates/target/wasm32-unknown-unknown/release/softbody_wasm.wasm",
+    "build:wasm": "cd legacy/rust-fixed-point && cargo build --target wasm32-unknown-unknown --release -p softbody-wasm && cd ../.. && wasm-bindgen --target web --out-dir src/physics/wasm legacy/rust-fixed-point/target/wasm32-unknown-unknown/release/softbody_wasm.wasm",
     "preview": "vite preview",
     "ios:dev": "tauri ios dev",
     "ios:build": "tauri ios build --export-method app-store-connect",
