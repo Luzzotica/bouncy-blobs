@@ -1,5 +1,6 @@
 //! Bouncy Blobs — the Bevy app.
 
+pub mod achievements;
 pub mod assets;
 pub mod audio;
 pub mod camera;
@@ -88,6 +89,7 @@ impl Plugin for GamePlugin {
                 menu::MenuPlugin,
                 party::PartyPlugin,
                 pause::PausePlugin,
+                achievements::AchievementsPlugin,
                 devtools::DevToolsPlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
