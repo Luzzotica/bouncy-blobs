@@ -13,6 +13,7 @@ pub mod input;
 pub mod kids;
 pub mod level_view;
 pub mod menu;
+pub mod net;
 pub mod palette;
 pub mod party;
 pub mod party_assets;
@@ -53,7 +54,7 @@ pub fn run() {
 
 pub fn app() -> App {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(bevy::asset::AssetPlugin { file_path: asset_root(), ..default() }).set(WindowPlugin {
+    app.add_plugins(DefaultPlugins.set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,webrtc=warn,rtc=warn,rtc_ice=error,webrtc_ice=error,webrtc_mdns=error".into(), ..default() }).set(bevy::asset::AssetPlugin { file_path: asset_root(), ..default() }).set(WindowPlugin {
         primary_window: Some(Window {
             title: "Bouncy Blobs".into(),
             fit_canvas_to_parent: true,
@@ -95,6 +96,7 @@ impl Plugin for GamePlugin {
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
                 editor::EditorPlugin,
+                net::NetPlugin,
             ));
     }
 }
