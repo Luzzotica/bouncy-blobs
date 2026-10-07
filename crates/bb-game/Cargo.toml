@@ -1,0 +1,28 @@
+[package]
+name = "bb-game"
+description = "Bouncy Blobs — the Bevy app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "bb_game"
+crate-type = ["lib"]
+
+[[bin]]
+name = "bouncy-blobs"
+path = "src/main.rs"
+
+[features]
+default = []
+dev = ["bevy/dynamic_linking"]
+
+[dependencies]
+bb-physics = { path = "../bb-physics" }
+bb-level = { path = "../bb-level" }
+bb-sim = { path = "../bb-sim" }
+glam.workspace = true
+bevy = { version = "0.19.1", default-features = false, features = [
+    "2d", "ui", "audio", "mp3", "wav", "vorbis", "default_font", "png",
+] }
