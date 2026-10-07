@@ -83,7 +83,7 @@ pub fn build() -> Course {
 
     // -------------------------------------- the big jelly slope + kicker
     c.pickups(v(9500.0, 760.0), v(10500.0, 220.0), 6);
-    c.wp(Move::Walk, 9300.0, 815.0).wp(Move::Walk, 10600.0, 100.0).wp(Move::Walk, 11000.0, 0.0).wp(Move::Walk, 11420.0, 130.0);
+    c.wp(Move::Walk, 9300.0, 815.0).wp(Move::Walk, 10600.0, 100.0).wp(Move::Walk, 11000.0, 0.0).wp(Move::Walk, 11430.0, 135.0);
     // Leap off the kicker (it's downhill, so it carries further than a
     // flat jump). A soft basin catches short hops; steps lead back out.
     c.pickup_arc(v(11480.0, 200.0), v(11850.0, 40.0), 200.0, 5);
@@ -92,7 +92,7 @@ pub fn build() -> Course {
     c.ledge(11750.0, 11850.0, -60.0);
     c.drops(11480.0, 11620.0, -350.0, 2);
     c.floor(&[v(11850.0, 0.0), v(14400.0, 0.0)]);
-    c.wp(Move::Jump, 11930.0, 0.0);
+    c.wp(Move::Jump, 11880.0, 0.0);
     c.cp(12300.0, 0.0);
 
     // ----------------------------------------------- the first look up
