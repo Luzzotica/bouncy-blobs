@@ -25,7 +25,7 @@ pub fn default_plugins() -> PluginGroupBuilder {
     if cfg!(target_os = "android") {
         wgpu.instance_flags.remove(bevy::render::settings::InstanceFlags::DEBUG | bevy::render::settings::InstanceFlags::VALIDATION);
     }
-    DefaultPlugins
+    let group = DefaultPlugins
         .set(bevy::render::RenderPlugin { render_creation: wgpu.into(), ..default() })
         .set(bevy::log::LogPlugin {
             filter: "wgpu=error,naga=warn,webrtc=warn,rtc=warn,rtc_ice=error,webrtc_ice=error,webrtc_mdns=error"
@@ -43,7 +43,26 @@ pub fn default_plugins() -> PluginGroupBuilder {
                 bevy::asset::AssetMetaCheck::default()
             },
             ..default()
-        })
+        });
+    if headless() {
+        // Dev screenshot runs: no window at all (nothing pops up on the
+        // desktop); devtools renders the camera into an offscreen image and a
+        // plain loop drives the app instead of winit.
+        group
+            .set(WindowPlugin {
+                primary_window: None,
+                exit_condition: bevy::window::ExitCondition::DontExit,
+                ..default()
+            })
+            .disable::<bevy::winit::WinitPlugin>()
+    } else {
+        group
+    }
+}
+
+/// True for headless dev runs (`BB_SHOT` screenshots).
+pub fn headless() -> bool {
+    !cfg!(any(target_arch = "wasm32", target_os = "ios", target_os = "android")) && std::env::var("BB_SHOT").is_ok()
 }
 
 /// The main window for the current target.
