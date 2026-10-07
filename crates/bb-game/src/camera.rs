@@ -102,6 +102,11 @@ fn follow(
     tf.translation.x = next.x;
     tf.translation.y = next.y;
     if let Projection::Orthographic(o) = proj.as_mut() {
-        o.scale += (zoom - o.scale) * (1.0 - (-dt * 2.5).exp());
+        if dir.target.is_some() && dir.zoom.is_some() && dir.ease <= 0.0 {
+            // Direct control (editor): snap.
+            o.scale = zoom;
+        } else {
+            o.scale += (zoom - o.scale) * (1.0 - (-dt * 2.5).exp());
+        }
     }
 }

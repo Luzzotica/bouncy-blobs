@@ -2,6 +2,7 @@
 
 pub mod camera;
 pub mod devtools;
+pub mod editor;
 pub mod flow;
 pub mod input;
 pub mod level_view;
@@ -47,6 +48,7 @@ impl Plugin for GamePlugin {
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
                 devtools::DevToolsPlugin,
+                editor::EditorPlugin,
             ));
     }
 }

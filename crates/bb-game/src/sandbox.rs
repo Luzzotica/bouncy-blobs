@@ -41,5 +41,9 @@ pub fn sandbox_level() -> bb_level::Level {
 }
 
 fn start(mut load: MessageWriter<LoadLevel>) {
+    // `BB_START=<state>` boots elsewhere (e.g. the editor).
+    if std::env::var("BB_START").is_ok() {
+        return;
+    }
     load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
 }
