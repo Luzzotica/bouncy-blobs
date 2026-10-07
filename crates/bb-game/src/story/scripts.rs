@@ -109,14 +109,12 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
             let st = stage(id, Theme::Hollow, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[("drip", 40.0, 520.0, 1.0), ("crystal", -700.0, 0.0, 1.1), ("crystal", 760.0, 0.0, 0.8), ("sun", 0.0, 2600.0, 0.5)]);
             (st, vec![
                 eyes("pip", EyeState::Closed),
-                mood("pip", Mood::Squash),
                 Beat::Fade { to: 0.0, secs: 3.0 },
                 slow_cam(0.0, 70.0, 0.45, 0.2),
                 wait(2.2),
                 word("pip", "plip"),
                 push("pip", 0.0, -120.0),
                 wait(1.2),
-                unmood("pip"),
                 puff("pip", 1.08, 0.6),
                 wait(0.8),
                 eyes("pip", EyeState::Roll),

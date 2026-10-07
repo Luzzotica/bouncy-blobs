@@ -127,7 +127,8 @@ impl Plugin for StoryPlugin {
 }
 
 fn enter(mut commands: Commands, progress: Res<StoryProgress>) {
-    let chapter = progress.current.clamp(1, CHAPTERS);
+    // Dev: `BB_CHAPTER=n` starts a specific chapter without touching saves.
+    let chapter = std::env::var("BB_CHAPTER").ok().and_then(|c| c.parse::<u8>().ok()).unwrap_or(progress.current).clamp(1, CHAPTERS);
     commands.insert_resource(StoryFlow { chapter, phase: Phase::Intro, goal_timer: None });
     commands.insert_resource(PendingStart);
 }
