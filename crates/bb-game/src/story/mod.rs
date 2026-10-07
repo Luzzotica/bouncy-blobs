@@ -115,11 +115,12 @@ impl Plugin for StoryPlugin {
                     cutscene::run.run_if(resource_exists::<Runner>.and_then(resource_exists::<Game>)),
                     advance.run_if(resource_exists::<StoryFlow>),
                     level_lines.run_if(resource_exists::<Game>),
-                    drop_in.run_if(in_state(AppState::Story).or_else(in_state(AppState::Playing))),
+                    drop_in.run_if(in_state(AppState::Playing)),
                 )
                     .chain(),
             )
             .add_systems(Update, (bubble::spawn_bubbles, bubble::update_bubbles, words, cues_ui).chain())
+            .add_systems(PreUpdate, merge_inputs_into_pip.after(crate::input::GatherInput).run_if(in_state(AppState::Story)))
             .add_systems(Startup, setup_cues_ui)
             .add_systems(Last, persist_progress);
     }
@@ -150,14 +151,23 @@ fn start_cutscene(id: &str, progress: &StoryProgress, commands: &mut Commands, l
     true
 }
 
-fn local_players(inputs: &Inputs, progress: &StoryProgress) -> Vec<(u8, String, u32)> {
-    let mut v = vec![(0u8, "Pip".to_string(), progress.pip_color)];
-    for s in 1..8u8 {
-        if inputs.active[s as usize] {
-            v.push((s, format!("Buddy {s}"), bb_sim::PALETTE[s as usize % 12]));
+/// The campaign is single-player: just Pip. (Multiplayer lives in Party.)
+fn local_players(_inputs: &Inputs, progress: &StoryProgress) -> Vec<(u8, String, u32)> {
+    vec![(0u8, "Pip".to_string(), progress.pip_color)]
+}
+
+/// Single-player: every local device (keyboard, touch, any gamepad) drives Pip.
+fn merge_inputs_into_pip(mut inputs: ResMut<Inputs>) {
+    let mut stick = inputs.slots[0].stick;
+    let mut button = inputs.slots[0].button;
+    for s in 1..16 {
+        if inputs.active[s] {
+            stick += inputs.slots[s].stick;
+            button |= inputs.slots[s].button;
         }
     }
-    v
+    inputs.slots[0].stick = stick.clamp_length_max(1.0);
+    inputs.slots[0].button = button;
 }
 
 #[allow(clippy::too_many_arguments)]
