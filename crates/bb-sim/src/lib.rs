@@ -327,6 +327,14 @@ impl Sim {
         self.tags.get(&id).copied()
     }
 
+    pub fn npc_by_id(&self, id: &str) -> Option<&Npc> {
+        self.npcs.iter().find(|n| n.id == id)
+    }
+
+    pub fn npc_by_id_mut(&mut self, id: &str) -> Option<&mut Npc> {
+        self.npcs.iter_mut().find(|n| n.id == id)
+    }
+
     pub fn npc_role(&self, i: u16) -> Option<&NpcRole> {
         self.npcs.get(i as usize).map(|n| &n.role)
     }

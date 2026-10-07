@@ -18,6 +18,8 @@ pub struct Npc {
     pub dead: Option<f32>,
     /// Trapped NPCs become followers once freed.
     pub following: bool,
+    /// Driven by a cutscene: the AI leaves `ctl.input` alone.
+    pub scripted: bool,
     timer: f32,
     target: Vec2,
     stuck_for: f32,
@@ -73,6 +75,7 @@ impl Npc {
             home: def.pos,
             dead: None,
             following: def.role == NpcRole::Follower,
+            scripted: false,
             timer: 1.0 + index as f32 * 0.37,
             target: def.pos,
             stuck_for: 0.0,
@@ -115,7 +118,7 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
         .collect();
     let mut freed = Vec::new();
     for n in sim.npcs.iter_mut() {
-        if n.dead.is_some() {
+        if n.dead.is_some() || n.scripted {
             continue;
         }
         let Some(b) = sim.world.body(n.ctl.body) else { continue };
