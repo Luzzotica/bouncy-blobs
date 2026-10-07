@@ -6,6 +6,7 @@
 
 pub mod control;
 pub mod load;
+pub mod modes;
 pub mod npc;
 mod runtime;
 
@@ -116,6 +117,8 @@ pub struct Sim {
     pub events: Vec<SimEvent>,
     /// Gameplay toggles (Kids Mode disables popping, etc.).
     pub rules: Rules,
+    /// Ignore player input (match countdown / results).
+    pub input_frozen: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +156,7 @@ impl Sim {
             time: 0.0,
             events: Vec::new(),
             rules: Rules::default(),
+            input_frozen: false,
             level: level.clone(),
         };
         load::load(&mut sim, &level);
@@ -214,6 +218,7 @@ impl Sim {
     }
 
     pub fn set_input(&mut self, slot: u8, input: Input) {
+        let input = if self.input_frozen { Input::default() } else { input };
         if let Some(p) = self.player_mut(slot) {
             p.ctl.input = input;
         }
