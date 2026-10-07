@@ -1,0 +1,15 @@
+[package]
+name = "bb-level"
+description = "Bouncy Blobs level format, builders, legacy importer and the campaign."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+glam = { workspace = true, features = ["serde"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bb-physics = { path = "../bb-physics" }

@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 
 use glam::Vec2;
 
-use crate::body::{Body, BodyDesc, BodyId, BodyKind, Material};
+use crate::body::{Body, BodyDesc, BodyId, Material};
 use crate::collide;
 use crate::constraints;
 use crate::geom::{self, Aabb};
@@ -156,7 +156,6 @@ pub struct World {
 }
 
 pub(crate) struct SubstepCtx {
-    pub h: f32,
     pub record: bool,
 }
 
@@ -481,7 +480,7 @@ impl World {
 
         for sub in 0..substeps {
             let alpha = (sub + 1) as f32 / substeps as f32;
-            let ctx = SubstepCtx { h, record: sub + 1 == substeps };
+            let ctx = SubstepCtx { record: sub + 1 == substeps };
             self.contacts.clear();
 
             // Kinematic statics move along their interpolated path.
@@ -722,20 +721,10 @@ impl World {
         &self.statics
     }
 
-    pub(crate) fn slot_bodies_mut(&mut self) -> impl Iterator<Item = (BodyId, &mut Body)> {
-        self.slots.iter_mut().enumerate().filter_map(|(i, s)| {
-            let generation = s.generation;
-            s.body.as_mut().map(|b| (BodyId { index: i as u32, generation }, b))
-        })
-    }
-
     pub(crate) fn push_events(&mut self, mut e: Vec<Event>) {
         self.events.append(&mut e);
     }
 
-    pub(crate) fn kind_of(&self, id: BodyId) -> Option<BodyKind> {
-        self.body(id).map(|b| b.kind)
-    }
 }
 
 pub(crate) fn ordered(a: BodyId, b: BodyId) -> (BodyId, BodyId) {

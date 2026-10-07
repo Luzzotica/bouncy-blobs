@@ -1,0 +1,12 @@
+[package]
+name = "bb-sim"
+description = "Bouncy Blobs gameplay simulation: players, level runtime, NPCs. Engine-agnostic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bb-physics = { path = "../bb-physics" }
+bb-level = { path = "../bb-level" }
+glam.workspace = true
