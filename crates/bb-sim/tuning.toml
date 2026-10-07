@@ -1,0 +1,78 @@
+# Bouncy Blobs — blob feel tuning.
+#
+# LIVE: while the game runs (desktop dev builds), saving this file applies it
+# within half a second; no rebuild. Bad values are reported in the terminal
+# and the last good tuning stays. These values are also compiled in as the
+# defaults, so whatever is here when you build is what ships.
+#
+# Units: pixels, seconds. The player blob has a 32 px radius. Accelerations
+# are px/s². The model is the 2.x blob (slimeBlob.ts) scaled 48 → 32 px.
+
+[jump]
+# The jump IS the swell: holding the button grows the blob to this multiple
+# of its size, and the growing body shoves off whatever it's pressed against.
+expand_scale = 2.0
+# How fast it swells while held / shrinks when released (scale units per s).
+# This sets the jump height, but NOT monotonically (the shove resonates with
+# the body's springs). At expand_scale 2: 22 → 130 px, 28 → 226, 30 → 266,
+# 32 → 253, 34 → 241. Nudge and feel it.
+expand_rate_press = 32.0
+expand_rate_release = 18.0
+# Springs stiffen this much while the button is held.
+expand_spring_mult = 1.45
+
+[gravity]
+# Blobs fall at this (the rest of the world uses the level's gravity).
+# Springs, wind and water scale along with it.
+gravity = 2613.0
+
+[move]
+# Stick left/right. Full on a floor; × air in the air; × wall when touching
+# only walls/ceilings. There's no top speed (2.x): rolling keeps building.
+accel = 2667.0
+air = 0.6
+wall = 0.4
+
+[stick]
+# Stick DOWN presses into the floor / falls faster, and squashes the blob
+# wider (x) and flatter (y) by these fractions.
+down_accel = 2000.0
+squash_x = 0.35
+squash_y = 0.30
+# Stick UP floats: a gentle lift (≈40% less gravity at 1067 vs 2613).
+up_accel = 1067.0
+# × when something is on top of you (clamber up a ledge / stick to a roof).
+ledge_up_mult = 12.0
+# × when pressing up a bare wall (so you can't rocket up walls).
+wall_climb_mult = 0.35
+
+[sticky]
+# Sticky walls: you cling (≥ min_contacts points touching) until the button
+# launches you along the stick (or straight off the wall) at this speed.
+min_contacts = 2
+jump = 933.0
+release_grace = 0.25
+
+[body]
+# The softbody itself (accelerations per px of error). Higher = firmer.
+spring_k = 843.0
+spring_damp = 58.3
+# Skip-one "shear" springs as a fraction of spring_k.
+shear = 0.85
+# Outline-area pressure.
+pressure_k = 4.5
+# Pull back toward the round rest shape, and damping of wobble.
+shape_k = 2024.0
+shape_damp = 25.0
+static_friction = 1.0
+dynamic_friction = 0.8
+
+[vine]
+swing_accel = 1100.0
+# Let-go launch (x, y), scaled by √(gravity / 1800).
+jump_x = 380.0
+jump_y = 720.0
+
+[water]
+# Button kick in water, scaled by √(gravity / 1800).
+swim_kick = 720.0

@@ -409,7 +409,7 @@ impl Bot {
                         stick.y = 1.0;
                     }
                     // Predict the ballistic landing if we let go now.
-                    let g = bb_sim::control::tune::GRAVITY;
+                    let g = bb_sim::tuning::current().gravity.gravity;
                     let rel = vel + Vec2::new(dir * 380.0, 720.0) * (g / 1800.0).sqrt();
                     let drop = pos.y - (tgt.at.y + R);
                     let disc = rel.y * rel.y + 2.0 * g * drop;

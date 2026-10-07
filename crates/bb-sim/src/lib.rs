@@ -9,6 +9,7 @@ pub mod load;
 pub mod modes;
 pub mod npc;
 mod runtime;
+pub mod tuning;
 
 use std::collections::HashMap;
 
@@ -108,6 +109,8 @@ pub enum SimEvent {
 
 pub struct Sim {
     pub world: World,
+    /// Blob feel (from `tuning.toml`); see [`Sim::set_tuning`].
+    pub tuning: tuning::Tuning,
     pub level: Level,
     pub tags: HashMap<BodyId, BodyTag>,
     pub players: Vec<Player>,
@@ -152,6 +155,7 @@ impl Sim {
     pub fn new(level: Level) -> Sim {
         let mut sim = Sim {
             world: World::new(Config::default()),
+            tuning: tuning::current(),
             tags: HashMap::new(),
             players: Vec::new(),
             npcs: Vec::new(),
@@ -289,6 +293,17 @@ impl Sim {
         }
     }
 
+    /// Swap in new blob tuning (live edits), updating every blob body.
+    pub fn set_tuning(&mut self, t: tuning::Tuning) {
+        for p in &self.players {
+            p.ctl.apply_tuning(&mut self.world, &t);
+        }
+        for n in &self.npcs {
+            n.ctl.apply_tuning(&mut self.world, &t);
+        }
+        self.tuning = t;
+    }
+
     pub fn step(&mut self) {
         let dt = DT;
         self.time += dt;
@@ -297,7 +312,7 @@ impl Sim {
         let ropes = std::mem::take(&mut self.ropes);
         for p in self.players.iter_mut() {
             if p.dead.is_none() {
-                if let Some(a) = p.ctl.pre_step(&mut self.world, &ropes, dt) {
+                if let Some(a) = p.ctl.pre_step(&mut self.world, &ropes, &self.tuning, dt) {
                     self.events.push(SimEvent::Action { who: Who::Player(p.slot), action: a });
                 }
             }
@@ -305,7 +320,7 @@ impl Sim {
         npc::think(self, &ropes, dt);
         for n in self.npcs.iter_mut() {
             if n.dead.is_none() {
-                n.ctl.pre_step(&mut self.world, &ropes, dt);
+                n.ctl.pre_step(&mut self.world, &ropes, &self.tuning, dt);
             }
         }
 

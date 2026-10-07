@@ -31,6 +31,7 @@ pub mod sim;
 pub mod softtext;
 pub mod story;
 pub mod story_iface;
+pub mod tuning;
 
 use bevy::prelude::*;
 
@@ -92,6 +93,7 @@ impl Plugin for GamePlugin {
                 editor::EditorPlugin,
                 net::NetPlugin,
                 online::OnlinePlugin,
+                tuning::TuningPlugin,
             ));
     }
 }

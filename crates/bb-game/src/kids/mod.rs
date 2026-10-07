@@ -604,7 +604,7 @@ fn drive(
         inputs.active[0] = true;
     }
     if let Some(p) = sim.player_mut(0) {
-        p.ctl.expand_scale = if held == Some(0) { PICK_SCALE_PEAK } else { bb_sim::control::tune::EXPAND_SCALE };
+        p.ctl.expand_scale = (held == Some(0)).then_some(PICK_SCALE_PEAK);
     }
 
     // Friends wander and puff on their own (legacy timings).
@@ -616,7 +616,7 @@ fn drive(
         if held == Some(f.slot) {
             f.puff = PICK_PUFF_SEC;
             input.button = true;
-            scale = PICK_SCALE_PEAK;
+            scale = Some(PICK_SCALE_PEAK);
         } else {
             f.wander_t -= dt;
             if f.wander_t <= 0.0 {
@@ -634,7 +634,7 @@ fn drive(
                 }
             }
             let puffing = f.puff > 0.0;
-            scale = if puffing { 1.0 + 0.55 * (f.puff / PICK_PUFF_SEC * 1.2).min(1.0) } else { bb_sim::control::tune::EXPAND_SCALE };
+            scale = puffing.then(|| 1.0 + 0.55 * (f.puff / PICK_PUFF_SEC * 1.2).min(1.0));
             f.puff = (f.puff - dt).max(0.0);
             input.stick.x = f.wander_dir * 0.55;
             input.button = group || f.self_hold > 0.0 || puffing;

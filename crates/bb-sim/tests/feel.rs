@@ -125,7 +125,8 @@ fn probe_mechanics() {
     sim.add_player(0, "P", 1);
     for _ in 0..30 { sim.step(); }
     let mut grabbed = None;
-    for f in 0..200 { let btn = (40..50).contains(&f); sim.set_input(0, Input { stick: Vec2::new(1.0, 0.0), button: btn }); sim.step(); if sim.players[0].ctl.grab.is_some() && grabbed.is_none() { grabbed = Some(f); } }
+    let mut t0 = None;
+    for f in 0..200 { if t0.is_none() && body(&sim).centroid().x > 370.0 { t0 = Some(f); } let btn = t0.is_some_and(|t| f - t < 10); sim.set_input(0, Input { stick: Vec2::new(1.0, 0.0), button: btn }); sim.step(); if sim.players[0].ctl.grab.is_some() && grabbed.is_none() { grabbed = Some(f); } }
     println!("vine grabbed at frame {grabbed:?}, pos {:?}", body(&sim).centroid());
     assert!(grabbed.is_some(), "vine grab");
 }

@@ -130,3 +130,13 @@ The story bible is in [`Story.md`](Story.md).
   Maps live in `<data dir>/me.sterlinglong.bouncyblobs/maps-v3/` (web:
   localStorage). Dev hooks for screenshots: `BB_EDIT_SELECT=kind:i`,
   `BB_EDIT_TOOL=<name>`, `BB_EDIT_PLAY=<frame>`, `BB_EDIT_BACK=<frames>`.
+
+## Live tuning
+
+Blob feel (jump/swell, gravity, movement, squash, float, sticky walls, body
+stiffness) lives in `crates/bb-sim/tuning.toml`. Desktop dev builds watch it:
+save the file and the running game applies it within ~0.4 s (a green
+"tuning reloaded" note top-left; errors show in red and in the terminal, and
+the last good tuning stays). `BB_TUNING=/path/to.toml` watches another file;
+a file may hold only the keys being changed. The same file is compiled in as
+the defaults, so whatever it says at build time ships on every platform.
