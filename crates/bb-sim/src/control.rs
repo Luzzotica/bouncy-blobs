@@ -26,20 +26,29 @@ pub mod tune {
     pub const JUMP_CUT: f32 = 0.5;
     pub const COYOTE: f32 = 0.1;
     pub const JUMP_BUFFER: f32 = 0.12;
-    pub const EXPAND_SCALE: f32 = 1.28;
-    pub const EXPAND_RATE: f32 = 30.0;
-    pub const RELAX_RATE: f32 = 7.0;
+    /// Full swell (2.x swelled to 3.0; this body is softer, 2.3 reads big).
+    pub const EXPAND_SCALE: f32 = 2.3;
+    /// Linear swell speed while the button is held (scale units / s):
+    /// ~0.08 s to full size, like 2.x's press rate.
+    pub const SWELL_RATE: f32 = 16.0;
+    /// Linear shrink speed when released.
+    pub const RELAX_RATE: f32 = 5.0;
+    /// Shape-matching compliance while swelling: much stiffer than the
+    /// resting 3e-3, so the swell shoves off what you're pressed against
+    /// (the spring-loaded part of the jump).
+    pub const SWELL_COMPLIANCE: f32 = 6e-4;
     pub const SWING_ACCEL: f32 = 1100.0;
     pub const CLIMB_INTERVAL: f32 = 0.09;
     pub const GRAB_COOLDOWN: f32 = 0.35;
     pub const ROPE_JUMP: Vec2 = Vec2::new(380.0, 720.0);
     pub const WALL_JUMP: Vec2 = Vec2::new(560.0, 860.0);
     pub const SWIM_KICK: f32 = 720.0;
-    /// Launch speed per unit of rest-scale growth while touching a surface:
-    /// expanding pushes you off whatever you're pressed against.
-    pub const LAUNCH_PER_EXPAND: f32 = 5600.0;
-    /// Cap on launch speed from one press (stacks on top of springs etc.).
-    pub const LAUNCH_MAX: f32 = 900.0;
+    /// Mario-style launch: pressing while touching something kicks you off
+    /// it, then holding keeps adding a decaying push for up to LAUNCH_HOLD
+    /// seconds. Releasing just stops adding.
+    pub const LAUNCH_KICK: f32 = 380.0;
+    pub const LAUNCH_ACCEL: f32 = 12000.0;
+    pub const LAUNCH_HOLD: f32 = 0.32;
     /// Crouch: wide and flat on the ground, narrow dive in the air.
     pub const CROUCH_SQUASH: Vec2 = Vec2::new(1.32, 0.6);
     pub const DIVE_SQUASH: Vec2 = Vec2::new(0.84, 1.2);
@@ -87,8 +96,13 @@ pub struct Controller {
     /// springs, other blobs), for expand-launches.
     pub contact_normal: Vec2,
     since_contact: f32,
-    /// Velocity added by expansion during the current press.
-    launch_given: f32,
+    /// Active launch: (push direction, seconds held).
+    launch: Option<(Vec2, f32)>,
+    /// Speed along the surface when the launch began (kept through the jump
+    /// so the swell's friction against the ground doesn't eat a run-up).
+    launch_carry: Vec2,
+    /// Resting shape compliance (restored after a swell).
+    base_shape: Option<f32>,
     /// 0..1 crouch amount (stick down), smoothed.
     pub crouch: f32,
     swim_cooldown: f32,
@@ -142,7 +156,9 @@ impl Controller {
             swim_cooldown: 0.0,
             contact_normal: Vec2::Y,
             since_contact: 1.0,
-            launch_given: 0.0,
+            launch: None,
+            launch_carry: Vec2::ZERO,
+            base_shape: None,
             crouch: 0.0,
             expand_scale: tune::EXPAND_SCALE,
         }
@@ -186,15 +202,17 @@ impl Controller {
         }
         let vel = body.velocity();
 
-        // Expand / relax.
-        let target = self.puff.unwrap_or(if self.input.button { self.expand_scale } else { 1.0 });
-        let rate = if target > self.expand { tune::EXPAND_RATE } else { tune::RELAX_RATE };
-        let before = self.expand;
-        self.expand += (target - self.expand) * (1.0 - (-rate * dt).exp());
-        let grew = (self.expand - before).max(0.0);
-        if pressed {
-            self.launch_given = 0.0;
+        // Swell / relax: linear ramps, like 2.x.
+        let mut target = self.puff.unwrap_or(if self.input.button { self.expand_scale } else { 1.0 });
+        // Clinging to a sticky wall or a vine: a small puff only, so the
+        // swell doesn't shove you off what you're holding.
+        if self.stuck.is_some() || self.grab.is_some() {
+            target = target.min(1.3);
         }
+        let swelling = target > self.expand + 1e-4;
+        let rate = if swelling { tune::SWELL_RATE } else { tune::RELAX_RATE };
+        let step = rate * dt;
+        self.expand = if (target - self.expand).abs() <= step { target } else { self.expand + step * (target - self.expand).signum() };
 
         // Crouch (stick down): squash flat on the ground, dive in the air.
         let want_crouch = if stick.y < -0.5 && self.grab.is_none() { 1.0 } else { 0.0 };
@@ -239,24 +257,45 @@ impl Controller {
             b.add_accel(Vec2::new(0.0, -tune::FAST_FALL * self.crouch));
         }
 
-        // Expanding while pressed against something pushes you off it: on
-        // the floor that's a jump, in a corner a diagonal throw, on a spring
-        // an extra-big launch, under a ceiling a shove downward.
-        if grew > 0.0 && self.since_contact < tune::COYOTE && self.puff.is_none() && self.stuck.is_none() {
-            let room = (tune::LAUNCH_MAX * strength - self.launch_given).max(0.0);
-            let dv = (grew * tune::LAUNCH_PER_EXPAND * strength).min(room);
-            if dv > 0.0 {
-                let n = self.contact_normal;
-                // Don't fight speed we already have along the push.
-                let along = vel.dot(n).max(0.0);
-                let add = (dv - along * 0.25).max(0.0);
-                b.add_velocity(n * add);
-                self.launch_given += dv;
-                if !self.jumping {
-                    self.jumping = true;
-                    action = Some(Action::Jump);
+        // Spring-loaded body: stiffen while swelling so the jelly itself
+        // shoves off whatever it's pressed against.
+        let base = *self.base_shape.get_or_insert(b.params.shape_compliance.unwrap_or(3e-3));
+        b.params.shape_compliance = Some(if swelling && self.puff.is_none() { tune::SWELL_COMPLIANCE.min(base) } else { base });
+
+        // Launch: press while touching something (or just after leaving it)
+        // to kick off along the contact normal — the floor sends you up, a
+        // corner throws you diagonally, a spring stacks, a ceiling shoves you
+        // down. Holding keeps adding a decaying push; releasing stops it.
+        if pressed && self.since_contact < tune::COYOTE && self.puff.is_none() && self.stuck.is_none() {
+            // Full strength straight up; sideways/downward pushes (walls,
+            // ceilings) are gentler, since nothing like gravity fights them.
+            let n = self.contact_normal;
+            let push = n * (0.55 + 0.45 * n.y.max(0.0));
+            let along = vel.dot(n).max(0.0);
+            b.add_velocity(push * (tune::LAUNCH_KICK * strength - along * 0.3).max(0.0));
+            self.launch = Some((push, 0.0));
+            self.launch_carry = vel - n * vel.dot(n);
+            self.jumping = true;
+            self.since_ground = 1.0;
+            self.since_contact = 1.0;
+            action = Some(Action::Jump);
+        }
+        if let Some((n, t)) = self.launch {
+            // Keep the run-up: restore lost speed along the launch surface.
+            if t < 0.2 {
+                let dir = n.normalize_or(Vec2::Y);
+                let now_t = vel - dir * vel.dot(dir);
+                let lost = self.launch_carry - now_t;
+                if lost.dot(self.launch_carry) > 0.0 {
+                    b.add_accel(lost * 9.0);
                 }
-                self.since_ground = 1.0;
+            }
+            if !self.input.button || t >= tune::LAUNCH_HOLD {
+                self.launch = None;
+            } else {
+                let k = 1.0 - t / tune::LAUNCH_HOLD;
+                b.add_accel(n * tune::LAUNCH_ACCEL * strength * k * k);
+                self.launch = Some((n, t + dt));
             }
         }
 
@@ -316,10 +355,7 @@ impl Controller {
             return Some(Action::Jump);
         }
 
-        if self.jumping && released && vel.y > 0.0 {
-            b.add_velocity(Vec2::new(0.0, -vel.y * (1.0 - tune::JUMP_CUT)));
-            self.jumping = false;
-        }
+        let _ = released;
         action
     }
 
@@ -370,7 +406,7 @@ impl Controller {
         if self.grab.is_none() && !self.grounded && self.grab_cooldown <= 0.0 {
             let c = body.centroid();
             // Generous: grabbing a vine you brushed should just work.
-            let reach = self.radius * self.expand + 18.0;
+            let reach = self.radius * self.expand.min(1.3) + 18.0;
             let mut best: Option<(usize, u32, f32)> = None;
             for (ri, r) in ropes.iter().enumerate() {
                 if !r.grabbable {

@@ -193,6 +193,19 @@ fn rand(seed: &mut u32) -> f32 {
     v
 }
 
+/// Wraps the sfx writer, scaling volume by distance gain.
+struct Gained<'a, 'w> {
+    out: &'a mut MessageWriter<'w, PlaySfx>,
+    gain: f32,
+}
+
+impl Gained<'_, '_> {
+    fn write(&mut self, mut s: PlaySfx) {
+        s.volume *= self.gain;
+        self.out.write(s);
+    }
+}
+
 /// Sim events → sounds (legacy effectsBindings.ts volumes).
 fn sim_sounds(
     mut reader: MessageReader<SimMsg>,
@@ -202,12 +215,41 @@ fn sim_sounds(
     mut seed: Local<u32>,
     mut last_land: Local<HashMap<bb_sim::BodyId, f64>>,
     mut streak: Local<(u32, f64)>,
+    cam: Query<(&Transform, &Projection), With<crate::camera::MainCamera>>,
 ) {
     if *seed == 0 {
         *seed = 0x2545_f491;
     }
     let now = time.elapsed_secs_f64();
+    // Sounds fade with distance from the camera: full on screen, silent
+    // well off it, so blobs far away don't chatter in your ear.
+    let (cam_p, zoom) = cam
+        .single()
+        .map(|(t, p)| (t.translation.truncate(), if let Projection::Orthographic(o) = p { o.scale } else { 1.0 }))
+        .unwrap_or((Vec2::ZERO, 1.0));
+    let gain_at = |p: Option<bb_sim::Vec2>| -> f32 {
+        let Some(p) = p else { return 1.0 };
+        let d = (Vec2::new(p.x, p.y) - cam_p).length() / zoom.max(0.5);
+        (1.0 - (d - 850.0) / 750.0).clamp(0.0, 1.0)
+    };
+    let body_pos = |id: bb_sim::BodyId| game.as_ref().and_then(|g| g.sim.world.body(id)).map(|b| b.centroid());
     for SimMsg(e) in reader.read() {
+        let pos = match e {
+            SimEvent::Impact { pos, .. } | SimEvent::Popped { pos, .. } | SimEvent::Respawned { pos, .. } | SimEvent::Pickup { pos, .. } | SimEvent::Checkpoint { pos, .. } => Some(*pos),
+            SimEvent::Spring { index } => game.as_ref().and_then(|g| g.sim.springs.get(*index)).map(|s| s.def.pos),
+            SimEvent::Action { who, .. } => game.as_ref().and_then(|g| match who {
+                bb_sim::Who::Player(s) => g.sim.player(*s).map(|p| p.ctl.body),
+                bb_sim::Who::Npc(i) => g.sim.npcs.get(*i as usize).map(|n| n.ctl.body),
+            }).and_then(body_pos),
+            SimEvent::NpcFreed { index } => game.as_ref().and_then(|g| g.sim.npcs.get(*index as usize)).and_then(|n| body_pos(n.ctl.body)),
+            SimEvent::Phew { body } => body_pos(*body),
+            _ => None,
+        };
+        let gain = gain_at(pos);
+        if gain <= 0.02 {
+            continue;
+        }
+        let mut out = Gained { out: &mut out, gain };
         match e {
             SimEvent::Impact { body, speed, .. } => {
                 const LAND_MIN: f32 = 220.0;

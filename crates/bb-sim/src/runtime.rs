@@ -214,7 +214,8 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
                 continue;
             }
             let frac = inside as f32 / n as f32;
-            let puff = b.rest_scale * b.rest_scale;
+            // Puffing up floats you more, but cap it: a full swell is 2.3×.
+            let puff = (b.rest_scale * b.rest_scale).min(1.7);
             let v = b.velocity();
             match &z.kind {
                 ZoneKind::Wind { accel } => b.add_accel(*accel * frac * puff),

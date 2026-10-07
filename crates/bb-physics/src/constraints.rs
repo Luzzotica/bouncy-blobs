@@ -94,9 +94,12 @@ pub(crate) fn solve_limits(b: &mut Body) {
     // area per triangle instead.
     if b.closed && b.rest_area > 0.0 && b.tris.is_empty() {
         let rest = b.rest_area * scale * scale;
+        // Squash floor relative to the unswollen size: swelling in a tight
+        // spot squeezes you back toward normal, it never pops you.
+        let floor = b.rest_area * scale.min(1.0).powi(2) * l.min_area;
         let area = b.area();
-        if area < rest * l.min_area {
-            project_area(b, rest * l.min_area, 0.0, |c| c < 0.0);
+        if area < floor {
+            project_area(b, floor, 0.0, |c| c < 0.0);
         } else if area > rest * l.max_area {
             project_area(b, rest * l.max_area, 0.0, |c| c > 0.0);
         }
@@ -134,8 +137,9 @@ pub(crate) fn measure_strain(b: &mut Body) -> Strain {
     if b.closed && b.rest_area > 0.0 && b.tris.is_empty() {
         let ratio = b.area() / (b.rest_area * scale * scale);
         b.area_ratio = ratio;
-        if ratio < l.min_area {
-            over = over.max((l.min_area - ratio) / l.min_area);
+        let squash = b.area() / (b.rest_area * scale.min(1.0).powi(2));
+        if squash < l.min_area {
+            over = over.max((l.min_area - squash) / l.min_area);
         } else if ratio > l.max_area {
             over = over.max((ratio - l.max_area) / l.max_area);
         }
