@@ -352,6 +352,55 @@ pub fn resample_loop(outline: &[Vec2], spacing: f32) -> Vec<Vec2> {
     out
 }
 
+/// Resample a closed outline to exactly `n` points, keeping every original
+/// corner when `n` allows (so a star stays pointy) and spreading the rest
+/// along the edges by length.
+pub fn resample_to(outline: &[Vec2], n: usize) -> Vec<Vec2> {
+    let m = outline.len();
+    if m == 0 || n == 0 {
+        return Vec::new();
+    }
+    let lens: Vec<f32> = (0..m).map(|i| (outline[(i + 1) % m] - outline[i]).length()).collect();
+    let total: f32 = lens.iter().sum::<f32>().max(1e-6);
+    if n < m {
+        // Too few points for every corner: plain arc-length sampling.
+        let mut out = Vec::with_capacity(n);
+        let (mut edge, mut acc) = (0, 0.0);
+        for k in 0..n {
+            let s = k as f32 / n as f32 * total;
+            while edge < m - 1 && acc + lens[edge] < s {
+                acc += lens[edge];
+                edge += 1;
+            }
+            let t = if lens[edge] > 0.0 { (s - acc) / lens[edge] } else { 0.0 };
+            out.push(outline[edge].lerp(outline[(edge + 1) % m], t.clamp(0.0, 1.0)));
+        }
+        return out;
+    }
+    // Every corner, plus `extra` in-between points shared by largest remainder.
+    let extra = n - m;
+    let quotas: Vec<f32> = lens.iter().map(|l| l / total * extra as f32).collect();
+    let mut per: Vec<usize> = quotas.iter().map(|q| q.floor() as usize).collect();
+    let mut left = extra - per.iter().sum::<usize>();
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|a, b| (quotas[*b] - quotas[*b].floor()).total_cmp(&(quotas[*a] - quotas[*a].floor())));
+    for &i in order.iter().cycle() {
+        if left == 0 {
+            break;
+        }
+        per[i] += 1;
+        left -= 1;
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..m {
+        let (a, b) = (outline[i], outline[(i + 1) % m]);
+        for k in 0..=per[i] {
+            out.push(a.lerp(b, k as f32 / (per[i] + 1) as f32));
+        }
+    }
+    out
+}
+
 /// Live simulated body.
 #[derive(Clone, Debug)]
 pub struct Body {
@@ -600,6 +649,45 @@ impl Body {
         self.strain_time = 0.0;
         self.strain = 0.0;
         self.update_aabb();
+    }
+
+    /// Give a ring blob a new rest outline (any simple polygon, any
+    /// position — only its shape matters). The outline is resampled onto the
+    /// existing particles, so the body *morphs* toward it through its own
+    /// constraints over the next few steps: Kids Mode's circle → star.
+    ///
+    /// Only ring bodies (`BodyKind::Blob`, no triangles) can change shape;
+    /// returns false for anything else.
+    pub fn set_rest_shape(&mut self, outline: &[Vec2]) -> bool {
+        if self.kind != BodyKind::Blob || !self.tris.is_empty() || outline.len() < 3 {
+            return false;
+        }
+        let n = self.boundary.len();
+        let mut pts = resample_to(outline, n);
+        if geom::signed_area_slice(&pts) < 0.0 {
+            pts.reverse();
+        }
+        let c = geom::centroid(&pts);
+        for p in pts.iter_mut() {
+            *p -= c;
+        }
+        // Rotate the index order to best match the current rest pose so the
+        // morph doesn't spin the body.
+        let old: Vec<Vec2> = self.boundary.iter().map(|&i| self.rest[i as usize]).collect();
+        let best = (0..n)
+            .min_by(|&a, &b| {
+                let cost = |o: usize| (0..n).map(|k| old[k].distance_squared(pts[(k + o) % n])).sum::<f32>();
+                cost(a).total_cmp(&cost(b))
+            })
+            .unwrap_or(0);
+        for (k, &i) in self.boundary.iter().enumerate() {
+            self.rest[i as usize] = pts[(k + best) % n];
+        }
+        for e in self.edges.iter_mut() {
+            e.rest = (self.rest[e.a as usize] - self.rest[e.b as usize]).length();
+        }
+        self.rest_area = geom::signed_area(self.boundary.iter().map(|&i| self.rest[i as usize])).abs();
+        true
     }
 
     /// Move the whole body by `d` without changing its velocity.

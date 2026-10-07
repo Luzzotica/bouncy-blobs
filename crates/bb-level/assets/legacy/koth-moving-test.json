@@ -1,0 +1,30 @@
+{
+  "name": "KOTH Moving Hill (test)",
+  "version": 1,
+  "levelType": "koth",
+  "bounds": { "width": 3200, "height": 2400 },
+  "platforms": [
+    { "id": "hill", "x": 1600, "y": 1200, "width": 500, "height": 120, "rotation": 0 },
+    { "id": "upper-left", "x": 800, "y": 1000, "width": 300, "height": 90, "rotation": 0 },
+    { "id": "upper-right", "x": 2400, "y": 1000, "width": 300, "height": 90, "rotation": 0 }
+  ],
+  "walls": [
+    { "id": "floor", "points": [{ "x": -100, "y": 2200 }, { "x": 3300, "y": 2200 }, { "x": 3300, "y": 2400 }, { "x": -100, "y": 2400 }] },
+    { "id": "left", "points": [{ "x": -100, "y": -100 }, { "x": 0, "y": -100 }, { "x": 0, "y": 2400 }, { "x": -100, "y": 2400 }] },
+    { "id": "right", "points": [{ "x": 3200, "y": -100 }, { "x": 3300, "y": -100 }, { "x": 3300, "y": 2400 }, { "x": 3200, "y": 2400 }] },
+    { "id": "ceiling", "points": [{ "x": -100, "y": -100 }, { "x": 3300, "y": -100 }, { "x": 3300, "y": 0 }, { "x": -100, "y": 0 }] }
+  ],
+  "spawnPoints": [
+    { "id": "sp1", "x": 400, "y": 1600, "type": "player" },
+    { "id": "sp2", "x": 600, "y": 1600, "type": "player" },
+    { "id": "sp3", "x": 2600, "y": 1600, "type": "player" },
+    { "id": "sp4", "x": 2800, "y": 1600, "type": "player" }
+  ],
+  "npcBlobs": [],
+  "hillZones": [
+    { "id": "hill-zone", "x": 1600, "y": 1100, "width": 500, "height": 250 },
+    { "id": "hill-left", "x": 800, "y": 900, "width": 360, "height": 220 },
+    { "id": "hill-right", "x": 2400, "y": 900, "width": 360, "height": 220 }
+  ],
+  "hillRotation": { "minSeconds": 2, "maxSeconds": 3 }
+}

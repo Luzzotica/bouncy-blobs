@@ -10,3 +10,6 @@ license.workspace = true
 bb-physics = { path = "../bb-physics" }
 bb-level = { path = "../bb-level" }
 glam.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

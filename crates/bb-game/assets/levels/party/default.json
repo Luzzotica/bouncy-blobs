@@ -1,0 +1,377 @@
+{
+  "version": 3,
+  "id": "default",
+  "name": "Default Arena",
+  "theme": "party",
+  "modes": [
+    "sandbox"
+  ],
+  "spawn": [
+    -293.33334,
+    -253.33334
+  ],
+  "kill_y": -1166.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -800.0,
+          206.66667
+        ],
+        "size": [
+          200.0,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          0.0,
+          206.66667
+        ],
+        "size": [
+          200.0,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          800.0,
+          206.66667
+        ],
+        "size": [
+          200.0,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -600.0,
+          -64.0
+        ],
+        "size": [
+          186.66667,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          0.0,
+          -64.0
+        ],
+        "size": [
+          186.66667,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          600.0,
+          -64.0
+        ],
+        "size": [
+          186.66667,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -400.0,
+          -334.6667
+        ],
+        "size": [
+          173.33334,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          200.0,
+          -334.6667
+        ],
+        "size": [
+          173.33334,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          733.3334,
+          -334.6667
+        ],
+        "size": [
+          173.33334,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -333.33334,
+          -666.6667
+        ],
+        "size": [
+          266.6667,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          333.33334,
+          -666.6667
+        ],
+        "size": [
+          266.6667,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          0.0,
+          -980.0
+        ],
+        "size": [
+          533.3334,
+          48.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1466.6667,
+            -1100.0
+          ],
+          [
+            1466.6667,
+            -1100.0
+          ],
+          [
+            1466.6667,
+            -1066.6667
+          ],
+          [
+            -1466.6667,
+            -1066.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1466.6667,
+            433.33334
+          ],
+          [
+            1466.6667,
+            433.33334
+          ],
+          [
+            1466.6667,
+            466.6667
+          ],
+          [
+            -1466.6667,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -1500.0,
+            -1100.0
+          ],
+          [
+            -1466.6667,
+            -1100.0
+          ],
+          [
+            -1466.6667,
+            466.6667
+          ],
+          [
+            -1500.0,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            1466.6667,
+            -1100.0
+          ],
+          [
+            1500.0,
+            -1100.0
+          ],
+          [
+            1500.0,
+            466.6667
+          ],
+          [
+            1466.6667,
+            466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [
+    {
+      "id": "npc1",
+      "pos": [
+        -613.3334,
+        -213.33334
+      ],
+      "role": "huddle",
+      "color": "#db9657",
+      "radius": 32.0
+    },
+    {
+      "id": "npc2",
+      "pos": [
+        613.3334,
+        -213.33334
+      ],
+      "role": "huddle",
+      "color": "#99db57",
+      "radius": 32.0
+    },
+    {
+      "id": "npc3",
+      "pos": [
+        -346.6667,
+        -413.33334
+      ],
+      "role": "huddle",
+      "color": "#57db9c",
+      "radius": 32.0
+    },
+    {
+      "id": "npc4",
+      "pos": [
+        346.6667,
+        -413.33334
+      ],
+      "role": "huddle",
+      "color": "#57b4db",
+      "radius": 32.0
+    },
+    {
+      "id": "npc5",
+      "pos": [
+        0.0,
+        -613.3334
+      ],
+      "role": "huddle",
+      "color": "#9957db",
+      "radius": 32.0
+    }
+  ],
+  "goal": null,
+  "hills": [],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

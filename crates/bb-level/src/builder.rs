@@ -107,8 +107,11 @@ impl LevelBuilder {
             let (a, b) = (w[0], w[1]);
             let n = ((b - a).length() / metrics::TILE).ceil().max(1.0) as usize;
             for k in 0..n {
-                let p0 = a.lerp(b, k as f32 / n as f32);
-                let p1 = a.lerp(b, (k + 1) as f32 / n as f32);
+                // Overlap neighbours by a few px so anti-aliased edges don't
+                // leave hairline seams (jelly never collides with jelly).
+                let dir = (b - a).normalize_or_zero() * 3.0;
+                let p0 = a.lerp(b, k as f32 / n as f32) - if k > 0 { dir } else { Vec2::ZERO };
+                let p1 = a.lerp(b, (k + 1) as f32 / n as f32) + if k + 1 < n { dir } else { Vec2::ZERO };
                 let pts = vec![p0 - v(0.0, skin), p1 - v(0.0, skin), p1, p0];
                 self.level.jelly.push(Jelly { shape: Shape::Poly { points: pts }, material, wobble });
             }

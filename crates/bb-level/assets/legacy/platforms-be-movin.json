@@ -1,0 +1,247 @@
+{
+  "name": "Platforms Be MOVIN",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing",
+    "koth"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_192",
+      "x": -310,
+      "y": 700,
+      "width": 1060,
+      "height": 400,
+      "rotation": 0
+    },
+    {
+      "id": "plat_203",
+      "x": 1970,
+      "y": -610,
+      "width": 820,
+      "height": 340,
+      "rotation": 0
+    },
+    {
+      "id": "plat_212",
+      "x": 480,
+      "y": 630,
+      "width": 520,
+      "height": 260,
+      "rotation": 0
+    },
+    {
+      "id": "plat_218",
+      "x": -1050,
+      "y": 100,
+      "width": 420,
+      "height": 1600,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": -740,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_193",
+      "x": -620,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_194",
+      "x": -500,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_195",
+      "x": -380,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_196",
+      "x": -260,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_197",
+      "x": -160,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_198",
+      "x": -40,
+      "y": 420,
+      "type": "player"
+    },
+    {
+      "id": "sp_199",
+      "x": 100,
+      "y": 420,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "actions": [
+    {
+      "id": "act_202",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_200",
+          "endX": 740,
+          "endY": -660
+        }
+      ],
+      "duration": 1,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [],
+      "requireMode": "any",
+      "mode": "switch"
+    },
+    {
+      "id": "act_207",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_200",
+          "endX": 1360,
+          "endY": -660
+        }
+      ],
+      "duration": 1,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [],
+      "requireMode": "any",
+      "mode": "switch"
+    },
+    {
+      "id": "act_213",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_212",
+          "endX": 1300,
+          "endY": -660
+        }
+      ],
+      "duration": 5,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [],
+      "requireMode": "any",
+      "mode": "timer",
+      "intervalSeconds": 7
+    }
+  ],
+  "triggers": [],
+  "goalZones": [
+    {
+      "id": "goal_215",
+      "x": 2130,
+      "y": -900,
+      "width": 500,
+      "height": 240
+    }
+  ],
+  "pointShapes": [
+    {
+      "id": "shape_216",
+      "points": [
+        {
+          "x": -120,
+          "y": -580,
+          "anchored": false
+        },
+        {
+          "x": -540,
+          "y": -160,
+          "anchored": false
+        },
+        {
+          "x": 40,
+          "y": 0,
+          "anchored": false
+        },
+        {
+          "x": 420,
+          "y": -220,
+          "anchored": false
+        },
+        {
+          "x": 300,
+          "y": -520,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    },
+    {
+      "id": "shape_219",
+      "points": [
+        {
+          "x": 1160,
+          "y": -1640,
+          "anchored": false
+        },
+        {
+          "x": 520,
+          "y": -1480,
+          "anchored": false
+        },
+        {
+          "x": 720,
+          "y": -1020,
+          "anchored": false
+        },
+        {
+          "x": 1780,
+          "y": -1300,
+          "anchored": false
+        },
+        {
+          "x": 1760,
+          "y": -1860,
+          "anchored": false
+        },
+        {
+          "x": 1180,
+          "y": -1880,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    }
+  ],
+  "hillZones": [
+    {
+      "id": "hill_217",
+      "x": 60,
+      "y": -700,
+      "width": 480,
+      "height": 360
+    }
+  ]
+}

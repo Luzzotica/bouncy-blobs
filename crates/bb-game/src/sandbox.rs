@@ -3,6 +3,7 @@
 use bb_level::{LevelBuilder, PropKind, RopeEnd, RopeStyle, Theme, v};
 use bevy::prelude::*;
 
+use crate::flow::AppState;
 use crate::sim::LoadLevel;
 
 pub struct SandboxPlugin;
@@ -40,6 +41,17 @@ pub fn sandbox_level() -> bb_level::Level {
     b.build()
 }
 
-fn start(mut load: MessageWriter<LoadLevel>) {
-    load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
+fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+    match std::env::var("BB_START").as_deref() {
+        Ok("story") => next.set(AppState::Story),
+        Ok("sandbox") => {
+            load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
+            next.set(AppState::Playing);
+        }
+        Ok("kids") => next.set(AppState::Kids),
+        Ok("editor") => next.set(AppState::Editor),
+        Ok("party") => next.set(AppState::Party),
+        _ => {}
+    }
 }
+

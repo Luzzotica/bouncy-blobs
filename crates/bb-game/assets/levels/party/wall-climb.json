@@ -1,0 +1,123 @@
+{
+  "version": 3,
+  "id": "wall-climb",
+  "name": "Wall Climb",
+  "theme": "party",
+  "modes": [
+    "race",
+    "koth"
+  ],
+  "spawn": [
+    0.0,
+    -253.33334
+  ],
+  "kill_y": -786.6667,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -300.0,
+          -540.0
+        ],
+        "size": [
+          1240.0,
+          360.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -793.3334,
+          260.0
+        ],
+        "size": [
+          306.6667,
+          1293.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          193.33334,
+          266.6667
+        ],
+        "size": [
+          280.0,
+          1280.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -306.6667,
+          946.6667
+        ],
+        "size": [
+          1280.0,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      -293.33334,
+      840.0
+    ],
+    "size": [
+      640.0,
+      106.66667
+    ],
+    "angle": 0.0
+  },
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        -293.33334,
+        473.33334
+      ],
+      "size": [
+        693.3334,
+        440.0
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

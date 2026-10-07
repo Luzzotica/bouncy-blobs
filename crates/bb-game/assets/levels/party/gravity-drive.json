@@ -1,0 +1,330 @@
+{
+  "version": 3,
+  "id": "gravity-drive",
+  "name": "Gravity Drive",
+  "theme": "party",
+  "modes": [
+    "koth"
+  ],
+  "spawn": [
+    0.0,
+    -253.33334
+  ],
+  "kill_y": -786.66675,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          120.0,
+          -613.3334
+        ],
+        "size": [
+          1013.3334,
+          213.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          73.333336,
+          666.6667
+        ],
+        "size": [
+          386.6667,
+          346.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [
+    {
+      "id": "grav_104_0",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            86.66667,
+            693.3334
+          ],
+          [
+            -573.3333,
+            40.0
+          ],
+          [
+            746.6667,
+            40.0
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -0.00002101976,
+          900.0
+        ]
+      }
+    },
+    {
+      "id": "grav_104_1",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            86.66667,
+            693.3334
+          ],
+          [
+            746.6667,
+            40.0
+          ],
+          [
+            746.6667,
+            1346.6667
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -899.99994,
+          0.0
+        ]
+      }
+    },
+    {
+      "id": "grav_104_2",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            86.66667,
+            693.3334
+          ],
+          [
+            746.6667,
+            1346.6667
+          ],
+          [
+            -573.3333,
+            1346.6667
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -0.00002101976,
+          -900.0
+        ]
+      }
+    },
+    {
+      "id": "grav_104_3",
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            86.66667,
+            693.3334
+          ],
+          [
+            -573.3333,
+            1346.6667
+          ],
+          [
+            -573.3333,
+            40.0
+          ]
+        ]
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          899.99994,
+          0.0
+        ]
+      }
+    },
+    {
+      "id": "grav_106",
+      "shape": {
+        "type": "rect",
+        "center": [
+          100.0,
+          1633.3334
+        ],
+        "size": [
+          3080.0,
+          520.0
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          -4500.0
+        ]
+      }
+    },
+    {
+      "id": "grav_107",
+      "shape": {
+        "type": "rect",
+        "center": [
+          1213.3334,
+          560.0
+        ],
+        "size": [
+          866.6667,
+          2133.3335
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          -4500.0,
+          -0.0
+        ]
+      }
+    },
+    {
+      "id": "grav_108",
+      "shape": {
+        "type": "rect",
+        "center": [
+          -1000.0,
+          600.0
+        ],
+        "size": [
+          866.6667,
+          2133.3335
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          4500.0,
+          -0.0
+        ]
+      }
+    },
+    {
+      "id": "grav_110",
+      "shape": {
+        "type": "rect",
+        "center": [
+          120.0,
+          -253.33334
+        ],
+        "size": [
+          3080.0,
+          520.0
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "gravity",
+        "gravity": [
+          0.0,
+          4500.0
+        ]
+      }
+    },
+    {
+      "id": "death_147",
+      "shape": {
+        "type": "rect",
+        "center": [
+          573.3334,
+          -1986.6667
+        ],
+        "size": [
+          14106.667,
+          1093.3334
+        ],
+        "angle": 0.0
+      },
+      "kind": {
+        "type": "kill"
+      }
+    }
+  ],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": null,
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        -253.33334,
+        666.6667
+      ],
+      "size": [
+        266.6667,
+        346.6667
+      ],
+      "angle": 0.0
+    },
+    {
+      "type": "rect",
+      "center": [
+        400.0,
+        666.6667
+      ],
+      "size": [
+        266.6667,
+        346.6667
+      ],
+      "angle": 0.0
+    },
+    {
+      "type": "rect",
+      "center": [
+        73.333336,
+        386.6667
+      ],
+      "size": [
+        386.6667,
+        213.33334
+      ],
+      "angle": 0.0
+    },
+    {
+      "type": "rect",
+      "center": [
+        73.333336,
+        946.6667
+      ],
+      "size": [
+        386.6667,
+        213.33334
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

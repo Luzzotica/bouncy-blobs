@@ -1,0 +1,219 @@
+{
+  "version": 3,
+  "id": "koth-moving-test",
+  "name": "KOTH Moving Hill (test)",
+  "theme": "party",
+  "modes": [
+    "koth"
+  ],
+  "spawn": [
+    266.6667,
+    -1066.6667
+  ],
+  "kill_y": -1666.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1066.6667,
+          -800.0
+        ],
+        "size": [
+          333.33334,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          533.3334,
+          -666.6667
+        ],
+        "size": [
+          200.0,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1600.0,
+          -666.6667
+        ],
+        "size": [
+          200.0,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1466.6667
+          ],
+          [
+            -66.66667,
+            -1466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            0.0,
+            -1600.0
+          ],
+          [
+            0.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2133.3335,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            2133.3335,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -0.0
+          ],
+          [
+            2200.0,
+            -0.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": null,
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        1066.6667,
+        -733.3334
+      ],
+      "size": [
+        333.33334,
+        166.66667
+      ],
+      "angle": 0.0
+    },
+    {
+      "type": "rect",
+      "center": [
+        533.3334,
+        -600.0
+      ],
+      "size": [
+        240.0,
+        146.66667
+      ],
+      "angle": 0.0
+    },
+    {
+      "type": "rect",
+      "center": [
+        1600.0,
+        -600.0
+      ],
+      "size": [
+        240.0,
+        146.66667
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

@@ -72,6 +72,10 @@ pub struct EyePart {
 #[derive(Resource, Default)]
 pub struct BodyEntities(pub HashMap<BodyId, Entity>);
 
+/// Per-body style overrides (menu focus highlights, kids colour changes).
+#[derive(Resource, Default)]
+pub struct StyleOverrides(pub HashMap<BodyId, Style>);
+
 /// Shared handles for simple shapes.
 #[derive(Resource)]
 pub struct Shared {
@@ -87,6 +91,7 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BodyEntities>()
+            .init_resource::<StyleOverrides>()
             .add_systems(Startup, setup_shared)
             .add_systems(PostUpdate, (sync_bodies, update_eyes).chain().run_if(resource_exists::<Game>))
             .add_systems(PostUpdate, cleanup_bodies.run_if(resource_removed::<Game>));
@@ -326,7 +331,8 @@ fn sync_bodies(
     mut map: ResMut<BodyEntities>,
     mut meshes: ResMut<Assets<Mesh>>,
     shared: Res<Shared>,
-    visuals: Query<&BodyVisual>,
+    overrides: Res<StyleOverrides>,
+    mut visuals: Query<&mut BodyVisual>,
 ) {
     let theme = palette::theme(game.sim.level.theme);
     // Spawn / despawn.
@@ -354,7 +360,7 @@ fn sync_bodies(
                 _ => None,
             };
             if let Some(kind) = eyes {
-                let owner = commands.spawn((Eyes { body: id, blink: 2.0, look: Vec2::ZERO, kind }, Transform::default())).id();
+                let owner = commands.spawn((Eyes { body: id, blink: 1.0 + (id.index % 9) as f32 * 0.45, look: Vec2::ZERO, kind }, Transform::default())).id();
                 for k in 0..4u8 {
                     let mat = if k < 2 { shared.white.clone() } else { shared.ink.clone() };
                     commands.spawn((
@@ -378,7 +384,10 @@ fn sync_bodies(
         }
     });
     // Rebuild meshes.
-    for v in visuals.iter() {
+    for mut v in visuals.iter_mut() {
+        if let Some(s) = overrides.0.get(&v.id) {
+            v.style = *s;
+        }
         let Some(b) = game.sim.world.body(v.id) else { continue };
         let Some(mut mesh) = meshes.get_mut(&v.mesh) else { continue };
         let mut buf = MeshBuf::default();

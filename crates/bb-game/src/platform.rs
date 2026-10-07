@@ -14,6 +14,11 @@ pub const IS_MOBILE: bool = cfg!(any(target_os = "ios", target_os = "android"));
 /// `DefaultPlugins` configured for the current target.
 pub fn default_plugins() -> PluginGroupBuilder {
     DefaultPlugins
+        .set(bevy::log::LogPlugin {
+            filter: "wgpu=error,naga=warn,webrtc=warn,rtc=warn,rtc_ice=error,webrtc_ice=error,webrtc_mdns=error"
+                .into(),
+            ..default()
+        })
         .set(WindowPlugin { primary_window: Some(primary_window()), ..default() })
         .set(AssetPlugin {
             file_path: asset_file_path(),

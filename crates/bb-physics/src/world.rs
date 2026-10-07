@@ -131,6 +131,8 @@ pub enum Event {
     RopeSnapped { rope: RopeId },
     /// A joint exceeded its break stretch and was removed.
     JointBroke { joint: JointId },
+    /// A body next to a popped one was granted pop immunity ("phew!").
+    Spared { body: BodyId },
 }
 
 struct Slot {
@@ -689,20 +691,19 @@ impl World {
             b.enabled = false;
             b.strain_time = 0.0;
             self.events.push(Event::Popped { body: id, position: pos, velocity: vel, cause });
-            let neighbours = self.neighbours.get(&id).cloned().unwrap_or_default();
-            for n in neighbours {
+            // Neighbours in either direction get immunity.
+            let mut spared = self.neighbours.get(&id).cloned().unwrap_or_default();
+            spared.extend(self.neighbours.iter().filter(|(_, v)| v.contains(&id)).map(|(k, _)| *k));
+            spared.sort();
+            spared.dedup();
+            for n in spared {
                 if let Some(nb) = self.body_mut(n) {
+                    let was_straining = nb.strain_time > 0.0 && nb.params.limits.poppable;
                     nb.immunity = nb.immunity.max(immunity);
                     nb.strain_time = 0.0;
-                }
-            }
-            // Anything that touched the popped body counts as a neighbour too.
-            let touched_by: Vec<BodyId> =
-                self.neighbours.iter().filter(|(_, v)| v.contains(&id)).map(|(k, _)| *k).collect();
-            for n in touched_by {
-                if let Some(nb) = self.body_mut(n) {
-                    nb.immunity = nb.immunity.max(immunity);
-                    nb.strain_time = 0.0;
+                    if was_straining {
+                        self.events.push(Event::Spared { body: n });
+                    }
                 }
             }
             self.detach_all(id);

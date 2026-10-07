@@ -82,10 +82,86 @@ fn dynamic_bodies(sim: &Sim) -> Vec<(BodyId, BodyTag)> {
     v
 }
 
+/// Ids of `plate:<id>` story triggers that a player, NPC or prop is on.
+pub(crate) fn pressed_plates(sim: &Sim) -> Vec<String> {
+    let mut out = Vec::new();
+    let bodies = dynamic_bodies(sim);
+    for st in &sim.level.story {
+        let Some(id) = st.script.strip_prefix("plate:") else { continue };
+        let poly = st.shape.outline();
+        let bb = bb_physics::Aabb::from_points(poly.iter().copied());
+        let hit = bodies.iter().any(|(b, _)| {
+            sim.world.body(*b).is_some_and(|b| {
+                b.enabled && b.aabb.overlaps(&bb) && b.boundary.iter().any(|&i| geom::point_in_polygon(b.x[i as usize], &poly))
+            })
+        });
+        if hit {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum PlateMode {
+    Held,
+    Toggle,
+    Once,
+}
+
+/// Parse a mover trigger spec: `a|b` (any), `a&b` (all), optional
+/// `#toggle` / `#once` suffix.
+fn plate_condition(spec: &str, pressed: &[String]) -> (bool, PlateMode) {
+    let (ids, mode) = match spec.split_once('#') {
+        Some((ids, "toggle")) => (ids, PlateMode::Toggle),
+        Some((ids, "once")) => (ids, PlateMode::Once),
+        Some((ids, _)) => (ids, PlateMode::Held),
+        None => (spec, PlateMode::Held),
+    };
+    let on = |id: &str| pressed.iter().any(|p| p == id.trim());
+    let cond = if ids.contains('&') { ids.split('&').all(on) } else { ids.split('|').any(on) };
+    (cond, mode)
+}
+
 pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
     // Movers.
     let t = sim.time;
-    for m in sim.movers.iter() {
+    let plates = if sim.movers.iter().any(|m| !m.def.trigger.is_empty()) { pressed_plates(sim) } else { Vec::new() };
+    for m in sim.movers.iter_mut() {
+        if !m.def.trigger.is_empty() {
+            // Plate-driven: travel to the end of the path while the plate
+            // condition holds (or is latched), back to rest otherwise.
+            let (cond, mode) = plate_condition(&m.def.trigger, &plates);
+            let target = match mode {
+                PlateMode::Held => cond,
+                PlateMode::Toggle => {
+                    if cond && !m.pressed {
+                        m.latched = !m.latched;
+                    }
+                    m.latched
+                }
+                PlateMode::Once => {
+                    m.latched |= cond;
+                    m.latched
+                }
+            };
+            m.pressed = cond;
+            m.active = target;
+            let half = (m.def.period * 0.5).max(0.05);
+            let goal = if target { 1.0 } else { 0.0 };
+            let before = m.progress;
+            m.progress += (goal - m.progress).clamp(-dt / half, dt / half);
+            if before == m.progress && m.progress == 0.0 {
+                continue;
+            }
+            let mut def = m.def.clone();
+            def.motion = bb_level::MoverMotion::PingPong;
+            def.phase = 0.0;
+            let (off, _) = mover_offset(&def, m.progress * half);
+            let poly: Vec<Vec2> = m.base.iter().map(|p| *p + off).collect();
+            sim.world.move_static(m.id, poly);
+            continue;
+        }
         if !m.active {
             continue;
         }
@@ -284,6 +360,9 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
         }
     }
     for (i, st) in sim.level.story.clone().iter().enumerate() {
+        if st.script.starts_with("plate:") {
+            continue;
+        }
         if st.once && sim.story_fired[i] {
             continue;
         }

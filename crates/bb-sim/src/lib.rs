@@ -6,6 +6,7 @@
 
 pub mod control;
 pub mod load;
+pub mod modes;
 pub mod npc;
 mod runtime;
 
@@ -55,6 +56,12 @@ pub struct MoverState {
     pub id: StaticId,
     pub base: Vec<Vec2>,
     pub active: bool,
+    /// Plate-driven movers: 0 = authored pose, 1 = end of the path.
+    pub progress: f32,
+    /// Plate-driven movers: latched open (`#toggle` / `#once`).
+    pub latched: bool,
+    /// Plate condition last step (edge detection for `#toggle`).
+    pub pressed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +99,8 @@ pub enum SimEvent {
     Spring { index: usize },
     Action { who: Who, action: Action },
     NpcFreed { index: u16 },
+    /// A blob was squeezed next to a crush but spared.
+    Phew { body: BodyId },
 }
 
 pub struct Sim {
@@ -116,6 +125,8 @@ pub struct Sim {
     pub events: Vec<SimEvent>,
     /// Gameplay toggles (Kids Mode disables popping, etc.).
     pub rules: Rules,
+    /// Ignore player input (match countdown / results).
+    pub input_frozen: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +164,7 @@ impl Sim {
             time: 0.0,
             events: Vec::new(),
             rules: Rules::default(),
+            input_frozen: false,
             level: level.clone(),
         };
         load::load(&mut sim, &level);
@@ -214,6 +226,7 @@ impl Sim {
     }
 
     pub fn set_input(&mut self, slot: u8, input: Input) {
+        let input = if self.input_frozen { Input::default() } else { input };
         if let Some(p) = self.player_mut(slot) {
             p.ctl.input = input;
         }
@@ -290,6 +303,7 @@ impl Sim {
         for e in self.world.drain_events() {
             match e {
                 Event::Popped { body, position, .. } => self.on_popped(body, position),
+                Event::Spared { body } => self.events.push(SimEvent::Phew { body }),
                 Event::Impact { body, point, speed, .. } => {
                     self.events.push(SimEvent::Impact { body, pos: point, speed })
                 }
@@ -325,6 +339,26 @@ impl Sim {
     /// Bodies that belong to a role, for rendering.
     pub fn tag(&self, id: BodyId) -> Option<BodyTag> {
         self.tags.get(&id).copied()
+    }
+
+    /// Add an arbitrary body (menu buttons, title letters, cutscene props).
+    pub fn add_body(&mut self, desc: physics::BodyDesc, tag: BodyTag) -> BodyId {
+        let id = self.world.add_body(desc);
+        self.tags.insert(id, tag);
+        id
+    }
+
+    pub fn remove_body(&mut self, id: BodyId) {
+        self.tags.remove(&id);
+        self.world.remove_body(id);
+    }
+
+    pub fn npc_by_id(&self, id: &str) -> Option<&Npc> {
+        self.npcs.iter().find(|n| n.id == id)
+    }
+
+    pub fn npc_by_id_mut(&mut self, id: &str) -> Option<&mut Npc> {
+        self.npcs.iter_mut().find(|n| n.id == id)
     }
 
     pub fn npc_role(&self, i: u16) -> Option<&NpcRole> {

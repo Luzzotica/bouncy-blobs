@@ -99,3 +99,18 @@ and crushes cascaded.
 11. Remove the TS app (keep `web-controller/`).
 
 The story bible is in [`Story.md`](Story.md).
+
+## Editor & legacy levels
+
+* `bb_level::legacy::import_legacy` converts v1 (TS app) JSON: y-down → y-up,
+  scaled 2/3 to the 32 px blob. Lossy cases come back as notes
+  (`import_legacy_with`). Pressure plates become `plate:<id>` story
+  triggers; `movePoints` actions become movers whose `trigger` names the
+  plates (`a|b` any, `a&b` all, `#toggle`, `#once`). bb-sim drives them.
+* The 27 legacy levels are converted into `crates/bb-game/assets/levels/party/`
+  (`cargo run -p bb-level --example convert_legacy`; a test fails if stale).
+* In-game editor: `crates/bb-game/src/editor/` (`AppState::Editor`).
+  `BB_START=editor BB_EDIT_LEVEL=<party id|map id|path>` boots into it.
+  Maps live in `<data dir>/me.sterlinglong.bouncyblobs/maps-v3/` (web:
+  localStorage). Dev hooks for screenshots: `BB_EDIT_SELECT=kind:i`,
+  `BB_EDIT_TOOL=<name>`, `BB_EDIT_PLAY=<frame>`, `BB_EDIT_BACK=<frames>`.

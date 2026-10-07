@@ -69,6 +69,11 @@ pub struct Controller {
     pub stuck: Option<Vec2>,
     /// Movement strength multiplier (NPCs are a bit slower).
     pub strength: f32,
+    /// Scripted puff: inflate toward this scale without jumping.
+    pub puff: Option<f32>,
+    /// Rest-scale target while the button is held (Kids Mode puffs a
+    /// picked-up blob bigger than a normal expand).
+    pub expand_scale: f32,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -83,9 +88,12 @@ pub enum Action {
 impl Controller {
     pub fn spawn(world: &mut World, at: Vec2, radius: f32, layer_bits: u32) -> Controller {
         let mut d = BodyDesc::blob(at, radius, tune::SEGMENTS, tune::MASS * (radius / tune::RADIUS).powi(2));
-        d.params.volume_compliance = 2e-7;
-        d.params.shape_compliance = Some(6e-6);
-        d.params.edge_compliance = 4e-7;
+        // Shape matching is what makes a blob feel rigid: at 720 Hz substeps
+        // a compliance around 1e-5 snaps ~50% back to shape every substep.
+        // 3e-3 gives a ~1.5× squash on a hard landing and still recovers.
+        d.params.volume_compliance = 1e-6;
+        d.params.shape_compliance = Some(3e-3);
+        d.params.edge_compliance = 1e-5;
         d.params.internal_damping = 3.0;
         d.params.linear_damping = 0.0;
         d.params.radius = 2.0;
@@ -108,6 +116,8 @@ impl Controller {
             climb_timer: 0.0,
             stuck: None,
             strength: 1.0,
+            puff: None,
+            expand_scale: tune::EXPAND_SCALE,
         }
     }
 
@@ -150,7 +160,7 @@ impl Controller {
         let vel = body.velocity();
 
         // Expand / relax.
-        let target = if self.input.button { tune::EXPAND_SCALE } else { 1.0 };
+        let target = self.puff.unwrap_or(if self.input.button { self.expand_scale } else { 1.0 });
         let rate = if target > self.expand { tune::EXPAND_RATE } else { tune::RELAX_RATE };
         self.expand += (target - self.expand) * (1.0 - (-rate * dt).exp());
 

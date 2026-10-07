@@ -25,6 +25,9 @@ pub mod layer {
     pub const ROPE: u32 = 8;
     pub const NPC: u32 = 16;
     pub const UI: u32 = 32;
+    /// Jelly ground tiles and soft platforms: never collide with each
+    /// other (adjacent tiles would push apart and open seams).
+    pub const JELLY: u32 = 64;
 }
 
 pub(crate) fn load(sim: &mut Sim, level: &Level) {
@@ -53,7 +56,8 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         d.params.internal_damping = 6.0;
         d.params.gravity_scale = 0.0;
         d.params.radius = 1.5;
-        d.layer = layer::WORLD;
+        d.layer = layer::WORLD | layer::JELLY;
+        d.mask = !layer::JELLY;
         let id = w.add_body(d);
         // Wobble 0 → firm (1e-6), wobble 1 → very jiggly (4e-5).
         w.body_mut(id).unwrap().anchor_home(1e-6 + 4e-5 * j.wobble * j.wobble);
@@ -79,7 +83,8 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         d.params.shape_compliance = Some(5e-6 * (1.0 - stiff) + 2e-8);
         d.params.internal_damping = 4.0;
         d.params.radius = 1.5;
-        d.layer = layer::WORLD;
+        d.layer = layer::WORLD | layer::JELLY;
+        d.mask = !layer::JELLY;
         let pins = p.pins;
         let id = w.add_body(d);
         {
@@ -133,7 +138,7 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         };
         d.params.material = material(p.material);
         d.params.limits.poppable = false;
-        d.params.shape_compliance = Some(3e-6);
+        d.params.shape_compliance = Some(4e-4);
         d.layer = layer::PROP;
         let id = w.add_body(d);
         if p.pinned {
@@ -152,7 +157,15 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         let mut d = StaticDesc::polygon(poly.clone());
         d.material = material(m.material);
         let id = w.add_static(d);
-        sim.movers.push(MoverState { def: m.clone(), id, base: phys_ccw(poly), active: m.trigger.is_empty() });
+        sim.movers.push(MoverState {
+            def: m.clone(),
+            id,
+            base: phys_ccw(poly),
+            active: m.trigger.is_empty(),
+            progress: 0.0,
+            latched: false,
+            pressed: false,
+        });
     }
 
     for r in &level.ropes {
@@ -179,7 +192,7 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
             b.layer = layer::ROPE;
             // Ropes only collide with the world and props, not players
             // (players grab them instead).
-            b.mask = layer::WORLD | layer::PROP;
+            b.mask = layer::WORLD | layer::PROP | layer::JELLY;
         }
         sim.tags.insert(body, BodyTag::Rope);
         sim.ropes.push(RopeState { id: r.id.clone(), rope: id, grabbable: r.grabbable, style: r.style });

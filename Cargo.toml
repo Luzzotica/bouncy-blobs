@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/bb-physics", "crates/bb-level", "crates/bb-sim", "crates/bb-game", "crates/bb-mobile"]
+members = ["crates/bb-physics", "crates/bb-level", "crates/bb-sim", "crates/bb-net", "crates/bb-game", "crates/bb-mobile"]
 # Legacy fixed-point crates + Tauri shell: reference only until the Bevy port
 # reaches parity, then deleted.
 exclude = ["crates/softbody", "crates/softbody-wasm", "src-tauri"]

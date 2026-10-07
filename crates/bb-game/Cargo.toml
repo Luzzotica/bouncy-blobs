@@ -19,19 +19,31 @@ default = []
 # Desktop-only fast iteration: `cargo run -p bb-game --features dev`.
 # Never enable for iOS, Android or web (dynamic linking is unsupported there).
 dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
+# Desktop Steam builds only (steamworks can't link on mobile/web).
+steam = ["dep:steamworks"]
 
 [dependencies]
 bb-physics = { path = "../bb-physics" }
 bb-level = { path = "../bb-level" }
 bb-sim = { path = "../bb-sim" }
+bb-net = { path = "../bb-net" }
+qrcode = { version = "0.14", default-features = false }
 glam.workspace = true
+steamworks = { version = "0.13", optional = true }
 bevy = { version = "0.19.1", default-features = false, features = [
     "2d", "ui", "audio", "mp3", "wav", "vorbis", "default_font", "png",
 ] }
+bevy_egui = { version = "0.42", default-features = false, features = ["render", "default_fonts", "manage_clipboard"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "6"
 
 # Web: browser time source + getrandom's wasm_js backend (no RUSTFLAGS needed
 # with getrandom >= 0.3.4).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Storage"] }
 bevy = { version = "0.19.1", default-features = false, features = ["web"] }
 getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
 getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

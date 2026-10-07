@@ -1,0 +1,316 @@
+{
+  "name": "Simple Race",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing",
+    "team_racing"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_1",
+      "x": -1430,
+      "y": 1020,
+      "width": 1620,
+      "height": 880,
+      "rotation": 0
+    },
+    {
+      "id": "plat_9",
+      "x": -2470,
+      "y": 70,
+      "width": 660,
+      "height": 260,
+      "rotation": 2.6179938779914944
+    },
+    {
+      "id": "plat_10",
+      "x": -2780,
+      "y": -20,
+      "width": 280,
+      "height": 200,
+      "rotation": 1.0471975511965976
+    },
+    {
+      "id": "plat_15",
+      "x": -520,
+      "y": 1100,
+      "width": 560,
+      "height": 720,
+      "rotation": 0
+    },
+    {
+      "id": "plat_16",
+      "x": 630,
+      "y": 1020,
+      "width": 2020,
+      "height": 880,
+      "rotation": 0
+    },
+    {
+      "id": "plat_18",
+      "x": -710,
+      "y": -510,
+      "width": 220,
+      "height": 500,
+      "rotation": 0
+    },
+    {
+      "id": "plat_19",
+      "x": -300,
+      "y": 2000,
+      "width": 4880,
+      "height": 200,
+      "rotation": 0
+    },
+    {
+      "id": "plat_23",
+      "x": 2310,
+      "y": 250,
+      "width": 340,
+      "height": 3380,
+      "rotation": 0
+    },
+    {
+      "id": "plat_28",
+      "x": -2720,
+      "y": 1110,
+      "width": 200,
+      "height": 1580,
+      "rotation": 0
+    },
+    {
+      "id": "plat_29",
+      "x": -490,
+      "y": -1250,
+      "width": 5300,
+      "height": 380,
+      "rotation": 0
+    },
+    {
+      "id": "plat_32",
+      "x": -3000,
+      "y": -570,
+      "width": 280,
+      "height": 980,
+      "rotation": 0
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": -2040,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_2",
+      "x": -1900,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_3",
+      "x": -1760,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_4",
+      "x": -1600,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_5",
+      "x": -1440,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_6",
+      "x": -1280,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_7",
+      "x": -1120,
+      "y": 400,
+      "type": "player"
+    },
+    {
+      "id": "sp_8",
+      "x": -960,
+      "y": 400,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    {
+      "id": "goal_12",
+      "x": 1450,
+      "y": 510,
+      "width": 380,
+      "height": 140
+    }
+  ],
+  "springPads": [
+    {
+      "id": "spring_13",
+      "x": -65,
+      "y": -532.5,
+      "width": 150,
+      "height": 55,
+      "rotation": -2.094395102393195,
+      "fireSpeed": 2500
+    },
+    {
+      "id": "spring_14",
+      "x": -285,
+      "y": 327.5,
+      "width": 150,
+      "height": 55,
+      "rotation": 3.141592653589793,
+      "fireSpeed": 2500
+    },
+    {
+      "id": "spring_34",
+      "x": -285,
+      "y": -172.5,
+      "width": 150,
+      "height": 55,
+      "rotation": 3.141592653589793,
+      "fireSpeed": 2500
+    }
+  ],
+  "spikes": [
+    {
+      "id": "spike_20",
+      "x": -1040,
+      "y": 1910,
+      "width": 880,
+      "height": 60,
+      "rotation": 0
+    },
+    {
+      "id": "spike_21",
+      "x": 300,
+      "y": 1450,
+      "width": 880,
+      "height": 60,
+      "rotation": -3.1415926535897927
+    },
+    {
+      "id": "spike_24",
+      "x": 2130,
+      "y": 1000,
+      "width": 620,
+      "height": 40,
+      "rotation": -1.5707963267948957
+    }
+  ],
+  "gravityZones": [
+    {
+      "id": "grav_25",
+      "x": 1910,
+      "y": 900,
+      "width": 460,
+      "height": 1480,
+      "field": {
+        "kind": "uniform",
+        "vector": {
+          "x": 1000,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trig_26",
+      "x": -2610,
+      "y": -80,
+      "width": 260,
+      "height": 200,
+      "rotation": 1.0471975511965976,
+      "chargeSeconds": 1
+    }
+  ],
+  "actions": [
+    {
+      "id": "act_27",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_10",
+          "endX": -2180,
+          "endY": -360
+        }
+      ],
+      "duration": 0.25,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_26"
+      ],
+      "requireMode": "any",
+      "mode": "continuous"
+    }
+  ],
+  "pointShapes": [
+    {
+      "id": "shape_33",
+      "points": [
+        {
+          "x": 440,
+          "y": -540,
+          "anchored": false
+        },
+        {
+          "x": 240,
+          "y": -180,
+          "anchored": false
+        },
+        {
+          "x": 340,
+          "y": 100,
+          "anchored": false
+        },
+        {
+          "x": 1200,
+          "y": -20,
+          "anchored": false
+        },
+        {
+          "x": 1240,
+          "y": -440,
+          "anchored": false
+        },
+        {
+          "x": 880,
+          "y": -700,
+          "anchored": false
+        }
+      ],
+      "edges": [],
+      "closed": true,
+      "pinned": true,
+      "frameLocked": true
+    }
+  ],
+  "deathZones": [
+    {
+      "id": "death_35",
+      "x": -660,
+      "y": 3760,
+      "width": 10160,
+      "height": 1600
+    }
+  ]
+}

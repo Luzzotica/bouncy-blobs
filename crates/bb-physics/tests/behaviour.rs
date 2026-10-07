@@ -272,3 +272,31 @@ fn pick_finds_tapped_body() {
     assert_eq!(w.pick(Vec2::new(200.0, 130.0), u32::MAX), Some(a));
     assert_eq!(w.pick(Vec2::new(500.0, 130.0), u32::MAX), None);
 }
+
+#[test]
+fn blob_morphs_to_new_rest_shape() {
+    let mut w = world();
+    let id = w.add_body(BodyDesc::blob(Vec2::new(0.0, 60.0), 32.0, 22, 1.0));
+    run(&mut w, 0.5);
+    // A 5-point star: every corner must survive the resample.
+    let star: Vec<Vec2> = (0..10)
+        .map(|i| {
+            let a = std::f32::consts::FRAC_PI_2 + i as f32 / 10.0 * std::f32::consts::TAU;
+            Vec2::new(a.cos(), a.sin()) * if i % 2 == 0 { 40.0 } else { 16.0 }
+        })
+        .collect();
+    let star_area = geom::signed_area_slice(&star);
+    assert!(w.body_mut(id).unwrap().set_rest_shape(&star));
+    let b = w.body(id).unwrap();
+    assert!((b.rest_area - star_area).abs() < 1.0, "rest area {} vs {}", b.rest_area, star_area);
+    assert!(b.rest.iter().any(|r| (r.length() - 40.0).abs() < 1.0), "star tip kept");
+    run(&mut w, 1.5);
+    let b = w.body(id).unwrap();
+    let ratio = b.area().abs() / star_area;
+    assert!((ratio - 1.0).abs() < 0.15, "settled into the star: area ratio {ratio}");
+    let far = b.outline().map(|p| p.distance(b.centroid())).fold(0.0, f32::max);
+    assert!(far > 34.0, "tips poke out past the old circle radius: {far}");
+    // Meshes refuse.
+    let m = w.add_body(BodyDesc::grid(Vec2::new(-50.0, 300.0), Vec2::new(50.0, 340.0), 4, 2, 1.0));
+    assert!(!w.body_mut(m).unwrap().set_rest_shape(&star));
+}

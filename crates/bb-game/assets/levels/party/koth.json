@@ -1,0 +1,365 @@
+{
+  "version": 3,
+  "id": "koth",
+  "name": "King of the Hill Arena",
+  "theme": "party",
+  "modes": [
+    "koth"
+  ],
+  "spawn": [
+    266.6667,
+    -1066.6667
+  ],
+  "kill_y": -1666.6666,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1066.6667,
+          -800.0
+        ],
+        "size": [
+          333.33334,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          733.3334,
+          -933.3334
+        ],
+        "size": [
+          266.6667,
+          60.0
+        ],
+        "angle": 0.3
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1400.0,
+          -933.3334
+        ],
+        "size": [
+          266.6667,
+          60.0
+        ],
+        "angle": -0.3
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          333.33334,
+          -1133.3334
+        ],
+        "size": [
+          333.33334,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1800.0,
+          -1133.3334
+        ],
+        "size": [
+          333.33334,
+          80.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          533.3334,
+          -666.6667
+        ],
+        "size": [
+          200.0,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1600.0,
+          -666.6667
+        ],
+        "size": [
+          200.0,
+          60.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          800.0,
+          -700.0
+        ],
+        "size": [
+          100.0,
+          50.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1333.3334,
+          -700.0
+        ],
+        "size": [
+          100.0,
+          50.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1466.6667
+          ],
+          [
+            -66.66667,
+            -1466.6667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -1600.0
+          ],
+          [
+            0.0,
+            -1600.0
+          ],
+          [
+            0.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            2133.3335,
+            -1600.0
+          ],
+          [
+            2200.0,
+            -1600.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            2133.3335,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "poly",
+        "points": [
+          [
+            -66.66667,
+            -0.0
+          ],
+          [
+            2200.0,
+            -0.0
+          ],
+          [
+            2200.0,
+            66.66667
+          ],
+          [
+            -66.66667,
+            66.66667
+          ]
+        ]
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [],
+  "ropes": [],
+  "zones": [],
+  "springs": [
+    {
+      "pos": [
+        341.0,
+        -1106.721
+      ],
+      "angle": 1.0471976,
+      "width": 213.33334,
+      "power": 650.0
+    },
+    {
+      "pos": [
+        1792.3334,
+        -1106.721
+      ],
+      "angle": 2.0943952,
+      "width": 213.33334,
+      "power": 650.0
+    }
+  ],
+  "spikes": [
+    {
+      "a": [
+        766.6667,
+        -1440.0
+      ],
+      "b": [
+        900.00006,
+        -1440.0
+      ]
+    },
+    {
+      "a": [
+        1233.3334,
+        -1440.0
+      ],
+      "b": [
+        1366.6666,
+        -1440.0
+      ]
+    },
+    {
+      "a": [
+        1166.6667,
+        -26.666677
+      ],
+      "b": [
+        966.66675,
+        -26.666658
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [
+    [
+      533.3334,
+      -600.0
+    ],
+    [
+      1600.0,
+      -600.0
+    ],
+    [
+      1066.6667,
+      -1066.6667
+    ]
+  ],
+  "npcs": [
+    {
+      "id": "npc1",
+      "pos": [
+        1066.6667,
+        -733.3334
+      ],
+      "role": "huddle",
+      "color": "",
+      "radius": 32.0
+    }
+  ],
+  "goal": null,
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        1066.6667,
+        -733.3334
+      ],
+      "size": [
+        333.33334,
+        166.66667
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}

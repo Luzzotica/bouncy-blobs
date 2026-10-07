@@ -1,17 +1,40 @@
 //! Bouncy Blobs — the Bevy app.
 
+pub mod achievements;
+pub mod assets;
+pub mod audio;
 pub mod camera;
 pub mod devtools;
+pub mod editor;
 pub mod flow;
+pub mod fx;
+pub mod hud;
 pub mod input;
+pub mod kids;
 pub mod level_view;
+pub mod menu;
+pub mod net;
 pub mod palette;
+pub mod party;
+pub mod party_assets;
+pub mod pause;
 pub mod platform;
 pub mod render;
 pub mod sandbox;
+pub mod save;
 pub mod sim;
+pub mod story;
+pub mod story_iface;
 
 use bevy::prelude::*;
+
+pub use bb_sim::load::layer as load_layer;
+
+/// A cheerful colour per index (chapter buttons, confetti).
+pub fn palette_cycle(i: usize) -> u32 {
+    const C: [u32; 10] = [0xff5d73, 0xff9f43, 0xffd93d, 0x6bcb77, 0x4d96ff, 0x9b5de5, 0xf15bb5, 0x00c2a8, 0x5dd6ff, 0xa0e426];
+    C[i % C.len()]
+}
 
 pub fn run() {
     app().run();
@@ -33,14 +56,28 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(0.1, 0.07, 0.14)))
             .add_plugins((
+                assets::AssetsPlugin,
                 flow::FlowPlugin,
+                fx::FxPlugin,
+                hud::HudPlugin,
                 sim::SimPlugin,
                 input::InputPlugin,
                 camera::CameraPlugin,
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
+            ))
+            .add_plugins((
+                story::StoryPlugin,
+                menu::MenuPlugin,
+                party::PartyPlugin,
+                pause::PausePlugin,
+                achievements::AchievementsPlugin,
                 devtools::DevToolsPlugin,
+                audio::GameAudioPlugin,
+                kids::KidsPlugin,
+                editor::EditorPlugin,
+                net::NetPlugin,
             ));
     }
 }
