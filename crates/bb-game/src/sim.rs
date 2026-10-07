@@ -60,8 +60,35 @@ impl Plugin for SimPlugin {
     }
 }
 
-fn load_levels(mut commands: Commands, mut reader: MessageReader<LoadLevel>) {
-    if let Some(req) = reader.read().last() {
+/// A load waiting one frame for the previous level to be torn down.
+#[derive(Resource)]
+struct PendingLoad(LoadLevel);
+
+/// Swapping levels removes the old `Game` for one frame before inserting the
+/// new one, so every presentation system sees a clean removed → added edge
+/// (and body ids from the old world can never alias the new one).
+fn load_levels(mut commands: Commands, mut reader: MessageReader<LoadLevel>, existing: Option<Res<Game>>, pending: Option<Res<PendingLoad>>) {
+    let req = reader.read().last().cloned();
+    let req = match (req, pending) {
+        (Some(r), _) => {
+            commands.remove_resource::<PendingLoad>();
+            r
+        }
+        (None, Some(p)) => {
+            commands.remove_resource::<PendingLoad>();
+            if existing.is_some() {
+                return;
+            }
+            p.0.clone()
+        }
+        (None, None) => return,
+    };
+    if existing.is_some() {
+        commands.remove_resource::<Game>();
+        commands.insert_resource(PendingLoad(req));
+        return;
+    }
+    {
         let mut game = Game::new(req.level.clone());
         for (slot, name, color) in &req.players {
             game.sim.add_player(*slot, name, *color);
