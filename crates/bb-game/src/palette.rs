@@ -42,6 +42,16 @@ pub struct ThemeColors {
     pub accent: Color,
     pub glow: Color,
     pub water: Color,
+    /// Black-cave look: black stone, near-black sky, luminous life.
+    /// False for the daylight finale (Well, Playroom) and Kids Mode.
+    pub dark: bool,
+    /// Glow-mushroom colour (per-theme tint of the luminous accents).
+    pub mush: Color,
+    /// Crystal / glowworm colour.
+    pub crystal: Color,
+    /// Checkpoint lantern flowers: cool cyan-white everywhere, so they never
+    /// read as mushrooms.
+    pub lantern: Color,
 }
 
 pub fn theme(t: Theme) -> ThemeColors {
@@ -61,19 +71,62 @@ pub fn theme(t: Theme) -> ThemeColors {
         Theme::Kids => (0xfff3d6, 0xfffae6, 0xd9c8f5, 0xa8e6cf, 0xff8fab),
         Theme::Party => (0x232946, 0x3e4a89, 0x5b5f97, 0xeebbc3, 0xffd803),
     };
+    // Luminous accents for the black cave: (jelly, mushroom, crystal, drop glow).
+    let cave = match t {
+        Theme::Hollow => Some((0xc98cff, 0xd77bff, 0x9fb8ff, 0xffd27a)),
+        Theme::Drip => Some((0x5fe3d0, 0x6dffb0, 0x8ff7ff, 0xc8ff7d)),
+        Theme::Fungus => Some((0xff7fb0, 0xff4fa0, 0xff9be8, 0xffd0ea)),
+        Theme::Vines => Some((0x7fe08a, 0x8dff6a, 0xc6ff8a, 0xeaff86)),
+        Theme::Stoneworks => Some((0xffa86b, 0xff9a3d, 0xffc98a, 0xffd38a)),
+        Theme::Lake => Some((0x6fb8ff, 0x4fa8ff, 0x8fd8ff, 0xc4ecff)),
+        Theme::Chimney => Some((0xb7a4ff, 0xc08bff, 0xffc9a0, 0xffe0b8)),
+        Theme::Toys => Some((0xffc94d, 0x2ee6b0, 0xff8fd0, 0xff9fc0)),
+        Theme::CaveIn => Some((0xff8a6a, 0xff5a5a, 0xffb070, 0xffc0a0)),
+        Theme::Party => Some((0xff9fd0, 0xffd803, 0x8fd8ff, 0xfff27a)),
+        Theme::Well | Theme::Playroom | Theme::Kids => None,
+    };
     let rock_c = hex(rock);
     let jelly_c = hex(jelly);
-    ThemeColors {
-        sky_top: hex(sky_top),
-        sky_bottom: hex(sky_bottom),
-        far: mix(hex(sky_bottom), rock_c, 0.35),
-        rock: rock_c,
-        rock_rim: darken(rock_c, 0.35),
-        jelly: jelly_c,
-        jelly_rim: darken(jelly_c, 0.3),
-        accent: hex(accent),
-        glow: lighten(hex(accent), 0.4),
-        water: Color::srgba(0.35, 0.65, 1.0, 0.35),
+    let lantern = hex(0x8ff8ff);
+    match cave {
+        Some((jelly, mush, crystal, glow)) => {
+            let j = hex(jelly);
+            // A breath of the theme hue in the black so each chapter keeps
+            // its mood without lifting the backdrop.
+            let tint = |k: f32| mix(Color::BLACK, j, k);
+            ThemeColors {
+                sky_top: tint(0.02),
+                sky_bottom: tint(0.075),
+                far: tint(0.105),
+                rock: Color::BLACK,
+                rock_rim: tint(0.2),
+                jelly: j,
+                jelly_rim: lighten(j, 0.45),
+                accent: hex(accent),
+                glow: hex(glow),
+                water: Color::srgba(0.3, 0.6, 1.0, 0.28),
+                dark: true,
+                mush: hex(mush),
+                crystal: hex(crystal),
+                lantern,
+            }
+        }
+        None => ThemeColors {
+            sky_top: hex(sky_top),
+            sky_bottom: hex(sky_bottom),
+            far: mix(hex(sky_bottom), rock_c, 0.35),
+            rock: rock_c,
+            rock_rim: darken(rock_c, 0.35),
+            jelly: jelly_c,
+            jelly_rim: darken(jelly_c, 0.3),
+            accent: hex(accent),
+            glow: lighten(hex(accent), 0.4),
+            water: Color::srgba(0.35, 0.65, 1.0, 0.35),
+            dark: false,
+            mush: lighten(hex(accent), 0.1),
+            crystal: lighten(hex(accent), 0.4),
+            lantern: hex(0x5fd8ff),
+        },
     }
 }
 
