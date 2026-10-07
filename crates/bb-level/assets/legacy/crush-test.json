@@ -1,0 +1,133 @@
+{
+  "name": "Crush Test",
+  "version": 1,
+  "levelTypes": [
+    "solo_racing"
+  ],
+  "bounds": {
+    "width": 4400,
+    "height": 2248
+  },
+  "platforms": [
+    {
+      "id": "plat_305",
+      "x": -60,
+      "y": -150,
+      "width": 1040,
+      "height": 220,
+      "rotation": 0
+    },
+    {
+      "id": "plat_306",
+      "x": -60,
+      "y": -720,
+      "width": 920,
+      "height": 440,
+      "rotation": 0
+    },
+    {
+      "id": "plat_307",
+      "x": 1400,
+      "y": -150,
+      "width": 880,
+      "height": 220,
+      "rotation": 0
+    },
+    {
+      "id": "plat_308",
+      "x": 1680,
+      "y": -560,
+      "width": 600,
+      "height": 280,
+      "rotation": 0.2617993877991494
+    },
+    {
+      "id": "plat_309",
+      "x": 1120,
+      "y": -600,
+      "width": 760,
+      "height": 320,
+      "rotation": -0.2617993877991494
+    }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    {
+      "id": "sp1",
+      "x": -60,
+      "y": -380,
+      "type": "player"
+    },
+    {
+      "id": "sp_310",
+      "x": 1380,
+      "y": -340,
+      "type": "player"
+    }
+  ],
+  "npcBlobs": [],
+  "actions": [
+    {
+      "id": "act_311",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_306",
+          "endX": -60,
+          "endY": -40
+        }
+      ],
+      "duration": 1,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_313"
+      ],
+      "requireMode": "any",
+      "mode": "switch"
+    },
+    {
+      "id": "act_312",
+      "kind": "movePoints",
+      "targets": [
+        {
+          "kind": "platform",
+          "platformId": "plat_309",
+          "endX": 1140,
+          "endY": 20
+        },
+        {
+          "kind": "platform",
+          "platformId": "plat_308",
+          "endX": 1640,
+          "endY": 20
+        }
+      ],
+      "duration": 1,
+      "easing": "easeInOut",
+      "sourceTriggerIds": [
+        "trig_314"
+      ],
+      "requireMode": "any",
+      "mode": "switch"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trig_313",
+      "x": -60,
+      "y": -350,
+      "width": 920,
+      "height": 180,
+      "rotation": 0
+    },
+    {
+      "id": "trig_314",
+      "x": 1400,
+      "y": -350,
+      "width": 880,
+      "height": 180,
+      "rotation": 0
+    }
+  ]
+}

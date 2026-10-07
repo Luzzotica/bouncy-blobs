@@ -157,7 +157,15 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         let mut d = StaticDesc::polygon(poly.clone());
         d.material = material(m.material);
         let id = w.add_static(d);
-        sim.movers.push(MoverState { def: m.clone(), id, base: phys_ccw(poly), active: m.trigger.is_empty() });
+        sim.movers.push(MoverState {
+            def: m.clone(),
+            id,
+            base: phys_ccw(poly),
+            active: m.trigger.is_empty(),
+            progress: 0.0,
+            latched: false,
+            pressed: false,
+        });
     }
 
     for r in &level.ropes {

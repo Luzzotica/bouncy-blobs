@@ -5,6 +5,7 @@ pub mod assets;
 pub mod audio;
 pub mod camera;
 pub mod devtools;
+pub mod editor;
 pub mod flow;
 pub mod fx;
 pub mod hud;
@@ -93,6 +94,7 @@ impl Plugin for GamePlugin {
                 devtools::DevToolsPlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
+                editor::EditorPlugin,
             ));
     }
 }

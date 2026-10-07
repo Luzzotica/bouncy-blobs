@@ -1,0 +1,296 @@
+{
+  "version": 3,
+  "id": "ceiling-crawl",
+  "name": "Ceiling Crawl",
+  "theme": "party",
+  "modes": [
+    "race",
+    "koth"
+  ],
+  "spawn": [
+    0.0,
+    -253.33334
+  ],
+  "kill_y": -933.3334,
+  "gravity": null,
+  "terrain": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          140.0,
+          -553.3334
+        ],
+        "size": [
+          1160.0,
+          280.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1540.0,
+          86.66667
+        ],
+        "size": [
+          1960.0,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3306.6667,
+          -520.0
+        ],
+        "size": [
+          1653.3334,
+          293.33334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          -660.0,
+          -93.333336
+        ],
+        "size": [
+          466.6667,
+          1333.3334
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          173.33334,
+          366.6667
+        ],
+        "size": [
+          1253.3334,
+          466.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1606.6667,
+          -766.6667
+        ],
+        "size": [
+          2093.3335,
+          200.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2900.0,
+          373.33334
+        ],
+        "size": [
+          146.66667,
+          720.0
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          2193.3335,
+          680.0
+        ],
+        "size": [
+          1266.6667,
+          186.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1400.0,
+          393.33334
+        ],
+        "size": [
+          346.6667,
+          466.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          3660.0,
+          380.0
+        ],
+        "size": [
+          1400.0,
+          146.66667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    },
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          4260.0,
+          -180.0
+        ],
+        "size": [
+          280.0,
+          1026.6667
+        ],
+        "angle": 0.0
+      },
+      "material": "ground",
+      "one_way": false
+    }
+  ],
+  "jelly": [],
+  "platforms": [],
+  "props": [],
+  "movers": [
+    {
+      "id": "act_57",
+      "shape": {
+        "type": "rect",
+        "center": [
+          2900.0,
+          -180.0
+        ],
+        "size": [
+          146.66667,
+          360.0
+        ],
+        "angle": 0.0
+      },
+      "path": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          326.6667,
+          326.6667
+        ]
+      ],
+      "motion": {
+        "type": "ping_pong"
+      },
+      "period": 2.0,
+      "phase": 0.0,
+      "material": "ground",
+      "trigger": "trig_56#once"
+    }
+  ],
+  "ropes": [],
+  "zones": [],
+  "springs": [],
+  "spikes": [
+    {
+      "a": [
+        720.0,
+        -673.3334
+      ],
+      "b": [
+        2480.0,
+        -673.3334
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "pickups": [],
+  "npcs": [],
+  "goal": {
+    "type": "rect",
+    "center": [
+      3860.0,
+      -200.0
+    ],
+    "size": [
+      493.33334,
+      346.6667
+    ],
+    "angle": 0.0
+  },
+  "hills": [
+    {
+      "type": "rect",
+      "center": [
+        1586.6667,
+        -66.66667
+      ],
+      "size": [
+        746.6667,
+        160.0
+      ],
+      "angle": 0.0
+    }
+  ],
+  "story": [
+    {
+      "shape": {
+        "type": "rect",
+        "center": [
+          1673.3334,
+          373.33334
+        ],
+        "size": [
+          173.33334,
+          400.0
+        ],
+        "angle": 0.0
+      },
+      "script": "plate:trig_56",
+      "once": false
+    }
+  ],
+  "decor": [],
+  "intro": "",
+  "outro": ""
+}
