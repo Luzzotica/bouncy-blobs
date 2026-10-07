@@ -82,21 +82,37 @@ and crushes cascaded.
 | Web | `wasm32-unknown-unknown` + `wasm-bindgen`, WebGL2 |
 | Tests | `cargo test --workspace` (headless: physics, level, net codecs, game logic with `MinimalPlugins`) |
 
-## Phases
+## Status (2026-10-07)
 
-1. ✅ `bb-physics` core + behavioural tests.
-2. `bb-game` skeleton: render softbodies, player controls, camera, sandbox.
-3. `bb-level` format + gameplay elements (checkpoints, springs, spikes,
-   crushers, ropes/vines, wind, water, conveyors, one-ways, goals).
-4. Story campaign: 10 long levels with checkpoints, cutscene system, story
-   beats.
-5. Softbody UI: title, menus, level select, pause.
-6. `bb-net`: phones (Lobbii + WebRTC + controller JSON), then online
-   eventual-consistency play.
-7. Kids Mode port (colors, ABC/Music/Shapes, voice clips, grab, AI friends,
-   hold-back exit).
-8. Party modes. 9. Egui editor. 10. Platform builds + CI.
-11. Remove the TS app (keep `web-controller/`).
+| Area | State |
+|---|---|
+| Physics (`bb-physics`) | ✅ XPBD core; pop limits + neighbour immunity ("phew!"); ropes (<1–2% stretch, pulleys via laid paths); dense platforms; body-level bounce. 18 behavioural tests. |
+| Gameplay (`bb-sim`) | ✅ Controller (one stick + one button), vines, swim kick, wall-cling, movers (loop/ping-pong/crusher/spin/lift/plates), zones, springs, spikes, checkpoints, NPCs, party modes. ≤2 ms/step per chapter (release, 4 players). |
+| Campaign (`bb-level::campaign`) | ✅ 10 chapters, 11–18k px each, 4–5 checkpoints, 36–53 glow drops; JSON/rest/geometry/gap audits + autopilot bot (42/51 segments; ch10 needs a smarter bot or tuning). |
+| Story | ✅ Cutscene engine (softbody puppetry), 20 intro/outro scripts, 75 mid-level beats, progress saved. |
+| Menus | ✅ Softbody title, chapter select, settings, softbody pause menu. |
+| Kids Mode + audio | ✅ Ported (see kids/), sfx/music/voice clips, blub voices. |
+| Party | ✅ Jelly lobby, drop-in, 2 built-in + 27 imported maps, Race / KOTH / Chained (real ropes). |
+| Net (`bb-net`) | ✅ Lobbii rooms + WebRTC (native + web); **deployed phone controller verified joining the native host live**; eventual-consistency screen sync; Join a Friend. |
+| Editor | ✅ egui editor + legacy importer. |
+| Platforms | ✅ macOS .app, iOS simulator + signed IPA export, web (WebGL2). ⏳ Android (needs SDK/NDK locally; CI builds it), Windows/Linux via CI. |
+| Achievements | ✅ Local everywhere; Steam with `--features steam` (app 4485010). |
+| TS app removal | ⏳ Not yet: the phone controller page is still served by the 2.x web deploy. |
+
+## Running
+
+```bash
+cargo run -p bb-game                      # the game (Title)
+BB_START=story|kids|party|editor cargo run -p bb-game
+BB_LEVEL=ch04 BB_CHECKPOINT=2 cargo run -p bb-game
+cargo test --workspace                    # 113 tests, headless
+cargo run --release -p bb-sim --example chbench
+```
+
+Multiplayer needs `BB_MP_API_KEY` (the legacy `VITE_MP_API_KEY` from
+`.env.local`; the one in `.env.production.local` is revoked). Phones join via
+the QR code (`BB_CONTROLLER_URL` overrides the controller page origin).
+See [`Platforms.md`](Platforms.md) for building and shipping each target.
 
 The story bible is in [`Story.md`](Story.md).
 
