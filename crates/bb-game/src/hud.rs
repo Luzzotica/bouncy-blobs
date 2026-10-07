@@ -1,10 +1,12 @@
-//! In-level HUD: glow-drop counter and short toasts.
+//! In-level HUD: glow-drop counter. Each digit is its own glyph and the
+//! ones that change bounce and jiggle.
 
 use bb_sim::SimEvent;
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::sim::{Game, SimMsg};
+use crate::softtext::JiggleText;
 
 #[derive(Component)]
 struct HudRoot;
@@ -37,17 +39,12 @@ fn spawn(mut commands: Commands, assets: Res<GameAssets>, game: Res<Game>) {
                 Node { width: px(26.0), height: px(32.0), border_radius: BorderRadius::all(px(13.0)), ..default() },
                 BackgroundColor(Color::srgb(1.0, 0.95, 0.64)),
             ));
-            p.spawn((
-                Text::new("0"),
-                TextFont { font: assets.font.clone().into(), font_size: 34.0.into(), weight: FontWeight::BOLD, ..default() },
-                TextColor(Color::WHITE),
-                TextShadow::default(),
-                DropCounter,
-            ));
+            let font = TextFont { font: assets.font.clone().into(), font_size: 34.0.into(), weight: FontWeight::BOLD, ..default() };
+            p.spawn((Node::default(), JiggleText::new(format!("0 / {}", game.sim.collected.len()), font, Color::WHITE).shadow(TextShadow::default()), DropCounter));
         });
 }
 
-fn update(game: Res<Game>, mut events: MessageReader<SimMsg>, mut q: Query<&mut Text, With<DropCounter>>) {
+fn update(game: Res<Game>, mut events: MessageReader<SimMsg>, mut q: Query<&mut JiggleText, With<DropCounter>>) {
     let changed = events.read().any(|SimMsg(e)| matches!(e, SimEvent::Pickup { .. }));
     if !changed && !game.is_added() {
         return;
@@ -55,7 +52,7 @@ fn update(game: Res<Game>, mut events: MessageReader<SimMsg>, mut q: Query<&mut 
     let got = game.sim.collected.iter().filter(|c| **c).count();
     let total = game.sim.collected.len();
     for mut t in q.iter_mut() {
-        t.0 = format!("{got} / {total}");
+        t.text = format!("{got} / {total}");
     }
 }
 

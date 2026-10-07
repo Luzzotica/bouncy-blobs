@@ -9,7 +9,7 @@ use bb_level::Level;
 use bb_sim::Vec2 as PVec2;
 use bevy::prelude::*;
 
-use super::bubble::{SayRequest, Speaker};
+use super::bubble::{SayRequest, Speaker, linger_secs, type_secs};
 use super::{Blub, Voice};
 use crate::camera::CameraDirector;
 use crate::sim::{Game, Inputs};
@@ -94,6 +94,12 @@ pub struct Cues {
     pub fade_speed: f32,
     pub speed_lines: bool,
     pub skip_progress: f32,
+}
+
+/// How long a `Say` beat holds the scene: the bubble finishes typing, then
+/// a beat to read it (the bubble itself lingers a little longer).
+pub fn say_wait(text: &str) -> f32 {
+    type_secs(text) + 0.9 + text.chars().count() as f32 * 0.02
 }
 
 pub fn voice_for(game: &Game, who: &str) -> Voice {
@@ -221,7 +227,7 @@ pub fn run(
                 Beat::Say { who, text } | Beat::Aside { who, text } => {
                     let voice = voice_for(&game, who);
                     let speaker = if who == "lulu" { Speaker::Offscreen } else { Speaker::Actor(who.clone()) };
-                    say.write(SayRequest { speaker, text: text.clone(), voice, linger: 1.2 + text.len() as f32 * 0.045 });
+                    say.write(SayRequest { speaker, text: text.clone(), voice, linger: linger_secs(text) });
                     blub.write(Blub { voice, syllables: (text.len() / 3).clamp(2, 16) as u8 });
                 }
                 Beat::Walk { who, x } | Beat::Stroll { who, x } => runner.strolls.push((who.clone(), *x)),
@@ -282,7 +288,7 @@ pub fn run(
         let t = runner.timer;
         let complete = match &beat {
             Beat::Title { .. } => t > 2.4 || (tapped && t > 0.4),
-            Beat::Say { text, .. } => t > 1.0 + text.len() as f32 * 0.045 || (tapped && t > 0.25),
+            Beat::Say { text, .. } => t > say_wait(text) || (tapped && t > 0.25),
             Beat::Walk { who, .. } => !runner.strolls.iter().any(|s| &s.0 == who) || t > 4.0,
             Beat::Wait(s) => t >= *s,
             Beat::Fade { secs, .. } => t >= *secs,
@@ -296,6 +302,25 @@ pub fn run(
         if matches!(beat, Beat::Say { .. } | Beat::Walk { .. } | Beat::Wait(_) | Beat::Title { .. } | Beat::Fade { .. }) {
             // Blocking beats end the frame so instant beats after them start next frame.
             return;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::bubble::{CHARS_PER_SEC, linger_secs, type_secs};
+    use super::say_wait;
+
+    #[test]
+    fn text_pacing_is_readable_and_in_sync() {
+        assert!((16.0..=18.0).contains(&CHARS_PER_SEC));
+        for text in ["Hi!", "This mushroom looks... springy.", "Mushrooms remember you. Pop all you like! Then come back and find me by the big glowing tree."] {
+            let (ty, wait, linger) = (type_secs(text), say_wait(text), linger_secs(text));
+            // A Say beat never moves on before its line has finished typing
+            // and had a moment to be read...
+            assert!(wait >= ty + 0.8, "{text}");
+            // ...and the bubble is still up when the next beat starts.
+            assert!(ty + linger > wait, "{text}");
         }
     }
 }

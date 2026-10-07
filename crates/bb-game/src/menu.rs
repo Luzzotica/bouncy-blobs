@@ -2,8 +2,9 @@
 //!
 //! Every letter of the logo and every button is a jelly body in the same
 //! physics world as your blob: tap a button and it squishes, roll into it
-//! and it wobbles, jump on the logo and it jiggles. Labels ride on top of
-//! their body (position, rotation and squash follow the jelly).
+//! and it wobbles, jump on the logo and it jiggles. Every letter of every
+//! label is its own glyph riding the jelly's deformation (see
+//! [`crate::softtext`]), and the whole page falls in from above on entry.
 
 use bb_level::{LevelBuilder, NpcRole, Theme, v};
 use bb_physics::{BodyDesc, BodyId, Vec2 as PVec2};
@@ -15,7 +16,9 @@ use crate::camera::{CameraDirector, MainCamera};
 use crate::flow::AppState;
 use crate::palette::{darken, hex, lighten};
 use crate::render::{Style, StyleOverrides, z};
+use crate::dropin::{DropIn, DropStyle};
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
+use crate::softtext::{Ride, SoftText};
 use crate::story::{CHAPTERS, StoryProgress};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,9 +62,14 @@ pub struct Menu {
     pub pending: Option<(Action, f32)>,
     pub nav_cooldown: f32,
     pub prev_button: bool,
+    /// The page's fall-in choreography.
+    pub drop: DropIn,
+    /// Seconds until a logo letter gets an idle jiggle.
+    pub idle: f32,
+    pub idle_n: u32,
 }
 
-/// Text that rides on a softbody.
+/// Text that rides on a softbody (one [`SoftText`] glyph per letter).
 #[derive(Component)]
 pub struct BodyLabel {
     pub body: BodyId,
@@ -79,9 +87,8 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
                 Update,
-                (build_page, interact, follow_labels).chain().run_if(in_state(AppState::Title).and_then(resource_exists::<Game>)),
+                (build_page, interact).chain().run_if(in_state(AppState::Title).and_then(resource_exists::<Game>)),
             )
-            .add_systems(Update, follow_labels.run_if(not(in_state(AppState::Title)).and_then(resource_exists::<Game>)))
             .add_systems(Update, boot.run_if(in_state(AppState::Boot)));
     }
 }
@@ -116,7 +123,18 @@ fn enter(mut load: MessageWriter<LoadLevel>, progress: Res<StoryProgress>, mut c
     cam.target = Some(Vec2::new(0.0, 380.0));
     cam.zoom = Some(1.0);
     cam.ease = 0.0;
-    commands.insert_resource(Menu { page: Page::Main, buttons: Vec::new(), letters: Vec::new(), focus: 0, pending: None, nav_cooldown: 0.0, prev_button: true });
+    commands.insert_resource(Menu {
+        page: Page::Main,
+        buttons: Vec::new(),
+        letters: Vec::new(),
+        focus: 0,
+        pending: None,
+        nav_cooldown: 0.0,
+        prev_button: true,
+        drop: DropIn::new(DropStyle::MENU),
+        idle: 2.0,
+        idle_n: 0,
+    });
 }
 
 fn exit(mut commands: Commands, labels: Query<Entity, With<MenuEntity>>, mut cam: ResMut<CameraDirector>, mut unload: MessageWriter<UnloadLevel>, mut overrides: ResMut<StyleOverrides>) {
@@ -180,18 +198,25 @@ fn label(commands: &mut Commands, assets: &GameAssets, body: BodyId, text: &str,
     label_with(commands, assets, body, text, size, color, MenuEntity);
 }
 
-/// A label riding on a jelly body, tagged with `marker` for cleanup.
-pub fn label_with<M: Component>(commands: &mut Commands, assets: &GameAssets, body: BodyId, text: &str, size: f32, color: Color, marker: M) -> Entity {
+/// A label riding on a jelly body, tagged with `marker` for cleanup. Each
+/// letter is its own glyph mapped through the jelly's deformation.
+pub fn label_with<M: Component>(commands: &mut Commands, _assets: &GameAssets, body: BodyId, text: &str, size: f32, color: Color, marker: M) -> Entity {
     commands
         .spawn((
-        Text2d::new(text),
-        TextFont { font: assets.font.clone().into(), font_size: size.into(), weight: FontWeight::BOLD, ..default() },
-        TextColor(color),
-        Transform::from_xyz(0.0, 0.0, z::FX - 0.5),
-        BodyLabel { body, size },
-        marker,
-    ))
-    .id()
+            SoftText::new(text, size).ride(Ride::Game(body)).color(color).z(z::FX - 0.5).stagger(0.025),
+            BodyLabel { body, size },
+            marker,
+        ))
+        .id()
+}
+
+/// Jiggle the glyphs of whatever label rides `body`.
+pub fn kick_label(labels: &mut Query<&mut SoftText>, body: BodyId, strength: f32) {
+    for mut t in labels.iter_mut() {
+        if t.body() == Some(body) {
+            t.kick(strength);
+        }
+    }
 }
 
 fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u32)> {
@@ -266,6 +291,7 @@ fn build_page(
         game.sim.remove_body(l);
     }
     overrides.0.clear();
+    menu.drop.clear();
 
     // Logo: soft letter tiles.
     let logo: &[(&str, u32)] = &[("B", 0xff5d73), ("O", 0xff9f43), ("U", 0xffd93d), ("N", 0x6bcb77), ("C", 0x4d96ff), ("Y", 0x9b5de5)];
@@ -280,6 +306,7 @@ fn build_page(
             overrides.0.insert(id, Style { fill: hex(*col), rim: darken(hex(*col), 0.4), rim_w: 5.0, highlight: true, z: z::PROP + 0.5, top_rim_only: false });
             label(&mut commands, &assets, id, ch, 64.0 * scale, Color::WHITE);
             menu.letters.push(id);
+
         }
     }
 
@@ -301,6 +328,23 @@ fn build_page(
         label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { 36.0 }, Color::WHITE);
         menu.buttons.push(Button { body: id, action, color });
     }
+    // Everything rains in from the bottom up — bottom button first, the
+    // logo's top row last, left to right — so nothing ever falls through
+    // something that has already landed.
+    let n = menu.buttons.len();
+    let step = if grid { 0.025 } else { 0.045 };
+    let mut t = 0.0;
+    for k in 0..n {
+        let id = menu.buttons[n - 1 - k].body;
+        menu.drop.add(&mut game.sim.world, id, t);
+        t += step;
+    }
+    let row1 = logo.len();
+    let order: Vec<BodyId> = menu.letters[row1..].iter().chain(&menu.letters[..row1]).copied().collect();
+    for id in order {
+        menu.drop.add(&mut game.sim.world, id, t);
+        t += 0.03;
+    }
     menu.focus = 0;
 }
 
@@ -309,8 +353,7 @@ fn interact(
     mut menu: ResMut<Menu>,
     mut game: ResMut<Game>,
     time: Res<Time>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    (mouse, touches): (Res<ButtonInput<MouseButton>>, Res<Touches>),
     keys: Res<ButtonInput<KeyCode>>,
     inputs: Res<Inputs>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
@@ -322,8 +365,26 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
+    mut labels: Query<&mut SoftText>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs().min(1.0 / 20.0);
+    {
+        let m = &mut *menu;
+        m.drop.update(&mut game.sim.world, dt);
+        // Idle life: now and then a logo letter hops and wiggles.
+        m.idle -= dt;
+        if m.idle <= 0.0 && m.drop.done() && !m.letters.is_empty() {
+            m.idle_n += 1;
+            let n = m.idle_n;
+            m.idle = 1.1 + (n * 7 % 5) as f32 * 0.35;
+            let id = m.letters[(n as usize * 7 + 3) % m.letters.len()];
+            if let Some(b) = game.sim.world.body_mut(id) {
+                b.add_velocity(PVec2::new(0.0, 260.0));
+                b.add_spin(if n % 2 == 0 { 3.0 } else { -3.0 });
+            }
+            kick_label(&mut labels, id, 0.6);
+        }
+    }
     if join.is_some() {
         return;
     }
@@ -405,6 +466,7 @@ fn interact(
                     b.add_velocity(PVec2::new(0.0, 500.0));
                     b.add_spin(4.0);
                 }
+                kick_label(&mut labels, hit, 1.0);
             }
         }
     }
@@ -428,6 +490,9 @@ fn interact(
         }
         if let Some(b) = menu.buttons.get(menu.focus).and_then(|b| game.sim.world.body_mut(b.body)) {
             b.add_velocity(PVec2::new(0.0, 120.0));
+        }
+        if let Some(b) = menu.buttons.get(menu.focus) {
+            kick_label(&mut labels, b.body, 0.5);
         }
     }
     // The keyboard player also rolls around the menu; only Enter activates,
@@ -453,6 +518,7 @@ fn interact(
             }
             b.rest_scale = 1.08;
         }
+        kick_label(&mut labels, body, 1.2);
         menu.pending = Some((action, 0.22));
     }
     // Relax any puffed button.
@@ -460,25 +526,5 @@ fn interact(
         if let Some(b) = game.sim.world.body_mut(btn.body) {
             b.rest_scale += (1.0 - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
         }
-    }
-}
-
-/// Labels follow their jelly: position, rotation and squash.
-pub fn follow_labels(game: Res<Game>, mut q: Query<(&BodyLabel, &mut Transform, &mut Visibility)>) {
-    for (l, mut tf, mut vis) in q.iter_mut() {
-        let Some(b) = game.sim.world.body(l.body) else {
-            *vis = Visibility::Hidden;
-            continue;
-        };
-        *vis = if b.enabled { Visibility::Visible } else { Visibility::Hidden };
-        let c = b.centroid();
-        let outline: Vec<PVec2> = b.outline().collect();
-        let (w, h) = crate::render::extents(&outline);
-        let rest = bb_physics::Aabb::from_points(b.rest.iter().copied());
-        let (rw, rh) = ((rest.max.x - rest.min.x).max(1.0), (rest.max.y - rest.min.y).max(1.0));
-        tf.translation.x = c.x;
-        tf.translation.y = c.y;
-        tf.rotation = Quat::from_rotation_z(b.angle());
-        tf.scale = Vec3::new((w / rw).clamp(0.6, 1.6), (h / rh).clamp(0.6, 1.6), 1.0);
     }
 }

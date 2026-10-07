@@ -6,6 +6,7 @@ pub mod audio;
 pub mod camera;
 pub mod cave;
 pub mod devtools;
+pub mod dropin;
 pub mod editor;
 pub mod flow;
 pub mod fx;
@@ -25,6 +26,7 @@ pub mod render;
 pub mod sandbox;
 pub mod save;
 pub mod sim;
+pub mod softtext;
 pub mod story;
 pub mod story_iface;
 
@@ -73,6 +75,7 @@ impl Plugin for GamePlugin {
                 level_view::LevelViewPlugin,
                 cave::CavePlugin,
                 sandbox::SandboxPlugin,
+                softtext::SoftTextPlugin,
             ))
             .add_plugins((
                 story::StoryPlugin,

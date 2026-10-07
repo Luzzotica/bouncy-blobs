@@ -5,7 +5,7 @@
 //! together by XPBD constraints, with an outline (`boundary`) used for
 //! collision and rendering.
 
-use glam::Vec2;
+use glam::{Mat2, Vec2};
 
 use crate::geom::{self, Aabb};
 
@@ -404,6 +404,18 @@ pub fn resample_to(outline: &[Vec2], n: usize) -> Vec<Vec2> {
     out
 }
 
+/// Where a rest-frame point sits inside a body, so it can be carried along
+/// by the body's deformation (text and decals riding on jelly).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum RestAnchor {
+    /// Barycentric coordinates in a rest triangle (meshes). Points outside
+    /// every triangle use the nearest one, extrapolated.
+    Tri { tri: u32, bary: [f32; 3] },
+    /// A rest-frame point mapped by a locally weighted best-fit affine
+    /// (ring blobs, which have no interior triangles).
+    Fit { rest: Vec2 },
+}
+
 /// Live simulated body.
 #[derive(Clone, Debug)]
 pub struct Body {
@@ -693,6 +705,80 @@ impl Body {
         true
     }
 
+    /// Locate a rest-frame point (relative to the rest centroid, like
+    /// [`Body::rest`]) for [`Body::anchor_pose`].
+    pub fn rest_anchor(&self, p: Vec2) -> RestAnchor {
+        let mut best: Option<(f32, u32, [f32; 3])> = None;
+        for (k, t) in self.tris.iter().enumerate() {
+            let [a, b, c] = t.i.map(|i| self.rest[i as usize]);
+            let Some(bary) = barycentric(p, a, b, c) else { continue };
+            let outside = -bary[0].min(bary[1]).min(bary[2]);
+            if outside <= 1e-5 {
+                return RestAnchor::Tri { tri: k as u32, bary };
+            }
+            if best.is_none_or(|b| outside < b.0) {
+                best = Some((outside, k as u32, bary));
+            }
+        }
+        match best {
+            Some((_, tri, bary)) => RestAnchor::Tri { tri, bary },
+            None => RestAnchor::Fit { rest: p },
+        }
+    }
+
+    /// Where an anchored point is now, and the local deformation gradient
+    /// there (rotation × squash/stretch, relative to the rest pose).
+    pub fn anchor_pose(&self, a: &RestAnchor) -> (Vec2, Mat2) {
+        match *a {
+            RestAnchor::Tri { tri, bary } => {
+                let Some(t) = self.tris.get(tri as usize) else { return self.local_affine(Vec2::ZERO, f32::INFINITY) };
+                let [ia, ib, ic] = t.i.map(|i| i as usize);
+                let pos = self.x[ia] * bary[0] + self.x[ib] * bary[1] + self.x[ic] * bary[2];
+                let dm = Mat2::from_cols(self.rest[ib] - self.rest[ia], self.rest[ic] - self.rest[ia]);
+                let ds = Mat2::from_cols(self.x[ib] - self.x[ia], self.x[ic] - self.x[ia]);
+                let f = if dm.determinant().abs() > 1e-6 { ds * dm.inverse() } else { Mat2::IDENTITY };
+                (pos, f)
+            }
+            RestAnchor::Fit { rest } => {
+                let sigma = (self.rest_area.max(1.0) / std::f32::consts::PI).sqrt() * 0.8;
+                self.local_affine(rest, sigma)
+            }
+        }
+    }
+
+    /// Weighted least-squares affine fit of the body around rest point `p`
+    /// (Gaussian weights of width `sigma`; infinite = whole body). Returns
+    /// where `p` maps to now and the fitted deformation gradient.
+    pub fn local_affine(&self, p: Vec2, sigma: f32) -> (Vec2, Mat2) {
+        let inv2s2 = if sigma.is_finite() { 1.0 / (2.0 * sigma * sigma).max(1e-6) } else { 0.0 };
+        let wts: Vec<f32> = self
+            .rest
+            .iter()
+            .zip(&self.base_w)
+            .map(|(r, &w)| {
+                let m = if w > 0.0 { 1.0 / w } else { 1.0 };
+                m * ((-(*r - p).length_squared() * inv2s2).exp() + 1e-4)
+            })
+            .collect();
+        let total: f32 = wts.iter().sum::<f32>().max(1e-12);
+        let rc = self.rest.iter().zip(&wts).map(|(r, w)| *r * *w).sum::<Vec2>() / total;
+        let xc = self.x.iter().zip(&wts).map(|(x, w)| *x * *w).sum::<Vec2>() / total;
+        let mut apq = Mat2::ZERO;
+        let mut aqq = Mat2::ZERO;
+        for ((r, x), w) in self.rest.iter().zip(&self.x).zip(&wts) {
+            let (q, d) = (*r - rc, *x - xc);
+            apq += Mat2::from_cols(d * q.x, d * q.y) * *w;
+            aqq += Mat2::from_cols(q * q.x, q * q.y) * *w;
+        }
+        let f = if aqq.determinant().abs() > 1e-6 * total * total {
+            apq * aqq.inverse()
+        } else {
+            let a = self.angle();
+            Mat2::from_angle(a)
+        };
+        (xc + f * (p - rc), f)
+    }
+
     /// Move the whole body by `d` without changing its velocity.
     pub fn translate(&mut self, d: Vec2) {
         for (p, q) in self.x.iter_mut().zip(self.prev.iter_mut()) {
@@ -700,5 +786,59 @@ impl Body {
             *q += d;
         }
         self.update_aabb();
+    }
+}
+
+/// Barycentric coordinates of `p` in triangle `abc` (None if degenerate).
+pub fn barycentric(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> Option<[f32; 3]> {
+    let (v0, v1, v2) = (b - a, c - a, p - a);
+    let den = v0.perp_dot(v1);
+    if den.abs() < 1e-9 {
+        return None;
+    }
+    let v = v2.perp_dot(v1) / den;
+    let w = v0.perp_dot(v2) / den;
+    Some([1.0 - v - w, v, w])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn deform(b: &mut Body, f: Mat2, t: Vec2) {
+        let c = geom::centroid(&b.x);
+        for x in b.x.iter_mut() {
+            *x = t + f * (*x - c);
+        }
+    }
+
+    #[test]
+    fn mesh_anchor_follows_affine_deformation() {
+        let mut b = Body::from_desc(BodyDesc::grid(Vec2::new(-100.0, -30.0), Vec2::new(100.0, 30.0), 8, 3, 1.0));
+        let pts = [Vec2::new(0.0, 0.0), Vec2::new(-63.0, 11.0), Vec2::new(91.0, -24.0), Vec2::new(130.0, 0.0)];
+        let anchors: Vec<RestAnchor> = pts.iter().map(|p| b.rest_anchor(*p)).collect();
+        assert!(anchors.iter().all(|a| matches!(a, RestAnchor::Tri { .. })));
+        let f = Mat2::from_angle(0.4) * Mat2::from_diagonal(Vec2::new(1.3, 0.7));
+        let t = Vec2::new(500.0, -200.0);
+        deform(&mut b, f, t);
+        for (p, a) in pts.iter().zip(&anchors) {
+            let (pos, g) = b.anchor_pose(a);
+            assert!((pos - (t + f * *p)).length() < 1e-2, "{pos} vs {}", t + f * *p);
+            assert!((g - f).abs().to_cols_array().iter().all(|e| *e < 1e-3));
+        }
+    }
+
+    #[test]
+    fn ring_anchor_follows_rotation_and_stretch() {
+        let mut b = Body::from_desc(BodyDesc::blob(Vec2::new(40.0, 40.0), 50.0, 24, 1.0));
+        let p = Vec2::new(12.0, -8.0);
+        let a = b.rest_anchor(p);
+        assert!(matches!(a, RestAnchor::Fit { .. }));
+        let f = Mat2::from_angle(-1.1) * Mat2::from_diagonal(Vec2::new(1.2, 0.8));
+        let t = Vec2::new(-300.0, 90.0);
+        deform(&mut b, f, t);
+        let (pos, g) = b.anchor_pose(&a);
+        assert!((pos - (t + f * p)).length() < 1e-2);
+        assert!((g - f).abs().to_cols_array().iter().all(|e| *e < 1e-3));
     }
 }

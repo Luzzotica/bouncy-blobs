@@ -284,8 +284,9 @@ fn level_lines(
         return;
     }
     if let Some((speaker, voice, text)) = queue.pending.pop_front() {
-        let read = 0.9 + text.len() as f32 * 0.05;
-        queue.wait = read + 0.3;
+        // Next line once this one has typed and had time to be read.
+        let read = bubble::linger_secs(&text);
+        queue.wait = bubble::type_secs(&text) + read * 0.75 + 0.3;
         if voice != Voice::Glimmer || speaker != Speaker::Tip {
             blub.write(Blub { voice, syllables: (text.len() / 3).clamp(2, 14) as u8 });
         }
