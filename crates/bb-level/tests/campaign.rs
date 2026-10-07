@@ -220,12 +220,13 @@ struct Bot {
     retreat: f32,
     jumped: bool,
     vx_avg: f32,
+    retreat_dir: f32,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0 }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0 }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -255,6 +256,21 @@ impl Bot {
                 break;
             }
         }
+        // Fell well below where we were headed: go back to the last
+        // waypoint at this height and retry from there.
+        if grounded && self.i > 0 {
+            let t = path[self.i];
+            let goal_y = if t.how == Move::Spring { path[self.i - 1].at.y } else { t.at.y };
+            let assisted_up = matches!(t.how, Move::Ride | Move::Wall | Move::Wind | Move::Swim | Move::Rope);
+            if goal_y > feet + 260.0 && !assisted_up {
+                let near = (0..self.i)
+                    .filter(|&j| (path[j].at.y - feet).abs() < 70.0 && (path[j].at.x - pos.x).abs() < 600.0)
+                    .min_by(|&a, &b| (path[a].at.x - pos.x).abs().total_cmp(&(path[b].at.x - pos.x).abs()));
+                if let Some(j) = near {
+                    self.i = j + 1;
+                }
+            }
+        }
         let tgt = path[self.i];
         let prev = path[self.i.saturating_sub(1)];
         let dx = tgt.at.x - pos.x;
@@ -275,20 +291,24 @@ impl Bot {
             && !sim.world.raycast(pos + Vec2::new(dir * 50.0, 0.0), Vec2::NEG_Y, 150.0, bb_sim::load::layer::WORLD, Some(p.ctl.body)).is_some();
         let mut want_jump = blocked;
         // Target right above us: just jump.
-        if tgt.at.y > feet + 40.0 && dx.abs() < 150.0 && !matches!(tgt.how, Move::Ride | Move::Swim | Move::Wall) {
+        if tgt.at.y > feet + 40.0 && dx.abs() < 150.0 && !matches!(tgt.how, Move::Ride | Move::Swim | Move::Wall | Move::Spring) {
             want_jump = true;
         }
         // A jump that landed back short of a higher target: back up for a run-up.
+        // (For spring moves the thing to climb onto is the spring/cap itself.)
+        let goal = if tgt.how == Move::Spring && on_ground { prev.at } else { tgt.at };
+        let gdir = if goal.x >= pos.x { 1.0 } else { -1.0 };
         if self.jumped && grounded && self.hold <= 0.0 {
             self.jumped = false;
-            if tgt.at.y > feet + 40.0 && dx.abs() < 220.0 && p.ctl.grab.is_none() {
+            if goal.y > feet + 40.0 && (goal.x - pos.x).abs() < 240.0 && p.ctl.grab.is_none() {
                 self.retreat = 0.45;
+                self.retreat_dir = -gdir;
             }
         }
         if self.retreat > 0.0 {
             self.retreat -= dt;
             self.prev_button = false;
-            return Input { stick: Vec2::new(-dir, 0.0), button: false };
+            return Input { stick: Vec2::new(self.retreat_dir, 0.0), button: false };
         }
 
         match tgt.how {
@@ -299,7 +319,7 @@ impl Bot {
                 }
             }
             Move::Spring => {
-                if on_ground && (pos.x - tgt.at.x).abs() > 60.0 {
+                if on_ground && (feet < tgt.at.y - 60.0 || (pos.x - tgt.at.x).abs() > 60.0) {
                     stick.x = ((prev.at.x - pos.x) / 40.0).clamp(-1.0, 1.0);
                     if (pos.x - prev.at.x).abs() < 40.0 && prev.at.y > feet + 40.0 {
                         want_jump = true;

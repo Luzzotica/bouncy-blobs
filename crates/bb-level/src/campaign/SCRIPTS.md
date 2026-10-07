@@ -36,3 +36,17 @@ Lulu (only in ch10).
 | `ch02_up_feeling` | At the top of the shaft. Glimmer: "Up is a direction AND a feeling!" Pip bounces higher than before. |
 | `ch02_mushroom_glow` | Warm light ahead: the Fungus Caverns. Glimmer: "Smell that? Mushrooms. Bouncy ones." |
 | `ch02_outro` | Pip and Glimmer peer into the glowing Fungus Caverns; giant mushroom caps wobble like trampolines. |
+
+## Chapter 3 — Mushroom Bounce (Fungus Caverns)
+
+| id | what happens |
+|---|---|
+| `ch03_intro` | The Fungus Caverns glow orange and pink; giant caps wobble. Pip's eyes go huge (sparkle eyes). Glimmer: "Go on. Bounce. Nobody here minds." |
+| `ch03_fungus` | Pip bounces once, cautiously, then again, bigger. A tiny squeal. |
+| `ch03_first_trampoline` | Hint: land on a mushroom cap to get **launched**. Glimmer: "Some floors push back. Those are the good ones." |
+| `ch03_spring` | A spring pad. Hint: roll onto it. Pip, mid-air: "WHEEEE!" |
+| `ch03_chain` | A row of caps over a spiky pit. Glimmer: "One bounce leads to another. That's called momentum. Or friendship." Hint: steer in the air. |
+| `ch03_angled` | A tilted spring aimed across a big gap. Pip gulps, then grins. |
+| `ch03_cavern` | Bottom of a tall cavern ringed with caps. Glimmer: "Up, up, up!" |
+| `ch03_bouncing_up` | Top of the climb. Pip realises: bouncing is how you go *up*. Pure joy, little speed lines. Glimmer: "Told you." |
+| `ch03_outro` | Pip bounces in happy circles; beyond the fungus, the glow of hanging vines. |

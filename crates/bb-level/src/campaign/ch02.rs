@@ -65,7 +65,6 @@ pub fn build() -> Course {
         c.pickup(v(x + 150.0, y + 60.0));
     }
     membrane(&mut c, 5330.0, 5640.0, 1120.0);
-    c.drip_hazard(v(5480.0, 1560.0), 700.0, 30.0, 0.5);
     c.wp(Move::Walk, 5120.0, 150.0);
     for (x, y) in shaft {
         c.wp(Move::Jump, x + 150.0, y);
