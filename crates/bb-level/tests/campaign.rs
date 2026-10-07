@@ -325,10 +325,6 @@ impl Bot {
         let dx = tgt.at.x - pos.x;
         let dir = if dx >= 0.0 { 1.0 } else { -1.0 };
         let mut stick = Vec2::new((dx / 80.0).clamp(-1.0, 1.0), 0.0);
-        // Short hops onto small platforms: don't take them at full tilt.
-        if on_ground && tgt.how == Move::Jump && tgt.at.y > feet - 40.0 && dx.abs() < 340.0 && (pos.x - prev.at.x).abs() < 80.0 {
-            stick.x = dir * (dx.abs() / 420.0).clamp(0.45, 1.0);
-        }
         let mut button = false;
         let at_prev = (pos.x - prev.at.x).abs() < 35.0 && on_ground;
 
@@ -391,10 +387,6 @@ impl Bot {
             }
             Move::Jump => {
                 if at_prev || (edge_ahead && tgt.at.y > feet - 60.0) {
-                    want_jump = true;
-                }
-                // Already within reach of a higher landing: go.
-                if tgt.at.y > feet + 30.0 && dx.abs() < 280.0 && vel.x * dir > -50.0 {
                     want_jump = true;
                 }
             }
