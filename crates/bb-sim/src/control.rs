@@ -83,9 +83,12 @@ pub enum Action {
 impl Controller {
     pub fn spawn(world: &mut World, at: Vec2, radius: f32, layer_bits: u32) -> Controller {
         let mut d = BodyDesc::blob(at, radius, tune::SEGMENTS, tune::MASS * (radius / tune::RADIUS).powi(2));
-        d.params.volume_compliance = 2e-7;
-        d.params.shape_compliance = Some(6e-6);
-        d.params.edge_compliance = 4e-7;
+        // Shape matching is what makes a blob feel rigid: at 720 Hz substeps
+        // a compliance around 1e-5 snaps ~50% back to shape every substep.
+        // 3e-3 gives a ~1.5× squash on a hard landing and still recovers.
+        d.params.volume_compliance = 1e-6;
+        d.params.shape_compliance = Some(3e-3);
+        d.params.edge_compliance = 1e-5;
         d.params.internal_damping = 3.0;
         d.params.linear_damping = 0.0;
         d.params.radius = 2.0;
