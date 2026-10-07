@@ -1,0 +1,78 @@
+# XcodeGen spec for the iOS app. Regenerate with:  (cd ios && xcodegen)
+# The generated BouncyBlobs.xcodeproj is committed so xcodegen is optional.
+name: BouncyBlobs
+options:
+  bundleIdPrefix: me.sterlinglong
+  deploymentTarget:
+    iOS: "14.0"
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+targets:
+  BouncyBlobs:
+    type: application
+    platform: iOS
+    sources:
+      - path: BouncyBlobs/Assets.xcassets
+      - path: BouncyBlobs/LaunchScreen.storyboard
+      - path: BouncyBlobs/BouncyBlobs.entitlements
+        buildPhase: none
+      - path: build-rust.sh
+        buildPhase: none
+      # Bevy assets, copied as a folder reference -> BouncyBlobs.app/assets
+      - path: ../crates/bb-game/assets
+        type: folder
+        buildPhase: resources
+    info:
+      path: BouncyBlobs/Info.plist
+      properties:
+        CFBundleDisplayName: Bouncy Blobs
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchStoryboardName: LaunchScreen
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: false
+        UIRequiresFullScreen: true
+        UIRequiredDeviceCapabilities: [arm64, metal]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: BouncyBlobs/BouncyBlobs.entitlements
+    settings:
+      base:
+        PRODUCT_NAME: Bouncy Blobs
+        EXECUTABLE_NAME: BouncyBlobs
+        PRODUCT_BUNDLE_IDENTIFIER: me.sterlinglong.bouncyblobs
+        MARKETING_VERSION: 3.0.0
+        CURRENT_PROJECT_VERSION: 3.0.0.1
+        DEVELOPMENT_TEAM: 74874V9Z5H
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_BITCODE: false
+        ENABLE_USER_SCRIPT_SANDBOXING: false
+        # Device: arm64 only. Simulator: Apple-silicon arm64 only.
+        ARCHS: arm64
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+        # The binary comes from cargo; Xcode has nothing to compile or link.
+        GENERATE_INFOPLIST_FILE: false
+    preBuildScripts:
+      - name: Build Rust (bb-mobile)
+        script: '"${SRCROOT}/build-rust.sh"'
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/build-rust.sh
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info

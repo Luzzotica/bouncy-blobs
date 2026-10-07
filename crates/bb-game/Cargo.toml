@@ -16,7 +16,9 @@ path = "src/main.rs"
 
 [features]
 default = []
-dev = ["bevy/dynamic_linking"]
+# Desktop-only fast iteration: `cargo run -p bb-game --features dev`.
+# Never enable for iOS, Android or web (dynamic linking is unsupported there).
+dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 
 [dependencies]
 bb-physics = { path = "../bb-physics" }
@@ -26,3 +28,10 @@ glam.workspace = true
 bevy = { version = "0.19.1", default-features = false, features = [
     "2d", "ui", "audio", "mp3", "wav", "vorbis", "default_font", "png",
 ] }
+
+# Web: browser time source + getrandom's wasm_js backend (no RUSTFLAGS needed
+# with getrandom >= 0.3.4).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["web"] }
+getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

@@ -6,6 +6,7 @@ pub mod flow;
 pub mod input;
 pub mod level_view;
 pub mod palette;
+pub mod platform;
 pub mod render;
 pub mod sandbox;
 pub mod sim;
@@ -18,16 +19,9 @@ pub fn run() {
 
 pub fn app() -> App {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Bouncy Blobs".into(),
-            fit_canvas_to_parent: true,
-            prevent_default_event_handling: true,
-            ..default()
-        }),
-        ..default()
-    }))
-    .add_plugins(GamePlugin);
+    app.add_plugins(platform::default_plugins())
+        .add_plugins(platform::PlatformPlugin)
+        .add_plugins(GamePlugin);
     app
 }
 

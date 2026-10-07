@@ -1,6 +1,6 @@
-# Godot 4+ specific ignores
+# Godot 4+ specific ignores (legacy)
 .godot/
-/android/
+
 
 # Local Supabase credentials (copy from config/supabase_env.example)
 config/supabase.env
