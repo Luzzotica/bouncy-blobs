@@ -34,6 +34,7 @@ pub mod tune {
     pub const GRAB_COOLDOWN: f32 = 0.35;
     pub const ROPE_JUMP: Vec2 = Vec2::new(380.0, 720.0);
     pub const WALL_JUMP: Vec2 = Vec2::new(560.0, 860.0);
+    pub const SWIM_KICK: f32 = 720.0;
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -71,6 +72,9 @@ pub struct Controller {
     pub strength: f32,
     /// Scripted puff: inflate toward this scale without jumping.
     pub puff: Option<f32>,
+    /// Fraction of the outline under water this step (set by the runtime).
+    pub in_water: f32,
+    swim_cooldown: f32,
     /// Rest-scale target while the button is held (Kids Mode puffs a
     /// picked-up blob bigger than a normal expand).
     pub expand_scale: f32,
@@ -117,6 +121,8 @@ impl Controller {
             stuck: None,
             strength: 1.0,
             puff: None,
+            in_water: 0.0,
+            swim_cooldown: 0.0,
             expand_scale: tune::EXPAND_SCALE,
         }
     }
@@ -239,6 +245,19 @@ impl Controller {
                 let t = Vec2::new(r.y, -r.x).normalize_or_zero();
                 b.add_point_accel(i, t * stick.x * tune::TREAD_ACCEL * strength);
             }
+        }
+
+        // Swim kick: in water the button kicks you up and out (so you can
+        // climb out onto a bank), with a short cooldown.
+        self.swim_cooldown = (self.swim_cooldown - dt).max(0.0);
+        // Holding the button while pushing into a bank also climbs out.
+        let pushing_bank = self.input.button && stick.x.abs() > 0.5 && vel.x.abs() < 60.0;
+        if self.in_water > 0.2 && !self.grounded && (self.jump_buffer > 0.0 || pushing_bank) && self.swim_cooldown <= 0.0 {
+            let vy = vel.y.max(0.0);
+            b.add_velocity(Vec2::new(stick.x * 120.0, tune::SWIM_KICK * strength - vy));
+            self.jump_buffer = 0.0;
+            self.swim_cooldown = 0.45;
+            return Some(Action::Jump);
         }
 
         // Jump.

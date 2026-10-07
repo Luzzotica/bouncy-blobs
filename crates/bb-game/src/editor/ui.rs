@@ -778,12 +778,14 @@ fn properties(ui: &mut egui::Ui, l: &mut Level, e: Elem, vertex: Option<usize>) 
                 MoverMotion::PingPong => 1,
                 MoverMotion::Crusher { .. } => 2,
                 MoverMotion::Spin { .. } => 3,
+                MoverMotion::Lift { .. } => 4,
             };
-            if combo(ui, "Motion", &mut k, &[(0, "Loop"), (1, "Ping-pong"), (2, "Crusher"), (3, "Spin")]) {
+            if combo(ui, "Motion", &mut k, &[(0, "Loop"), (1, "Ping-pong"), (2, "Crusher"), (3, "Spin"), (4, "Lift (pauses)")]) {
                 m.motion = match k {
                     0 => MoverMotion::Loop,
                     1 => MoverMotion::PingPong,
                     2 => MoverMotion::Crusher { slam: 0.25, hold: 0.4, rise: 1.2, wait: 1.0 },
+                    4 => MoverMotion::Lift { hold: 1.2 },
                     _ => MoverMotion::Spin { speed: 1.5 },
                 };
                 c = true;
@@ -796,6 +798,10 @@ fn properties(ui: &mut egui::Ui, l: &mut Level, e: Elem, vertex: Option<usize>) 
                     c |= num(ui, "Wait s", wait, 0.01, 0.0..=10.0);
                 }
                 MoverMotion::Spin { speed } => c |= num(ui, "Speed rad/s", speed, 0.05, -20.0..=20.0),
+                MoverMotion::Lift { hold } => {
+                    c |= num(ui, "Hold s", hold, 0.05, 0.0..=10.0);
+                    c |= num(ui, "Travel s", &mut m.period, 0.05, 0.1..=60.0);
+                }
                 _ => {
                     c |= num(ui, "Period s", &mut m.period, 0.05, 0.05..=120.0);
                 }

@@ -66,6 +66,10 @@ impl Npc {
         if def.role == NpcRole::Trapped {
             b.anchor_home(5e-7);
         }
+        if def.role == NpcRole::Follower {
+            // Followers never shove the player off a ledge.
+            b.mask &= !layer::PLAYER;
+        }
         Npc {
             index,
             id: def.id.clone(),
@@ -198,6 +202,7 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
         if let Some(n) = sim.npcs.get(i as usize) {
             if let Some(b) = sim.world.body_mut(n.ctl.body) {
                 b.home = None;
+                b.mask &= !layer::PLAYER;
             }
         }
         sim.events.push(SimEvent::NpcFreed { index: i });

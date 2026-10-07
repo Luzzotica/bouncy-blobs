@@ -300,3 +300,47 @@ fn blob_morphs_to_new_rest_shape() {
     let m = w.add_body(BodyDesc::grid(Vec2::new(-50.0, 300.0), Vec2::new(50.0, 340.0), 4, 2, 1.0));
     assert!(!w.body_mut(m).unwrap().set_rest_shape(&star));
 }
+
+#[test]
+fn pulley_over_a_peg_lifts_the_lighter_weight() {
+    let mut w = world();
+    w.add_static(StaticDesc::rect(Vec2::new(-30.0, 760.0), Vec2::new(30.0, 800.0)));
+    let light = w.add_body(BodyDesc::blob(Vec2::new(-150.0, 500.0), 30.0, 16, 1.0));
+    let heavy = w.add_body(BodyDesc::blob(Vec2::new(150.0, 500.0), 30.0, 16, 3.0));
+    let (al, ah) = (Anchor::centre(&w, light).unwrap(), Anchor::centre(&w, heavy).unwrap());
+    let mut d = RopeDesc::new(al, ah);
+    d.path = Some(vec![Vec2::new(-150.0, 500.0), Vec2::new(-35.0, 812.0), Vec2::new(35.0, 812.0), Vec2::new(150.0, 500.0)]);
+    let len: f32 = d.path.as_ref().unwrap().windows(2).map(|p| (p[1] - p[0]).length()).sum();
+    d.length = Some(len);
+    let rope = w.add_rope(d);
+    let y0 = w.body(light).unwrap().centroid().y;
+    run(&mut w, 1.5);
+    let r = w.rope(rope).unwrap();
+    assert!(r.current_length < len * 1.03, "rope stretched {}", r.current_length / len);
+    assert!(w.body(light).unwrap().centroid().y > y0 + 80.0, "light side didn't rise");
+    assert!(w.body(r.body).unwrap().x.iter().any(|p| p.y > 800.0 && p.x.abs() < 40.0), "rope slid off the peg");
+}
+
+#[test]
+fn bouncy_softbody_bounces() {
+    let peak = |e: f32| {
+        let mut w = world();
+        let mut pad = BodyDesc::grid(Vec2::new(-200.0, 0.0), Vec2::new(200.0, 40.0), 20, 2, 10.0);
+        pad.params.material.restitution = e;
+        let pad = w.add_body(pad);
+        w.body_mut(pad).unwrap().anchor_home(1e-6);
+        let b = w.add_body(BodyDesc::blob(Vec2::new(0.0, 500.0), 30.0, 16, 1.0));
+        let (mut peak, mut landed) = (0.0f32, false);
+        for _ in 0..180 {
+            w.step(DT);
+            let c = w.body(b).unwrap().centroid();
+            landed |= c.y < 90.0;
+            if landed {
+                peak = peak.max(c.y);
+            }
+        }
+        peak
+    };
+    let (dead, bouncy) = (peak(0.0), peak(0.85));
+    assert!(bouncy > dead + 30.0, "bouncy {bouncy} vs plain {dead}");
+}

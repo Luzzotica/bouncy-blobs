@@ -239,6 +239,11 @@ impl LevelBuilder {
         self.mover(Shape::rect_at(a, v(width, 26.0), 0.0), &[Vec2::ZERO, b - a], period, MoverMotion::PingPong)
     }
 
+    /// An elevator that pauses `hold` seconds at each end (easy to board).
+    pub fn lift(&mut self, a: Vec2, b: Vec2, width: f32, travel: f32, hold: f32) -> &mut Self {
+        self.mover(Shape::rect_at(a, v(width, 26.0), 0.0), &[Vec2::ZERO, b - a], travel, MoverMotion::Lift { hold })
+    }
+
     /// A stone piston that slams down from `top` by `drop` px.
     pub fn crusher(&mut self, top: Vec2, width: f32, drop: f32, phase: f32) -> &mut Self {
         let h = 120.0;

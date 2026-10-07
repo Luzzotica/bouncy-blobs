@@ -184,22 +184,51 @@ pub(crate) fn body_vs_body(a: &mut Body, ida: BodyId, b: &mut Body, idb: BodyId,
 /// Bounce off bouncy statics: after the velocity update, reflect the normal
 /// velocity of particles that hit a surface hard enough.
 pub(crate) fn apply_restitution(world: &mut World, _h: f32) {
+    // Bounce whole bodies, not single particles: reflecting only the two or
+    // three particles in contact gets averaged away by the rest of a soft
+    // body within a substep. So per body we gather the bouncy contacts
+    // (statics or bouncy softbodies) and reflect the body's mean normal
+    // velocity relative to the surface.
     let threshold = world.config.restitution_threshold;
     let contacts: Vec<Contact> = world.contacts().to_vec();
     let statics: Vec<f32> =
         world.static_list().iter().map(|s| s.as_ref().map_or(0.0, |s| s.material.restitution)).collect();
-    for c in contacts {
-        let Collider::Static(sid) = c.other else { continue };
-        if c.approach_speed < threshold {
-            continue;
-        }
-        let Some(b) = world.body_by_index_mut(c.body.index) else { continue };
-        let e = b.params.material.restitution.max(statics[sid.0 as usize]);
+    let mut per_body: std::collections::HashMap<BodyId, (Vec2, f32, Vec2, u32)> = std::collections::HashMap::new();
+    for c in &contacts {
+        let (surface_e, surface_v) = match c.other {
+            Collider::Static(sid) => (statics[sid.0 as usize], Vec2::ZERO),
+            Collider::Body(other) => match world.body(other) {
+                Some(o) => (o.params.material.restitution, o.velocity()),
+                None => continue,
+            },
+        };
+        let own_e = world.body(c.body).map_or(0.0, |b| b.params.material.restitution);
+        let e = own_e.max(surface_e);
         if e <= 0.0 {
             continue;
         }
-        let i = c.particle as usize;
-        let vn = b.v[i].dot(c.normal);
-        b.v[i] += c.normal * (e * c.approach_speed - vn);
+        let entry = per_body.entry(c.body).or_insert((Vec2::ZERO, 0.0, Vec2::ZERO, 0));
+        entry.0 += c.normal;
+        entry.1 = entry.1.max(e);
+        entry.2 += surface_v;
+        entry.3 += 1;
+    }
+    for (id, (nsum, e, vsum, n)) in per_body {
+        let Some(b) = world.body_mut(id) else { continue };
+        let normal = nsum.normalize_or_zero();
+        if normal == Vec2::ZERO {
+            continue;
+        }
+        let surface_v = vsum / n as f32;
+        let rel = (b.velocity() - surface_v).dot(normal);
+        if -rel < threshold {
+            continue;
+        }
+        let dv = normal * (-rel * e - rel);
+        for (v, &w) in b.v.iter_mut().zip(&b.w) {
+            if w > 0.0 {
+                *v += dv;
+            }
+        }
     }
 }

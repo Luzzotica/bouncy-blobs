@@ -19,6 +19,23 @@ pub(crate) fn mover_offset(m: &bb_level::Mover, t: f32) -> (Vec2, f32) {
     let path = &m.path;
     match m.motion {
         MoverMotion::Spin { speed } => (Vec2::ZERO, speed * t + m.phase * std::f32::consts::TAU),
+        MoverMotion::Lift { hold } => {
+            let travel = m.period.max(0.1);
+            let cycle = 2.0 * (travel + hold);
+            let u = (t + m.phase * cycle).rem_euclid(cycle);
+            let f = if u < hold {
+                0.0
+            } else if u < hold + travel {
+                smooth((u - hold) / travel)
+            } else if u < 2.0 * hold + travel {
+                1.0
+            } else {
+                1.0 - smooth((u - 2.0 * hold - travel) / travel)
+            };
+            let end = path.last().copied().unwrap_or(Vec2::ZERO);
+            let start = path.first().copied().unwrap_or(Vec2::ZERO);
+            (start.lerp(end, f), 0.0)
+        }
         MoverMotion::Crusher { slam, hold, rise, wait } => {
             let cycle = slam + hold + rise + wait;
             let target = path.get(1).copied().unwrap_or(Vec2::ZERO);
@@ -172,6 +189,14 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
         sim.world.move_static(m.id, poly);
     }
 
+    for p in sim.players.iter_mut() {
+        p.ctl.in_water = 0.0;
+    }
+    for n in sim.npcs.iter_mut() {
+        n.ctl.in_water = 0.0;
+    }
+    let mut wet: Vec<(BodyId, f32)> = Vec::new();
+
     // Zones.
     let bodies = dynamic_bodies(sim);
     let gravity = sim.world.config.gravity;
@@ -194,6 +219,7 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
             match &z.kind {
                 ZoneKind::Wind { accel } => b.add_accel(*accel * frac * puff),
                 ZoneKind::Water { buoyancy, drag, current } => {
+                    wet.push((id, frac));
                     let density = (b.mass() / (b.rest_area.max(1.0) / 3200.0)).max(0.2);
                     b.add_accel(Vec2::new(0.0, buoyancy * frac * puff / density));
                     b.add_accel((*current - v) * (*drag * frac));
@@ -203,6 +229,14 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
                 ZoneKind::Conveyor { speed } => b.add_accel(Vec2::new((speed - v.x) * 6.0 * frac, 0.0)),
                 ZoneKind::Kill => {}
             }
+        }
+    }
+
+    for (id, frac) in wet {
+        if let Some(p) = sim.players.iter_mut().find(|p| p.ctl.body == id) {
+            p.ctl.in_water = p.ctl.in_water.max(frac);
+        } else if let Some(n) = sim.npcs.iter_mut().find(|n| n.ctl.body == id) {
+            n.ctl.in_water = n.ctl.in_water.max(frac);
         }
     }
 

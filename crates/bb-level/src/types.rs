@@ -219,6 +219,9 @@ pub enum MoverMotion {
     Crusher { slam: f32, hold: f32, rise: f32, wait: f32 },
     /// Spin around the shape's centre at `speed` rad/s.
     Spin { speed: f32 },
+    /// Back and forth along the path, pausing `hold` seconds at each end
+    /// (easy-to-board elevators). `period` is the travel time one way.
+    Lift { hold: f32 },
 }
 
 /// Kinematic (script-moved) geometry: elevators, pistons, crushers, fans.

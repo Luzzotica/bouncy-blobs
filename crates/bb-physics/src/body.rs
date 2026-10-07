@@ -301,6 +301,9 @@ impl BodyDesc {
                 shape_compliance: None,
                 internal_damping: 0.5,
                 radius: 3.0,
+                // Slippery, so ropes slide over pegs like a pulley instead of
+                // gripping them (capstan friction would lock a pulley).
+                material: Material { static_friction: 0.03, dynamic_friction: 0.02, restitution: 0.0 },
                 ..Default::default()
             },
             velocity: Vec2::ZERO,

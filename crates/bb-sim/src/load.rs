@@ -13,7 +13,9 @@ pub fn material(m: lvl::Material) -> phys::Material {
         lvl::Material::Stone => phys::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 0.0 },
         lvl::Material::Ice => phys::Material { static_friction: 0.02, dynamic_friction: 0.01, restitution: 0.0 },
         lvl::Material::Sticky => phys::Material { static_friction: 3.0, dynamic_friction: 2.5, restitution: 0.0 },
-        lvl::Material::Bouncy => phys::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 0.85 },
+        // Slightly super-elastic: soft bodies soak up energy, and bouncy caps
+        // should LAUNCH you (JellyCar trampolines).
+        lvl::Material::Bouncy => phys::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 1.2 },
     }
 }
 

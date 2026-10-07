@@ -158,6 +158,9 @@ pub struct RopeDesc {
     pub break_stretch: Option<f32>,
     /// Let the rope collide with the bodies it's tied to.
     pub collide_with_anchors: bool,
+    /// Lay the rope along these points (e.g. over a pulley peg) instead of
+    /// a sagging arc. Should start/end at the anchors.
+    pub path: Option<Vec<Vec2>>,
 }
 
 impl RopeDesc {
@@ -171,6 +174,7 @@ impl RopeDesc {
             radius: 3.0,
             break_stretch: None,
             collide_with_anchors: false,
+            path: None,
         }
     }
 
@@ -194,12 +198,15 @@ pub(crate) fn add_rope(world: &mut World, d: RopeDesc) -> RopeId {
     if perp.y > 0.0 {
         perp = -perp;
     }
-    let pts: Vec<Vec2> = (0..=segs)
-        .map(|k| {
-            let t = k as f32 / segs as f32;
-            a.lerp(b, t) + perp * (sag * 4.0 * t * (1.0 - t))
-        })
-        .collect();
+    let pts: Vec<Vec2> = match &d.path {
+        Some(path) if path.len() >= 2 => resample_polyline(path, segs + 1),
+        _ => (0..=segs)
+            .map(|k| {
+                let t = k as f32 / segs as f32;
+                a.lerp(b, t) + perp * (sag * 4.0 * t * (1.0 - t))
+            })
+            .collect(),
+    };
     let mut desc = BodyDesc::chain(&pts, d.mass);
     desc.params.radius = d.radius;
     let body = world.add_body(desc);
@@ -227,6 +234,24 @@ pub(crate) fn add_rope(world: &mut World, d: RopeDesc) -> RopeId {
         over_time: 0.0,
     }));
     RopeId(world.ropes.len() as u32 - 1)
+}
+
+/// `n` points evenly spaced along a polyline.
+fn resample_polyline(path: &[Vec2], n: usize) -> Vec<Vec2> {
+    let lens: Vec<f32> = path.windows(2).map(|w| (w[1] - w[0]).length()).collect();
+    let total: f32 = lens.iter().sum::<f32>().max(1e-3);
+    (0..n)
+        .map(|k| {
+            let mut s = total * k as f32 / (n - 1).max(1) as f32;
+            for (i, l) in lens.iter().enumerate() {
+                if s <= *l || i == lens.len() - 1 {
+                    return path[i].lerp(path[i + 1], (s / l.max(1e-6)).min(1.0));
+                }
+                s -= l;
+            }
+            path[path.len() - 1]
+        })
+        .collect()
 }
 
 /// A resolved weighted point: (body slot index, particle, weight, inv mass).
