@@ -11,6 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+source "$ROOT/scripts/lib/mp-api-key.sh"
 
 MODE=debug; AAB=0; INSTALL=0
 for a in "$@"; do

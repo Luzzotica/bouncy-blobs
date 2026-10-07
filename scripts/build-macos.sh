@@ -10,6 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
+source "$ROOT/scripts/lib/mp-api-key.sh"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 
 RUN=0; ZIP=0

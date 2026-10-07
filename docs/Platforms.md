@@ -24,6 +24,21 @@ team `74874V9Z5H`. Marketing version **3.0.0**, from `[workspace.package]` in
 Export `CARGO_BUILD_JOBS=4` (or any value) to limit parallel jobs. Every
 script respects it.
 
+## Multiplayer API key
+
+`bb-net` reads `BB_MP_API_KEY` at **compile time** (`option_env!`), with the
+runtime env var as a fallback, so shipped builds must have it exported before
+`cargo` runs. Every build script (`build-macos.sh`, `web-build.sh`,
+`android-build.sh`, and `ios/build-rust.sh`, which also covers Xcode and
+`ios-build.sh`) sources `scripts/lib/mp-api-key.sh`. That helper uses
+`$BB_MP_API_KEY` if it is already set. Otherwise it reads `VITE_MP_API_KEY=`
+from `$BB_ENV_FILE`, then `./.env.local`, then `../bouncy-blobs/.env.local`. It
+never prints the value. **`.env.production.local` holds a revoked key; don't
+use it.** CI reads the repo secret `BB_MP_API_KEY`, which must be added. Plain
+`cargo run` without the variable builds fine, but online and phone play are
+disabled. On web the key ends up in the public wasm, as it did in the Vite
+build.
+
 ## Assets
 
 Source: `crates/bb-game/assets/`. Paths passed to `AssetServer::load` are

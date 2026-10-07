@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+source "$ROOT/scripts/lib/mp-api-key.sh"
 
 PROFILE=release; CARGO_FLAGS="--release"; SERVE=0
 for a in "$@"; do

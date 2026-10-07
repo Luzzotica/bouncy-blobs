@@ -16,6 +16,7 @@ export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-14.0}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Share the workspace target dir so Xcode builds reuse `cargo` caches.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+ROOT="$REPO_ROOT"; source "$REPO_ROOT/scripts/lib/mp-api-key.sh"
 
 CONFIGURATION="${CONFIGURATION:-Debug}"
 PLATFORM_NAME="${PLATFORM_NAME:-iphonesimulator}"
