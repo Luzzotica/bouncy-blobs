@@ -1,6 +1,7 @@
 //! Bouncy Blobs — the Bevy app.
 
 pub mod achievements;
+pub mod alive;
 pub mod assets;
 pub mod audio;
 pub mod backdrop;
@@ -78,6 +79,7 @@ impl Plugin for GamePlugin {
                 level_view::LevelViewPlugin,
                 backdrop::BackdropPlugin,
                 cave::CavePlugin,
+                alive::AlivePlugin,
                 sandbox::SandboxPlugin,
                 softtext::SoftTextPlugin,
             ))

@@ -45,7 +45,7 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-fn follow(
+pub fn follow(
     game: Option<Res<Game>>,
     mut dir: ResMut<CameraDirector>,
     time: Res<Time>,

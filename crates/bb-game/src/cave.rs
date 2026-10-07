@@ -126,6 +126,9 @@ pub struct ReactiveDecor {
     react: f32,
     wob: f32,
     wob_v: f32,
+    /// Vertical squash spring (bounced on / landed near).
+    sq: f32,
+    sq_v: f32,
     cooldown: f32,
     phase: f32,
     mesh: Handle<Mesh>,
@@ -148,7 +151,7 @@ pub fn spawn_reactive(
     theme: &ThemeColors,
 ) {
     for (i, d) in level.decor.iter().enumerate() {
-        if !is_reactive(&d.kind) {
+        if !is_reactive(&d.kind) || crate::level_view::near_checkpoint(level, d.pos) {
             continue;
         }
         // Vary the hue a touch per mushroom so a patch isn't a row of clones.
@@ -178,6 +181,8 @@ pub fn spawn_reactive(
                 react: 0.0,
                 wob: 0.0,
                 wob_v: 0.0,
+                sq: 0.0,
+                sq_v: 0.0,
                 cooldown: 0.0,
                 phase: i as f32 * 1.37,
                 mesh,
@@ -191,13 +196,15 @@ pub fn spawn_reactive(
 }
 
 fn spill_color(col: Color, react: f32, dark: bool) -> Color {
-    let a = if dark { 0.05 + 0.12 * react.min(1.5) } else { 0.0 };
+    let a = if dark { 0.02 + 0.13 * react.min(1.5) } else { 0.0 };
     col.with_alpha(a)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn react_decor(
     game: Res<Game>,
     time: Res<Time>,
+    mut msgs: MessageReader<crate::sim::SimMsg>,
     mut spores: ResMut<Spores>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<ColorMaterial>>,
@@ -207,25 +214,55 @@ fn react_decor(
     let dt = time.delta_secs().min(0.05);
     let t = time.elapsed_secs();
     let view = cam.single().map(|c| c.translation.truncate()).unwrap_or(Vec2::ZERO);
-    let players: Vec<(PVec2, PVec2, f32)> = game
-        .sim
+    let sim = &game.sim;
+    let players: Vec<(bb_physics::BodyId, PVec2, PVec2, f32)> = sim
         .players
         .iter()
         .filter(|p| p.dead.is_none())
-        .filter_map(|p| game.sim.world.body(p.ctl.body).map(|b| (b.centroid(), b.velocity(), p.ctl.radius)))
+        .map(|p| (p.ctl.body, p.ctl.radius))
+        .chain(sim.npcs.iter().filter(|n| n.dead.is_none()).map(|n| (n.ctl.body, n.ctl.radius)))
+        .filter_map(|(id, r)| sim.world.body(id).map(|b| (id, b.centroid(), b.velocity(), r)))
+        .collect();
+    // Hard landings nearby make every mushroom in reach jump.
+    let shocks: Vec<(PVec2, f32)> = msgs
+        .read()
+        .filter_map(|m| match m.0 {
+            bb_sim::SimEvent::Impact { body, pos, speed } if speed > 330.0 && players.iter().any(|p| p.0 == body) => Some((pos, ((speed - 250.0) / 700.0).clamp(0.15, 1.0))),
+            _ => None,
+        })
         .collect();
     for mut d in q.iter_mut() {
+        let near_view = (d.pos.x - view.x).abs() < 2600.0 && (d.pos.y - view.y).abs() < 1700.0;
+        if !near_view && d.react < 0.01 {
+            continue;
+        }
         let cap = d.pos + PVec2::new(0.0, 44.0 * d.scale);
         let mut target: f32 = 0.0;
         let mut push = 0.0;
+        let mut press = 0.0;
         let mut touched = false;
-        for (p, v, r) in &players {
+        for (_, p, v, r) in &players {
             let dist = (p.distance(cap) - r - 26.0 * d.scale).max(0.0);
             target = target.max(1.0 - (dist / NOTICE).clamp(0.0, 1.0));
-            if dist < 50.0 {
-                push += v.x * (1.0 - dist / 50.0);
+            if dist < 60.0 {
+                let k = 1.0 - dist / 60.0;
+                // A share of the blob's motion goes into the sway…
+                push += v.x * k;
+                // …and pressing down on the cap squashes it.
+                if p.y > cap.y && dist < 10.0 {
+                    press += (-v.y).max(0.0) * k + 120.0;
+                }
             }
             touched |= dist < 4.0;
+        }
+        for (sp, s) in &shocks {
+            let dd = sp.distance(d.pos);
+            if dd < 420.0 {
+                let k = s * (1.0 - dd / 420.0);
+                d.sq_v -= 6.0 * k;
+                d.wob_v += (d.pos.x - sp.x).signum() * 2.5 * k;
+                target = target.max(1.1 * k);
+            }
         }
         d.cooldown = (d.cooldown - dt).max(0.0);
         if touched {
@@ -233,23 +270,26 @@ fn react_decor(
             if d.cooldown <= 0.0 {
                 d.cooldown = 0.9;
                 let col = d.col;
-                spores.puff(cap + PVec2::new(0.0, 8.0 * d.scale), 50.0 * d.scale, col, 7);
+                spores.puff(cap + PVec2::new(0.0, 8.0 * d.scale), 50.0 * d.scale, col, 9);
             }
         }
-        let k = if target > d.react { 7.0 } else { 1.5 };
+        // Lights up fast; fades slowly back to the dark (a few seconds).
+        let k = if target > d.react { 7.0 } else { 0.4 };
         d.react += (target - d.react) * (1.0 - (-k * dt).exp());
         // Damped spring wobble, kicked by blobs brushing past.
-        let accel = -90.0 * d.wob - 5.0 * d.wob_v + push * 0.012;
+        let accel = -70.0 * d.wob - 2.6 * d.wob_v + push * 0.02;
         d.wob_v += accel * dt;
         d.wob = (d.wob + d.wob_v * dt).clamp(-0.6, 0.6);
-        let near_view = (d.pos.x - view.x).abs() < 2600.0 && (d.pos.y - view.y).abs() < 1700.0;
+        let accel = -160.0 * d.sq - 6.0 * d.sq_v - press * 0.02;
+        d.sq_v += accel * dt;
+        d.sq = (d.sq + d.sq_v * dt).clamp(-0.35, 0.3);
         if !near_view {
             continue;
         }
         if let Some(mut mesh) = meshes.get_mut(&d.mesh) {
             let mut buf = MeshBuf::default();
             let breathe = (t * 1.3 + d.phase).sin();
-            draw_mushroom(&mut buf, d.scale, d.react, d.wob, breathe, d.dark, d.col);
+            draw_mushroom_sq(&mut buf, d.scale, d.react, d.wob, d.sq, breathe, d.dark, d.col);
             buf.write(&mut mesh);
         }
         if let Some(mut m) = mats.get_mut(&d.spill) {
@@ -261,14 +301,21 @@ fn react_decor(
 /// A glow mushroom in local space (base at the origin), `react` 0..1.5,
 /// `wob` a shear in radians-ish, `breathe` -1..1 idle pulse.
 pub fn draw_mushroom(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, breathe: f32, dark: bool, col: Color) {
+    draw_mushroom_sq(buf, s, react, wob, 0.0, breathe, dark, col);
+}
+
+/// [`draw_mushroom`] with a vertical squash-and-stretch `sq` (-ve squashes).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32, breathe: f32, dark: bool, col: Color) {
     let g = react.clamp(0.0, 1.5);
-    let squash = 1.0 - 0.08 * (g - 1.0).max(0.0) * 2.0;
+    let squash = (1.0 - 0.08 * (g - 1.0).max(0.0) * 2.0) * (1.0 + sq);
+    let widen = 1.0 - sq * 0.6;
     // Shear by height so the cap sways on its stalk.
-    let sh = |p: PVec2| PVec2::new(p.x + wob * p.y * 0.9, p.y * squash);
+    let sh = |p: PVec2| PVec2::new(p.x * widen + wob * p.y * 0.9, p.y * squash);
     let cap_c = PVec2::new(0.0, 44.0 * s);
     let pulse = 1.0 + breathe * 0.06;
     // Halo behind.
-    let ha = if dark { 0.09 + 0.03 * breathe + 0.2 * g } else { 0.04 + 0.12 * g };
+    let ha = if dark { 0.045 + 0.015 * breathe + 0.24 * g } else { 0.04 + 0.12 * g };
     buf.halo(sh(cap_c), PVec2::new(95.0, 80.0) * s * pulse * (1.0 + 0.2 * g), -0.004, la(col, ha));
     // Stalk: pale, faintly lit from the cap.
     let stalk = if dark { mix(Color::BLACK, lighten(col, 0.5), 0.35 + 0.2 * g) } else { lighten(col, 0.6) };
@@ -288,16 +335,18 @@ pub fn draw_mushroom(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, breathe: f
     dome.push(sh(cap_c + PVec2::new(-cw * 0.7, -5.0 * s)));
     dome.push(sh(cap_c + PVec2::new(cw * 0.7, -5.0 * s)));
     let lit = lighten(col, 0.55);
-    let top = mix(lighten(col, 0.15), lit, 0.5 * g.min(1.0));
-    let edge = mix(if dark { mix(Color::BLACK, col, 0.7) } else { col }, col, 0.6 * g.min(1.0));
+    // In the dark cave a resting cap is dim; a blob nearby wakes it.
+    let gm = g.min(1.0);
+    let top = if dark { mix(mix(Color::BLACK, col, 0.6), lit, 0.15 + 0.7 * gm) } else { mix(lighten(col, 0.15), lit, 0.5 * gm) };
+    let edge = mix(if dark { mix(Color::BLACK, col, 0.45) } else { col }, col, 0.7 * gm);
     buf.fan(&dome, sh(cap_c + PVec2::new(0.0, ch * 0.55)), 0.0, lin(top), lin(edge));
     // Gills.
     buf.stroke(&[sh(cap_c + PVec2::new(-cw * 0.85, -1.0 * s)), sh(cap_c + PVec2::new(cw * 0.85, -1.0 * s))], 4.0 * s, 0.001, lin(darken(col, 0.45)));
     // Rim light along the top.
     let rim: Vec<PVec2> = dome[..=n].iter().copied().collect();
-    buf.stroke(&rim, 2.2 * s, 0.001, la(lighten(col, 0.6), 0.9));
+    buf.stroke(&rim, 2.2 * s, 0.001, la(lighten(col, 0.6), if dark { 0.4 + 0.5 * gm } else { 0.9 }));
     // Spots.
-    let spot = la(mix(lighten(col, 0.75), palette::hex(0xffffff), 0.5 * g.min(1.0)), 0.95);
+    let spot = la(mix(lighten(col, 0.75), palette::hex(0xffffff), 0.5 * gm), if dark { 0.45 + 0.5 * gm } else { 0.95 });
     for (fx, fy, r) in [(-0.45f32, 0.45f32, 4.5f32), (0.05, 0.78, 5.5), (0.5, 0.4, 3.5)] {
         buf.ellipse(sh(cap_c + PVec2::new(fx * cw, fy * ch)), PVec2::new(r, r * 0.8) * s, 0.0, 0.002, spot);
     }
