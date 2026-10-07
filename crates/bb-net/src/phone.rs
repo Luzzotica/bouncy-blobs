@@ -173,8 +173,9 @@ impl PhoneInput {
                         continue;
                     }
                     self.last_stick = Some(ts);
-                    // The phone's y is screen-down; the game's is up.
-                    let s = Vec2::new(num(value, "x"), -num(value, "y"));
+                    // The phone's y is screen-down; the game's is up (+0.0
+                    // turns -0.0 into 0.0 for tidy logs and comparisons).
+                    let s = Vec2::new(num(value, "x"), -num(value, "y") + 0.0);
                     changed |= s != self.stick;
                     self.stick = s;
                 }

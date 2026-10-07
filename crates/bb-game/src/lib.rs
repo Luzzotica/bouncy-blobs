@@ -5,6 +5,7 @@ pub mod devtools;
 pub mod flow;
 pub mod input;
 pub mod level_view;
+pub mod net;
 pub mod palette;
 pub mod render;
 pub mod sandbox;
@@ -47,6 +48,7 @@ impl Plugin for GamePlugin {
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
                 devtools::DevToolsPlugin,
+                net::NetPlugin,
             ));
     }
 }

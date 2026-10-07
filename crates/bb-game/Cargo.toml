@@ -22,6 +22,9 @@ dev = ["bevy/dynamic_linking"]
 bb-physics = { path = "../bb-physics" }
 bb-level = { path = "../bb-level" }
 bb-sim = { path = "../bb-sim" }
+bb-net = { path = "../bb-net" }
+qrcode = { version = "0.14", default-features = false }
+serde_json.workspace = true
 glam.workspace = true
 bevy = { version = "0.19.1", default-features = false, features = [
     "2d", "ui", "audio", "mp3", "wav", "vorbis", "default_font", "png",
