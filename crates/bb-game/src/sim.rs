@@ -50,7 +50,7 @@ impl Plugin for SimPlugin {
             .add_message::<SimMsg>()
             .add_message::<LoadLevel>()
             .add_message::<UnloadLevel>()
-            .add_systems(PreUpdate, (load_levels, unload_levels))
+            .add_systems(PreUpdate, (unload_levels, load_levels).chain())
             .add_systems(FixedUpdate, step.run_if(resource_exists::<Game>));
     }
 }

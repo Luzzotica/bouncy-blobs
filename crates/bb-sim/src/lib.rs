@@ -327,6 +327,18 @@ impl Sim {
         self.tags.get(&id).copied()
     }
 
+    /// Add an arbitrary body (menu buttons, title letters, cutscene props).
+    pub fn add_body(&mut self, desc: physics::BodyDesc, tag: BodyTag) -> BodyId {
+        let id = self.world.add_body(desc);
+        self.tags.insert(id, tag);
+        id
+    }
+
+    pub fn remove_body(&mut self, id: BodyId) {
+        self.tags.remove(&id);
+        self.world.remove_body(id);
+    }
+
     pub fn npc_by_id(&self, id: &str) -> Option<&Npc> {
         self.npcs.iter().find(|n| n.id == id)
     }

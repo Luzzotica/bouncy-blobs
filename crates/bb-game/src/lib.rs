@@ -8,6 +8,7 @@ pub mod fx;
 pub mod hud;
 pub mod input;
 pub mod level_view;
+pub mod menu;
 pub mod palette;
 pub mod render;
 pub mod sandbox;
@@ -15,6 +16,14 @@ pub mod sim;
 pub mod story;
 
 use bevy::prelude::*;
+
+pub use bb_sim::load::layer as load_layer;
+
+/// A cheerful colour per index (chapter buttons, confetti).
+pub fn palette_cycle(i: usize) -> u32 {
+    const C: [u32; 10] = [0xff5d73, 0xff9f43, 0xffd93d, 0x6bcb77, 0x4d96ff, 0x9b5de5, 0xf15bb5, 0x00c2a8, 0x5dd6ff, 0xa0e426];
+    C[i % C.len()]
+}
 
 pub fn run() {
     app().run();
@@ -54,6 +63,7 @@ impl Plugin for GamePlugin {
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
                 story::StoryPlugin,
+                menu::MenuPlugin,
                 devtools::DevToolsPlugin,
             ));
     }

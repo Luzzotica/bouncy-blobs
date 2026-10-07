@@ -3,13 +3,15 @@
 use bb_level::{LevelBuilder, PropKind, RopeEnd, RopeStyle, Theme, v};
 use bevy::prelude::*;
 
+use crate::flow::AppState;
 use crate::sim::LoadLevel;
 
 pub struct SandboxPlugin;
 
 impl Plugin for SandboxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, start);
+        app.add_systems(Startup, start)
+            .add_systems(Update, back_to_title.run_if(in_state(AppState::Playing).or_else(in_state(AppState::Story))));
     }
 }
 
@@ -40,12 +42,24 @@ pub fn sandbox_level() -> bb_level::Level {
     b.build()
 }
 
-fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<crate::flow::AppState>>) {
-    if let Ok(s) = std::env::var("BB_START") {
-        if s == "story" {
-            next.set(crate::flow::AppState::Story);
-            return;
+fn start(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+    match std::env::var("BB_START").as_deref() {
+        Ok("story") => next.set(AppState::Story),
+        Ok("sandbox") => {
+            load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
+            next.set(AppState::Playing);
         }
+        Ok("kids") => next.set(AppState::Kids),
+        Ok("editor") => next.set(AppState::Editor),
+        Ok("party") => next.set(AppState::Party),
+        _ => {}
     }
-    load.write(LoadLevel { level: sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
+}
+
+/// Esc (or Back on Android) from free play returns to the title.
+fn back_to_title(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>, mut unload: MessageWriter<crate::sim::UnloadLevel>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        unload.write(crate::sim::UnloadLevel);
+        next.set(AppState::Title);
+    }
 }
