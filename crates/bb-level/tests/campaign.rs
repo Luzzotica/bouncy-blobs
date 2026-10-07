@@ -221,12 +221,13 @@ struct Bot {
     jumped: bool,
     vx_avg: f32,
     retreat_dir: f32,
+    runup: bool,
 }
 
 impl Bot {
     fn new(path: &[Waypoint], from: Vec2) -> Bot {
         let i = (nearest_wp(path, from) + 1).min(path.len() - 1);
-        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0 }
+        Bot { i, hold: 0.0, blocked: 0.0, since_ground: 0.0, rope_t: 0.0, prev_button: false, wall_dir: 1.0, retreat: 0.0, jumped: false, vx_avg: 0.0, retreat_dir: -1.0, runup: false }
     }
 
     fn think(&mut self, sim: &Sim, path: &[Waypoint]) -> Input {
@@ -243,6 +244,7 @@ impl Bot {
         let reached = |t: Waypoint| {
             let near = (pos.x - t.at.x).abs() < 50.0 && feet > t.at.y - 45.0 && feet < t.at.y + 140.0;
             near && (on_ground || matches!(t.how, Move::Swim | Move::Wind))
+                || (t.how == Move::Rope && p.ctl.grab.is_some() && (pos.x - t.at.x).abs() < 120.0 && (t.at.y - feet).abs() < 250.0 && !ground_below(sim, t.at, 40.0))
         };
         while self.i < path.len() - 1 {
             if reached(path[self.i]) {
@@ -330,15 +332,28 @@ impl Bot {
                 if p.ctl.grab.is_some() {
                     self.rope_t += dt;
                     stick.x = dir;
-                    if tgt.at.y > feet + 160.0 {
+                    if tgt.at.y > feet - 40.0 {
                         stick.y = 1.0;
                     }
-                    let good = vel.x * dir > 260.0 && vel.y > -150.0;
-                    if (self.rope_t > 0.5 && good) || self.rope_t > 8.0 {
+                    // Predict the ballistic landing if we let go now.
+                    let rel = vel + Vec2::new(dir * 380.0, 720.0);
+                    let drop = pos.y - (tgt.at.y + R);
+                    let disc = rel.y * rel.y + 3600.0 * drop;
+                    let land = (disc >= 0.0).then(|| pos.x + rel.x * (rel.y + disc.sqrt()) / 1800.0);
+                    let good = vel.x * dir > 150.0 && land.is_some_and(|x| (x - tgt.at.x) * dir > -160.0 && (x - tgt.at.x) * dir < 260.0);
+                    // Climb first if the landing is above us.
+                    let high_enough = feet > tgt.at.y - 60.0 || self.rope_t > 6.0;
+                    if (self.rope_t > 0.5 && good && high_enough) || self.rope_t > 10.0 {
                         button = !self.prev_button;
                     }
+                } else if at_prev && vel.x * dir < 220.0 && self.since_ground < 0.05 && !self.runup {
+                    // Take a run-up before leaping for a vine.
+                    self.runup = true;
+                    self.retreat = 0.4;
+                    self.retreat_dir = -dir;
                 } else if at_prev || (edge_ahead && self.i > 0) {
                     want_jump = true;
+                    self.runup = false;
                 }
             }
             Move::Wind => {

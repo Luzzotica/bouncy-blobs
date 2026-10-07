@@ -50,3 +50,17 @@ Lulu (only in ch10).
 | `ch03_cavern` | Bottom of a tall cavern ringed with caps. Glimmer: "Up, up, up!" |
 | `ch03_bouncing_up` | Top of the climb. Pip realises: bouncing is how you go *up*. Pure joy, little speed lines. Glimmer: "Told you." |
 | `ch03_outro` | Pip bounces in happy circles; beyond the fungus, the glow of hanging vines. |
+
+## Chapter 4 — Vine Gardens (Glowroot Grotto)
+
+| id | what happens |
+|---|---|
+| `ch04_intro` | Glowing roots and dangling vines sway like they're listening. Glimmer swings on one, giggling. "Grab on! Vines love a hug." |
+| `ch04_vines` | Hint: jump into a vine to **grab** it; stick to swing; button to **let go** (with a big fling). A soft basin waits below the first one. |
+| `ch04_swing_chain` | Two vines over spikes. Glimmer: "Let go at the top of the swing. Trust the swing." |
+| `ch04_climb` | A tall vine up a cliff. Hint: stick up/down to **climb**. Pip, climbing: "Hup… hup… hup!" |
+| `ch04_traverse` | A long run of vines climbing over a spiky gulf. Glimmer: "Friends are just ropes you choose." (Bounce-Buddies in co-op: hold hands = grab each other.) |
+| `ch04_well` | A well of vines. Pip looks up; it's a long way. Then grins: up is a feeling. |
+| `ch04_remix` | Rope bridge over goo, with drips. Glimmer: "Everything you learned, all at once! That's called *life*." |
+| `ch04_friends` | Pip lands the big fling; Glimmer applauds (chimes). "You swing like you were born upside down." |
+| `ch04_outro` | Beyond the vines, a rhythmic THUMP… THUMP… of old stone machines. Pip's bounce falters. |
