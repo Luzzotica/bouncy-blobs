@@ -3,6 +3,7 @@
 //! * `BB_SHOT=/path.png` — save a screenshot after `BB_SHOT_FRAME` frames
 //!   (default 150) and exit.
 //! * `BB_AUTOPLAY=1` — slot 0 holds right and jumps every second.
+//! * `BB_START=kids` — boot straight into Kids Mode (skips the sandbox).
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};

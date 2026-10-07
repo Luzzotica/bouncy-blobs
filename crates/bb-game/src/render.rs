@@ -360,7 +360,7 @@ fn sync_bodies(
                 _ => None,
             };
             if let Some(kind) = eyes {
-                let owner = commands.spawn((Eyes { body: id, blink: 2.0, look: Vec2::ZERO, kind }, Transform::default())).id();
+                let owner = commands.spawn((Eyes { body: id, blink: 1.0 + (id.index % 9) as f32 * 0.45, look: Vec2::ZERO, kind }, Transform::default())).id();
                 for k in 0..4u8 {
                     let mat = if k < 2 { shared.white.clone() } else { shared.ink.clone() };
                     commands.spawn((

@@ -15,7 +15,12 @@ pub struct Game {
 
 impl Game {
     pub fn new(level: Level) -> Game {
-        Game { sim: Sim::new(level), paused: false, tick: 0 }
+        Game::new_with(Sim::new(level))
+    }
+
+    /// Wrap an already-configured sim (rules, players, extra bodies).
+    pub fn new_with(sim: Sim) -> Game {
+        Game { sim, paused: false, tick: 0 }
     }
 }
 

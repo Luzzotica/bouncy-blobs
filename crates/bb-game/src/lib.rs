@@ -1,12 +1,14 @@
 //! Bouncy Blobs — the Bevy app.
 
 pub mod assets;
+pub mod audio;
 pub mod camera;
 pub mod devtools;
 pub mod flow;
 pub mod fx;
 pub mod hud;
 pub mod input;
+pub mod kids;
 pub mod level_view;
 pub mod menu;
 pub mod palette;
@@ -16,6 +18,7 @@ pub mod render;
 pub mod sandbox;
 pub mod sim;
 pub mod story;
+pub mod story_iface;
 
 use bevy::prelude::*;
 
@@ -27,13 +30,26 @@ pub fn palette_cycle(i: usize) -> u32 {
     C[i % C.len()]
 }
 
+/// Where assets live: `BEVY_ASSET_ROOT` if set, `assets/` beside the
+/// executable when packaged, else (dev builds) this crate's source folder.
+fn asset_root() -> String {
+    if let Ok(root) = std::env::var("BEVY_ASSET_ROOT") {
+        return format!("{root}/assets");
+    }
+    let beside_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("assets"))).filter(|p| p.exists());
+    if beside_exe.is_some() || cfg!(any(target_os = "ios", target_os = "android", target_arch = "wasm32")) || !cfg!(debug_assertions) {
+        return "assets".into();
+    }
+    concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into()
+}
+
 pub fn run() {
     app().run();
 }
 
 pub fn app() -> App {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+    app.add_plugins(DefaultPlugins.set(bevy::asset::AssetPlugin { file_path: asset_root(), ..default() }).set(WindowPlugin {
         primary_window: Some(Window {
             title: "Bouncy Blobs".into(),
             fit_canvas_to_parent: true,
@@ -64,10 +80,14 @@ impl Plugin for GamePlugin {
                 render::RenderPlugin,
                 level_view::LevelViewPlugin,
                 sandbox::SandboxPlugin,
+            ))
+            .add_plugins((
                 story::StoryPlugin,
                 menu::MenuPlugin,
                 party::PartyPlugin,
                 devtools::DevToolsPlugin,
+                audio::GameAudioPlugin,
+                kids::KidsPlugin,
             ));
     }
 }
