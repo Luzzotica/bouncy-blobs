@@ -1,6 +1,6 @@
-# Godot 4+ specific ignores
+# Godot 4+ specific ignores (legacy)
 .godot/
-/android/
+
 
 # Local Supabase credentials (copy from config/supabase_env.example)
 config/supabase.env
@@ -62,3 +62,6 @@ crates/softbody-wasm/pkg/
 /marketing/shorts/
 /marketing/clips/
 /target
+
+# Platform build outputs (scripts/ios-build.sh, build-macos.sh, android-build.sh)
+/build/

@@ -19,6 +19,7 @@ pub mod palette;
 pub mod party;
 pub mod party_assets;
 pub mod pause;
+pub mod platform;
 pub mod render;
 pub mod sandbox;
 pub mod save;
@@ -36,35 +37,15 @@ pub fn palette_cycle(i: usize) -> u32 {
     C[i % C.len()]
 }
 
-/// Where assets live: `BEVY_ASSET_ROOT` if set, `assets/` beside the
-/// executable when packaged, else (dev builds) this crate's source folder.
-fn asset_root() -> String {
-    if let Ok(root) = std::env::var("BEVY_ASSET_ROOT") {
-        return format!("{root}/assets");
-    }
-    let beside_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("assets"))).filter(|p| p.exists());
-    if beside_exe.is_some() || cfg!(any(target_os = "ios", target_os = "android", target_arch = "wasm32")) || !cfg!(debug_assertions) {
-        return "assets".into();
-    }
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into()
-}
-
 pub fn run() {
     app().run();
 }
 
 pub fn app() -> App {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,webrtc=warn,rtc=warn,rtc_ice=error,webrtc_ice=error,webrtc_mdns=error".into(), ..default() }).set(bevy::asset::AssetPlugin { file_path: asset_root(), ..default() }).set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Bouncy Blobs".into(),
-            fit_canvas_to_parent: true,
-            prevent_default_event_handling: true,
-            ..default()
-        }),
-        ..default()
-    }))
-    .add_plugins(GamePlugin);
+    app.add_plugins(platform::default_plugins())
+        .add_plugins(platform::PlatformPlugin)
+        .add_plugins(GamePlugin);
     app
 }
 

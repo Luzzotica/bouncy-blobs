@@ -1,0 +1,381 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4CC78A6F20B64474A8C0DB95 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3EED1FDFF77468E6DC4D9380 /* Assets.xcassets */; };
+		6B31BD681CEB307063686992 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1AF8302D7111FCBF11562737 /* LaunchScreen.storyboard */; };
+		AA493A8E538A8033F287D816 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = D48AC4D9386ABF914C321FDE /* assets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1AF8302D7111FCBF11562737 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		1B988774E4A1F039E289521B /* BouncyBlobs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BouncyBlobs.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3EED1FDFF77468E6DC4D9380 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6368E85CE8E67CE3B0AD48D2 /* build-rust.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-rust.sh"; sourceTree = "<group>"; };
+		AE302F297DDAF52D3C041CF1 /* BouncyBlobs.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BouncyBlobs.entitlements; sourceTree = "<group>"; };
+		D48AC4D9386ABF914C321FDE /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = "../crates/bb-game/assets"; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0BF605D4AEE22BED1C414C82 /* bb-game */ = {
+			isa = PBXGroup;
+			children = (
+				D48AC4D9386ABF914C321FDE /* assets */,
+			);
+			path = "bb-game";
+			sourceTree = "<group>";
+		};
+		64DDCE850ADB64CF02E4400C /* BouncyBlobs */ = {
+			isa = PBXGroup;
+			children = (
+				3EED1FDFF77468E6DC4D9380 /* Assets.xcassets */,
+				AE302F297DDAF52D3C041CF1 /* BouncyBlobs.entitlements */,
+				1AF8302D7111FCBF11562737 /* LaunchScreen.storyboard */,
+			);
+			path = BouncyBlobs;
+			sourceTree = "<group>";
+		};
+		72D4513CB2E17D1881E80BE6 /* bb-wt-platform */ = {
+			isa = PBXGroup;
+			children = (
+				EE6F63CC6D815CBE685B6CC9 /* crates */,
+			);
+			name = "bb-wt-platform";
+			path = ..;
+			sourceTree = "<group>";
+		};
+		C37DE5876EFF0C00C679FD01 = {
+			isa = PBXGroup;
+			children = (
+				6368E85CE8E67CE3B0AD48D2 /* build-rust.sh */,
+				72D4513CB2E17D1881E80BE6 /* bb-wt-platform */,
+				64DDCE850ADB64CF02E4400C /* BouncyBlobs */,
+				E2555EFAB6DE69DB07263F72 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E2555EFAB6DE69DB07263F72 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1B988774E4A1F039E289521B /* BouncyBlobs.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EE6F63CC6D815CBE685B6CC9 /* crates */ = {
+			isa = PBXGroup;
+			children = (
+				0BF605D4AEE22BED1C414C82 /* bb-game */,
+			);
+			path = crates;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F5056975821D78E6EA5CBB71 /* BouncyBlobs */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 86AB9193B2CBBEF16B7FA9EF /* Build configuration list for PBXNativeTarget "BouncyBlobs" */;
+			buildPhases = (
+				599237903CD7D74E0696BD25 /* Build Rust (bb-mobile) */,
+				3913085385CDCCAAAA726B28 /* Sources */,
+				8EB31B304FFE8DC4768F8267 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BouncyBlobs;
+			packageProductDependencies = (
+			);
+			productName = BouncyBlobs;
+			productReference = 1B988774E4A1F039E289521B /* BouncyBlobs.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1E5FFF47CC9C309B97212ED9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					F5056975821D78E6EA5CBB71 = {
+						DevelopmentTeam = 74874V9Z5H;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 06F8908C5D82BFB442B42E23 /* Build configuration list for PBXProject "BouncyBlobs" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = C37DE5876EFF0C00C679FD01;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E2555EFAB6DE69DB07263F72 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F5056975821D78E6EA5CBB71 /* BouncyBlobs */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8EB31B304FFE8DC4768F8267 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4CC78A6F20B64474A8C0DB95 /* Assets.xcassets in Resources */,
+				6B31BD681CEB307063686992 /* LaunchScreen.storyboard in Resources */,
+				AA493A8E538A8033F287D816 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		599237903CD7D74E0696BD25 /* Build Rust (bb-mobile) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/build-rust.sh",
+			);
+			name = "Build Rust (bb-mobile)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/build-rust.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3913085385CDCCAAAA726B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		3EF50E9DB7352C4AB5B63549 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BouncyBlobs/BouncyBlobs.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3.0.0.1;
+				DEVELOPMENT_TEAM = 74874V9Z5H;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				EXECUTABLE_NAME = BouncyBlobs;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BouncyBlobs/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 3.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.sterlinglong.bouncyblobs;
+				PRODUCT_NAME = "Bouncy Blobs";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9F84E667FC605C3D9DCBFDC6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CA4CD963E11F73337959C221 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BouncyBlobs/BouncyBlobs.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3.0.0.1;
+				DEVELOPMENT_TEAM = 74874V9Z5H;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				EXECUTABLE_NAME = BouncyBlobs;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BouncyBlobs/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 3.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.sterlinglong.bouncyblobs;
+				PRODUCT_NAME = "Bouncy Blobs";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D600A4348FF24CB3ED357FD3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		06F8908C5D82BFB442B42E23 /* Build configuration list for PBXProject "BouncyBlobs" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D600A4348FF24CB3ED357FD3 /* Debug */,
+				9F84E667FC605C3D9DCBFDC6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		86AB9193B2CBBEF16B7FA9EF /* Build configuration list for PBXNativeTarget "BouncyBlobs" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3EF50E9DB7352C4AB5B63549 /* Debug */,
+				CA4CD963E11F73337959C221 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1E5FFF47CC9C309B97212ED9 /* Project object */;
+}

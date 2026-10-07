@@ -1,0 +1,75 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+// Release signing (optional): android/keystore.properties with
+//   storeFile=/Users/you/keystores/bouncy-blobs.jks
+//   storePassword=…  keyAlias=bouncyblobs  keyPassword=…
+def keystoreProps = new Properties()
+def keystoreFile = rootProject.file('keystore.properties')
+if (keystoreFile.exists()) { keystoreFile.withInputStream { keystoreProps.load(it) } }
+
+// Version comes from the Cargo workspace (marketing) + BB_VERSION_CODE env.
+def cargoToml = rootProject.file('../Cargo.toml').text
+def cargoVersion = (cargoToml =~ /(?m)^version\s*=\s*"([^"]+)"/)[0][1]
+
+android {
+    namespace 'me.sterlinglong.bouncyblobs'
+    compileSdk 36
+    ndkVersion project.findProperty('bb.ndkVersion') ?: '28.2.13676358'
+
+    defaultConfig {
+        applicationId 'me.sterlinglong.bouncyblobs'
+        minSdk 31
+        targetSdk 36
+        versionCode((System.getenv('BB_VERSION_CODE') ?: '3000001') as int)
+        versionName cargoVersion
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        if (keystoreProps['storeFile']) {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            jniDebuggable true
+        }
+        release {
+            minifyEnabled false
+            if (keystoreProps['storeFile']) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        prefab true
+    }
+    sourceSets {
+        main {
+            // Bevy's AndroidAssetReader reads from the APK assets/ root.
+            assets.srcDirs = ['../../crates/bb-game/assets']
+            // libbb_mobile.so per ABI, written by scripts/android-build.sh (cargo-ndk).
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+}
+
+dependencies {
+    implementation libs.appcompat
+    implementation libs.games.activity
+}

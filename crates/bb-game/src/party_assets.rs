@@ -7,15 +7,14 @@ use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 
-/// Party maps converted from 2.x, if the assets exist.
+/// Party maps converted from 2.x. Embedded in the binary (via
+/// `editor::library`) so they exist on every platform: reading
+/// `CARGO_MANIFEST_DIR` at runtime only works on the dev machine, not in a
+/// shipped .app/.ipa/.apk/web build.
 pub fn imported_maps() -> Vec<Level> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels/party");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
-    let mut v: Vec<Level> = entries
-        .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json") && e.file_name() != "manifest.json")
-        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-        .filter_map(|s| Level::from_json(&s).ok())
+    let mut v: Vec<Level> = crate::editor::library::PARTY_LEVELS
+        .iter()
+        .filter_map(|b| Level::from_json(b.json).ok())
         .collect();
     v.sort_by(|a, b| a.name.cmp(&b.name));
     v
