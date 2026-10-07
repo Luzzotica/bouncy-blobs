@@ -10,6 +10,7 @@ use crate::camera::CameraDirector;
 use crate::palette::{self, hex, lighten};
 use crate::render::{Shared, z};
 use crate::sim::{Game, SimMsg};
+use crate::softtext::SoftText;
 
 #[derive(Component)]
 pub struct Particle {
@@ -21,13 +22,13 @@ pub struct Particle {
     pub drag: f32,
 }
 
-/// A floating word ("POP!", "BOING!") that pops in, wobbles and fades.
+/// A floating word ("POP!", "BOING!"): every letter is its own jelly glyph
+/// on a spring — they burst out, wobble back into the word, float and fade.
 #[derive(Component)]
 pub struct Word {
     pub life: f32,
     pub max: f32,
     pub vel: Vec2,
-    pub spin: f32,
 }
 
 #[derive(Resource, Default)]
@@ -87,14 +88,13 @@ pub fn burst(commands: &mut Commands, shared: &Shared, cache: &mut MatCache, mat
     }
 }
 
-pub fn word(commands: &mut Commands, assets: &GameAssets, text: &str, pos: Vec2, color: Color, size: f32) {
-    commands.spawn((
-        Text2d::new(text),
-        TextFont { font: assets.font.clone().into(), font_size: size.into(), weight: FontWeight::BOLD, ..default() },
-        TextColor(color),
-        Transform::from_xyz(pos.x, pos.y, z::FX + 1.0).with_scale(Vec3::splat(0.2)),
-        Word { life: 0.9, max: 0.9, vel: Vec2::new(0.0, 90.0), spin: 0.0 },
-    ));
+pub fn word(commands: &mut Commands, _assets: &GameAssets, text: &str, pos: Vec2, color: Color, size: f32) {
+    let mut st = SoftText::new(text, size).color(color).at(pos).z(z::FX + 1.0).stagger(0.035);
+    st.burst = size * 12.0;
+    st.stiffness = 170.0;
+    st.damping = 5.5;
+    let life = 1.25 + text.chars().count() as f32 * 0.03;
+    commands.spawn((st, Word { life, max: life, vel: Vec2::new(0.0, 80.0) }));
 }
 
 fn react(
@@ -190,7 +190,7 @@ fn animate(
     mut commands: Commands,
     time: Res<Time>,
     mut particles: Query<(Entity, &mut Particle, &mut Transform), Without<Word>>,
-    mut words: Query<(Entity, &mut Word, &mut Transform, &mut TextColor), Without<Particle>>,
+    mut words: Query<(Entity, &mut Word, &mut SoftText), Without<Particle>>,
 ) {
     let dt = time.delta_secs();
     for (e, mut p, mut tf) in particles.iter_mut() {
@@ -207,22 +207,17 @@ fn animate(
         let t = (p.life / p.max).clamp(0.0, 1.0);
         tf.scale = Vec3::splat(p.size * (0.3 + 0.7 * t));
     }
-    for (e, mut w, mut tf, mut col) in words.iter_mut() {
+    for (e, mut w, mut st) in words.iter_mut() {
         w.life -= dt;
         if w.life <= 0.0 {
             commands.entity(e).despawn();
             continue;
         }
-        let age = w.max - w.life;
-        // Overshooting pop-in, then a gentle float and fade.
-        let s = if age < 0.15 { 0.2 + (age / 0.15) * 1.1 } else if age < 0.25 { 1.3 - (age - 0.15) * 3.0 } else { 1.0 };
-        tf.scale = Vec3::splat(s);
-        tf.translation.x += w.vel.x * dt;
-        tf.translation.y += w.vel.y * dt;
-        w.spin += dt;
-        tf.rotation = Quat::from_rotation_z((w.spin * 9.0).sin() * 0.08);
-        let a = (w.life / 0.35).clamp(0.0, 1.0);
-        col.0.set_alpha(a);
+        // Float up, slowing; fade over the last moments.
+        let v = w.vel;
+        st.offset += v * dt;
+        w.vel *= (1.0 - 1.5 * dt).max(0.0);
+        st.alpha = (w.life / 0.35).clamp(0.0, 1.0);
     }
 }
 

@@ -348,7 +348,7 @@ fn rebuild(mut commands: Commands, assets: Option<Res<GameAssets>>, mut q: Query
     }
 }
 
-type GlyphQuery<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut TextColor, &'static mut Visibility), (With<SoftGlyph>, Without<SoftText>)>;
+pub type GlyphQuery<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut TextColor, &'static mut Visibility), (With<SoftGlyph>, Without<SoftText>)>;
 
 fn ride_game(time: Res<Time>, game: Option<Res<Game>>, mut q: Query<&mut SoftText>, mut glyphs: GlyphQuery) {
     let dt = time.delta_secs().min(1.0 / 20.0);

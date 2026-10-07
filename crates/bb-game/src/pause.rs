@@ -1,11 +1,14 @@
 //! Pause menu. The game world freezes, so the jelly buttons live in their
-//! own little overlay physics world that keeps wobbling.
+//! own little overlay physics world that keeps wobbling. They drop in
+//! gently, and every letter of their labels rides the jelly.
 
 use bb_physics::{BodyDesc, BodyId, Config, Vec2 as PVec2, World};
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::camera::MainCamera;
+use crate::dropin::{DropIn, DropStyle};
+use crate::softtext::{self, GlyphQuery, Ride, SoftText};
 use crate::flow::AppState;
 use crate::menu::button_style;
 use crate::render::{MeshBuf, Shared, Style, body_mesh, empty_mesh};
@@ -28,6 +31,7 @@ struct Pause {
     prev_button: bool,
     nav: f32,
     dim: Entity,
+    drop: DropIn,
 }
 
 pub struct PausePlugin;
@@ -73,7 +77,9 @@ fn toggle(
     }
     game.paused = true;
     let origin = cam.single().map(|t| PVec2::new(t.translation.x, t.translation.y)).unwrap_or_default();
-    let mut world = World::new(Config { gravity: PVec2::ZERO, ..Config::default() });
+    // Gravity exists only for the drop-in; settled buttons are weightless.
+    let mut world = World::new(Config::default());
+    let mut drop = DropIn::new(DropStyle::GENTLE);
     let dim = commands
         .spawn((Node { position_type: PositionType::Absolute, width: percent(100.0), height: percent(100.0), ..default() }, BackgroundColor(Color::srgba(0.05, 0.02, 0.1, 0.55)), GlobalZIndex(40)))
         .id();
@@ -85,23 +91,18 @@ fn toggle(
         d.params.shape_compliance = Some(2e-4);
         d.params.edge_compliance = 2e-5;
         d.params.tri_compliance = 2e-5;
+        d.params.gravity_scale = 0.0;
         let id = world.add_body(d);
         world.body_mut(id).unwrap().anchor_home(2e-4);
-        // Pop in from below with a wobble.
-        world.body_mut(id).unwrap().add_velocity(PVec2::new(0.0, 600.0 + i as f32 * 200.0));
+        // Bottom first, so no button ever falls through another.
+        drop.add(&mut world, id, (ITEMS.len() - 1 - i) as f32 * 0.07);
         let mesh = meshes.add(empty_mesh());
         let vis = commands.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, 300.0))).id();
-        let label = commands
-            .spawn((
-                Text2d::new(*text),
-                TextFont { font: assets.font.clone().into(), font_size: 38.0.into(), weight: FontWeight::BOLD, ..default() },
-                TextColor(Color::WHITE),
-                Transform::from_xyz(c.x, c.y, 301.0),
-            ))
-            .id();
+        let label = commands.spawn(SoftText::new(*text, 38.0).ride(Ride::Overlay(id)).z(301.0).stagger(0.02)).id();
         items.push((id, *action, *color, vis, mesh, label));
     }
-    commands.insert_resource(Pause { world, items, origin, focus: 0, prev_button: true, nav: 0.0, dim });
+    let _ = &assets;
+    commands.insert_resource(Pause { world, items, origin, focus: 0, prev_button: true, nav: 0.0, dim, drop });
 }
 
 fn close(commands: &mut Commands, p: &Pause) {
@@ -126,9 +127,8 @@ fn run(
     mut game: ResMut<Game>,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut labels: Query<&mut Transform, With<Text2d>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    (mut labels, mut glyphs): (Query<&mut SoftText>, GlyphQuery),
+    (mouse, touches): (Res<ButtonInput<MouseButton>>, Res<Touches>),
     keys: Res<ButtonInput<KeyCode>>,
     inputs: Res<Inputs>,
     windows: Query<&Window>,
@@ -137,6 +137,10 @@ fn run(
     mut unload: MessageWriter<UnloadLevel>,
 ) {
     let dt = time.delta_secs().min(1.0 / 30.0);
+    {
+        let p = &mut *pause;
+        p.drop.update(&mut p.world, dt);
+    }
     pause.world.step(dt);
     let focus = pause.focus;
     let p = &*pause;
@@ -148,11 +152,8 @@ fn run(
             body_mesh(b, &s, &mut buf);
             buf.write(&mut m);
         }
-        if let Ok(mut tf) = labels.get_mut(*label) {
-            let c = b.centroid();
-            tf.translation.x = c.x;
-            tf.translation.y = c.y;
-            tf.rotation = Quat::from_rotation_z(b.angle());
+        if let Ok(mut st) = labels.get_mut(*label) {
+            softtext::pose(&mut st, Some(b), dt, &mut glyphs);
         }
     }
 
@@ -181,6 +182,9 @@ fn run(
         let id = pause.items[pause.focus].0;
         if let Some(b) = pause.world.body_mut(id) {
             b.add_velocity(PVec2::new(0.0, 150.0));
+        }
+        if let Ok(mut st) = labels.get_mut(pause.items[pause.focus].5) {
+            st.kick(0.6);
         }
     }
     let button = inputs.slots.iter().any(|i| i.button) || keys.any_pressed([KeyCode::Enter, KeyCode::Space]);

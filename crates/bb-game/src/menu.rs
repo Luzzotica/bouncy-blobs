@@ -292,7 +292,6 @@ fn build_page(
     }
     overrides.0.clear();
     menu.drop.clear();
-    let mut order = 0usize;
 
     // Logo: soft letter tiles.
     let logo: &[(&str, u32)] = &[("B", 0xff5d73), ("O", 0xff9f43), ("U", 0xffd93d), ("N", 0x6bcb77), ("C", 0x4d96ff), ("Y", 0x9b5de5)];
@@ -307,9 +306,7 @@ fn build_page(
             overrides.0.insert(id, Style { fill: hex(*col), rim: darken(hex(*col), 0.4), rim_w: 5.0, highlight: true, z: z::PROP + 0.5, top_rim_only: false });
             label(&mut commands, &assets, id, ch, 64.0 * scale, Color::WHITE);
             menu.letters.push(id);
-            // Letters rain in left to right.
-            menu.drop.add(&mut game.sim.world, id, order as f32 * 0.035);
-            order += 1;
+
         }
     }
 
@@ -330,9 +327,23 @@ fn build_page(
         overrides.0.insert(id, button_style(color, i == 0));
         label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { 36.0 }, Color::WHITE);
         menu.buttons.push(Button { body: id, action, color });
-        // Buttons drop between the letters, top to bottom.
-        let step = if grid { 0.035 } else { 0.06 };
-        menu.drop.add(&mut game.sim.world, id, 0.12 + i as f32 * step);
+    }
+    // Everything rains in from the bottom up — bottom button first, the
+    // logo's top row last, left to right — so nothing ever falls through
+    // something that has already landed.
+    let n = menu.buttons.len();
+    let step = if grid { 0.025 } else { 0.045 };
+    let mut t = 0.0;
+    for k in 0..n {
+        let id = menu.buttons[n - 1 - k].body;
+        menu.drop.add(&mut game.sim.world, id, t);
+        t += step;
+    }
+    let row1 = logo.len();
+    let order: Vec<BodyId> = menu.letters[row1..].iter().chain(&menu.letters[..row1]).copied().collect();
+    for id in order {
+        menu.drop.add(&mut game.sim.world, id, t);
+        t += 0.03;
     }
     menu.focus = 0;
 }

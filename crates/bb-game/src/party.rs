@@ -10,7 +10,9 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::camera::{CameraDirector, MainCamera};
 use crate::flow::AppState;
-use crate::menu::{BodyLabel, button_style, jelly_tile, label_with};
+use crate::dropin::{DropIn, DropStyle};
+use crate::menu::{BodyLabel, button_style, jelly_tile, kick_label, label_with};
+use crate::softtext::{JiggleText, SoftText};
 use crate::palette::hex;
 use crate::render::StyleOverrides;
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
@@ -36,6 +38,8 @@ pub struct Party {
     built: bool,
     /// Re-open the room for joins once back in the lobby.
     reopen: bool,
+    /// Lobby buttons fall in like the title menu.
+    drop: DropIn,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +155,7 @@ fn enter(
         pending_start: false,
         built: false,
         reopen: false,
+        drop: DropIn::new(DropStyle::MENU),
     });
 }
 
@@ -189,7 +194,7 @@ fn lobby_ui(
     assets: Res<GameAssets>,
     mut overrides: ResMut<StyleOverrides>,
     labels: Query<Entity, With<PartyEntity>>,
-    mut texts: Query<(&BodyLabel, &mut Text2d)>,
+    mut texts: Query<(&BodyLabel, &mut SoftText)>,
 ) {
     if party.phase != PartyPhase::Lobby {
         return;
@@ -203,6 +208,7 @@ fn lobby_ui(
             commands.entity(e).despawn();
         }
         party.buttons.clear();
+        party.drop.clear();
         let items = [(PartyButton::Map, 0x5dd6ff), (PartyButton::Mode, 0xffc75f), (PartyButton::Start, 0x6bcb77), (PartyButton::Back, 0xd0c4e8)];
         for (i, (b, color)) in items.iter().enumerate() {
             let center = PVec2::new(260.0, 620.0 - i as f32 * 96.0);
@@ -211,19 +217,21 @@ fn lobby_ui(
             let text = button_label(*b, &party);
             label_with(&mut commands, &assets, id, &text, 34.0, Color::WHITE, PartyEntity);
             party.buttons.push((id, *b, *color));
+            party.drop.add(&mut game.sim.world, id, 0.12 + (items.len() - 1 - i) as f32 * 0.07);
         }
         // Title tile.
         let id = jelly_tile(&mut game, PVec2::new(-420.0, 640.0), PVec2::new(420.0, 110.0), BodyTag::Ui, 6e-5);
         overrides.0.insert(id, button_style(0xff8fab, false));
         label_with(&mut commands, &assets, id, "PARTY!", 72.0, Color::WHITE, PartyEntity);
+        party.drop.add(&mut game.sim.world, id, 0.0);
         crate::party_assets::spawn_join_hint(&mut commands, &assets, PartyEntity);
     }
     // Keep labels current.
     for (bl, mut t) in texts.iter_mut() {
         if let Some((_, b, _)) = party.buttons.iter().find(|(id, _, _)| *id == bl.body) {
             let want = button_label(*b, &party);
-            if t.0 != want {
-                t.0 = want;
+            if t.text != want {
+                t.text = want;
             }
         }
     }
@@ -243,7 +251,13 @@ fn lobby_input(
     mut cam_dir: ResMut<CameraDirector>,
     inputs: Res<Inputs>,
     mut joinable: MessageWriter<crate::net::NetCommand>,
+    (time, mut labels): (Res<Time>, Query<&mut SoftText>),
 ) {
+    if party.phase == PartyPhase::Lobby {
+        let dt = time.delta_secs().min(1.0 / 20.0);
+        let p = &mut *party;
+        p.drop.update(&mut game.sim.world, dt);
+    }
     // Drop-in: any slot (pads, phones) pressing its button joins the roster.
     for s in 1..8u8 {
         if inputs.slots[s as usize].button && game.sim.player(s).is_none() && party.phase == PartyPhase::Lobby {
@@ -291,6 +305,7 @@ fn lobby_input(
     if let Some(b) = game.sim.world.body_mut(body) {
         b.add_velocity(PVec2::new(0.0, -380.0));
     }
+    kick_label(&mut labels, body, 1.2);
     match which {
         PartyButton::Map => party.map = (party.map + 1) % party.maps.len().max(1),
         PartyButton::Mode => {
@@ -358,6 +373,7 @@ fn hud(
     assets: Res<GameAssets>,
     existing: Query<Entity, With<MatchHud>>,
     mut texts: Query<(&HudText, &mut Text, &mut TextColor)>,
+    mut jiggles: Query<(&HudText, &mut JiggleText)>,
 ) {
     let Some(m) = party.current.as_ref() else {
         for e in existing.iter() {
@@ -370,8 +386,13 @@ fn hud(
         commands
             .spawn((Node { position_type: PositionType::Absolute, width: percent(100.0), height: percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }, MatchHud))
             .with_children(|p| {
-                p.spawn((Text::new(""), font(30.0), TextColor(Color::WHITE), TextShadow::default(), Node { margin: UiRect::top(px(14.0)), ..default() }, HudText::Timer));
-                p.spawn((Text::new(""), font(140.0), TextColor(Color::WHITE), TextShadow { offset: Vec2::new(5.0, 6.0), color: Color::srgba(0.0, 0.0, 0.0, 0.5) }, Node { margin: UiRect::top(px(140.0)), ..default() }, HudText::Big));
+                // Timer and the big countdown are per-glyph: digits bounce as they change.
+                p.spawn((JiggleText::new("", font(30.0), Color::WHITE).shadow(TextShadow::default()), Node { margin: UiRect::top(px(14.0)), ..default() }, HudText::Timer));
+                p.spawn((
+                    JiggleText::new("", font(140.0), Color::WHITE).shadow(TextShadow { offset: Vec2::new(5.0, 6.0), color: Color::srgba(0.0, 0.0, 0.0, 0.5) }),
+                    Node { margin: UiRect::top(px(140.0)), ..default() },
+                    HudText::Big,
+                ));
             });
         commands.spawn((
             Text::new(""),
@@ -385,15 +406,14 @@ fn hud(
         return;
     }
     let name_of = |slot: u8| game.sim.player(slot).map_or(format!("P{}", slot + 1), |p| p.name.clone());
-    for (which, mut text, mut color) in texts.iter_mut() {
-        match which {
+    for (which, mut jt) in jiggles.iter_mut() {
+        let (want, color) = match which {
             HudText::Timer => {
                 let t = m.time_remaining().ceil() as u32;
-                text.0 = format!("{}:{:02}", t / 60, t % 60);
-                color.0 = if t <= 10 { hex(0xff5c5c) } else { Color::WHITE };
+                (format!("{}:{:02}", t / 60, t % 60), if t <= 10 { hex(0xff5c5c) } else { Color::WHITE })
             }
             HudText::Big => {
-                text.0 = match m.phase {
+                let text = match m.phase {
                     MatchPhase::Countdown(t) => format!("{}", t.ceil() as u32),
                     MatchPhase::Playing if m.time < 0.8 => "GO!".into(),
                     MatchPhase::Results(_) | MatchPhase::Over => match (m.kind, m.team_won, m.winner) {
@@ -404,17 +424,24 @@ fn hud(
                     },
                     _ => String::new(),
                 };
-                color.0 = if matches!(m.phase, MatchPhase::Playing) { hex(0x4eff4e) } else { Color::WHITE };
+                (text, if matches!(m.phase, MatchPhase::Playing) { hex(0x4eff4e) } else { Color::WHITE })
             }
-            HudText::Scores => {
-                text.0 = if m.kind == ModeKind::Koth {
-                    let mut rows = m.scores.clone();
-                    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
-                    rows.iter().map(|(s, sc)| format!("{}  {:>2} / {}", name_of(*s), sc.floor() as u32, KOTH_TARGET as u32)).collect::<Vec<_>>().join("\n")
-                } else {
-                    String::new()
-                };
-            }
+            HudText::Scores => continue,
+        };
+        if jt.text != want {
+            jt.text = want;
+        }
+        jt.color = color;
+    }
+    for (which, mut text, _) in texts.iter_mut() {
+        if let HudText::Scores = which {
+            text.0 = if m.kind == ModeKind::Koth {
+                let mut rows = m.scores.clone();
+                rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+                rows.iter().map(|(s, sc)| format!("{}  {:>2} / {}", name_of(*s), sc.floor() as u32, KOTH_TARGET as u32)).collect::<Vec<_>>().join("\n")
+            } else {
+                String::new()
+            };
         }
     }
 }

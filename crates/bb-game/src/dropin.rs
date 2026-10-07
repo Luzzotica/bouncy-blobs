@@ -26,9 +26,9 @@ pub struct DropStyle {
 
 impl DropStyle {
     /// Title screen, sub-pages and the party lobby.
-    pub const MENU: DropStyle = DropStyle { lift: 1150.0, fall_speed: 1300.0, gravity_scale: 2.2, soft: 3e-3, settle: 0.6, keep: 0.3, damping: 7.0 };
+    pub const MENU: DropStyle = DropStyle { lift: 1050.0, fall_speed: 1600.0, gravity_scale: 2.2, soft: 3e-3, settle: 0.5, keep: 0.3, damping: 7.0 };
     /// The pause menu: shorter, softer drop.
-    pub const GENTLE: DropStyle = DropStyle { lift: 380.0, fall_speed: 700.0, gravity_scale: 1.6, soft: 4e-3, settle: 0.45, keep: 0.35, damping: 4.0 };
+    pub const GENTLE: DropStyle = DropStyle { lift: 650.0, fall_speed: 700.0, gravity_scale: 1.6, soft: 4e-3, settle: 0.45, keep: 0.35, damping: 4.0 };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,15 +1,22 @@
-//! Speech bubbles: typewriter text in a candy bubble that follows a softbody.
+//! Speech bubbles: real jelly bodies with typewriter soft text.
+//!
+//! A bubble is a weightless grid mesh in the game's physics world (it
+//! collides with nothing), sized to its text. A few particles at the middle
+//! of its bottom edge are pinned and driven toward the speaker's head, and
+//! the rest of the sheet is pulled toward an upright pose by a soft home
+//! tether that follows along, so the bubble lags, sways and jiggles as the
+//! speaker moves. Every glyph rides the sheet (see [`crate::softtext`]).
 
-use bb_sim::Vec2 as PVec2;
+use bb_physics::{BodyDesc, BodyId, Vec2 as PVec2};
+use bb_sim::BodyTag;
 use bevy::prelude::*;
-use bevy::text::{TextBounds, TextLayoutInfo};
 
 use super::Voice;
-use crate::assets::GameAssets;
 use crate::camera::MainCamera;
 use crate::palette::lin;
-use crate::render::{MeshBuf, Shared, empty_mesh, z};
-use crate::sim::Game;
+use crate::render::{MeshBuf, Shared, Style, StyleOverrides, empty_mesh, z};
+use crate::sim::{Game, Inputs};
+use crate::softtext::{Ride, SoftText, layout};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Speaker {
@@ -32,6 +39,27 @@ pub struct SayRequest {
     pub linger: f32,
 }
 
+/// Typewriter speed. Slow enough to read along comfortably.
+pub const CHARS_PER_SEC: f32 = 17.0;
+const WRAP: f32 = 440.0;
+const FONT: f32 = 30.0;
+const PAD: Vec2 = Vec2::new(44.0, 34.0);
+/// Gap between the speaker's top and the bubble's bottom edge.
+const LIFT: f32 = 46.0;
+const CLOSE: f32 = 0.28;
+/// Above everything in the world, front decor included.
+const BUBBLE_Z: f32 = z::DECOR_FRONT + 2.0;
+
+/// Seconds to type `text` out.
+pub fn type_secs(text: &str) -> f32 {
+    text.chars().count() as f32 / CHARS_PER_SEC
+}
+
+/// How long a line stays up after it has finished typing.
+pub fn linger_secs(text: &str) -> f32 {
+    1.5 + text.chars().count() as f32 * 0.035
+}
+
 #[derive(Component)]
 pub struct Bubble {
     pub speaker: Speaker,
@@ -39,60 +67,136 @@ pub struct Bubble {
     pub shown: f32,
     pub linger: f32,
     pub age: f32,
-    pub bg: Entity,
-    pub label: Entity,
-    pub mesh: Handle<Mesh>,
-    pub size: Vec2,
     pub voice: Voice,
+    pub body: BodyId,
+    /// Rest positions relative to the bubble's bottom-centre anchor.
+    rest: Vec<PVec2>,
+    pins: Vec<usize>,
+    tail: Entity,
+    tail_mesh: Handle<Mesh>,
+    size: Vec2,
 }
 
-const CHARS_PER_SEC: f32 = 38.0;
-const WRAP: f32 = 440.0;
+fn paper(s: &Speaker) -> Color {
+    match s {
+        Speaker::Tip => Color::srgb(0.86, 0.97, 0.88),
+        Speaker::Offscreen => Color::srgb(1.0, 0.92, 0.96),
+        _ => Color::srgb(1.0, 0.98, 0.93),
+    }
+}
 
+const INK: Color = Color::srgb(0.17, 0.13, 0.21);
+
+/// The jelly sheet of a bubble whose bottom-centre sits at `anchor`.
+fn bubble_desc(anchor: PVec2, size: Vec2) -> (BodyDesc, Vec<usize>) {
+    let cols = ((size.x / 34.0).ceil() as usize).max(4);
+    let cols = cols + cols % 2; // even, so there's a middle column
+    let rows = ((size.y / 30.0).ceil() as usize).max(2);
+    let min = anchor + PVec2::new(-size.x * 0.5, 0.0);
+    let max = anchor + PVec2::new(size.x * 0.5, size.y);
+    let mut d = BodyDesc::grid(min, max, cols, rows, size.x * size.y / 4000.0);
+    let nx = cols + 1;
+    let cut = 10.0f32.min(size.y * 0.2);
+    for (ix, iy, dx, dy) in [(0, 0, 1.0, 1.0), (nx - 1, 0, -1.0, 1.0), (0, rows, 1.0, -1.0), (nx - 1, rows, -1.0, -1.0)] {
+        d.positions[iy * nx + ix] += PVec2::new(dx, dy) * cut;
+    }
+    d.params.gravity_scale = 0.0;
+    d.params.shape_compliance = Some(1e-4);
+    d.params.edge_compliance = 2e-5;
+    d.params.tri_compliance = 2e-5;
+    d.params.internal_damping = 2.2;
+    d.params.linear_damping = 0.5;
+    d.params.limits.poppable = false;
+    d.layer = 0;
+    d.mask = 0;
+    let mid = cols / 2;
+    let pins = vec![mid - 1, mid, mid + 1];
+    (d, pins)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_bubbles(
     mut commands: Commands,
     mut reqs: MessageReader<SayRequest>,
     existing: Query<(Entity, &Bubble)>,
-    assets: Res<GameAssets>,
+    mut game: Option<ResMut<Game>>,
     shared: Res<Shared>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut overrides: ResMut<StyleOverrides>,
+    cam: Query<&Transform, With<MainCamera>>,
 ) {
+    let cam_p = cam.single().map(|t| t.translation.truncate()).unwrap_or_default();
     for r in reqs.read() {
+        let Some(game) = game.as_mut() else { continue };
         for (e, b) in existing.iter() {
             if b.speaker == r.speaker {
-                commands.entity(b.bg).despawn();
-                commands.entity(b.label).despawn();
-                commands.entity(e).despawn();
+                despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, b);
             }
         }
-        let mesh = meshes.add(empty_mesh());
-        let bg = commands.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, z::FX + 2.0))).id();
-        let label = commands
-            .spawn((
-                Text2d::new(""),
-                TextFont { font: assets.font.clone().into(), font_size: 30.0.into(), weight: FontWeight::MEDIUM, ..default() },
-                TextColor(Color::srgb(0.17, 0.13, 0.21)),
-                TextLayout::justify(Justify::Center),
-                TextBounds::new_horizontal(WRAP),
-                Transform::from_xyz(0.0, 0.0, z::FX + 2.1),
-            ))
-            .id();
-        commands.spawn((Bubble {
-            speaker: r.speaker.clone(),
-            text: r.text.clone(),
-            shown: 0.0,
-            linger: r.linger,
-            age: 0.0,
-            bg,
-            label,
-            mesh,
-            size: Vec2::ZERO,
-            voice: r.voice,
-        },));
+        let Some(anchor) = speaker_anchor(game, &r.speaker, cam_p) else { continue };
+        let size = layout(&r.text, FONT, 500, Some(WRAP)).size.max(Vec2::new(40.0, 30.0)) + PAD;
+        let a = PVec2::new(anchor.x, anchor.y);
+        let (desc, pins) = bubble_desc(a, size);
+        let rest: Vec<PVec2> = desc.positions.iter().map(|p| *p - a).collect();
+        let body = game.sim.add_body(desc, BodyTag::Ui);
+        if let Some(b) = game.sim.world.body_mut(body) {
+            // Start squeezed toward the speaker so it springs open.
+            for i in 0..b.x.len() {
+                let p = a + rest[i] * PVec2::new(0.35, 0.2);
+                b.x[i] = p;
+                b.prev[i] = p;
+            }
+            for &i in &pins {
+                b.pin(i);
+            }
+            b.home = Some(b.x.clone());
+            b.home_compliance = 4e-3;
+        }
+        let p = paper(&r.speaker);
+        overrides.0.insert(body, Style { fill: p, rim: INK, rim_w: 4.0, highlight: false, z: BUBBLE_Z, top_rim_only: false });
+        let tail_mesh = meshes.add(empty_mesh());
+        let tail = commands.spawn((Mesh2d(tail_mesh.clone()), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, BUBBLE_Z))).id();
+        // Text centre in the sheet's rest frame (rest centroid = sheet centre).
+        commands.spawn((
+            Bubble {
+                speaker: r.speaker.clone(),
+                text: r.text.clone(),
+                shown: 0.0,
+                linger: r.linger,
+                age: 0.0,
+                voice: r.voice,
+                body,
+                rest,
+                pins,
+                tail,
+                tail_mesh,
+                size,
+            },
+            SoftText::new(r.text.clone(), FONT)
+                .ride(Ride::Game(body))
+                .weight(500)
+                .color(INK)
+                .wrap(WRAP)
+                .z(BUBBLE_Z + 0.1)
+                .typewriter(),
+        ));
     }
 }
 
-fn speaker_pos(game: &Game, s: &Speaker, cam: Vec2) -> Option<(Vec2, f32)> {
+fn despawn_bubble(commands: &mut Commands, sim: &mut bb_sim::Sim, overrides: &mut StyleOverrides, e: Entity, b: &Bubble) {
+    sim.remove_body(b.body);
+    overrides.0.remove(&b.body);
+    commands.entity(b.tail).despawn();
+    commands.entity(e).despawn();
+}
+
+/// Where the bubble's bottom-centre wants to be, plus the point its tail
+/// aims at (None for tails: offscreen voices and tips have none).
+fn speaker_anchor(game: &Game, s: &Speaker, cam: Vec2) -> Option<Vec2> {
+    speaker_head(game, s, cam).map(|(head, r)| head + Vec2::new(0.0, r + LIFT))
+}
+
+fn speaker_head(game: &Game, s: &Speaker, cam: Vec2) -> Option<(Vec2, f32)> {
     let (c, r) = match s {
         Speaker::Actor(id) => {
             let n = game.sim.npc_by_id(id)?;
@@ -104,98 +208,94 @@ fn speaker_pos(game: &Game, s: &Speaker, cam: Vec2) -> Option<(Vec2, f32)> {
             let b = game.sim.world.body(p.ctl.body)?;
             (b.centroid(), p.ctl.radius * p.ctl.expand)
         }
-        Speaker::Offscreen => return Some((cam + Vec2::new(0.0, 260.0), 0.0)),
-        Speaker::Tip => return Some((cam + Vec2::new(0.0, 230.0), 0.0)),
+        Speaker::Offscreen => return Some((cam + Vec2::new(0.0, 190.0), 0.0)),
+        Speaker::Tip => return Some((cam + Vec2::new(0.0, 160.0), 0.0)),
     };
     Some((Vec2::new(c.x, c.y), r))
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub fn update_bubbles(
     mut commands: Commands,
     time: Res<Time>,
-    game: Option<Res<Game>>,
-    mut bubbles: Query<(Entity, &mut Bubble)>,
-    mut texts: Query<(&mut Text2d, &TextLayoutInfo, &mut Transform), Without<MainCamera>>,
-    mut bgs: Query<&mut Transform, (Without<Text2d>, Without<MainCamera>)>,
-    cam: Query<&Transform, (With<MainCamera>, Without<Text2d>)>,
+    mut game: Option<ResMut<Game>>,
+    mut bubbles: Query<(Entity, &mut Bubble, &mut SoftText)>,
+    cam: Query<&Transform, With<MainCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut overrides: ResMut<StyleOverrides>,
+    inputs: Res<Inputs>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut prev_button: Local<bool>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs().min(1.0 / 20.0);
     let cam_p = cam.single().map(|t| t.translation.truncate()).unwrap_or_default();
-    for (e, mut b) in bubbles.iter_mut() {
-        b.age += dt;
-        let total = b.text.chars().count() as f32;
-        b.shown = (b.shown + dt * CHARS_PER_SEC).min(total);
-        let done_at = total / CHARS_PER_SEC + b.linger;
-        let pos = game.as_ref().and_then(|g| speaker_pos(g, &b.speaker, cam_p));
-        if b.age > done_at || pos.is_none() {
-            commands.entity(b.bg).despawn();
-            commands.entity(b.label).despawn();
+    // A tap while a line is typing shows the rest of it at once.
+    let button = inputs.slots.iter().any(|i| i.button) || keys.any_pressed([KeyCode::Enter, KeyCode::Space]);
+    let tapped = button && !*prev_button;
+    *prev_button = button;
+    for (e, mut b, mut st) in bubbles.iter_mut() {
+        let Some(game) = game.as_mut() else {
+            commands.entity(b.tail).despawn();
             commands.entity(e).despawn();
             continue;
+        };
+        b.age += dt;
+        let total = b.text.chars().count() as f32;
+        if tapped && b.age > 0.25 && b.shown < total {
+            b.shown = total;
+            b.age = b.age.max(type_secs(&b.text));
         }
-        let (p, r) = pos.unwrap();
-        let shown: String = b.text.chars().take(b.shown as usize).collect();
-        let Ok((mut text, info, mut tf)) = texts.get_mut(b.label) else { continue };
-        if text.0 != shown {
-            text.0 = shown;
+        b.shown = (b.shown + dt * CHARS_PER_SEC).min(total);
+        let done_at = total / CHARS_PER_SEC + b.linger;
+        let anchor = speaker_anchor(game, &b.speaker, cam_p);
+        let alive = game.sim.world.body(b.body).is_some();
+        if b.age > done_at + CLOSE || anchor.is_none() || !alive {
+            despawn_bubble(&mut commands, &mut game.sim, &mut overrides, e, &b);
+            continue;
         }
-        // Size the bubble to the FULL text so it doesn't grow as it types.
-        let full = info.size.max(Vec2::new(60.0, 30.0));
-        let target = if b.shown >= total || b.size == Vec2::ZERO { full } else { b.size.max(full) };
-        let pop = if b.age < 0.12 { 0.6 + b.age / 0.12 * 0.5 } else if b.age < 0.2 { 1.1 - (b.age - 0.12) * 1.25 } else { 1.0 };
-        let fade_out = ((done_at - b.age) / 0.25).clamp(0.0, 1.0);
-        let scale = pop * (0.85 + 0.15 * fade_out);
-        let anchor = p + Vec2::new(0.0, r + 46.0 + target.y * 0.5);
-        tf.translation.x = anchor.x;
-        tf.translation.y = anchor.y;
-        tf.scale = Vec3::splat(scale);
-        if (target - b.size).length() > 0.5 {
-            b.size = target;
-            if let Some(mut mesh) = meshes.get_mut(&b.mesh) {
-                bubble_mesh(target + Vec2::new(36.0, 24.0), b.speaker == Speaker::Offscreen, b.speaker == Speaker::Tip).write(&mut mesh);
+        st.reveal = b.shown;
+        let anchor = anchor.unwrap();
+        let a = PVec2::new(anchor.x, anchor.y);
+        let closing = ((b.age - done_at) / CLOSE).clamp(0.0, 1.0);
+        st.alpha = 1.0 - closing;
+        let Some(body) = game.sim.world.body_mut(b.body) else { continue };
+        // Drive the pinned stem toward the speaker; the sheet follows on a
+        // soft tether, so it lags and jiggles.
+        for &i in &b.pins {
+            body.drive_pinned(i, a + b.rest[i]);
+        }
+        if let Some(home) = body.home.as_mut() {
+            for (h, r) in home.iter_mut().zip(&b.rest) {
+                *h = a + *r;
             }
         }
-        if let Ok(mut btf) = bgs.get_mut(b.bg) {
-            btf.translation.x = anchor.x;
-            btf.translation.y = anchor.y;
-            btf.scale = Vec3::splat(scale);
+        if closing > 0.0 {
+            body.rest_scale = 1.0 - 0.75 * closing;
+            if let Some(home) = body.home.as_mut() {
+                for (h, r) in home.iter_mut().zip(&b.rest) {
+                    *h = a + *r * (1.0 - 0.75 * closing);
+                }
+            }
         }
-    }
-}
-
-fn bubble_mesh(size: Vec2, offscreen: bool, tip: bool) -> MeshBuf {
-    let mut buf = MeshBuf::default();
-    let h = size * 0.5;
-    let r = 22.0f32.min(h.y);
-    let mut pts = Vec::new();
-    for (cx, cy, a0) in [(h.x - r, h.y - r, 0.0f32), (-h.x + r, h.y - r, 90.0), (-h.x + r, -h.y + r, 180.0), (h.x - r, -h.y + r, 270.0)] {
-        for k in 0..=6 {
-            let a = (a0 + k as f32 * 15.0).to_radians();
-            pts.push(PVec2::new(cx + a.cos() * r, cy + a.sin() * r));
+        // Tail from the stem down to the speaker.
+        let has_tail = matches!(b.speaker, Speaker::Actor(_) | Speaker::Player(_));
+        if let Some(mut m) = meshes.get_mut(&b.tail_mesh) {
+            let mut buf = MeshBuf::default();
+            if has_tail && closing < 1.0 {
+                let (l, r) = (body.x[b.pins[0]], body.x[b.pins[2]]);
+                let mid = (l + r) * 0.5;
+                let tip = mid + PVec2::new(-8.0, -(LIFT - 14.0)) * (1.0 - closing);
+                let ink = lin(INK);
+                let pap = lin(paper(&b.speaker));
+                let side = (r - l).normalize_or_zero();
+                let (li, ri) = (l - side * 4.0, r + side * 4.0);
+                let (i0, i1, i2) = (buf.vert(li + PVec2::new(0.0, 5.0), -0.01, ink), buf.vert(ri + PVec2::new(0.0, 5.0), -0.01, ink), buf.vert(tip - PVec2::new(0.0, 6.0), -0.01, ink));
+                buf.tri(i0, i1, i2);
+                let (j0, j1, j2) = (buf.vert(l + PVec2::new(0.0, 6.0), 0.0015, pap), buf.vert(r + PVec2::new(0.0, 6.0), 0.0015, pap), buf.vert(tip, 0.0015, pap));
+                buf.tri(j0, j1, j2);
+            }
+            buf.write(&mut m);
         }
+        let _ = b.size;
     }
-    let ink = lin(Color::srgb(0.17, 0.13, 0.21));
-    let paper = if tip {
-        lin(Color::srgb(0.86, 0.97, 0.88))
-    } else if offscreen {
-        lin(Color::srgb(1.0, 0.92, 0.96))
-    } else {
-        lin(Color::srgb(1.0, 0.98, 0.93))
-    };
-    // Tail.
-    if !offscreen && !tip {
-        let a = buf.vert(PVec2::new(-16.0, -h.y + 2.0), -0.01, ink);
-        let b = buf.vert(PVec2::new(14.0, -h.y + 2.0), -0.01, ink);
-        let c = buf.vert(PVec2::new(-4.0, -h.y - 28.0), -0.01, ink);
-        buf.tri(a, b, c);
-        let a = buf.vert(PVec2::new(-11.0, -h.y + 4.0), 0.002, paper);
-        let b = buf.vert(PVec2::new(9.0, -h.y + 4.0), 0.002, paper);
-        let c = buf.vert(PVec2::new(-4.0, -h.y - 20.0), 0.002, paper);
-        buf.tri(a, b, c);
-    }
-    buf.ring(&pts, 0.0, 4.0, 0.0, ink);
-    buf.fan(&pts, PVec2::ZERO, 0.001, paper, paper);
-    buf
 }
