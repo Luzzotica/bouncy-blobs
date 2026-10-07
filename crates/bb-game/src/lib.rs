@@ -16,6 +16,7 @@ pub mod party;
 pub mod party_assets;
 pub mod render;
 pub mod sandbox;
+pub mod save;
 pub mod sim;
 pub mod story;
 pub mod story_iface;

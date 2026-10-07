@@ -53,7 +53,27 @@ pub struct StoryProgress {
 
 impl Default for StoryProgress {
     fn default() -> Self {
-        StoryProgress { unlocked: 1, current: 1, pip_color: 0xff5d73 }
+        let num = |k: &str| crate::save::get(k).and_then(|v| v.parse::<u8>().ok());
+        StoryProgress {
+            unlocked: num("story.unlocked").unwrap_or(1).clamp(1, CHAPTERS),
+            current: num("story.current").unwrap_or(1).clamp(1, CHAPTERS),
+            pip_color: crate::save::get("pip.color").and_then(|c| bb_sim::parse_color(&c)).unwrap_or(0xff5d73),
+        }
+    }
+}
+
+impl StoryProgress {
+    pub fn persist(&self) {
+        crate::save::set("story.unlocked", &self.unlocked.to_string());
+        crate::save::set("story.current", &self.current.to_string());
+        crate::save::set("pip.color", &format!("#{:06x}", self.pip_color));
+    }
+}
+
+/// Save progress whenever it changes.
+fn persist_progress(progress: Res<StoryProgress>) {
+    if progress.is_changed() && !progress.is_added() {
+        progress.persist();
     }
 }
 
@@ -103,7 +123,8 @@ impl Plugin for StoryPlugin {
                     .chain(),
             )
             .add_systems(Update, (bubble::spawn_bubbles, bubble::update_bubbles, words, cues_ui).chain())
-            .add_systems(Startup, setup_cues_ui);
+            .add_systems(Startup, setup_cues_ui)
+            .add_systems(Last, persist_progress);
     }
 }
 

@@ -127,29 +127,13 @@ impl Plugin for KidsPlugin {
 /// Tiny best-effort prefs file (learn mode + colour). Silent on failure and
 /// a no-op on the web.
 mod prefs {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn path() -> Option<std::path::PathBuf> {
-        let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
-        let dir = if cfg!(target_os = "ios") { home.join("Library/Preferences") } else { home.join(".bouncy-blobs") };
-        Some(dir.join("kids.txt"))
-    }
-
     pub fn load() -> (Option<String>, Option<u32>) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(s) = path().and_then(|p| std::fs::read_to_string(p).ok()) {
-            let get = |k: &str| s.lines().find_map(|l| l.strip_prefix(k)).map(str::trim).map(String::from);
-            return (get("mode="), get("color=").and_then(|c| bb_sim::parse_color(&c)));
-        }
-        (None, None)
+        (crate::save::get("kids.mode"), crate::save::get("kids.color").and_then(|c| bb_sim::parse_color(&c)))
     }
 
     pub fn save(mode: &str, color: u32) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(p) = path() {
-            let _ = std::fs::create_dir_all(p.parent().unwrap());
-            let _ = std::fs::write(p, format!("mode={mode}\ncolor=#{color:06x}\n"));
-        }
-        let _ = (mode, color);
+        crate::save::set("kids.mode", mode);
+        crate::save::set("kids.color", &format!("#{color:06x}"));
     }
 }
 
