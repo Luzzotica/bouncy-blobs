@@ -216,3 +216,19 @@ fn puffed_blob_is_crushed() {
     }
     assert!(popped, "puffed blob survived the crusher");
 }
+
+/// A popped blob leaves soft droplets that move, then melt away.
+#[test]
+fn pop_leaves_droplets() {
+    let mut sim = flat();
+    let id = sim.players[0].ctl.body;
+    sim.pop(id);
+    assert_eq!(sim.droplets.len(), 6);
+    let d0 = sim.droplets[0].0;
+    let p0 = sim.world.body(d0).unwrap().centroid();
+    for _ in 0..30 { sim.step(); }
+    let p1 = sim.world.body(d0).unwrap().centroid();
+    assert!(p0.distance(p1) > 20.0, "droplets fly apart");
+    for _ in 0..420 { sim.step(); }
+    assert!(sim.droplets.is_empty() && sim.world.body(d0).is_none(), "droplets melt away");
+}

@@ -21,6 +21,9 @@ impl Plugin for DevToolsPlugin {
         if std::env::var("BB_PRESS").is_ok() {
             app.add_systems(PreUpdate, press.after(bevy::input::InputSystems));
         }
+        if std::env::var("BB_POP").is_ok() {
+            app.add_systems(Update, dev_pop);
+        }
         if std::env::var("BB_AUTOPLAY").is_ok() {
             app.add_systems(PreUpdate, autoplay.after(crate::input::InputPlugin::gather_set()));
         }
@@ -83,6 +86,19 @@ fn autoplay(time: Res<Time>, mut inputs: ResMut<Inputs>) {
     let t = time.elapsed_secs();
     inputs.slots[0].stick.x = 1.0;
     inputs.slots[0].button = t.fract() < 0.35;
+}
+
+/// `BB_POP=n` pops player 1 on frame n (to look at pop effects).
+fn dev_pop(game: Option<ResMut<crate::sim::Game>>, mut frame: Local<u32>) {
+    *frame += 1;
+    let Some(n) = std::env::var("BB_POP").ok().and_then(|v| v.parse::<u32>().ok()) else { return };
+    if *frame == n {
+        if let Some(mut g) = game {
+            if let Some(id) = g.sim.player(0).map(|p| p.ctl.body) {
+                g.sim.pop(id);
+            }
+        }
+    }
 }
 
 /// `BB_PRESS=escape@60,enter@90` taps keys at given frames.

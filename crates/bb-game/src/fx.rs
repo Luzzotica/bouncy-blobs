@@ -155,7 +155,7 @@ fn react(
         match e {
             SimEvent::Popped { pos, color, who } => {
                 let p = Vec2::new(pos.x, pos.y);
-                burst(&mut commands, &shared, &mut cache, &mut mats, Burst { pos: p, color: *color, count: 22, speed: 520.0, size: 9.0, life: 0.9, gravity: -1600.0, implode: 0.0 }, seed);
+                burst(&mut commands, &shared, &mut cache, &mut mats, Burst { pos: p, color: *color, count: 10, speed: 420.0, size: 7.0, life: 0.6, gravity: -1600.0, implode: 0.0 }, seed);
                 word(&mut commands, &assets, "POP!", p + Vec2::new(0.0, 50.0), Color::WHITE, 64.0);
                 if matches!(who, Who::Player(_)) {
                     cam.shake = cam.shake.max(0.6);
@@ -183,7 +183,7 @@ fn react(
                     if let (Some(col), Some(b)) = (body_color(&game, &overrides, *body), game.sim.world.body(*body)) {
                         let v = b.velocity();
                         let n = ((*speed - 400.0) / 120.0).clamp(2.0, 8.0) as u32;
-                        let drift = Vec2::new(v.x, v.y) * 0.5 + Vec2::Y * speed * 0.25;
+                        let drift = Vec2::new(v.x, v.y) * 0.18 + Vec2::Y * speed * 0.22;
                         spray(&mut commands, &shared, &mut cache, &mut mats, Vec2::new(pos.x, pos.y), drift, 1.6, col, n, 6.0, seed);
                     }
                 }
@@ -196,11 +196,11 @@ fn react(
                     let va = game.sim.world.body(*a).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
                     let vb = game.sim.world.body(*b).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
                     let shared_v = (va + vb) * 0.5;
-                    let side = bb_sim::Vec2::new(-normal.y, normal.x) * speed.min(900.0) * 0.6;
+                    let side = bb_sim::Vec2::new(-normal.y, normal.x) * speed.min(900.0) * 0.35;
                     let n = ((*speed - 200.0) / 140.0).clamp(2.0, 7.0) as u32;
                     for (k, (id, sgn)) in [(*a, 1.0f32), (*b, -1.0)].into_iter().enumerate() {
                         let Some(col) = body_color(&game, &overrides, id) else { continue };
-                        let d = shared_v + side * sgn + *normal * sgn * speed * 0.3;
+                        let d = shared_v * 0.3 + side * sgn + *normal * sgn * speed * 0.2;
                         spray(&mut commands, &shared, &mut cache, &mut mats, Vec2::new(pos.x, pos.y), Vec2::new(d.x, d.y), 1.1, col, n, 5.5, seed + k as u32 * 97);
                     }
                 }

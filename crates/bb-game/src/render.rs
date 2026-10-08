@@ -1118,6 +1118,7 @@ pub fn look_for(game: &Game, id: BodyId) -> Look {
         },
         Some(BodyTag::Prop) => Look::Blob { halo: 0.05 },
         Some(BodyTag::Amoeba(_)) => Look::Blob { halo: 0.45 },
+        Some(BodyTag::Droplet(_)) => Look::Blob { halo: 0.08 },
         Some(BodyTag::Jelly) => {
             if is_mushroom_cap(game, id) {
                 return Look::Cap;
@@ -1221,6 +1222,10 @@ pub fn style_for(game: &Game, id: BodyId, theme: &ThemeColors) -> Style {
         Some(BodyTag::Amoeba(i)) => {
             let c = hex(bb_sim::amoeba_color(i as usize));
             Style { fill: c, rim: lighten(c, 0.5), rim_w: 2.5, highlight: true, z: z::ITEMS + 0.2, top_rim_only: false }
+        }
+        Some(BodyTag::Droplet(c)) => {
+            let c = hex(c);
+            Style { fill: c, rim: darken(c, 0.35), rim_w: 2.5, highlight: true, z: z::PLAYER - 0.5, top_rim_only: false }
         }
         Some(BodyTag::Ui) | None => Style { fill: theme.accent, rim: darken(theme.accent, 0.3), rim_w: 4.0, highlight: true, z: z::PROP, top_rim_only: false },
     }

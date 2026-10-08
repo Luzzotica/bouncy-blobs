@@ -35,6 +35,8 @@ pub enum BodyTag {
     Ui,
     /// An edible amoeba (index into `level.pickups`).
     Amoeba(u16),
+    /// A droplet left by a popped blob (its colour, 0xRRGGBB).
+    Droplet(u32),
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +131,8 @@ pub struct Sim {
     pub collected: Vec<bool>,
     /// Living amoebas, one per pickup (None once eaten).
     pub amoebas: Vec<Option<BodyId>>,
+    /// Droplets from popped blobs: (body, seconds left).
+    pub droplets: Vec<(BodyId, f32)>,
     pub story_fired: Vec<bool>,
     pub completed: bool,
     pub time: f32,
@@ -171,6 +175,7 @@ impl Sim {
             checkpoint: 0,
             collected: vec![false; level.pickups.len()],
             amoebas: Vec::new(),
+            droplets: Vec::new(),
             story_fired: vec![false; level.story.len()],
             completed: false,
             time: 0.0,
@@ -272,6 +277,54 @@ impl Sim {
         self.on_popped(body, pos);
     }
 
+    /// A popped blob bursts into a handful of small soft droplets in its
+    /// colour: they fly apart, roll, can be pushed around, then melt away.
+    fn spawn_droplets(&mut self, body: BodyId, pos: Vec2, color: u32) {
+        let (vel, r) = self.world.body(body).map_or((Vec2::ZERO, 32.0), |b| (b.velocity(), (b.rest_area.abs() / std::f32::consts::PI).sqrt()));
+        let n = 6;
+        for k in 0..n {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU + 0.4;
+            let dir = Vec2::new(a.cos(), a.sin());
+            // On a ring wide enough that they don't overlap (overlap shoves
+            // them apart violently).
+            let rad = r * (0.28 + 0.04 * ((k * 5 % 3) as f32));
+            let mut d = physics::BodyDesc::blob(pos + dir * r * 0.8, rad, 10, 0.12);
+            d.params.shape_compliance = Some(3e-3);
+            d.params.volume_compliance = 1e-6;
+            d.params.edge_compliance = 1e-5;
+            d.params.internal_damping = 3.0;
+            d.params.radius = 1.5;
+            d.params.limits.poppable = false;
+            d.params.material = physics::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 0.1 };
+            d.layer = load::layer::PROP;
+            let id = self.add_body(d, BodyTag::Droplet(color));
+            if let Some(b) = self.world.body_mut(id) {
+                b.add_velocity(vel * 0.4 + dir * 220.0 + Vec2::new(0.0, 180.0));
+            }
+            self.droplets.push((id, 4.5 + (k % 3) as f32 * 0.6));
+        }
+    }
+
+    fn update_droplets(&mut self, dt: f32) {
+        let mut gone = Vec::new();
+        for (id, t) in self.droplets.iter_mut() {
+            *t -= dt;
+            if let Some(b) = self.world.body_mut(*id) {
+                // Melt away over the last second.
+                if *t < 1.0 {
+                    b.rest_scale = (0.25 + 0.75 * t.max(0.0)).max(0.25);
+                }
+            }
+            if *t <= 0.0 {
+                gone.push(*id);
+            }
+        }
+        self.droplets.retain(|d| d.1 > 0.0);
+        for id in gone {
+            self.remove_body(id);
+        }
+    }
+
     fn on_popped(&mut self, body: BodyId, pos: Vec2) {
         match self.tags.get(&body).copied() {
             Some(BodyTag::Player(slot)) => {
@@ -281,6 +334,7 @@ impl Sim {
                     let color = p.color;
                     p.ctl.grab = None;
                     self.events.push(SimEvent::Popped { who: Who::Player(slot), pos, color });
+                    self.spawn_droplets(body, pos, color);
                 }
             }
             Some(BodyTag::Npc(i)) => {
@@ -289,6 +343,7 @@ impl Sim {
                     n.ctl.grab = None;
                     let color = n.color;
                     self.events.push(SimEvent::Popped { who: Who::Npc(i), pos, color });
+                    self.spawn_droplets(body, pos, color);
                 }
             }
             _ => {}
@@ -309,6 +364,7 @@ impl Sim {
     pub fn step(&mut self) {
         let dt = DT;
         self.time += dt;
+        self.update_droplets(dt);
         runtime::pre_step(self, dt);
 
         let ropes = std::mem::take(&mut self.ropes);

@@ -25,6 +25,7 @@ use crate::story::{CHAPTERS, StoryProgress};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Main,
+    Play,
     Chapters,
     Party,
     Settings,
@@ -152,8 +153,9 @@ impl Launcher {
         PVec2::new((self.rand() * 2.0 - 1.0) * 260.0, (2.0 * g * apex).sqrt())
     }
 
-    fn recolor(&mut self, overrides: &mut StyleOverrides, body: BodyId) {
-        let c = hex(BLOB_COLORS[(self.rand() * BLOB_COLORS.len() as f32) as usize % BLOB_COLORS.len()]);
+    /// New random colour (the first blob is always you, in Pip's colour).
+    fn recolor(&mut self, overrides: &mut StyleOverrides, body: BodyId, pip: Option<u32>) {
+        let c = hex(pip.unwrap_or(BLOB_COLORS[(self.rand() * BLOB_COLORS.len() as f32) as usize % BLOB_COLORS.len()]));
         overrides.0.insert(body, Style { fill: c, rim: darken(c, 0.35), rim_w: 4.5, highlight: true, z: z::PLAYER, top_rim_only: false });
     }
 }
@@ -168,8 +170,7 @@ fn menu_blobs(
     touches: Res<Touches>,
     windows: Query<&Window>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    menu: Res<Menu>,
-    time: Res<Time>,
+    (menu, time, progress): (Res<Menu>, Res<Time>, Res<StoryProgress>),
 ) {
     let g = game.sim.tuning.gravity.gravity;
     let ids: Vec<BodyId> = game.sim.npcs.iter().map(|n| n.ctl.body).collect();
@@ -191,7 +192,7 @@ fn menu_blobs(
                 b.params.limits.poppable = false;
                 b.add_velocity(vel);
             }
-            st.recolor(&mut overrides, id);
+            st.recolor(&mut overrides, id, (Some(&id) == ids.first()).then_some(progress.pip_color));
         }
     }
 
@@ -270,7 +271,7 @@ fn menu_blobs(
             if let Some(b) = game.sim.world.body_mut(id) {
                 b.add_velocity(vel);
             }
-            st.recolor(&mut overrides, id);
+            st.recolor(&mut overrides, id, (Some(&id) == ids.first()).then_some(progress.pip_color));
         }
     }
 }
@@ -381,22 +382,29 @@ pub fn kick_label(labels: &mut Query<&mut SoftText>, body: BodyId, strength: f32
 
 fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u32)> {
     match page {
-        Page::Main => {
-            let story = if progress.unlocked > 1 { format!("Continue  ·  Ch {}", progress.current) } else { "Play Story".into() };
-            vec![
-                (story, Action::Continue, 0xff8fab),
-                ("Chapters".into(), Action::Goto(Page::Chapters), 0xffc75f),
-                ("Party  (phones!)".into(), Action::Goto(Page::Party), 0x6bcb77),
-                ("Kids Mode".into(), Action::Kids, 0x5dd6ff),
-                ("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff),
-            ]
+        Page::Main => vec![
+            ("Play".into(), Action::Goto(Page::Play), 0xff8fab),
+            ("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff),
+            #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+            ("Quit".into(), Action::Quit, 0xff5d73),
+        ],
+        Page::Play => {
+            let story = if progress.unlocked > 1 { format!("Story  ·  Ch {}", progress.current) } else { "Story".into() };
+            let mut v = vec![(story, Action::Continue, 0xff8fab)];
+            if progress.unlocked > 1 {
+                v.push(("Chapters".into(), Action::Goto(Page::Chapters), 0xffc75f));
+            }
+            v.push(("Kids Mode".into(), Action::Kids, 0x5dd6ff));
+            v.push(("Multiplayer".into(), Action::Goto(Page::Party), 0x6bcb77));
+            v.push(("Back".into(), Action::Goto(Page::Main), 0xd0c4e8));
+            v
         }
         Page::Chapters => {
             let mut v: Vec<(String, Action, u32)> = (1..=CHAPTERS)
                 .filter(|c| *c <= progress.unlocked)
                 .map(|c| (format!("{c}"), Action::Chapter(c), crate::palette_cycle(c as usize)))
                 .collect();
-            v.push(("Back".into(), Action::Goto(Page::Main), 0xd0c4e8));
+            v.push(("Back".into(), Action::Goto(Page::Play), 0xd0c4e8));
             v
         }
         Page::Party => vec![
@@ -404,13 +412,11 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
             ("Join a Friend".into(), Action::JoinFriend, 0x5dd6ff),
             ("Level Editor".into(), Action::Editor, 0xffc75f),
             ("Sandbox".into(), Action::Sandbox, 0xff9f43),
-            ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
+            ("Back".into(), Action::Goto(Page::Play), 0xd0c4e8),
         ],
         Page::Settings => vec![
             ("Blob Color".into(), Action::Color, progress.pip_color),
             ("Fullscreen".into(), Action::ToggleFullscreen, 0x5dd6ff),
-            #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
-            ("Quit".into(), Action::Quit, 0xff5d73),
             ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
         ],
     }
@@ -619,8 +625,16 @@ fn interact(
                     if let Some(p) = game.sim.player_mut(0) {
                         p.color = progress.pip_color;
                     }
-                    if let Some(b) = menu.buttons.iter_mut().find(|b| b.action == Action::Color) {
+                    let focus = menu.focus;
+                    if let Some((i, b)) = menu.buttons.iter_mut().enumerate().find(|(_, b)| b.action == Action::Color) {
+                        // The button itself shows the colour you picked...
                         b.color = progress.pip_color;
+                        overrides.0.insert(b.body, button_style(b.color, i == focus));
+                    }
+                    // ...and so does the first launched blob (that's you).
+                    if let Some(id) = game.sim.npcs.first().map(|n| n.ctl.body) {
+                        let c = hex(progress.pip_color);
+                        overrides.0.insert(id, Style { fill: c, rim: darken(c, 0.35), rim_w: 4.5, highlight: true, z: z::PLAYER, top_rim_only: false });
                     }
                     if let Some(body) = game.sim.player(0).map(|p| p.ctl.body) {
                         let c = hex(progress.pip_color);
@@ -706,7 +720,7 @@ fn interact(
         chosen = Some(menu.focus);
     }
     if keys.just_pressed(KeyCode::Escape) && menu.page != Page::Main {
-        menu.page = Page::Main;
+        menu.page = if matches!(menu.page, Page::Chapters | Page::Party) { Page::Play } else { Page::Main };
         return;
     }
 
