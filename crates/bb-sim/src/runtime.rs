@@ -277,6 +277,18 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
                 crushed.push(id);
             }
         }
+        // Droplets caught underneath just go (squeezed between the slab and
+        // jelly ground they'd make the ground lurch).
+        if lo.y < closed_bottom + 40.0 {
+            for d in sim.droplets.iter_mut() {
+                if let Some(b) = sim.world.body(d.0) {
+                    let c = b.centroid();
+                    if c.x > lo.x - 10.0 && c.x < hi.x + 10.0 && c.y < lo.y + 10.0 && c.y > closed_bottom - 80.0 {
+                        d.1 = 0.0;
+                    }
+                }
+            }
+        }
     }
     for id in crushed {
         sim.pop(id);

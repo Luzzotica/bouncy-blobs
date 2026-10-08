@@ -294,7 +294,8 @@ impl Sim {
             d.params.edge_compliance = 1e-5;
             d.params.internal_damping = 3.0;
             d.params.radius = 1.5;
-            d.params.limits.poppable = false;
+            // Crushable: an unbreakable droplet ground into jelly by a
+            // crusher makes the jelly lurch. Popping just removes it.
             d.params.material = physics::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 0.1 };
             d.layer = load::layer::PROP;
             let id = self.add_body(d, BodyTag::Droplet(color));
@@ -310,6 +311,13 @@ impl Sim {
         for (id, t) in self.droplets.iter_mut() {
             *t -= dt;
             if let Some(b) = self.world.body_mut(*id) {
+                // Droplets born squeezed (e.g. under a crusher) get shoved out
+                // hard; never let them fly like bullets.
+                let v = b.velocity();
+                let sp = v.length();
+                if sp > 650.0 {
+                    b.add_velocity(-v * (1.0 - 650.0 / sp));
+                }
                 // Melt away over the last second.
                 if *t < 1.0 {
                     b.rest_scale = (0.25 + 0.75 * t.max(0.0)).max(0.25);
