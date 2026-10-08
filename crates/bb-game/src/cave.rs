@@ -135,6 +135,10 @@ pub struct ReactiveDecor {
     spill: Handle<ColorMaterial>,
     dark: bool,
     col: Color,
+    /// Index into the level's decor (how `alive.rs` knows it).
+    idx: usize,
+    /// Light from the cave's pulse network last frame.
+    lit: f32,
 }
 
 pub fn is_reactive(kind: &str) -> bool {
@@ -154,9 +158,15 @@ pub fn spawn_reactive(
         if !is_reactive(&d.kind) || crate::level_view::near_checkpoint(level, d.pos) {
             continue;
         }
-        // Vary the hue a touch per mushroom so a patch isn't a row of clones.
-        let hue = ((i as f32 * 2.399).sin() * 0.5 + 0.5) * 0.35;
-        let col = mix(theme.mush, if theme.dark { theme.crystal } else { theme.accent }, hue);
+        // In the dark cave every glow shares the scene's smooth hue field
+        // (so a pulse arriving from a vein never meets a clashing colour);
+        // in daylight, vary the hue a touch so a patch isn't a row of clones.
+        let col = if theme.dark {
+            palette::glow_at(theme, d.pos.x, d.pos.y + 46.0 * d.scale)
+        } else {
+            let hue = ((i as f32 * 2.399).sin() * 0.5 + 0.5) * 0.35;
+            mix(theme.mush, theme.accent, hue)
+        };
         let mut buf = MeshBuf::default();
         draw_mushroom(&mut buf, d.scale, 0.0, 0.0, 0.0, theme.dark, col);
         let mesh = meshes.add(buf.into_mesh());
@@ -189,6 +199,8 @@ pub fn spawn_reactive(
                 spill,
                 dark: theme.dark,
                 col,
+                idx: i,
+                lit: 0.0,
             },
             LevelEntity,
         ));
@@ -210,6 +222,7 @@ fn react_decor(
     mut mats: ResMut<Assets<ColorMaterial>>,
     cam: Query<&Transform, (With<Camera2d>, Without<ReactiveDecor>)>,
     mut q: Query<&mut ReactiveDecor>,
+    alive: Res<crate::alive::Alive>,
 ) {
     let dt = time.delta_secs().min(0.05);
     let t = time.elapsed_secs();
@@ -264,6 +277,14 @@ fn react_decor(
                 target = target.max(1.1 * k);
             }
         }
+        // The cave's pulse network reaching it: light, and a little nod
+        // as the front arrives.
+        let lit = alive.decor_light(d.idx);
+        if lit > 0.3 && d.lit <= 0.3 {
+            d.wob_v += if d.phase.sin() > 0.0 { 0.9 } else { -0.9 } * lit;
+        }
+        d.lit = lit;
+        target = target.max(lit);
         d.cooldown = (d.cooldown - dt).max(0.0);
         if touched {
             target = 1.5;
