@@ -153,3 +153,34 @@ pub fn material_tint(m: bb_level::Material, base: Color) -> Color {
         bb_level::Material::Bouncy => mix(base, Color::srgb(1.0, 0.45, 0.7), 0.7),
     }
 }
+
+/// The scene's one glow-hue family: the theme's jelly light, leaning
+/// smoothly toward its mushroom hue in some places and its crystal hue in
+/// others. A slow function of position, so neighbouring glows always share
+/// (nearly) the same colour and any change of hue is a gentle gradient —
+/// never two different lights abutting with a hard edge.
+pub fn glow_at(theme: &ThemeColors, x: f32, y: f32) -> Color {
+    let k = ((x * 0.0019).sin() * 0.6 + (x * 0.00071 + y * 0.0012 + 1.3).sin() * 0.4).clamp(-1.0, 1.0);
+    if k >= 0.0 { mix(theme.jelly, theme.mush, 0.45 * k) } else { mix(theme.jelly, theme.crystal, -0.45 * k) }
+}
+
+/// A pulse front's light at a point the front passed `x` px ago (negative:
+/// not there yet). A soft leading edge, a brighter crest riding the front,
+/// and a long gentle tail of `tail` px — never a step.
+pub fn pulse_env(x: f32, lead: f32, tail: f32) -> f32 {
+    if x < -lead {
+        return 0.0;
+    }
+    let rise = {
+        let t = ((x + lead) / (lead * 1.25)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let xp = x.max(0.0);
+    rise * (0.55 * (-xp / tail).exp() + 0.45 * (-xp / lead).exp())
+}
+
+/// Combine overlapping lights softly (1 - Π(1 - a)): two fronts crossing
+/// brighten, but never clip or flash.
+pub fn screen_add(a: f32, b: f32) -> f32 {
+    1.0 - (1.0 - a.clamp(0.0, 1.0)) * (1.0 - b.clamp(0.0, 1.0))
+}
