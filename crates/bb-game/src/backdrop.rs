@@ -473,12 +473,19 @@ const FG_SPACING: f32 = 300.0;
 fn update_foreground(
     time: Res<Time>,
     cam: Query<(&Transform, &Projection), With<crate::camera::MainCamera>>,
-    mut q: Query<(&Foreground, &mut Transform), Without<crate::camera::MainCamera>>,
+    mut q: Query<(&Foreground, &mut Transform, &mut Visibility), Without<crate::camera::MainCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    game: Option<Res<crate::sim::Game>>,
 ) {
     let Some((c, half, _)) = view(&cam) else { return };
     let t = time.elapsed_secs();
-    for (fg, mut tf) in q.iter_mut() {
+    // The title screen is v2's clean menu: no foreground silhouettes.
+    let title = game.as_ref().is_some_and(|g| g.sim.level.id == "title");
+    for (fg, mut tf, mut vis) in q.iter_mut() {
+        *vis = if title { Visibility::Hidden } else { Visibility::Inherited };
+        if title {
+            continue;
+        }
         tf.translation.x = c.x;
         tf.translation.y = c.y;
         let u = half.y * 2.0 / REF_H;

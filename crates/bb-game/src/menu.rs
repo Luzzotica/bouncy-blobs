@@ -87,7 +87,7 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
                 Update,
-                (build_page, interact).chain().run_if(in_state(AppState::Title).and_then(resource_exists::<Game>)),
+                (build_page, interact, menu_blobs).chain().run_if(in_state(AppState::Title).and_then(resource_exists::<Game>)),
             )
             .add_systems(Update, boot.run_if(in_state(AppState::Boot)));
     }
@@ -101,25 +101,179 @@ fn boot(mut next: ResMut<NextState<AppState>>, mut frames: Local<u32>) {
     }
 }
 
+/// The v2 home screen: an open cave where soft blobs are launched up from
+/// below, arc across the screen bumping into the logo, the buttons and each
+/// other, and fall back out the bottom to be launched again.
 pub fn title_level() -> bb_level::Level {
     let mut b = LevelBuilder::new("title", "Title", Theme::Hollow);
-    b.spawn(v(-560.0, 120.0))
-        .ground(&[v(-1300.0, 0.0), v(1300.0, 0.0)], 400.0)
-        .block(v(-1400.0, -400.0), v(-1300.0, 1800.0))
-        .block(v(1300.0, -400.0), v(1400.0, 1800.0))
-        .mushroom(v(-900.0, 0.0), 120.0, 200.0)
-        .kill_y(-900.0)
-        .decor("crystal", v(860.0, 0.0), 1.2, -1.0)
+    b.spawn(v(0.0, -2000.0))
+        .kill_y(-8000.0)
         .decor("glowworm", v(-300.0, 760.0), 1.4, -1.0)
         .decor("glowworm", v(500.0, 820.0), 1.0, -1.0);
-    for (i, x) in [-1100.0f32, 1050.0, 700.0].iter().enumerate() {
-        b.npc(&format!("w{i}"), v(*x, 60.0), NpcRole::Wanderer, "", 26.0);
+    for i in 0..MENU_BLOBS {
+        b.npc(&format!("m{i}"), v(-600.0 + i as f32 * 240.0, -600.0), NpcRole::Huddle, "", BLOB_R);
     }
     b.build()
 }
 
-fn enter(mut load: MessageWriter<LoadLevel>, progress: Res<StoryProgress>, mut cam: ResMut<CameraDirector>, mut commands: Commands) {
-    load.write(LoadLevel { level: title_level(), players: vec![(0, "Pip".into(), progress.pip_color)] });
+/// The menu blob playground (v2 `menuBlobs.ts`).
+const MENU_BLOBS: usize = 6;
+const BLOB_R: f32 = 36.0;
+const BLOB_COLORS: [u32; 8] = [0x4ac8c8, 0xff6b7d, 0x5a9cff, 0xffd54a, 0xff7bd5, 0x8fe36b, 0xb98cff, 0xff9d4a];
+/// Visible world area at the menu camera (centre 0,380; zoom 1).
+const VIEW_BOTTOM: f32 = 380.0 - crate::camera::VIEW_H * 0.5;
+const VIEW_HALF_W: f32 = crate::camera::VIEW_W * 0.5;
+
+#[derive(Default)]
+pub struct Launcher {
+    seed: u32,
+    /// Blob being dragged by the pointer.
+    held: Option<BodyId>,
+    started: bool,
+    /// Seconds each blob has been sitting still (on a button or letter).
+    resting: std::collections::HashMap<BodyId, f32>,
+    /// Where each blob was a moment ago (catches one wedged between
+    /// buttons, which jitters too much to count as resting).
+    anchor: std::collections::HashMap<BodyId, (PVec2, f32)>,
+}
+
+impl Launcher {
+    fn rand(&mut self) -> f32 {
+        self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (self.seed >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Launch velocity: up to an apex 55–90% of the screen height.
+    fn launch_vel(&mut self, g: f32) -> PVec2 {
+        let apex = crate::camera::VIEW_H * (0.55 + self.rand() * 0.35);
+        PVec2::new((self.rand() * 2.0 - 1.0) * 260.0, (2.0 * g * apex).sqrt())
+    }
+
+    fn recolor(&mut self, overrides: &mut StyleOverrides, body: BodyId) {
+        let c = hex(BLOB_COLORS[(self.rand() * BLOB_COLORS.len() as f32) as usize % BLOB_COLORS.len()]);
+        overrides.0.insert(body, Style { fill: c, rim: darken(c, 0.35), rim_w: 4.5, highlight: true, z: z::PLAYER, top_rim_only: false });
+    }
+}
+
+/// Launch, recycle and drag the menu blobs.
+#[allow(clippy::too_many_arguments)]
+fn menu_blobs(
+    mut game: ResMut<Game>,
+    mut st: Local<Launcher>,
+    mut overrides: ResMut<StyleOverrides>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    windows: Query<&Window>,
+    cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    menu: Res<Menu>,
+    time: Res<Time>,
+) {
+    let g = game.sim.tuning.gravity.gravity;
+    let ids: Vec<BodyId> = game.sim.npcs.iter().map(|n| n.ctl.body).collect();
+    if game.is_added() || !st.started {
+        st.started = true;
+        st.held = None;
+        if st.seed == 0 {
+            st.seed = 0x9e37_79b9;
+        }
+        for n in game.sim.npcs.iter_mut() {
+            n.scripted = true;
+        }
+        // Seed the screen mid-flight so it's lively from the first frame.
+        for &id in &ids {
+            let at = PVec2::new((st.rand() * 2.0 - 1.0) * (VIEW_HALF_W - 120.0), VIEW_BOTTOM + 120.0 + st.rand() * 500.0);
+            let vel = st.launch_vel(g) * 0.6;
+            game.sim.world.respawn(id, at);
+            if let Some(b) = game.sim.world.body_mut(id) {
+                b.params.limits.poppable = false;
+                b.add_velocity(vel);
+            }
+            st.recolor(&mut overrides, id);
+        }
+    }
+
+    // Pointer: grab a blob (not a button) and fling it.
+    let pointer = (|| {
+        let (camera, tf) = cam.single().ok()?;
+        let w = windows.iter().next()?;
+        let screen = touches.iter().next().map(|t| t.position()).or_else(|| w.cursor_position())?;
+        camera.viewport_to_world_2d(tf, screen).ok()
+    })();
+    let down = mouse.pressed(MouseButton::Left) || touches.iter().next().is_some();
+    let just = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
+    if !down {
+        st.held = None;
+    } else if just && menu.pending.is_none() {
+        if let Some(p) = pointer {
+            let p = PVec2::new(p.x, p.y);
+            st.held = ids.iter().copied().find(|&id| game.sim.world.body(id).is_some_and(|b| b.centroid().distance(p) < BLOB_R * 1.6));
+        }
+    }
+    if let (Some(id), Some(p)) = (st.held, pointer) {
+        if let Some(b) = game.sim.world.body_mut(id) {
+            // Velocity servo toward the pointer (bounded, so it's stable);
+            // letting go keeps the speed: a throw.
+            let mut want = (PVec2::new(p.x, p.y) - b.centroid()) * 14.0;
+            if want.length() > 2800.0 {
+                want = want.normalize() * 2800.0;
+            }
+            let v = b.velocity();
+            b.add_velocity(want - v);
+        }
+    }
+
+    // A blob that lands on a button or letter sits a moment, then hops off.
+    let dt = time.delta_secs();
+    for &id in &ids {
+        if st.held == Some(id) {
+            continue;
+        }
+        let slow = game.sim.world.body(id).is_some_and(|b| b.velocity().length() < 90.0);
+        let t = st.resting.entry(id).or_insert(0.0);
+        *t = if slow { *t + dt } else { 0.0 };
+        if *t > 0.8 {
+            *t = 0.0;
+            let side = if st.rand() < 0.5 { -1.0 } else { 1.0 };
+            let up = 700.0 + st.rand() * 500.0;
+            if let Some(b) = game.sim.world.body_mut(id) {
+                b.add_velocity(PVec2::new(side * (150.0 + st.rand() * 250.0), up));
+            }
+        }
+    }
+
+    // Recycle anything that left the screen (or got wedged somewhere).
+    for &id in &ids {
+        if st.held == Some(id) {
+            continue;
+        }
+        let Some(c) = game.sim.world.body(id).map(|b| b.centroid()) else { continue };
+        let wedged = {
+            let a = st.anchor.entry(id).or_insert((c, 0.0));
+            if a.0.distance(c) > 60.0 {
+                *a = (c, 0.0);
+                false
+            } else {
+                a.1 += dt;
+                a.1 > 1.6
+            }
+        };
+        if wedged {
+            st.anchor.remove(&id);
+        }
+        if wedged || c.y < VIEW_BOTTOM - 200.0 || c.x.abs() > VIEW_HALF_W + 260.0 || c.y > 2600.0 {
+            let x = (st.rand() * 2.0 - 1.0) * (VIEW_HALF_W - 80.0);
+            let vel = st.launch_vel(g);
+            game.sim.world.respawn(id, PVec2::new(x, VIEW_BOTTOM - BLOB_R - 30.0));
+            if let Some(b) = game.sim.world.body_mut(id) {
+                b.add_velocity(vel);
+            }
+            st.recolor(&mut overrides, id);
+        }
+    }
+}
+
+fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mut commands: Commands) {
+    load.write(LoadLevel { level: title_level(), players: vec![] });
     cam.target = Some(Vec2::new(0.0, 380.0));
     cam.zoom = Some(1.0);
     cam.ease = 0.0;
@@ -296,34 +450,37 @@ fn build_page(
     // Logo: soft letter tiles.
     let logo: &[(&str, u32)] = &[("B", 0xff5d73), ("O", 0xff9f43), ("U", 0xffd93d), ("N", 0x6bcb77), ("C", 0x4d96ff), ("Y", 0x9b5de5)];
     let logo2: &[(&str, u32)] = &[("B", 0xf15bb5), ("L", 0x00c2a8), ("O", 0x5dd6ff), ("B", 0xa0e426), ("S", 0xff7eb6)];
-    let (title_y, scale) = if menu.page == Page::Main { (690.0, 1.0) } else { (760.0, 0.6) };
-    for (row, (letters, y)) in [(logo, title_y), (logo2, title_y - 112.0 * scale)].iter().enumerate() {
-        let n = letters.len() as f32;
+    // v2 layout: logo top-left with a slight tilt, buttons down the left.
+    let left = -VIEW_HALF_W + 48.0;
+    let (title_y, scale) = if menu.page == Page::Main { (735.0, 0.82) } else { (760.0, 0.55) };
+    for (row, (letters, y)) in [(logo, title_y), (logo2, title_y - 100.0 * scale)].iter().enumerate() {
         for (i, (ch, col)) in letters.iter().enumerate() {
-            let x = (i as f32 - (n - 1.0) * 0.5) * 104.0 * scale + row as f32 * 20.0 * scale;
+            let x = left + 46.0 * scale + i as f32 * 98.0 * scale + row as f32 * 26.0 * scale;
+            // Tilted up to the right (v2's -2° title), plus a hand-placed wobble.
             let tilt = ((i * 7 + row * 3) % 5) as f32 - 2.0;
-            let id = jelly_tile(&mut game, PVec2::new(x, *y + tilt * 4.0), PVec2::splat(92.0 * scale), BodyTag::Ui, 6e-5);
+            let rise = i as f32 * 4.0 * scale;
+            let id = jelly_tile(&mut game, PVec2::new(x, *y + rise + tilt * 3.0), PVec2::splat(88.0 * scale), BodyTag::Ui, 3e-5);
             overrides.0.insert(id, Style { fill: hex(*col), rim: darken(hex(*col), 0.4), rim_w: 5.0, highlight: true, z: z::PROP + 0.5, top_rim_only: false });
-            label(&mut commands, &assets, id, ch, 64.0 * scale, Color::WHITE);
+            label(&mut commands, &assets, id, ch, 60.0 * scale, Color::WHITE);
             menu.letters.push(id);
-
         }
     }
 
     // Buttons.
     let items = page_buttons(menu.page, &progress);
     let grid = menu.page == Page::Chapters;
-    let top = if menu.page == Page::Main { 430.0 } else { 560.0 };
+    let top = if menu.page == Page::Main { 470.0 } else { 560.0 };
     for (i, (text, action, color)) in items.into_iter().enumerate() {
         let (center, size) = if grid && !matches!(action, Action::Goto(_)) {
             let (col, row) = (i % 5, i / 5);
-            (PVec2::new((col as f32 - 2.0) * 150.0, top - row as f32 * 140.0), PVec2::new(120.0, 110.0))
+            (PVec2::new(left + 60.0 + col as f32 * 140.0, top - row as f32 * 130.0), PVec2::new(116.0, 106.0))
         } else if grid {
-            (PVec2::new(0.0, top - 2.0 * 140.0 - 20.0), PVec2::new(300.0, 76.0))
+            (PVec2::new(left + 150.0, top - 2.0 * 130.0 - 20.0), PVec2::new(300.0, 76.0))
         } else {
-            (PVec2::new(0.0, top - i as f32 * 96.0), PVec2::new(470.0, 78.0))
+            let w = 400.0;
+            (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, 76.0))
         };
-        let id = jelly_tile(&mut game, center, size, BodyTag::Ui, 2e-4);
+        let id = jelly_tile(&mut game, center, size, BodyTag::Ui, 4e-5);
         overrides.0.insert(id, button_style(color, i == 0));
         label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { 36.0 }, Color::WHITE);
         menu.buttons.push(Button { body: id, action, color });
