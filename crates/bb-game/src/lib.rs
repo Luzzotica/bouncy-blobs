@@ -8,6 +8,7 @@ pub mod backdrop;
 pub mod camera;
 pub mod cave;
 pub mod crag;
+pub mod dance;
 pub mod devtools;
 pub mod dropin;
 pub mod editor;
@@ -96,6 +97,7 @@ impl Plugin for GamePlugin {
                 net::NetPlugin,
                 online::OnlinePlugin,
                 tuning::TuningPlugin,
+                dance::DancePlugin,
             ));
     }
 }

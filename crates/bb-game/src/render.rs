@@ -258,8 +258,15 @@ impl MeshBuf {
         for i in 0..n {
             let prev = pts[(i + n - 1) % n];
             let next = pts[(i + 1) % n];
-            let d = next - prev;
-            let nrm = PVec2::new(d.y, -d.x).normalize_or_zero();
+            // Mitered join: offset along the bisector, lengthened by the
+            // corner angle so the band keeps its width (capped for very
+            // sharp points). Without it, sharp corners thin the rim and the
+            // fill peeks out past it.
+            let n1 = { let e = pts[i] - prev; PVec2::new(e.y, -e.x).normalize_or_zero() };
+            let n2 = { let e = next - pts[i]; PVec2::new(e.y, -e.x).normalize_or_zero() };
+            let m = (n1 + n2).normalize_or(n1);
+            let k = 1.0 / m.dot(n1).max(0.4);
+            let nrm = m * k;
             self.vert(pts[i] - nrm * inset, z, c);
             self.vert(pts[i] + nrm * outset, z, c);
         }
@@ -1243,7 +1250,7 @@ fn sync_bodies(
     overrides: Res<StyleOverrides>,
     mut spores: ResMut<crate::cave::Spores>,
     lip: Res<LipGlow>,
-    interp: Res<crate::sim::Interp>,
+    (interp, beat): (Res<crate::sim::Interp>, Res<crate::audio::MusicBeat>),
     mut visuals: Query<(&mut BodyVisual, &mut Transform)>,
 ) {
     let theme = palette::theme(game.sim.level.theme);
@@ -1344,6 +1351,8 @@ fn sync_bodies(
                     spores.puff(top, (bb.max.x - bb.min.x) * 0.45, v.style.fill, 9);
                 }
             }
+            // Caps breathe with the music, each on its own beat.
+            target = target.max(beat.pulse(crate::audio::Groove::of(v.id.index as usize)) * 0.45);
             let k = if target > v.react { 8.0 } else { 1.6 };
             v.react += (target - v.react) * (1.0 - (-k * dt).exp());
         }

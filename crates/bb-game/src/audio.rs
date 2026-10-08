@@ -24,32 +24,39 @@ use crate::flow::AppState;
 use crate::sim::{Game, Inputs, SimMsg};
 use crate::story_iface::Blub;
 
-/// Global volumes (0..1). Legacy defaults: music 0.34, sfx 0.85.
+/// Global volumes (0..1). Legacy defaults were music 0.34, sfx 0.85; music
+/// is 25% quieter than that now.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct AudioSettings {
     pub master: f32,
     pub music: f32,
     pub sfx: f32,
     pub mute: bool,
+    /// 1 while the window has focus, easing to [`UNFOCUSED_GAIN`] while it
+    /// doesn't: everything keeps playing, just quieter.
+    pub focus: f32,
 }
+
+/// Volume while the game window is in the background.
+pub const UNFOCUSED_GAIN: f32 = 0.25;
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        AudioSettings { master: 1.0, music: 0.34, sfx: 0.85, mute: false }
+        AudioSettings { master: 1.0, music: 0.255, sfx: 0.85, mute: false, focus: 1.0 }
     }
 }
 
 impl AudioSettings {
     pub fn sfx_gain(&self) -> f32 {
-        if self.mute { 0.0 } else { self.master * self.sfx }
+        if self.mute { 0.0 } else { self.master * self.sfx * self.focus }
     }
     pub fn music_gain(&self) -> f32 {
-        if self.mute { 0.0 } else { self.master * self.music }
+        if self.mute { 0.0 } else { self.master * self.music * self.focus }
     }
     /// Voices (story blubs, Kids Mode clips) follow master only, like the
     /// legacy kids voice which ignored the sliders.
     pub fn voice_gain(&self) -> f32 {
-        if self.mute { 0.0 } else { self.master }
+        if self.mute { 0.0 } else { self.master * self.focus }
     }
 }
 
@@ -114,6 +121,94 @@ pub fn theme_music(theme: Theme) -> (&'static str, f32) {
     }
 }
 
+/// Beat grid of a music loop: (bpm, first-beat offset in s, beats per loop).
+/// Measured from the files (onset autocorrelation); the loops are exactly
+/// 60 and 58 beats long, so the grid realigns every time they wrap.
+pub fn track_beat(track: &str) -> (f64, f64, f64) {
+    match track {
+        "music/theme.mp3" => (120.0, 0.03, 60.0),
+        _ => (60.0 * 58.0 / 30.04, 0.06, 58.0),
+    }
+}
+
+/// Which beats something dances on. Give neighbours different groups so a
+/// scene ripples instead of hopping in unison (like Mario's dancing enemies).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Groove {
+    /// Beat 1 of the bar.
+    Downbeat,
+    /// Beats 1 and 3.
+    OneThree,
+    /// The backbeat: beats 2 and 4.
+    TwoFour,
+    /// The "and" between beats.
+    Offbeat,
+}
+
+impl Groove {
+    pub fn of(i: usize) -> Groove {
+        [Groove::OneThree, Groove::TwoFour, Groove::Offbeat, Groove::TwoFour, Groove::OneThree, Groove::Downbeat][i % 6]
+    }
+    /// Beat positions (within a 4-beat bar) this groove hits on.
+    fn hits(self) -> &'static [f64] {
+        match self {
+            Groove::Downbeat => &[0.0],
+            Groove::OneThree => &[0.0, 2.0],
+            Groove::TwoFour => &[1.0, 3.0],
+            Groove::Offbeat => &[0.5, 1.5, 2.5, 3.5],
+        }
+    }
+}
+
+/// The music's beat clock, read from the playing track's position (or a
+/// steady 120 bpm clock when there's no audio, e.g. headless runs).
+#[derive(Resource, Default)]
+pub struct MusicBeat {
+    /// Beats since the loop started (fractional).
+    pub beat: f64,
+    prev: f64,
+}
+
+impl MusicBeat {
+    /// True on the frame `g` hits.
+    pub fn crossed(&self, g: Groove) -> bool {
+        let bar = |b: f64| b.rem_euclid(4.0);
+        if self.beat < self.prev || self.beat - self.prev > 1.0 {
+            return false; // wrapped or jumped
+        }
+        g.hits().iter().any(|h| {
+            let (a, b) = (bar(self.prev), bar(self.beat));
+            if a <= b { a < *h && *h <= b } else { *h > a || *h <= b }
+        })
+    }
+
+    /// 0..1 envelope: 1 right on `g`'s hit, decaying over a quarter beat.
+    pub fn pulse(&self, g: Groove) -> f32 {
+        let b = self.beat.rem_euclid(4.0);
+        g.hits()
+            .iter()
+            .map(|h| {
+                let since = (b - h).rem_euclid(4.0);
+                (1.0 - since / 0.3).max(0.0) as f32
+            })
+            .fold(0.0, f32::max)
+    }
+}
+
+fn track_beat_clock(mut beat: ResMut<MusicBeat>, q: Query<(&Music, Option<&AudioSink>)>, time: Res<Time<Real>>) {
+    let playing = q.iter().find(|(m, s)| !m.fading_out && s.is_some_and(|s| !s.is_paused()));
+    let now = match playing {
+        Some((m, Some(sink))) => {
+            let (bpm, offset, beats) = track_beat(m.track);
+            let pos = sink.position().as_secs_f64() - offset;
+            (pos * bpm / 60.0).rem_euclid(beats)
+        }
+        _ => (time.elapsed_secs_f64() * 2.0).rem_euclid(64.0),
+    };
+    beat.prev = beat.beat;
+    beat.beat = now;
+}
+
 /// Forces a particular music track (cutscenes, menus); `None` = by theme.
 #[derive(Resource, Default)]
 pub struct MusicOverride(pub Option<(&'static str, f32)>);
@@ -125,6 +220,8 @@ impl Plugin for GameAudioPlugin {
         app.init_resource::<AudioSettings>()
             .init_resource::<SfxBank>()
             .init_resource::<MusicOverride>()
+            .init_resource::<MusicBeat>()
+            .add_systems(PreUpdate, track_beat_clock)
             .add_message::<PlaySfx>()
             .add_message::<Blub>()
             .add_systems(Startup, load_bank)
@@ -262,6 +359,7 @@ fn sim_sounds(
                 let t = ((speed - LAND_MIN) / (LAND_LOUD - LAND_MIN)).clamp(0.0, 1.0);
                 out.write(PlaySfx::new("land-squelch", 0.06 + 0.09 * t, 0.7 + rand(&mut seed) * 0.28));
             }
+            SimEvent::Bump { .. } => {}
             SimEvent::Popped { .. } => {
                 out.write(PlaySfx::new("spike-splat", 0.10625, 0.9 + rand(&mut seed) * 0.2));
             }
@@ -399,10 +497,40 @@ fn music(
 }
 
 /// Pause music while the window is in the background (iOS app switch).
-fn pause_on_blur(mut focus: MessageReader<WindowFocused>, q: Query<&AudioSink, With<Music>>) {
+/// Duck (rather than stop) all audio while the window is unfocused.
+fn pause_on_blur(mut focus: MessageReader<WindowFocused>, mut settings: ResMut<AudioSettings>, time: Res<Time<Real>>, mut want: Local<Option<f32>>) {
     for f in focus.read() {
-        for s in q.iter() {
-            if f.focused { s.play() } else { s.pause() }
+        *want = Some(if f.focused { 1.0 } else { UNFOCUSED_GAIN });
+    }
+    let target = want.unwrap_or(1.0);
+    let k = 1.0 - (-time.delta_secs() * 6.0).exp();
+    let next = settings.focus + (target - settings.focus) * k;
+    if (next - settings.focus).abs() > 1e-4 {
+        settings.focus = next;
+    }
+}
+
+#[cfg(test)]
+mod beat_tests {
+    use super::*;
+
+    #[test]
+    fn grooves_hit_their_beats() {
+        // Two bars at ~1/20-beat frames: count hits per groove.
+        let mut b = MusicBeat::default();
+        let mut counts = [0; 4];
+        let gs = [Groove::Downbeat, Groove::OneThree, Groove::TwoFour, Groove::Offbeat];
+        for k in 1..=160 {
+            b.prev = b.beat;
+            b.beat = k as f64 * 0.05;
+            for (i, g) in gs.iter().enumerate() {
+                counts[i] += b.crossed(*g) as u32;
+            }
         }
+        assert_eq!(counts, [2, 4, 4, 8]);
+        // A loop wrap never double-fires.
+        b.prev = 57.9;
+        b.beat = 0.02;
+        assert!(!b.crossed(Groove::Downbeat));
     }
 }

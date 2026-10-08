@@ -100,6 +100,8 @@ pub enum SimEvent {
     Goal { slot: u8 },
     Story { script: String, slot: u8 },
     Impact { body: BodyId, pos: Vec2, speed: f32 },
+    /// Two bodies hit each other (`normal` points from `b` toward `a`).
+    Bump { a: BodyId, b: BodyId, pos: Vec2, normal: Vec2, speed: f32 },
     Spring { index: usize },
     Action { who: Who, action: Action },
     NpcFreed { index: u16 },
@@ -330,7 +332,10 @@ impl Sim {
             match e {
                 Event::Popped { body, position, .. } => self.on_popped(body, position),
                 Event::Spared { body } => self.events.push(SimEvent::Phew { body }),
-                Event::Impact { body, point, speed, .. } => {
+                Event::Impact { body, point, speed, other, normal } => {
+                    if let physics::Collider::Body(o) = other {
+                        self.events.push(SimEvent::Bump { a: body, b: o, pos: point, normal, speed });
+                    }
                     self.events.push(SimEvent::Impact { body, pos: point, speed })
                 }
                 _ => {}

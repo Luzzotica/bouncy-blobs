@@ -88,6 +88,44 @@ pub fn burst(commands: &mut Commands, shared: &Shared, cache: &mut MatCache, mat
     }
 }
 
+/// A directional spray: `count` particles leaving `pos` mostly along
+/// `drift` (the motion of what collided), fanned by `spread` radians.
+#[allow(clippy::too_many_arguments)]
+pub fn spray(commands: &mut Commands, shared: &Shared, cache: &mut MatCache, mats: &mut Assets<ColorMaterial>, pos: Vec2, drift: Vec2, spread: f32, color: u32, count: u32, size: f32, seed: u32) {
+    let mat = cache.get(mats, color);
+    let base = drift.to_angle();
+    let sp = drift.length();
+    for k in 0..count {
+        let a = base + (hash(seed + k * 5) - 0.5) * spread;
+        let vel = Vec2::from_angle(a) * sp * (0.45 + hash(seed * 7 + k) * 0.8);
+        let sz = size * (0.6 + hash(seed * 13 + k) * 0.8);
+        commands.spawn((
+            Mesh2d(shared.circle.clone()),
+            MeshMaterial2d(mat.clone()),
+            Transform::from_xyz(pos.x, pos.y, z::FX + hash(seed + k * 3) * 0.1).with_scale(Vec3::splat(sz)),
+            Particle { vel, life: 0.5, max: 0.5, gravity: 500.0, size: sz, drag: 1.6 },
+        ));
+    }
+}
+
+/// Players and NPCs (the things whose collisions spray).
+fn is_blob(game: &Game, id: bb_sim::BodyId) -> bool {
+    matches!(game.sim.tag(id), Some(bb_sim::BodyTag::Player(_) | bb_sim::BodyTag::Npc(_)))
+}
+
+/// A body's on-screen colour (players, NPCs and style overrides).
+fn body_color(game: &Game, overrides: &crate::render::StyleOverrides, id: bb_sim::BodyId) -> Option<u32> {
+    if let Some(s) = overrides.0.get(&id) {
+        let c = s.fill.to_srgba();
+        return Some(((c.red * 255.0) as u32) << 16 | ((c.green * 255.0) as u32) << 8 | (c.blue * 255.0) as u32);
+    }
+    match game.sim.tag(id)? {
+        bb_sim::BodyTag::Player(s) => game.sim.player(s).map(|p| p.color),
+        bb_sim::BodyTag::Npc(i) => game.sim.npcs.get(i as usize).map(|n| n.color),
+        _ => None,
+    }
+}
+
 pub fn word(commands: &mut Commands, _assets: &GameAssets, text: &str, pos: Vec2, color: Color, size: f32) {
     let mut st = SoftText::new(text, size).color(color).at(pos).z(z::FX + 1.0).stagger(0.035);
     st.burst = size * 12.0;
@@ -106,7 +144,9 @@ fn react(
     mut cache: ResMut<MatCache>,
     mut mats: ResMut<Assets<ColorMaterial>>,
     mut cam: ResMut<CameraDirector>,
+    overrides: Res<crate::render::StyleOverrides>,
 ) {
+    let mut bumped = std::collections::HashSet::new();
     let theme = palette::theme(game.sim.level.theme);
     let accent = theme.accent.to_srgba();
     let accent_rgb = ((accent.red * 255.0) as u32) << 16 | ((accent.green * 255.0) as u32) << 8 | (accent.blue * 255.0) as u32;
@@ -137,10 +177,32 @@ fn react(
                 burst(&mut commands, &shared, &mut cache, &mut mats, Burst { pos: Vec2::new(pos.x, pos.y), color: 0xfff3a3, count: 7, speed: 220.0, size: 4.0, life: 0.4, gravity: 0.0, implode: 0.0 }, seed);
             }
             SimEvent::Impact { pos, speed, body } => {
-                let is_actor = matches!(game.sim.tag(*body), Some(bb_sim::BodyTag::Player(_)) | Some(bb_sim::BodyTag::Npc(_)));
-                if is_actor && *speed > 520.0 {
-                    let n = ((*speed - 400.0) / 120.0).clamp(2.0, 8.0) as u32;
-                    burst(&mut commands, &shared, &mut cache, &mut mats, Burst { pos: Vec2::new(pos.x, pos.y), color: 0xf2e6ff, count: n, speed: 160.0, size: 6.0, life: 0.45, gravity: 200.0, implode: 0.0 }, seed);
+                // Landing on something: splash in the blob's colour, thrown
+                // along its direction of travel.
+                if *speed > 520.0 && is_blob(&game, *body) {
+                    if let (Some(col), Some(b)) = (body_color(&game, &overrides, *body), game.sim.world.body(*body)) {
+                        let v = b.velocity();
+                        let n = ((*speed - 400.0) / 120.0).clamp(2.0, 8.0) as u32;
+                        let drift = Vec2::new(v.x, v.y) * 0.5 + Vec2::Y * speed * 0.25;
+                        spray(&mut commands, &shared, &mut cache, &mut mats, Vec2::new(pos.x, pos.y), drift, 1.6, col, n, 6.0, seed);
+                    }
+                }
+            }
+            SimEvent::Bump { a, b, pos, normal, speed } => {
+                // Two blobs collide: each sheds a few drops of its own colour,
+                // carried by the pair's shared motion and flung out sideways.
+                let key = if a.index < b.index { (*a, *b) } else { (*b, *a) };
+                if *speed > 260.0 && (is_blob(&game, *a) || is_blob(&game, *b)) && bumped.insert(key) {
+                    let va = game.sim.world.body(*a).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
+                    let vb = game.sim.world.body(*b).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
+                    let shared_v = (va + vb) * 0.5;
+                    let side = bb_sim::Vec2::new(-normal.y, normal.x) * speed.min(900.0) * 0.6;
+                    let n = ((*speed - 200.0) / 140.0).clamp(2.0, 7.0) as u32;
+                    for (k, (id, sgn)) in [(*a, 1.0f32), (*b, -1.0)].into_iter().enumerate() {
+                        let Some(col) = body_color(&game, &overrides, id) else { continue };
+                        let d = shared_v + side * sgn + *normal * sgn * speed * 0.3;
+                        spray(&mut commands, &shared, &mut cache, &mut mats, Vec2::new(pos.x, pos.y), Vec2::new(d.x, d.y), 1.1, col, n, 5.5, seed + k as u32 * 97);
+                    }
                 }
             }
             SimEvent::Spring { index } => {

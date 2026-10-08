@@ -12,6 +12,7 @@ use bb_sim::BodyTag;
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
+use crate::audio::{Groove, MusicBeat};
 use crate::camera::{CameraDirector, MainCamera};
 use crate::flow::AppState;
 use crate::palette::{darken, hex, lighten};
@@ -64,9 +65,8 @@ pub struct Menu {
     pub prev_button: bool,
     /// The page's fall-in choreography.
     pub drop: DropIn,
-    /// Seconds until a logo letter gets an idle jiggle.
-    pub idle: f32,
-    pub idle_n: u32,
+    /// Tiles from the previous page, falling out of view: (body, seconds left).
+    pub falling: Vec<(BodyId, f32)>,
 }
 
 /// Text that rides on a softbody (one [`SoftText`] glyph per letter).
@@ -115,6 +115,9 @@ pub fn title_level() -> bb_level::Level {
     }
     b.build()
 }
+
+/// Collision layer for the previous page's tiles while they fall away.
+const FALLING_LAYER: u32 = 1 << 9;
 
 /// The menu blob playground (v2 `menuBlobs.ts`).
 const MENU_BLOBS: usize = 6;
@@ -286,8 +289,7 @@ fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mu
         nav_cooldown: 0.0,
         prev_button: true,
         drop: DropIn::new(DropStyle::MENU),
-        idle: 2.0,
-        idle_n: 0,
+        falling: Vec::new(),
     });
 }
 
@@ -325,7 +327,11 @@ pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wob
         let mut d = BodyDesc::grid(center - size * 0.5, center + size * 0.5, cols, rows, size.x * size.y / 2500.0);
         // Chamfer the corners so it still reads as a soft pill.
         let (nx, ny) = (cols + 1, rows + 1);
-        let cut = size.y * 0.16;
+        // Keep the corner inside its cell's diagonal: pulled any further,
+        // the outline notches in while the cell's triangles still cover the
+        // corner, and the fill pokes out past the rim.
+        let cell = (size.x / cols as f32).min(size.y / rows as f32);
+        let cut = (size.y * 0.16).min(cell * 0.45);
         for (ix, iy, dx, dy) in [(0, 0, 1.0, 1.0), (nx - 1, 0, -1.0, 1.0), (0, ny - 1, 1.0, -1.0), (nx - 1, ny - 1, -1.0, -1.0)] {
             d.positions[iy * nx + ix] += PVec2::new(dx, dy) * cut;
         }
@@ -413,7 +419,7 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
 pub fn button_style(color: u32, focused: bool) -> Style {
     let c = hex(color);
     let fill = if focused { lighten(c, 0.25) } else { c };
-    Style { fill, rim: if focused { Color::WHITE } else { darken(c, 0.4) }, rim_w: if focused { 7.0 } else { 5.0 }, highlight: true, z: z::PROP + 1.0, top_rim_only: false }
+    Style { fill, rim: if focused { Color::WHITE } else { darken(c, 0.4) }, rim_w: if focused { 7.0 } else { 5.0 }, highlight: false, z: z::PROP + 1.0, top_rim_only: false }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -423,7 +429,7 @@ fn build_page(
     mut game: ResMut<Game>,
     assets: Res<GameAssets>,
     progress: Res<StoryProgress>,
-    labels: Query<Entity, With<MenuEntity>>,
+    labels: Query<(Entity, &BodyLabel), With<MenuEntity>>,
     mut overrides: ResMut<StyleOverrides>,
     mut built: Local<Option<(Page, u64)>>,
 ) {
@@ -434,17 +440,34 @@ fn build_page(
         return;
     }
     *built = Some(key);
-    for e in labels.iter() {
-        commands.entity(e).despawn();
+    if fresh {
+        menu.falling.clear();
     }
-    for b in menu.buttons.drain(..) {
-        game.sim.remove_body(b.body);
+    // The old page doesn't vanish: its tiles let go and tumble out of view
+    // (labels riding along) while the new page drops in.
+    let m = &mut *menu;
+    let leaving: Vec<BodyId> = m.buttons.drain(..).map(|b| b.body).chain(m.letters.drain(..)).collect();
+    for (k, id) in leaving.into_iter().enumerate() {
+        if let Some(b) = game.sim.world.body_mut(id) {
+            b.home = None;
+            b.params.gravity_scale = 1.6;
+            // Still jelly as they fall: they pile into and bounce off each
+            // other (and the launched blobs), but pass through the new page.
+            b.layer = FALLING_LAYER;
+            b.mask = FALLING_LAYER | crate::load_layer::NPC;
+            let side = if k % 2 == 0 { 1.0 } else { -1.0 };
+            b.add_velocity(PVec2::new(side * (60.0 + (k * 37 % 90) as f32), 180.0 + (k * 53 % 140) as f32));
+            b.add_spin(side * (1.0 + (k % 3) as f32 * 0.6));
+        }
+        menu.falling.push((id, 1.6));
     }
-    let old_letters: Vec<BodyId> = menu.letters.drain(..).collect();
-    for l in old_letters {
-        game.sim.remove_body(l);
+    let keep: Vec<BodyId> = menu.falling.iter().map(|f| f.0).collect();
+    for (e, l) in labels.iter() {
+        if !keep.contains(&l.body) {
+            commands.entity(e).despawn();
+        }
     }
-    overrides.0.clear();
+    overrides.0.retain(|id, _| keep.contains(id) || game.sim.npcs.iter().any(|n| n.ctl.body == *id));
     menu.drop.clear();
 
     // Logo: soft letter tiles.
@@ -522,24 +545,48 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    mut labels: Query<&mut SoftText>,
+    (mut labels, label_bodies, beat): (Query<&mut SoftText>, Query<(Entity, &BodyLabel)>, Res<MusicBeat>),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
+    // Remove the previous page's tiles once they've fallen away.
+    {
+        let mut gone = Vec::new();
+        menu.falling.retain_mut(|(id, t)| {
+            *t -= dt;
+            if *t <= 0.0 {
+                gone.push(*id);
+                false
+            } else {
+                true
+            }
+        });
+        for id in gone {
+            game.sim.remove_body(id);
+            overrides.0.remove(&id);
+            for (e, l) in label_bodies.iter() {
+                if l.body == id {
+                    commands.entity(e).despawn();
+                }
+            }
+        }
+    }
     {
         let m = &mut *menu;
         m.drop.update(&mut game.sim.world, dt);
-        // Idle life: now and then a logo letter hops and wiggles.
-        m.idle -= dt;
-        if m.idle <= 0.0 && m.drop.done() && !m.letters.is_empty() {
-            m.idle_n += 1;
-            let n = m.idle_n;
-            m.idle = 1.1 + (n * 7 % 5) as f32 * 0.35;
-            let id = m.letters[(n as usize * 7 + 3) % m.letters.len()];
-            if let Some(b) = game.sim.world.body_mut(id) {
-                b.add_velocity(PVec2::new(0.0, 260.0));
-                b.add_spin(if n % 2 == 0 { 3.0 } else { -3.0 });
+        // The logo dances to the music: each letter on its own beat.
+        if m.drop.done() {
+            for (i, &id) in m.letters.iter().enumerate() {
+                let groove = Groove::of(i);
+                if !beat.crossed(groove) {
+                    continue;
+                }
+                let big = groove == Groove::Downbeat;
+                if let Some(b) = game.sim.world.body_mut(id) {
+                    b.add_velocity(PVec2::new(0.0, if big { 420.0 } else { 250.0 }));
+                    b.add_spin(if i % 2 == 0 { 2.0 } else { -2.0 });
+                }
+                kick_label(&mut labels, id, if big { 0.6 } else { 0.35 });
             }
-            kick_label(&mut labels, id, 0.6);
         }
     }
     if join.is_some() {
