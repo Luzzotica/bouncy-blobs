@@ -5,9 +5,13 @@
 //! vignette. It lives in screen space (follows the camera, scrolls by a
 //! fraction of camera x) so every view reads as the inside of a cave.
 //!
-//! On top of v2's rock, the cave is alive: the mid layers carry slow,
-//! breathing bioluminescence — fungus clumps on stalagmite tips, glow-worm
-//! threads under stalactites and veins up the columns.
+//! On top of v2's rock, the cave is alive. Every piece of life is computed
+//! from the outline of the rock it sits on (same layer, same parallax), so
+//! nothing floats: glowing veins inside most columns and spikes, luminous
+//! goop clinging to their skin, glow-worm silk fanning from one point under
+//! stalactite tips, drops forming on tips, and small mushrooms of the
+//! layer's own rock growing off flanks and column collars. Each piece
+//! breathes on its own slow cycle, fading fully out and back in.
 //!
 //! Also here: the foreground layer, the same idea in front of the play
 //! area — sparse dark silhouettes along the top and bottom edges of the
@@ -18,7 +22,7 @@ use std::collections::HashMap;
 use bb_physics::Vec2 as PVec2;
 use bevy::prelude::*;
 
-use crate::crag::hash1;
+use crate::crag::{hash1, smoothstep};
 use crate::level_view::LevelEntity;
 use crate::palette::{ThemeColors, hex, lighten, lin, mix};
 use crate::render::{MeshBuf, Shared, la, z};
@@ -136,21 +140,25 @@ struct Layer {
     skip_chance: f32,
     /// Brightness of the rock (fraction of the cave hue).
     k: f32,
-    /// How much bioluminescence lives on this layer (0 = none).
-    life: f32,
+    /// Chance a shape on this layer carries a glowing vein.
+    vein: f32,
+    /// How bright this layer's veins get.
+    vein_glow: f32,
+    /// How much goop / glow-worm silk / mushroom life the layer has (0 = none).
+    goop: f32,
 }
 
 const LAYERS: [Layer; 5] = [
     // Deepest spikes behind the columns: long, slow, lightest.
-    Layer { spacing: 300.0, parallax: 0.018, len_base: 210.0, len_var: 300.0, width: 200.0, column_chance: 0.0, skip_chance: 0.08, k: 0.25, life: 0.0 },
+    Layer { spacing: 300.0, parallax: 0.018, len_base: 210.0, len_var: 300.0, width: 200.0, column_chance: 0.0, skip_chance: 0.08, k: 0.25, vein: 0.55, vein_glow: 0.35, goop: 0.0 },
     // Big pillars.
-    Layer { spacing: 380.0, parallax: 0.040, len_base: 160.0, len_var: 250.0, width: 240.0, column_chance: 0.55, skip_chance: 0.22, k: 0.19, life: 0.55 },
+    Layer { spacing: 380.0, parallax: 0.040, len_base: 160.0, len_var: 250.0, width: 240.0, column_chance: 0.55, skip_chance: 0.22, k: 0.19, vein: 0.75, vein_glow: 0.6, goop: 0.6 },
     // Smaller pillars.
-    Layer { spacing: 280.0, parallax: 0.075, len_base: 130.0, len_var: 215.0, width: 175.0, column_chance: 0.45, skip_chance: 0.20, k: 0.13, life: 0.8 },
+    Layer { spacing: 280.0, parallax: 0.075, len_base: 130.0, len_var: 215.0, width: 175.0, column_chance: 0.45, skip_chance: 0.20, k: 0.13, vein: 0.85, vein_glow: 0.8, goop: 0.85 },
     // Mid spikes.
-    Layer { spacing: 175.0, parallax: 0.120, len_base: 100.0, len_var: 175.0, width: 120.0, column_chance: 0.05, skip_chance: 0.18, k: 0.08, life: 1.0 },
+    Layer { spacing: 175.0, parallax: 0.120, len_base: 100.0, len_var: 175.0, width: 120.0, column_chance: 0.05, skip_chance: 0.18, k: 0.08, vein: 0.85, vein_glow: 0.9, goop: 1.0 },
     // Near spikes.
-    Layer { spacing: 130.0, parallax: 0.190, len_base: 75.0, len_var: 140.0, width: 96.0, column_chance: 0.02, skip_chance: 0.22, k: 0.04, life: 0.0 },
+    Layer { spacing: 130.0, parallax: 0.190, len_base: 75.0, len_var: 140.0, width: 96.0, column_chance: 0.02, skip_chance: 0.22, k: 0.04, vein: 0.4, vein_glow: 0.3, goop: 0.0 },
 ];
 
 /// One backdrop column's rock, cached in normalised form.
@@ -285,6 +293,7 @@ fn update_backdrop(
             // Roots get a touch darker so edges settle into the vignette.
             let root = mix(Color::BLACK, hue, layer.k * 0.75);
             let ext = 40.0;
+            let dr = Dress { theme: &theme, layer, l, u, t, zz: zz + 0.0015, rock, half: PVec2::new(w * 0.5, h * 0.5) * u };
             for col in first..=last {
                 let cc = bd.cols.entry((l, col)).or_insert_with(|| build_col(l, col));
                 let base_x = col as f32 * layer.spacing - off_x;
@@ -301,11 +310,7 @@ fn update_backdrop(
                         let e = (i as f32 / (n - 1) as f32 * 2.0 - 1.0).abs();
                         lin(mix(rock, root, (e - 0.6).max(0.0) * 2.0))
                     });
-                    if layer.life > 0.0 && hash2(col, l as i32 + 401) < 0.45 {
-                        let path: Vec<PVec2> = left.iter().zip(&right).map(|(a, b)| (*a + *b) * 0.5).collect();
-                        let ph = pulse(t, col, l);
-                        vein(&mut glows, &path, u, glow_col(&theme, col, l), layer.life * ph, zz + 0.0015, col);
-                    }
+                    dress(&mut glows, &dr, &left, &right, Part::Column, col * 3);
                 }
                 if let Some((s, len)) = &cc.top {
                     let cx = base_x + cc.cx_top;
@@ -313,11 +318,7 @@ fn update_backdrop(
                     let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, -ext + p.y * (len + ext))).collect();
                     let n = left.len();
                     fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    if layer.life > 0.0 && hash2(col, l as i32 + 211) < 0.4 {
-                        let tip = (left[n - 1] + right[n - 1]) * 0.5;
-                        let ph = pulse(t, col, l);
-                        threads(&mut glows, tip, u, glow_col(&theme, col + 5, l), layer.life * ph, zz + 0.0015, col, t);
-                    }
+                    dress(&mut glows, &dr, &left, &right, Part::Top, col * 3 + 1);
                 }
                 if let Some((s, len, cx_off)) = &cc.bot {
                     let cx = base_x + cx_off;
@@ -325,14 +326,7 @@ fn update_backdrop(
                     let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, h + ext - p.y * (len + ext))).collect();
                     let n = left.len();
                     fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    if layer.life > 0.0 && hash2(col, l as i32 + 307) < 0.4 {
-                        // Fungus a little below the tip, where the spike is wide enough.
-                        let k = n * 6 / 10;
-                        let at = (left[k] + right[k]) * 0.5;
-                        let wdt = (right[k].x - left[k].x).abs();
-                        let ph = pulse(t, col + 3, l);
-                        fungus(&mut glows, at, wdt, u, glow_col(&theme, col + 2, l), layer.life * ph, zz + 0.0015, col);
-                    }
+                    dress(&mut glows, &dr, &left, &right, Part::Bot, col * 3 + 2);
                 }
             }
             // This layer's glows sit just in front of it.
@@ -369,70 +363,385 @@ fn append(dst: &mut MeshBuf, src: MeshBuf) {
     dst.idx.extend(src.idx.into_iter().map(|i| i + base));
 }
 
-/// Slow breathing for backdrop life: mostly dim, swelling to a gentle
-/// flare once a period, each column on its own phase.
-fn pulse(t: f32, col: i32, l: usize) -> f32 {
-    let period = 7.0 + 5.0 * hash2(col, l as i32 + 500);
-    let phase = hash2(col, l as i32 + 501) * std::f32::consts::TAU;
-    let s = (t / period * std::f32::consts::TAU + phase).sin() * 0.5 + 0.5;
-    0.3 + 0.7 * s * s * s
+// ------------------------------------------------------- backdrop life
+
+/// Which kind of rock a piece of life sits on.
+#[derive(Clone, Copy, PartialEq)]
+enum Part {
+    /// Floor-to-ceiling column; index 0 at the top.
+    Column,
+    /// Stalactite; index 0 at the ceiling root, last at the tip.
+    Top,
+    /// Stalagmite; index 0 at the floor root, last at the tip.
+    Bot,
 }
 
-fn glow_col(theme: &ThemeColors, col: i32, l: usize) -> Color {
-    match (hash2(col, l as i32 + 600) * 3.0) as u32 {
+/// What one shape needs to dress itself.
+struct Dress<'a> {
+    theme: &'a ThemeColors,
+    layer: &'a Layer,
+    l: usize,
+    /// Screen px -> local units.
+    u: f32,
+    t: f32,
+    zz: f32,
+    /// The layer's rock colour (mushrooms are made of the same stuff).
+    rock: Color,
+    /// Visible half-extents in local units.
+    half: PVec2,
+}
+
+impl Dress<'_> {
+    fn visible(&self, p: PVec2, pad: f32) -> bool {
+        p.x.abs() < self.half.x + pad && p.y.abs() < self.half.y + pad
+    }
+}
+
+/// Breathing visibility: fades fully out, rests in the dark, then swells
+/// back in, each piece on its own period (6-14 s) and phase.
+fn breath(t: f32, seed: i32, salt: i32) -> f32 {
+    let period = 6.0 + 8.0 * hash2(seed, salt + 500);
+    let phase = hash2(seed, salt + 501);
+    let s = ((t / period + phase) * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+    smoothstep(0.3, 0.92, s)
+}
+
+fn glow_col(theme: &ThemeColors, seed: i32, k: i32) -> Color {
+    match (hash2(seed, k + 600) * 3.0) as u32 {
         0 => theme.crystal,
         1 => theme.mush,
         _ => theme.jelly,
     }
 }
 
-/// A glowing vein running up a column.
-fn vein(buf: &mut MeshBuf, path: &[PVec2], u: f32, col: Color, a: f32, zz: f32, seed: i32) {
-    // Only the middle stretch, wandering a little.
-    let n = path.len();
-    let (i0, i1) = (n / 5 + (hash1(seed, 3) * 3.0) as usize, n * 4 / 5);
-    let pts: Vec<PVec2> = (i0..i1).map(|i| path[i] + PVec2::new((fbm(seed as f32 + i as f32 * 0.7) - 0.5) * 30.0 * u, 0.0)).collect();
-    if pts.len() < 2 {
+/// A point inside the strip: `i` a (fractional) index along it, `f` 0..1
+/// from the left edge to the right.
+fn inside(left: &[PVec2], right: &[PVec2], i: f32, f: f32) -> PVec2 {
+    let n = left.len();
+    let i0 = (i.floor() as usize).min(n - 2);
+    let s = (i - i0 as f32).clamp(0.0, 1.0);
+    let l = left[i0] + (left[i0 + 1] - left[i0]) * s;
+    let r = right[i0] + (right[i0 + 1] - right[i0]) * s;
+    l + (r - l) * f
+}
+
+/// Dress one rock shape (already mapped to local space) with life that
+/// belongs to it: veins inside, glowing goop on its skin, glow-worm silk
+/// under a stalactite tip, mushrooms growing off its flanks. Everything is
+/// computed from the shape's own outline, so it never slides off it.
+fn dress(buf: &mut MeshBuf, d: &Dress, left: &[PVec2], right: &[PVec2], part: Part, seed: i32) {
+    let n = left.len();
+    let li = d.l as i32 * 1000;
+    let hs = |k: i32| hash2(seed, li + k);
+    let (lo, hi) = left.iter().chain(right).fold((PVec2::splat(f32::MAX), PVec2::splat(f32::MIN)), |(a, b), p| (a.min(*p), b.max(*p)));
+    let pad = 60.0 * d.u;
+    if hi.x < -d.half.x - pad || lo.x > d.half.x + pad || hi.y < -d.half.y - pad || lo.y > d.half.y + pad {
         return;
     }
-    buf.halo(pts[pts.len() / 2], PVec2::new(110.0, 260.0) * u, zz, la(col, 0.07 * a));
-    buf.stroke(&pts, 7.0 * u, zz, la(col, 0.12 * a));
-    buf.stroke(&pts, 1.8 * u, zz + 0.0001, la(lighten(col, 0.4), 0.55 * a));
-    for p in pts.iter().step_by(3) {
-        buf.ellipse(*p, PVec2::splat(2.0 * u), 0.0, zz + 0.0002, la(lighten(col, 0.7), 0.7 * a));
+    // Veins: most rock has one, columns sometimes two.
+    let veins = match part {
+        Part::Column => 1 + (hs(1) < 0.5) as i32,
+        _ => 1,
+    };
+    for k in 0..veins {
+        if hs(10 + k) < d.layer.vein {
+            vein(buf, d, left, right, part, seed * 4 + k);
+        }
+    }
+    if d.layer.goop <= 0.0 {
+        return;
+    }
+    // The outline as one loop root -> tip -> root, outward normals.
+    let mut ol: Vec<PVec2> = left.to_vec();
+    ol.extend(right.iter().rev().copied());
+    let mid: Vec<PVec2> = left.iter().zip(right).map(|(a, b)| (*a + *b) * 0.5).collect();
+    let m = ol.len();
+    let side_idx = |k: usize| if k < n { k } else { 2 * n - 1 - k };
+    let half_w = |k: usize| left[side_idx(k)].distance(right[side_idx(k)]) * 0.5;
+    let nrm: Vec<PVec2> = (0..m)
+        .map(|k| {
+            let d0 = ol[(k + 1).min(m - 1)] - ol[k.saturating_sub(1)];
+            let nn = PVec2::new(d0.y, -d0.x).normalize_or_zero();
+            if (ol[k] - mid[side_idx(k)]).dot(nn) < 0.0 { -nn } else { nn }
+        })
+        .collect();
+
+    // Goop patches on the skin.
+    let patches = (hs(20) * 3.2 * d.layer.goop) as i32;
+    for k in 0..patches {
+        let h = |q: i32| hash2(seed * 7 + k, li + 30 + q);
+        let right_side = h(0) < 0.5;
+        // Where along the rock (fraction from root to tip / top to bottom).
+        let along = match part {
+            Part::Column => 0.25 + 0.6 * h(1),
+            Part::Top => 0.35 + 0.5 * h(1),
+            Part::Bot => 0.15 + 0.6 * h(1),
+        };
+        let i = ((along * (n - 1) as f32) as usize).clamp(1, n - 3);
+        let span = 2 + (h(2) * 2.0) as usize;
+        let i1 = (i + span).min(n - 1);
+        let ks: Vec<usize> = if right_side { (i..=i1).map(|q| 2 * n - 1 - q).collect() } else { (i..=i1).collect() };
+        let thin = ks.iter().map(|q| half_w(*q)).fold(f32::MAX, f32::min);
+        if thin < 8.0 * d.u {
+            continue;
+        }
+        goop(buf, d, &ks.iter().map(|q| ol[*q]).collect::<Vec<_>>(), &ks.iter().map(|q| nrm[*q]).collect::<Vec<_>>(), thin, part, seed * 7 + k);
+    }
+    // The tip.
+    match part {
+        Part::Top if hs(40) < 0.5 * d.layer.goop => {
+            let tip = (left[n - 1] + right[n - 1]) * 0.5;
+            if d.visible(tip, pad * 2.0) {
+                threads(buf, d, tip, seed);
+            }
+        }
+        Part::Top if hs(40) < 0.85 * d.layer.goop => {
+            let tip = (left[n - 1] + right[n - 1]) * 0.5;
+            tip_drop(buf, d, tip, seed);
+        }
+        Part::Bot if hs(41) < 0.45 * d.layer.goop => {
+            // A cap of goop over the tip, down both flanks.
+            let ks: Vec<usize> = (n - 4..2 * n - 1 - (n - 4) + 1).collect();
+            goop(buf, d, &ks.iter().map(|q| ol[*q]).collect::<Vec<_>>(), &ks.iter().map(|q| nrm[*q]).collect::<Vec<_>>(), 2.0 * d.u, part, seed * 7 + 99);
+        }
+        _ => {}
+    }
+    // Mushrooms growing off a flank (never off a stalactite).
+    if part != Part::Top && hs(50) < 0.55 * d.layer.goop {
+        let right_side = hs(51) < 0.5;
+        let along = match part {
+            Part::Column => {
+                // The collar where the drips met is a natural ledge;
+                // otherwise low on the flank.
+                if hs(52) < 0.4 { 0.5 } else { 0.62 + 0.2 * hs(53) }
+            }
+            _ => 0.2 + 0.4 * hs(53),
+        };
+        let i = ((along * (n - 1) as f32).round() as usize).clamp(1, n - 2);
+        let k = if right_side { 2 * n - 1 - i } else { i };
+        let at = ol[k];
+        // Only where the flank faces sideways or up — not under an overhang.
+        if nrm[k].y > -0.3 && d.visible(at, pad) {
+            mushrooms(buf, d, at, nrm[k], seed);
+        }
     }
 }
 
-/// Glow-worm threads hanging from a stalactite tip.
-#[allow(clippy::too_many_arguments)]
-fn threads(buf: &mut MeshBuf, tip: PVec2, u: f32, col: Color, a: f32, zz: f32, seed: i32, t: f32) {
-    buf.halo(tip - PVec2::new(0.0, 40.0 * u), PVec2::new(80.0, 90.0) * u, zz, la(col, 0.09 * a));
-    let n = 2 + (hash1(seed, 7) * 4.0) as i32;
-    for k in 0..n {
-        let x = (hash1(seed * 31 + k, 8) - 0.5) * 30.0 * u;
-        let len = (25.0 + 70.0 * hash1(seed * 17 + k, 9)) * u;
-        let sway = (t * 0.6 + k as f32 * 1.3 + seed as f32).sin() * 2.0 * u;
-        let a0 = tip + PVec2::new(x * 0.4, 6.0 * u);
-        let b = tip + PVec2::new(x + sway, -len);
-        buf.stroke(&[a0, b], 1.0 * u, zz, la(lighten(col, 0.3), 0.3 * a));
-        buf.ellipse(b, PVec2::splat(2.6 * u), 0.0, zz + 0.0001, la(lighten(col, 0.6), 0.85 * a));
+/// A glowing mineral vein wandering through the inside of a rock shape,
+/// with a pulse running along it and a short side branch.
+fn vein(buf: &mut MeshBuf, d: &Dress, left: &[PVec2], right: &[PVec2], part: Part, seed: i32) {
+    let n = left.len() as f32;
+    let h = |k: i32| hash2(seed, d.l as i32 * 1000 + 200 + k);
+    let (i0, i1) = match part {
+        Part::Column => {
+            let a = 1.0 + h(0) * (n - 10.0);
+            (a, (a + 6.0 + h(1) * 8.0).min(n - 1.5))
+        }
+        _ => (0.5 + h(0) * 2.0, (n - 1.0) * (0.6 + 0.25 * h(1))),
+    };
+    let a = d.layer.vein_glow * breath(d.t, seed, d.l as i32 * 31 + 7);
+    if a < 0.01 {
+        return;
+    }
+    let col = glow_col(d.theme, seed, d.l as i32);
+    let fs = seed as f32 * 0.731 + d.l as f32 * 5.3;
+    let f_at = |i: f32| (0.5 + (fbm(fs + i * 0.35) - 0.5) * 1.5).clamp(0.2, 0.8);
+    let steps = ((i1 - i0) * 2.0).max(2.0) as usize;
+    let pts: Vec<PVec2> = (0..=steps).map(|s| {
+        let i = i0 + (i1 - i0) * s as f32 / steps as f32;
+        inside(left, right, i, f_at(i))
+    }).collect();
+    // A branch off toward one edge, heading the same way.
+    let bi = i0 + (i1 - i0) * (0.3 + 0.4 * h(2));
+    let fb = f_at(bi);
+    let to_edge = if h(3) < 0.5 { 0.12 } else { 0.88 };
+    let br: Vec<PVec2> = (0..=4).map(|s| {
+        let k = s as f32 / 4.0;
+        inside(left, right, (bi + k * 2.0).min(n - 1.2), fb + (to_edge - fb) * k)
+    }).collect();
+    draw_vein(buf, d, &pts, col, a, seed);
+    draw_vein(buf, d, &br, col, a * 0.7, seed + 1);
+}
+
+fn draw_vein(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], col: Color, a: f32, seed: i32) {
+    let u = d.u;
+    let n = pts.len();
+    // Fade the ends in and out so a vein emerges from the stone.
+    let end = |i: usize| (i as f32 / 2.0).min((n - 1 - i) as f32 / 2.0).min(1.0);
+    let soft: Vec<[f32; 4]> = (0..n).map(|i| la(col, 0.08 * a * end(i))).collect();
+    buf.stroke_cols(pts, 7.0 * u, d.zz, &soft);
+    let ph = hash2(seed, 77) * 20.0;
+    let core: Vec<[f32; 4]> = (0..n)
+        .map(|i| {
+            let wave = 0.55 + 0.45 * (d.t * 1.4 - i as f32 * 0.6 + ph).sin();
+            la(lighten(col, 0.4), 0.4 * a * wave * end(i))
+        })
+        .collect();
+    buf.stroke_cols(pts, 1.6 * u, d.zz + 0.0001, &core);
+    for (i, p) in pts.iter().enumerate().skip(2).step_by(4) {
+        buf.ellipse(*p, PVec2::splat(1.8 * u), 0.0, d.zz + 0.0002, la(lighten(col, 0.7), 0.6 * a * end(i)));
     }
 }
 
-/// A clump of tiny glowing caps on a stalagmite.
-#[allow(clippy::too_many_arguments)]
-fn fungus(buf: &mut MeshBuf, at: PVec2, wdt: f32, u: f32, col: Color, a: f32, zz: f32, seed: i32) {
-    let w = wdt.min(60.0 * u).max(14.0 * u);
-    buf.halo(at + PVec2::new(0.0, 10.0 * u), PVec2::new(w * 1.4 + 40.0 * u, w + 30.0 * u), zz, la(col, 0.16 * a));
-    let n = 4 + (hash1(seed, 11) * 6.0) as i32;
+/// Luminous goop clinging to the rock's skin along `pts` (with outward
+/// normals): a film just inside the edge, a soft spill outside it, a few
+/// lumps, and drips hanging off anything facing down.
+fn goop(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], nrm: &[PVec2], thin: f32, part: Part, seed: i32) {
+    let u = d.u;
+    let a = d.layer.goop * breath(d.t, seed, d.l as i32 * 31 + 3);
+    if a < 0.01 || pts.len() < 2 || !pts.iter().any(|p| d.visible(*p, 40.0 * u)) {
+        return;
+    }
+    let col = glow_col(d.theme, seed, d.l as i32 + 9);
+    // Subdivide so the ends taper smoothly.
+    let mut p2 = Vec::new();
+    let mut n2 = Vec::new();
+    for i in 0..pts.len() - 1 {
+        for s in 0..3 {
+            let k = s as f32 / 3.0;
+            p2.push(pts[i] + (pts[i + 1] - pts[i]) * k);
+            n2.push((nrm[i] + (nrm[i + 1] - nrm[i]) * k).normalize_or_zero());
+        }
+    }
+    p2.push(*pts.last().unwrap());
+    n2.push(*nrm.last().unwrap());
+    let m = p2.len();
+    let prof = |i: usize| (std::f32::consts::PI * i as f32 / (m - 1) as f32).sin().max(0.0).powf(0.7);
+    let film = |k: f32| -> Vec<[f32; 4]> { (0..m).map(|i| la(col, k * a * prof(i))).collect() };
+    let clear: Vec<[f32; 4]> = (0..m).map(|_| la(col, 0.0)).collect();
+    // Never deeper than the rock is thick, or a thin tip fills solid.
+    let depth = ((4.0 + 5.0 * hash2(seed, 3)) * u).min(thin * 0.4);
+    // Film inside the edge…
+    buf.band(&p2, &n2, 0.0, depth, d.zz, &film(0.42), &clear);
+    // …a bright lip right on it…
+    buf.band(&p2, &n2, 0.0, (1.4 * u).min(depth), d.zz + 0.0001, &film(0.6), &film(0.25));
+    // …and light spilling out onto the air.
+    buf.band(&p2, &n2, 0.0, -14.0 * u, d.zz - 0.0001, &film(0.14), &clear);
+    // Lumps and drips.
+    let lumps = 1 + (hash2(seed, 4) * 3.0) as usize;
+    for k in 0..lumps {
+        let i = 1 + ((hash2(seed + k as i32, 5) * (m - 2) as f32) as usize).min(m - 3);
+        let r = (1.4 + 1.6 * hash2(seed + k as i32, 6)) * u;
+        let p = p2[i] + n2[i] * r * 0.4;
+        buf.ellipse(p, PVec2::splat(r), 0.0, d.zz + 0.0002, la(lighten(col, 0.45), 0.7 * a * prof(i)));
+        if n2[i].y < -0.25 || (part == Part::Top && hash2(seed + k as i32, 7) < 0.5) {
+            // Hanging off an underside: a slow drip stretching down.
+            let s = (d.t * 0.25 + hash2(seed + k as i32, 8) * 3.0).fract();
+            let len = (4.0 + 12.0 * s) * u;
+            buf.stroke(&[p, p - PVec2::new(0.0, len)], 1.0 * u, d.zz + 0.0001, la(col, 0.35 * a * prof(i)));
+            buf.ellipse(p - PVec2::new(0.0, len), PVec2::new(1.3, 1.7) * u, 0.0, d.zz + 0.0002, la(lighten(col, 0.5), 0.7 * a * prof(i)));
+        }
+    }
+}
+
+/// A glowing drop slowly forming on a stalactite tip.
+fn tip_drop(buf: &mut MeshBuf, d: &Dress, tip: PVec2, seed: i32) {
+    let u = d.u;
+    let a = d.layer.goop * breath(d.t, seed, d.l as i32 * 31 + 5);
+    if a < 0.01 || !d.visible(tip, 30.0 * u) {
+        return;
+    }
+    let col = glow_col(d.theme, seed, d.l as i32 + 4);
+    let s = 0.6 + 0.4 * (d.t * 0.4 + hash2(seed, 9) * 6.0).sin();
+    let r = (2.2 + 1.2 * s) * u;
+    let c = tip - PVec2::new(0.0, r * 0.9);
+    buf.halo(c, PVec2::splat(22.0 * u), d.zz, la(col, 0.12 * a));
+    buf.ellipse(c, PVec2::new(r * 0.85, r * 1.1), 0.0, d.zz + 0.0002, la(lighten(col, 0.5), 0.75 * a));
+}
+
+/// Glow-worm silk under a stalactite tip: every strand hangs from one
+/// shared point and fans out under gravity, beads of light along it.
+fn threads(buf: &mut MeshBuf, d: &Dress, tip: PVec2, seed: i32) {
+    let u = d.u;
+    let a = d.layer.goop * breath(d.t, seed, d.l as i32 * 31 + 1);
+    if a < 0.01 {
+        return;
+    }
+    let col = glow_col(d.theme, seed, d.l as i32 + 5);
+    let anchor = tip + PVec2::new(0.0, 2.0 * u);
+    buf.halo(anchor - PVec2::new(0.0, 36.0 * u), PVec2::new(60.0, 80.0) * u, d.zz, la(col, 0.08 * a));
+    let n = 3 + (hash1(seed, 7) * 3.0) as i32;
     for k in 0..n {
-        let x = (hash1(seed * 13 + k, 12) - 0.5) * w;
-        let tall = (3.0 + 10.0 * hash1(seed * 7 + k, 13)) * u;
-        let base = at + PVec2::new(x, -4.0 * u);
-        let top = base + PVec2::new(0.0, tall);
-        let r = (1.6 + 2.6 * hash1(seed * 5 + k, 14)) * u;
-        buf.stroke(&[base, top], 1.0 * u, zz, la(mix(Color::BLACK, col, 0.5), 0.6 * a));
-        buf.ellipse(top, PVec2::new(r * 1.3, r * 0.8), 0.0, zz + 0.0001, la(lighten(col, 0.35), 0.85 * a));
+        let spread = if n > 1 { k as f32 / (n - 1) as f32 * 2.0 - 1.0 } else { 0.0 };
+        let ang0 = spread * 0.30 + (hash1(seed * 31 + k, 8) - 0.5) * 0.12;
+        let len = (28.0 + 72.0 * hash1(seed * 17 + k, 9)) * u;
+        let sway = (d.t * 0.6 + k as f32 * 1.3 + seed as f32).sin() * 0.05;
+        const N: usize = 7;
+        let mut p = anchor;
+        let mut pts = vec![p];
+        for j in 1..=N {
+            let s = j as f32 / N as f32;
+            // The silk leaves the root at its fan angle and droops straight.
+            let ang = ang0 * (1.0 - 0.6 * s) + sway * s;
+            p += PVec2::new(ang.sin(), -ang.cos()) * len / N as f32;
+            pts.push(p);
+        }
+        buf.stroke(&pts, 0.9 * u, d.zz, la(lighten(col, 0.3), 0.28 * a));
+        for q in pts.iter().skip(2).step_by(2) {
+            buf.ellipse(*q, PVec2::splat(1.1 * u), 0.0, d.zz + 0.0001, la(lighten(col, 0.5), 0.45 * a));
+        }
+        buf.ellipse(pts[N], PVec2::splat(2.3 * u), 0.0, d.zz + 0.0001, la(lighten(col, 0.6), 0.85 * a));
+    }
+    // The knot where the strands gather.
+    buf.ellipse(anchor, PVec2::splat(1.8 * u), 0.0, d.zz + 0.0001, la(lighten(col, 0.3), 0.5 * a));
+}
+
+/// A little cluster of mushrooms growing out of the rock at `at` (outward
+/// normal `nrm`): stalks and caps of the layer's own rock, only the gills
+/// and rim breathing with light.
+fn mushrooms(buf: &mut MeshBuf, d: &Dress, at: PVec2, nrm: PVec2, seed: i32) {
+    let u = d.u;
+    let a = d.layer.goop * breath(d.t, seed, d.l as i32 * 31 + 9);
+    let col = glow_col(d.theme, seed, d.l as i32 + 2);
+    let tan = PVec2::new(-nrm.y, nrm.x);
+    let size = d.layer.width * (0.10 + 0.07 * hash2(seed, 60)) * u;
+    let body = mix(d.rock, lighten(col, 0.1), 0.06);
+    if a > 0.01 {
+        buf.halo(at + PVec2::new(0.0, size * 0.8) + nrm * size * 0.3, PVec2::new(size * 1.6, size * 1.2), d.zz - 0.0001, la(col, 0.10 * a));
+    }
+    let count = 1 + (hash2(seed, 61) * 3.0) as i32;
+    for k in 0..count {
+        let h = |q: i32| hash2(seed * 5 + k, 70 + q);
+        let s = size * if k == 0 { 1.0 } else { 0.45 + 0.35 * h(0) };
+        let base = at + tan * (k as f32 - (count - 1) as f32 * 0.5) * size * 0.35 - nrm * 3.0 * u;
+        // Grows out of the rock, then turns up toward the cave roof.
+        let out = (nrm * 0.8 + PVec2::new(0.0, 0.6)).normalize_or_zero();
+        let lean = (h(1) - 0.5) * 0.3;
+        let up = PVec2::new(lean, 1.0).normalize_or_zero();
+        const N: usize = 5;
+        let pts: Vec<PVec2> = (0..=N)
+            .scan(base, |p, j| {
+                let s0 = j as f32 / N as f32;
+                let dir = (out * (1.0 - s0) + up * s0).normalize_or_zero();
+                let q = *p;
+                *p += dir * s / N as f32;
+                Some(q)
+            })
+            .collect();
+        let top = pts[N];
+        let wd = s * 0.16;
+        for j in 0..N {
+            buf.stroke(&[pts[j], pts[j + 1]], wd * (1.0 - 0.35 * j as f32 / N as f32), d.zz, lin(body));
+        }
+        // Cap, tilted to the stalk.
+        let dir = (pts[N] - pts[N - 1]).normalize_or_zero();
+        let side = PVec2::new(dir.y, -dir.x);
+        let (cw, ch) = (s * 0.42, s * 0.32);
+        let dome: Vec<PVec2> = (0..=12)
+            .map(|i| {
+                let an = std::f32::consts::PI * i as f32 / 12.0;
+                top - side * (an.cos() * cw) + dir * (an.sin() * ch)
+            })
+            .collect();
+        buf.fan(&dome, top + dir * ch * 0.3, d.zz, lin(body), lin(body));
+        if a > 0.01 {
+            // Gills glowing under the cap, a faint rim over it.
+            let g0 = top - side * cw * 0.9 - dir * 0.5 * u;
+            let g1 = top + side * cw * 0.9 - dir * 0.5 * u;
+            buf.stroke(&[g0, top - dir * 1.5 * u, g1], 2.2 * u, d.zz + 0.0001, la(lighten(col, 0.3), 0.75 * a));
+            buf.stroke(&dome, 1.0 * u, d.zz + 0.0001, la(lighten(col, 0.2), 0.3 * a));
+            buf.halo(top - dir * 2.0 * u, PVec2::new(cw * 1.6, ch * 1.6), d.zz + 0.0001, la(col, 0.16 * a));
+        }
     }
 }
 
@@ -584,16 +893,20 @@ fn fg_shape(buf: &mut MeshBuf, s: &Shape, map: impl Fn(PVec2) -> PVec2, body: Co
 /// beads at their tips.
 #[allow(clippy::too_many_arguments)]
 fn roots(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, col: i32, t: f32, body: Color, glow: Color, u: f32) {
+    // Every strand of a bundle grows from the same point and fans out.
     let n = 2 + (hash2(col, 950) * 3.0) as i32;
     for k in 0..n {
-        let x0 = cx + (hash2(col * 7 + k, 951) - 0.5) * 70.0;
+        let spread = if n > 1 { k as f32 / (n - 1) as f32 * 2.0 - 1.0 } else { 0.0 };
+        let fan = spread * 45.0 + (hash2(col * 7 + k, 951) - 0.5) * 20.0;
         let len = 110.0 + 200.0 * hash2(col * 5 + k, 952);
         let ph = hash2(col, 953 + k) * 6.0;
         let pts: Vec<PVec2> = (0..=10)
             .map(|i| {
                 let s = i as f32 / 10.0;
                 let sway = (t * 0.7 + ph).sin() * 10.0 * s * s + (s * 5.0 + ph).sin() * 6.0 * s;
-                to(x0 + sway, -10.0 + s * len)
+                // Splay out near the root, then hang straight.
+                let out = fan * (1.0 - (1.0 - s) * (1.0 - s));
+                to(cx + out + sway, -10.0 + s * len)
             })
             .collect();
         let wd = (9.0 + 9.0 * hash2(col + k, 954)) * u;
