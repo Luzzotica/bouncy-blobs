@@ -8,7 +8,8 @@
 //! pistons, a lift relay up the works, the grand crusher hall, and a last
 //! trampoline out into the light.
 //!
-//! Mechanics: crushers (pop limits!), moving platforms, elevators, conveyors.
+//! Mechanics: crushers (pop limits!; some spiked underneath), moving
+//! platforms, elevators, conveyors.
 
 use super::*;
 
@@ -16,6 +17,12 @@ use super::*;
 fn piston(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
     // Wide enough that puffing up can't squeeze you out from under it.
     c.crusher(v(x, roof), 210.0, roof - 120.0 - floor - 4.0, phase);
+}
+
+/// A piston with spikes on its face: don't even touch it from below.
+fn spiked_piston(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
+    piston(c, x, roof, floor, phase);
+    c.spiked();
 }
 
 /// A ferry platform (top surface at y) ping-ponging between x0 and x1.
@@ -34,7 +41,7 @@ pub fn build() -> Course {
     c.spawn(v(0.0, 40.0));
 
     // ------------------------------------------------ the thumping hall
-    c.wall(-1300.0, -500.0, -1400.0, 1800.0);
+    c.entry_cave(-1300.0, -500.0, 0.0, 1800.0, Theme::Vines);
     c.floor(&[v(-500.0, 0.0), v(2600.0, 0.0)]);
     // The cast from the intro cutscene greets you at the start.
     c.npc("clonk", v(-280.0, 90.0), NpcRole::Granny, "#7d7a74", 76.0);
@@ -45,7 +52,7 @@ pub fn build() -> Course {
     c.crate_box(v(650.0, 40.0), 70.0);
     c.say(820.0, 880.0, 0.0, "ch05_crusher");
     piston(&mut c, 1150.0, 560.0, 0.0, 0.2);
-    piston(&mut c, 1550.0, 560.0, 0.0, 0.5);
+    spiked_piston(&mut c, 1550.0, 560.0, 0.0, 0.5);
     piston(&mut c, 1880.0, 560.0, 0.0, 0.8);
     c.drops(1280.0, 1440.0, 0.0, 2);
     c.drops(1660.0, 1780.0, 0.0, 2);
@@ -64,8 +71,8 @@ pub fn build() -> Course {
     c.ledge(3400.0, 3600.0, 0.0);
     c.wp(Move::Walk, 2850.0, 0.0).wp(Move::Dash, 3250.0, 0.0).wp(Move::Walk, 3520.0, 0.0);
     c.say(3480.0, 3530.0, 0.0, "ch05_ferry");
-    c.ledge(3600.0, 4400.0, -500.0);
-    c.spikes(v(3600.0, -500.0), v(4400.0, -500.0));
+    c.ledge(3600.0, 4400.0, -250.0);
+    c.spikes(v(3600.0, -250.0), v(4400.0, -250.0));
     ferry(&mut c, 3720.0, 4280.0, 0.0, 220.0, 5.0);
     c.pickup_arc(v(3720.0, 60.0), v(4280.0, 60.0), 60.0, 4);
     c.floor(&[v(4400.0, 0.0), v(4700.0, 0.0)]);
@@ -83,7 +90,7 @@ pub fn build() -> Course {
     c.ledge(5600.0, 6800.0, 560.0);
     c.conveyor(v(5600.0, 600.0), 1200.0, 300.0);
     piston(&mut c, 5900.0, 1100.0, 600.0, 0.0);
-    piston(&mut c, 6250.0, 1100.0, 600.0, 0.35);
+    spiked_piston(&mut c, 6250.0, 1100.0, 600.0, 0.35);
     piston(&mut c, 6600.0, 1100.0, 600.0, 0.7);
     c.drops(6030.0, 6120.0, 600.0, 2);
     c.drops(6380.0, 6470.0, 600.0, 2);
@@ -105,17 +112,17 @@ pub fn build() -> Course {
 
     // ------------------------------------------- the grand crusher hall
     piston(&mut c, 8550.0, 2000.0, 1500.0, 0.0);
-    piston(&mut c, 8850.0, 2000.0, 1500.0, 0.5);
+    spiked_piston(&mut c, 8850.0, 2000.0, 1500.0, 0.5);
     piston(&mut c, 9150.0, 2000.0, 1500.0, 0.25);
-    piston(&mut c, 9450.0, 2000.0, 1500.0, 0.75);
+    spiked_piston(&mut c, 9450.0, 2000.0, 1500.0, 0.75);
     for x in [8700.0, 9000.0, 9300.0] {
         c.pickup(v(x, 1545.0));
     }
     c.wp(Move::Walk, 8400.0, 1500.0).wp(Move::Dash, 8700.0, 1500.0).wp(Move::Dash, 9000.0, 1500.0).wp(Move::Dash, 9300.0, 1500.0).wp(Move::Dash, 9620.0, 1500.0);
     c.cp(9720.0, 1500.0);
     // Last ferry over spikes, a trampoline up into the light.
-    c.ledge(9900.0, 10700.0, 1000.0);
-    c.spikes(v(9900.0, 1000.0), v(10700.0, 1000.0));
+    c.ledge(9900.0, 10700.0, 1250.0);
+    c.spikes(v(9900.0, 1250.0), v(10700.0, 1250.0));
     ferry(&mut c, 10020.0, 10580.0, 1500.0, 220.0, 4.5);
     c.pickup_arc(v(10020.0, 1560.0), v(10580.0, 1560.0), 80.0, 3);
     c.floor(&[v(10700.0, 1500.0), v(11050.0, 1500.0)]);
@@ -127,26 +134,25 @@ pub fn build() -> Course {
     c.pickups(v(10880.0, 1700.0), v(10880.0, 2000.0), 3);
     c.wp(Move::Jump, 10880.0, cap).wp(Move::Spring, 11150.0, 1950.0);
     c.say(11250.0, 11300.0, 1950.0, "ch05_light");
-    c.goal(v(11500.0, 1950.0), v(11700.0, 2170.0));
-    // Secret: a little shelf above the exit with a stash of drops.
-    c.shelf(11780.0, 11960.0, 2130.0, 40.0);
-    c.pickups(v(11800.0, 2180.0), v(11940.0, 2180.0), 4);
+    // Secret: a little shelf up by the roof with a stash of drops.
+    c.shelf(11420.0, 11600.0, 2150.0, 40.0);
+    c.pickups(v(11440.0, 2200.0), v(11580.0, 2200.0), 4);
     c.drops(11150.0, 11400.0, 1950.0, 3);
-    c.wp(Move::Walk, 11600.0, 1950.0);
-    c.wall(12000.0, 12800.0, -1400.0, 3500.0);
+    // Out through the tunnel; damp blue light from the Lake beyond.
+    c.exit_cave(12000.0, 12800.0, 1950.0, 3500.0, Theme::Lake);
+    c.wp(Move::Walk, 11600.0, 1950.0).wp(Move::Walk, 12480.0, 1950.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 560.0), v(2600.0, 560.0), v(2650.0, 700.0), v(3500.0, 700.0), v(3600.0, 820.0), v(4700.0, 820.0), v(4720.0, 1100.0), v(7100.0, 1100.0), v(7150.0, 2000.0), v(9900.0, 2000.0), v(10000.0, 2350.0), v(11000.0, 2450.0), v(12000.0, 2550.0)]);
 
     // ----------------------------------------------------------- decor
-    c.hang("lantern", 300.0, 2500.0, 700.0);
+    c.hang("drip", 300.0, 2500.0, 700.0);
     c.hang("drip", 2700.0, 4600.0, 380.0);
-    c.hang("lantern", 7800.0, 11900.0, 800.0);
+    c.hang("glowworm", 7800.0, 11900.0, 520.0);
     c.hang("glowworm", 4800.0, 7000.0, 450.0);
     c.scatter("crystal", -450.0, 400.0, 0.0, 200.0, -1.0);
     c.scatter("crystal", 4950.0, 5550.0, 600.0, 200.0, -1.0);
     c.scatter("mushroom", 9700.0, 9850.0, 1500.0, 80.0, -1.0);
-    c.scatter("mushroom", 11100.0, 11950.0, 1950.0, 150.0, -1.0);
-    c.decor("sun", v(11600.0, 2380.0), 0.5, -1.0);
+    c.scatter("mushroom", 11100.0, 11900.0, 1950.0, 150.0, -1.0);
     c.finish()
 }

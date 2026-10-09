@@ -19,6 +19,7 @@ pub mod input;
 pub mod kids;
 pub mod level_view;
 pub mod menu;
+pub mod mouths;
 pub mod net;
 pub mod online;
 pub mod palette;
@@ -84,6 +85,7 @@ impl Plugin for GamePlugin {
                 sandbox::SandboxPlugin,
                 softtext::SoftTextPlugin,
             ))
+            .add_plugins(mouths::MouthsPlugin)
             .add_plugins((
                 story::StoryPlugin,
                 menu::MenuPlugin,

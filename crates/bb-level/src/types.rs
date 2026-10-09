@@ -250,6 +250,10 @@ pub struct Mover {
     /// Touching it pops a blob (spinning blades, spiky drips).
     #[serde(default)]
     pub lethal: bool,
+    /// Spikes on its underside (falling rocks, spiked crushers): touching
+    /// the bottom face pops you.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub spiked: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -438,6 +442,46 @@ pub struct Decor {
     pub depth: f32,
 }
 
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MouthKind {
+    /// Sealed tunnel back to the previous chapter (scenery: can't be entered).
+    Entry,
+    /// The tunnel you walk into to finish the level (the goal sits inside).
+    #[default]
+    Exit,
+}
+
+/// A cave mouth: a tunnel opening in the rock at the start or end of a
+/// level, glowing with the colour of the chapter it leads to.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CaveMouth {
+    /// Floor point at the opening, on the wall face.
+    pub pos: Vec2,
+    /// Which way the tunnel runs into the rock: +1 = towards +x, -1 = -x.
+    pub facing: f32,
+    #[serde(default)]
+    pub kind: MouthKind,
+    /// Theme whose light fills the tunnel (the neighbouring chapter's).
+    #[serde(default)]
+    pub theme: Theme,
+    /// Opening height (y) and tunnel depth (x).
+    #[serde(default = "mouth_size")]
+    pub size: Vec2,
+    /// Daylight beyond (the finale): warm sunlight instead of cave glow.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub daylight: bool,
+}
+
+impl CaveMouth {
+    /// The tunnel interior: (min, max) corners.
+    pub fn interior(&self) -> (Vec2, Vec2) {
+        let a = self.pos;
+        let b = self.pos + Vec2::new(self.facing.signum() * self.size.x, self.size.y);
+        (a.min(b), a.max(b))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Level {
     #[serde(default = "format_version")]
@@ -489,6 +533,9 @@ pub struct Level {
     pub story: Vec<StoryTrigger>,
     #[serde(default)]
     pub decor: Vec<Decor>,
+    /// Entry / exit cave mouths (story chapters).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mouths: Vec<CaveMouth>,
     /// Cutscene played before the level starts (story mode).
     #[serde(default)]
     pub intro: String,
@@ -525,6 +572,7 @@ impl Level {
             hills: Vec::new(),
             story: Vec::new(),
             decor: Vec::new(),
+            mouths: Vec::new(),
             intro: String::new(),
             outro: String::new(),
         }
@@ -598,6 +646,12 @@ fn pad_power() -> f32 {
 }
 fn npc_radius() -> f32 {
     30.0
+}
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+fn mouth_size() -> Vec2 {
+    Vec2::new(560.0, 300.0)
 }
 fn format_version() -> u32 {
     FORMAT_VERSION

@@ -355,6 +355,7 @@ pub fn create(level: &mut Level, tool: Tool, o: &ToolOpts, pts: &[Vec2]) -> Vec<
                 material: Material::Stone,
                 trigger: String::new(),
                 lethal: false,
+                spiked: false,
             })
         }
         Tool::Rope => {

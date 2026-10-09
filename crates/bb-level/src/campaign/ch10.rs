@@ -4,7 +4,11 @@
 //! with the whole Huddle (and Granny) bouncing along behind. Every toy in
 //! the box comes back: membranes and a sagging bridge, trampolines and
 //! springs, a vine and a lift, a fountain column and an updraft, toy blocks,
-//! a slinky, and one last great updraft out into the sun.
+//! a slinky, and one last great updraft — into a cave at the top of the
+//! well, whose mouth opens onto daylight. Lulu waits just inside.
+//!
+//! It stays a cave climb to the very end: the outside world is only ever
+//! seen *through* the exit mouth (sunlight pouring in), never walked into.
 //!
 //! The well is built as stacked chambers floored with old one-way boards
 //! (about every 450–1000 px): you jump, bounce or float up through each
@@ -47,7 +51,7 @@ pub fn build() -> Course {
     c.floor(&[v(-1500.0, 0.0), v(-1100.0, 0.0), v(-1050.0, -120.0), v(-750.0, -120.0), v(-700.0, 0.0), v(0.0, 0.0)]);
     c.zone(v(-1080.0, -120.0), v(-720.0, -30.0), ZoneKind::Goo { drag: 5.0 });
     c.bridge(v(-1100.0, 0.0), v(-700.0, 0.0), 24.0, 0.3);
-    c.wall(-1900.0, -1500.0, -1400.0, 2000.0);
+    c.entry_cave(-1900.0, -1500.0, 0.0, 2000.0, Theme::CaveIn);
     c.wall(-1500.0, 0.0, 520.0, 9650.0);
     c.wall(1400.0, 2400.0, -1400.0, 9650.0);
     c.say(-1150.0, -1100.0, 0.0, "ch10_well");
@@ -159,30 +163,35 @@ pub fn build() -> Course {
     c.pickups(v(1050.0, 7750.0), v(700.0, 8200.0), 3);
     c.wp(Move::Walk, 1050.0, 7550.0).wp(Move::Spring, 650.0, 8100.0);
 
-    // ------------------------------- the last updraft, into daylight
+    // ------------------------- the last updraft, into the top cave
+    // The well ends in a cave under a rock roof; warm light spills along
+    // it from the left, where its mouth opens onto the outside.
     c.wind(v(0.0, 8000.0), v(400.0, 9950.0), v(0.0, 1400.0));
     c.wind(v(0.0, 9620.0), v(400.0, 9950.0), v(-700.0, 0.0));
     c.pickups(v(200.0, 8400.0), v(200.0, 9500.0), 5);
     c.story(v(0.0, 9100.0), v(1400.0, 9250.0), "ch10_daylight");
+    c.wall(-2200.0, -1500.0, 2000.0, 9650.0);
     c.shelf(-2200.0, 0.0, 9650.0, 80.0);
     c.shelf(1400.0, 2400.0, 9650.0, 80.0);
+    c.wall(2400.0, 2800.0, -1400.0, 11000.0);
+    c.roof(&[v(-1400.0, 10250.0), v(-900.0, 10300.0), v(0.0, 10380.0), v(400.0, 10420.0), v(1400.0, 10300.0), v(2400.0, 10200.0)]);
     c.wp(Move::Walk, 520.0, 8100.0).wp(Move::Wind, 200.0, 9700.0).wp(Move::Drop, -200.0, 9650.0);
-    c.say(-300.0, -250.0, 9650.0, "ch10_lulu");
-    c.goal(v(-700.0, 9650.0), v(-500.0, 9870.0));
-    c.wp(Move::Walk, -600.0, 9650.0);
-    c.wall(-2600.0, -2200.0, 9650.0, 11000.0);
+    c.drops(-1250.0, -500.0, 9650.0, 4);
+    c.say(-1000.0, -950.0, 9650.0, "ch10_lulu");
+    // The mouth: daylight. Lulu waits just inside it.
+    c.exit_cave(-1400.0, -2200.0, 9650.0, 11000.0, Theme::Playroom);
+    if let Some(m) = c.b.level.mouths.last_mut() {
+        m.daylight = true;
+    }
+    c.wp(Move::Walk, -900.0, 9650.0).wp(Move::Walk, -1780.0, 9650.0);
 
     // ----------------------------------------------------------- decor
-    c.decor("sun", v(700.0, 10500.0), 3.0, -1.0);
-    c.decor("sun", v(-1200.0, 10200.0), 1.2, -1.0);
-    for k in 0..18 {
-        let y = 700.0 + k as f32 * 520.0;
-        c.decor("glowworm", v(14.0, y), 1.1, -1.0);
-        c.decor("glowworm", v(1350.0, y + 260.0), 1.1, -1.0);
-    }
-    c.scatter("crystal", -2100.0, -300.0, 0.0, 260.0, -1.0);
-    c.scatter("mushroom", -1900.0, -400.0, 0.0, 330.0, -1.0);
-    c.scatter("mushroom", -2000.0, -200.0, 9650.0, 220.0, -1.0);
+    c.hang("drip", -1300.0, 2300.0, 520.0);
+    c.scatter("crystal", -1380.0, -1150.0, 0.0, 115.0, -1.0);
+    c.scatter("crystal", -600.0, -300.0, 0.0, 150.0, -1.0);
+    c.scatter("mushroom", -1400.0, -1200.0, 0.0, 200.0, -1.0);
+    c.scatter("mushroom", -500.0, -200.0, 0.0, 300.0, -1.0);
+    c.scatter("mushroom", -1250.0, -650.0, 9650.0, 300.0, -1.0);
     c.scatter("sock", 1500.0, 2200.0, 9650.0, 350.0, -1.0);
     c.finish()
 }

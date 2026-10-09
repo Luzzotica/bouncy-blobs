@@ -7,8 +7,12 @@ use bevy::prelude::*;
 use crate::sim::Game;
 
 /// Minimum visible world area; the window's aspect adds to one axis.
-pub const VIEW_W: f32 = 1500.0;
-pub const VIEW_H: f32 = 860.0;
+/// (Shared with level design: `bb_level::metrics::MAX_HAZARD_DEPTH` is
+/// derived from this framing.)
+pub const VIEW_W: f32 = bb_level::metrics::VIEW_W;
+pub const VIEW_H: f32 = bb_level::metrics::VIEW_H;
+/// The view centre sits this far above the followed blob.
+pub const CAM_LIFT: f32 = bb_level::metrics::CAM_LIFT;
 
 #[derive(Component)]
 pub struct MainCamera;
@@ -43,6 +47,28 @@ fn spawn_camera(mut commands: Commands) {
         }),
         Transform::from_xyz(0.0, 0.0, 500.0),
     ));
+}
+
+/// Where the camera should look when a blob at `p` is at (or in) the exit
+/// cave: a point between the blob and the middle of the tunnel, so the
+/// mouth, its glow, and the blob all stay on screen. `None` when not near.
+pub fn exit_framing(level: &bb_level::Level, p: Vec2, completed: bool) -> Option<Vec2> {
+    let m = level.mouths.iter().find(|m| m.kind == bb_level::MouthKind::Exit)?;
+    let (lo, hi) = m.interior();
+    let (lo, hi) = (Vec2::new(lo.x, lo.y), Vec2::new(hi.x, hi.y));
+    let mid_y = (lo.y + hi.y) * 0.5;
+    // How far into the approach / tunnel the blob is (0 = 500 px out).
+    let f = m.facing.signum();
+    let into = (p.x - m.pos.x) * f;
+    let near_y = p.y > lo.y - 200.0 && p.y < hi.y + 200.0;
+    let w = if completed { 1.0 } else { ((into + 500.0) / 600.0).clamp(0.0, 1.0) };
+    if w <= 0.0 || (!near_y && !completed) {
+        return None;
+    }
+    // Look at the blob, pulled towards a point just inside the mouth.
+    let focus = Vec2::new(m.pos.x + f * (m.size.x * 0.25), mid_y + 40.0);
+    let blob = Vec2::new(p.x, p.y + CAM_LIFT);
+    Some(blob.lerp(focus, 0.55 * w))
 }
 
 pub fn follow(
@@ -84,7 +110,15 @@ pub fn follow(
                 }
                 vel /= pts.len() as f32;
                 let lead = Vec2::new((vel.x * 0.35).clamp(-220.0, 220.0), (vel.y * 0.12).clamp(-120.0, 160.0));
-                target = Some((min + max) * 0.5 + lead + Vec2::new(0.0, 80.0));
+                let mut t = (min + max) * 0.5 + lead + Vec2::new(0.0, CAM_LIFT);
+                // Walking into the exit cave (or done): settle on the mouth
+                // so the tunnel and the blob inside it both stay framed,
+                // instead of leading off into the rock.
+                let centre = (min + max) * 0.5;
+                if let Some(c) = exit_framing(&game.sim.level, centre, game.sim.completed) {
+                    t = c;
+                }
+                target = Some(t);
                 let spread = max - min;
                 zoom = zoom.max((spread.x / (VIEW_W * 0.7)).max(spread.y / (VIEW_H * 0.65))).clamp(1.0, 2.2);
             } else {
@@ -111,6 +145,31 @@ pub fn follow(
             o.scale = zoom;
         } else {
             o.scale += (zoom - o.scale) * (1.0 - (-dt * 2.5).exp());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The blob stays on screen all the way into every exit cave.
+    #[test]
+    fn exit_cave_keeps_the_blob_framed() {
+        for level in bb_level::campaign::campaign() {
+            let Some(m) = level.mouths.iter().find(|m| m.kind == bb_level::MouthKind::Exit) else { continue };
+            let f = m.facing.signum();
+            for k in 0..=24 {
+                let d = -700.0 + k as f32 * 50.0;
+                if d > m.size.x - 40.0 {
+                    break;
+                }
+                let p = Vec2::new(m.pos.x + f * d, m.pos.y + 32.0);
+                for done in [false, true] {
+                    let c = exit_framing(&level, p, done).unwrap_or(p + Vec2::new(0.0, CAM_LIFT));
+                    assert!((c.x - p.x).abs() < VIEW_W * 0.5 - 120.0 && (c.y - p.y).abs() < VIEW_H * 0.5 - 80.0, "{}: blob at {p} off screen (camera {c})", level.id);
+                }
+            }
         }
     }
 }

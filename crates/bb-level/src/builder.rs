@@ -18,6 +18,23 @@ pub mod metrics {
     pub const SKIN: f32 = 26.0;
     /// Max jelly tile length before splitting.
     pub const TILE: f32 = 280.0;
+
+    // ── Camera framing (bb-game `camera.rs` uses these) ──────────────────
+    /// Minimum visible world height at zoom 1 (the window adds width).
+    pub const VIEW_W: f32 = 1500.0;
+    pub const VIEW_H: f32 = 860.0;
+    /// The view centre sits this far above the player's centroid.
+    pub const CAM_LIFT: f32 = 80.0;
+    /// Height of a spike tooth.
+    pub const SPIKE_H: f32 = 26.0;
+    /// Bottom-of-screen room a hazard must clear to read (HUD, vignette).
+    pub const SCREEN_MARGIN: f32 = 58.0;
+    /// **Danger is always visible.** The deepest a spike strip / kill zone
+    /// may sit below where the player is (the ledge you approach from, or
+    /// the line you swing / ride / jump along) and still be fully on screen
+    /// while standing there: half the view, minus how far the camera sits
+    /// above your feet, minus a margin. = 430 - 112 - 58 = 260 px.
+    pub const MAX_HAZARD_DEPTH: f32 = VIEW_H * 0.5 - (PLAYER_R + CAM_LIFT) - SCREEN_MARGIN;
 }
 
 pub fn v(x: f32, y: f32) -> Vec2 {
@@ -231,6 +248,7 @@ impl LevelBuilder {
             material: Material::Stone,
             trigger: String::new(),
             lethal: false,
+            spiked: false,
         });
         self
     }
@@ -258,6 +276,7 @@ impl LevelBuilder {
             material: Material::Stone,
             trigger: String::new(),
             lethal: false,
+            spiked: false,
         });
         self
     }
@@ -378,6 +397,7 @@ impl LevelBuilder {
             material: Material::Ice, // renders as a pale jelly drop
             trigger: String::new(),
             lethal: true,
+            spiked: false,
         });
         self
     }
@@ -412,6 +432,26 @@ impl LevelBuilder {
 
     pub fn spikes(&mut self, a: Vec2, b: Vec2) -> &mut Self {
         self.level.spikes.push(Spikes { a, b });
+        self
+    }
+
+    /// Spikes hanging from a ceiling whose underside is at `y` (teeth down),
+    /// from x0 to x1.
+    pub fn ceiling_spikes(&mut self, x0: f32, x1: f32, y: f32) -> &mut Self {
+        self.spikes(v(x1.max(x0), y), v(x0.min(x1), y))
+    }
+
+    /// Mark the most recently added mover as spiked underneath.
+    pub fn spiked(&mut self) -> &mut Self {
+        if let Some(m) = self.level.movers.last_mut() {
+            m.spiked = true;
+        }
+        self
+    }
+
+    /// A cave mouth (see [`CaveMouth`]). Geometry is the caller's job.
+    pub fn mouth(&mut self, pos: Vec2, facing: f32, kind: MouthKind, theme: Theme) -> &mut Self {
+        self.level.mouths.push(CaveMouth { pos, facing, kind, theme, size: v(560.0, 300.0), daylight: false });
         self
     }
 

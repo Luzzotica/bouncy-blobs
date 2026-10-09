@@ -13,6 +13,7 @@ use std::ops::{Deref, DerefMut};
 use glam::Vec2;
 
 pub(crate) use crate::builder::v;
+use crate::builder::metrics;
 use crate::builder::LevelBuilder;
 use crate::types::*;
 
@@ -240,6 +241,95 @@ impl Ch {
             k += 1;
         }
         self
+    }
+
+    /// Spikes along the underside of the roof from x0 to x1 (teeth down),
+    /// following its slope, leaving `keep` px clear either side of each x in
+    /// `gaps` (vine roots, slinky hooks). Over sections a mechanic gates, so
+    /// crawling along the ceiling is never a shortcut. Call after `roof`.
+    pub fn roof_spikes(&mut self, x0: f32, x1: f32, gaps: &[f32], keep: f32) -> &mut Self {
+        // Split x0..x1 at every roof vertex and around every gap.
+        let mut cuts: Vec<f32> = vec![x0, x1];
+        for r in &self.roofs {
+            cuts.extend(r.iter().map(|p| p.x).filter(|x| *x > x0 && *x < x1));
+        }
+        for g in gaps {
+            cuts.push((g - keep).clamp(x0, x1));
+            cuts.push((g + keep).clamp(x0, x1));
+        }
+        cuts.sort_by(f32::total_cmp);
+        cuts.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let mid = (a + b) * 0.5;
+            if b - a < 30.0 || gaps.iter().any(|g| (mid - g).abs() < keep) {
+                continue;
+            }
+            let (Some(ya), Some(yb)) = (self.roof_at(a + 0.5), self.roof_at(b - 0.5)) else { continue };
+            // Right to left: teeth point down.
+            self.b.spikes(v(b, yb), v(a, ya));
+        }
+        self
+    }
+
+    /// The level's opening wall with a **sealed entry cave**: rock from
+    /// `x_far` to the face at `x_face` (floor height `y`, up to `top`), with a
+    /// shallow tunnel mouth at floor level that glows with the previous
+    /// chapter's colour (a rock-fall plugs it: scenery, not a way back).
+    /// The tunnel runs away from the level (towards `x_far`).
+    pub fn entry_cave(&mut self, x_far: f32, x_face: f32, y: f32, top: f32, prev: Theme) -> &mut Self {
+        let facing = (x_far - x_face).signum();
+        let size = v(260.0, 280.0);
+        self.cave_rock(x_face, x_far, y, top, size, facing);
+        self.b.level.mouths.push(CaveMouth { pos: v(x_face, y), facing, kind: MouthKind::Entry, theme: prev, size, daylight: false });
+        self
+    }
+
+    /// The level's closing wall with an **exit cave**: rock from the face at
+    /// `x_face` to `x_far`, with a tunnel at floor height `y` that you walk
+    /// into; it glows with the next chapter's colour and holds the goal.
+    pub fn exit_cave(&mut self, x_face: f32, x_far: f32, y: f32, top: f32, next: Theme) -> &mut Self {
+        let facing = (x_far - x_face).signum();
+        let size = v(560.0, 300.0);
+        self.cave_rock(x_face, x_far, y, top, size, facing);
+        self.b.level.mouths.push(CaveMouth { pos: v(x_face, y), facing, kind: MouthKind::Exit, theme: next, size, daylight: false });
+        // The goal sits deep inside, so you see yourself walk in.
+        let (g0, g1) = (x_face + facing * (size.x - 300.0), x_face + facing * (size.x - 70.0));
+        self.b.goal(v(g0.min(g1), y), v(g0.max(g1), y + size.y - 40.0));
+        self
+    }
+
+    /// Rock with a floor-level tunnel cut into its face (rounded lip and
+    /// back), plus the tunnel floor.
+    fn cave_rock(&mut self, x_face: f32, x_far: f32, y: f32, top: f32, size: Vec2, facing: f32) {
+        let (d, h) = (size.x, size.y);
+        let x = |dx: f32| x_face + facing * dx;
+        let arc = |pts: &mut Vec<Vec2>, c: Vec2, r: f32, a0: f32, a1: f32| {
+            for i in 0..=6 {
+                let a = a0 + (a1 - a0) * i as f32 / 6.0;
+                pts.push(c + v(facing * a.cos() * r, a.sin() * r));
+            }
+        };
+        // Outline (for facing +1: counter-clockwise). One piece of rock
+        // from a deep plinth up to `top` (not all the way down to the level
+        // bottom: the finale's exit is high above other things), so no
+        // buried ledge edges sprout cave-grass inside it.
+        let base = (y - 700.0).max(self.bottom);
+        let (r1, r2) = (46.0, 90.0);
+        let mut pts = vec![v(x_far, base), v(x_far, top), v(x_face, top)];
+        // Down the face, round the lip into the tunnel roof.
+        arc(&mut pts, v(x(r1), y + h + r1), r1, std::f32::consts::PI, std::f32::consts::PI * 1.5);
+        // Along the roof, round the back into the floor.
+        arc(&mut pts, v(x(d - r2), y + h - r2), r2, std::f32::consts::FRAC_PI_2, 0.0);
+        pts.push(v(x(d), y - metrics::SKIN));
+        pts.push(v(x(d), base));
+        if facing < 0.0 {
+            pts.reverse();
+        }
+        self.b.poly(&pts);
+        // The tunnel floor: jelly-skinned like any floor.
+        let (a, b) = (x_face, x(d));
+        self.b.ground(&[v(a.min(b), y), v(a.max(b), y)], y - base);
     }
 
     pub fn finish(self) -> Course {

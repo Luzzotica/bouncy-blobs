@@ -14,13 +14,9 @@ use super::*;
 /// An updraft column (x0..x1, y0..y1) with lift `accel` (1400 = puff to rise,
 /// 2200 = lifts anyone).
 fn updraft(c: &mut Ch, x0: f32, x1: f32, y0: f32, y1: f32, accel: f32) {
+    // (The zone itself is drawn as a shimmering column; no decor floating
+    // in mid-air.)
     c.wind(v(x0, y0), v(x1, y1), v(0.0, accel));
-    // Little dust streaks so the column reads.
-    let mut y = y0 + 120.0;
-    while y < y1 - 60.0 {
-        c.decor("glowworm", v((x0 + x1) * 0.5 - 20.0, y), 0.6, -1.0);
-        y += 260.0;
-    }
 }
 
 pub fn build() -> Course {
@@ -28,7 +24,7 @@ pub fn build() -> Course {
     c.spawn(v(0.0, 40.0));
 
     // -------------------------------------- the first warm breath
-    c.wall(-1300.0, -500.0, -1400.0, 2400.0);
+    c.entry_cave(-1300.0, -500.0, 0.0, 2400.0, Theme::Lake);
     c.floor(&[v(-500.0, 0.0), v(1100.0, 0.0)]);
     // The cast from the intro cutscene greets you at the start.
     c.npc("gust1", v(-300.0, 40.0), NpcRole::Huddle, "#bfe8ff", 20.0);
@@ -53,8 +49,8 @@ pub fn build() -> Course {
 
     // --------------------------------------------- a gust across a gap
     c.say(2560.0, 2610.0, 1000.0, "ch07_gust");
-    c.ledge(2700.0, 3500.0, 400.0);
-    c.spikes(v(2700.0, 400.0), v(3500.0, 400.0));
+    c.ledge(2700.0, 3500.0, 740.0);
+    c.spikes(v(2700.0, 740.0), v(3500.0, 740.0));
     c.wind(v(2700.0, 980.0), v(3500.0, 1500.0), v(900.0, 0.0));
     c.scatter("drip", 2800.0, 3400.0, 1460.0, 200.0, -1.0);
     c.pickup_arc(v(2700.0, 1060.0), v(3500.0, 1060.0), 220.0, 5);
@@ -74,12 +70,18 @@ pub fn build() -> Course {
 
     // ------------------------------------- geysers over the spikes
     c.say(4650.0, 4700.0, 2400.0, "ch07_geysers");
-    c.ledge(4800.0, 6300.0, 1300.0);
-    c.spikes(v(4800.0, 1300.0), v(6300.0, 1300.0));
-    for x in [4900.0, 5250.0, 5600.0, 5950.0] {
-        updraft(&mut c, x, x + 200.0, 1300.0, 2470.0, 1800.0);
+    // Vents in a shallow spiky floor: fall into a vent and it puffs you
+    // back up; fall between them and... pop.
+    c.ledge(4800.0, 6300.0, 2160.0);
+    let vents = [4900.0, 5250.0, 5600.0, 5950.0];
+    let mut x0 = 4800.0;
+    for x in vents {
+        c.spikes(v(x0, 2160.0), v(x, 2160.0));
+        x0 = x + 200.0;
+        updraft(&mut c, x, x + 200.0, 2160.0, 2470.0, 2300.0);
         c.pickup(v(x + 100.0, 2500.0));
     }
+    c.spikes(v(x0, 2160.0), v(6300.0, 2160.0));
     c.floor(&[v(6300.0, 2400.0), v(7400.0, 2400.0)]);
     for x in [5175.0, 5525.0, 5875.0] {
         c.pickup(v(x, 2300.0));
@@ -112,9 +114,9 @@ pub fn build() -> Course {
     c.floor(&[v(9000.0, 4500.0), v(10000.0, 4500.0)]);
     c.drops(9250.0, 9550.0, 4500.0, 3);
     c.say(9100.0, 9160.0, 4500.0, "ch07_giggle");
-    c.goal(v(9600.0, 4500.0), v(9800.0, 4720.0));
-    c.wp(Move::Walk, 8550.0, 3650.0).wp(Move::Wind, 8800.0, 4560.0).wp(Move::Drop, 9200.0, 4500.0).wp(Move::Walk, 9700.0, 4500.0);
-    c.wall(10000.0, 10800.0, -1400.0, 6200.0);
+    // Out through the tunnel: a jumble of bright toy colours beyond.
+    c.exit_cave(10000.0, 10800.0, 4500.0, 6200.0, Theme::Toys);
+    c.wp(Move::Walk, 8550.0, 3650.0).wp(Move::Wind, 8800.0, 4560.0).wp(Move::Drop, 9200.0, 4500.0).wp(Move::Walk, 10480.0, 4500.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 720.0), v(850.0, 760.0), v(900.0, 1150.0), v(1750.0, 1150.0), v(1800.0, 1600.0), v(2700.0, 1650.0), v(3600.0, 1700.0)]);
@@ -124,10 +126,8 @@ pub fn build() -> Course {
     // ----------------------------------------------------------- decor
     c.hang("glowworm", -400.0, 9900.0, 520.0);
     c.scatter("crystal", -450.0, 700.0, 0.0, 230.0, -1.0);
-    c.scatter("lantern", 1200.0, 1700.0, 700.0, 500.0, -1.0);
     c.scatter("crystal", 2050.0, 2600.0, 1000.0, 180.0, -1.0);
     c.scatter("mushroom", 6350.0, 7250.0, 2400.0, 180.0, -1.0);
     c.scatter("crystal", 8000.0, 8550.0, 3650.0, 180.0, -1.0);
-    c.decor("sun", v(9700.0, 5000.0), 0.6, -1.0);
     c.finish()
 }
