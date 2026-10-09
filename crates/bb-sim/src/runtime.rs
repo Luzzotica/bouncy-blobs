@@ -290,6 +290,35 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             }
         }
     }
+    // Lethal movers (blades, spiky drips): touching one pops you. Checked
+    // geometrically (not just last-substep contacts) so a fast drip can't
+    // pass through a blob between frames unnoticed.
+    for m in sim.movers.iter().filter(|m| m.def.lethal) {
+        let Some(s) = sim.world.static_collider(m.id) else { continue };
+        if !s.enabled {
+            continue;
+        }
+        let poly = &s.poly;
+        let reach = s.aabb.expand(6.0);
+        let blobs = sim.players.iter().filter(|p| p.dead.is_none()).map(|p| p.ctl.body).chain(sim.npcs.iter().filter(|n| n.dead.is_none()).map(|n| n.ctl.body));
+        for id in blobs {
+            let Some(b) = sim.world.body(id).filter(|b| b.enabled) else { continue };
+            if !b.aabb.overlaps(&reach) {
+                continue;
+            }
+            let margin = b.params.radius + 3.0;
+            let touching = b.boundary.iter().any(|&i| {
+                let p = b.x[i as usize];
+                geom::point_in_polygon(p, poly)
+                    || (0..poly.len()).any(|k| geom::closest_on_segment(p, poly[k], poly[(k + 1) % poly.len()]).0.distance_squared(p) < margin * margin)
+            }) || sim.world.contacts_of(id).any(|c| c.other == Collider::Static(m.id));
+            if touching {
+                crushed.push(id);
+            }
+        }
+    }
+    crushed.sort();
+    crushed.dedup();
     for id in crushed {
         sim.pop(id);
     }

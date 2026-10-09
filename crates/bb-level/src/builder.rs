@@ -230,6 +230,7 @@ impl LevelBuilder {
             phase: 0.0,
             material: Material::Stone,
             trigger: String::new(),
+            lethal: false,
         });
         self
     }
@@ -256,12 +257,22 @@ impl LevelBuilder {
             phase,
             material: Material::Stone,
             trigger: String::new(),
+            lethal: false,
         });
         self
     }
 
     pub fn spinner(&mut self, center: Vec2, size: Vec2, speed: f32) -> &mut Self {
         self.mover(Shape::rect_at(center, size, 0.0), &[], 1.0, MoverMotion::Spin { speed })
+    }
+
+    /// A spinning blade: a spinner that pops any blob it touches.
+    pub fn blade(&mut self, center: Vec2, size: Vec2, speed: f32) -> &mut Self {
+        self.spinner(center, size, speed);
+        if let Some(m) = self.level.movers.last_mut() {
+            m.lethal = true;
+        }
+        self
     }
 
     // -------------------------------------------------------------- ropes
@@ -332,8 +343,9 @@ impl LevelBuilder {
         self
     }
 
-    /// A falling jelly drip: a blob of goo that waits on the ceiling at
-    /// `top`, drops `fall` px fast, then slowly slurps back up.
+    /// A falling spiky drip: a spiked ball of goo that waits on the ceiling
+    /// at `top`, drops `fall` px fast, then slowly slurps back up. Touching
+    /// it pops you.
     pub fn drip_hazard(&mut self, top: Vec2, fall: f32, radius: f32, phase: f32) -> &mut Self {
         self.level.movers.push(Mover {
             id: String::new(),
@@ -344,6 +356,7 @@ impl LevelBuilder {
             phase,
             material: Material::Ice, // renders as a pale jelly drop
             trigger: String::new(),
+            lethal: true,
         });
         self
     }

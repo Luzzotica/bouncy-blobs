@@ -247,6 +247,9 @@ pub struct Mover {
     /// If set, only moves while the named trigger is active.
     #[serde(default)]
     pub trigger: String,
+    /// Touching it pops a blob (spinning blades, spiky drips).
+    #[serde(default)]
+    pub lethal: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

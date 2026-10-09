@@ -191,3 +191,106 @@ fn probe_jelly_variants() {
     }
     println!("{var}: peak dev {peak:.1}: {}", log.join(" | "));
 }
+
+/// Item 3: a falling spiky drip pops the blob it lands on (and one it
+/// brushes past on the way down).
+#[test]
+fn falling_drip_pops() {
+    for (dx, label) in [(0.0, "under"), (52.0, "beside")] {
+        let mut b = LevelBuilder::new("d", "D", Theme::Drip);
+        b.spawn(v(-600.0, 40.0)).ground(&[v(-800.0, 0.0), v(800.0, 0.0)], 300.0);
+        b.drip_hazard(v(0.0, 600.0), 560.0, 30.0, 0.0);
+        let mut sim = Sim::new(b.build());
+        sim.add_player(0, "P", 1);
+        put(&mut sim, Vec2::new(dx, 34.0));
+        let mut popped = None;
+        for f in 0..300 {
+            set(&mut sim, Vec2::ZERO, false);
+            sim.step();
+            if sim.players[0].dead.is_some() { popped = Some(f); break; }
+        }
+        println!("drip {label}: popped at {popped:?}");
+        assert!(popped.is_some(), "drip {label} didn't pop the blob");
+    }
+}
+
+/// Item 6: blades pop on touch; plain spinners don't.
+#[test]
+fn blades_pop_spinners_dont() {
+    for lethal in [false, true] {
+        let mut b = LevelBuilder::new("s", "S", Theme::Chimney);
+        b.spawn(v(-600.0, 40.0)).ground(&[v(-800.0, 0.0), v(800.0, 0.0)], 300.0);
+        if lethal { b.blade(v(0.0, 220.0), v(160.0, 20.0), 1.5); } else { b.spinner(v(0.0, 220.0), v(160.0, 20.0), 1.5); }
+        let mut sim = Sim::new(b.build());
+        sim.add_player(0, "P", 1);
+        put(&mut sim, Vec2::new(0.0, 34.0));
+        let mut popped = false;
+        for f in 0..300 {
+            set(&mut sim, Vec2::ZERO, f % 60 < 10);
+            sim.step();
+            if sim.players[0].dead.is_some() { popped = true; break; }
+        }
+        assert_eq!(popped, lethal, "lethal={lethal}");
+    }
+}
+
+/// Item 6: with ch07's fans as lethal blades, you can still float up the
+/// flue by steering around them (blades on the left low, right high).
+#[test]
+fn ch07_flue_steer_around_blades() {
+    let mut lvl = bb_level::campaign::chapter(7);
+    let mut n = 0;
+    for m in lvl.movers.iter_mut() {
+        if matches!(m.motion, bb_level::MoverMotion::Spin { .. }) { m.lethal = true; n += 1; }
+    }
+    assert!(n >= 2);
+    let mut sim = Sim::new(lvl);
+    sim.add_player(0, "P", 1);
+    put(&mut sim, Vec2::new(3700.0, 1040.0));
+    let mut log = vec![];
+    let mut made_it = false;
+    let mut phase = 0;
+    for f in 0..900 {
+        let c = pbody(&sim).centroid();
+        let vy = pbody(&sim).velocity().y;
+        // Up the right side past the low (left) blade, hover and drift left
+        // under the high (right) one, then up and out to the right.
+        if phase == 0 && c.y > 1790.0 { phase = 1; }
+        if phase == 1 && c.x < 3890.0 { phase = 2; }
+        if phase == 2 && c.y > 2300.0 { phase = 3; }
+        let (target, btn) = match phase {
+            0 => (4030.0, c.x > 3800.0),
+            1 => (3860.0, vy < 0.0),
+            2 => (3860.0, true),
+            _ => (4300.0, c.y < 2440.0),
+        };
+        let stick = if c.x < 3820.0 && phase == 0 { 1.0 } else { ((target - c.x) / 60.0).clamp(-1.0, 1.0) };
+        set(&mut sim, Vec2::new(stick, 0.0), btn);
+        sim.step();
+        if f % 30 == 29 { log.push(format!("({:.0},{:.0})", c.x, c.y)); }
+        assert!(sim.players[0].dead.is_none(), "popped in the flue: {}", log.join(" "));
+        if c.x > 4150.0 && c.y > 2400.0 { made_it = true; break; }
+    }
+    println!("flue: {}", log.join(" "));
+    assert!(made_it, "didn't get up the flue: {}", log.join(" "));
+}
+
+/// …and a blob that just floats straight up the middle gets cut.
+#[test]
+fn ch07_blades_cut() {
+    let mut lvl = bb_level::campaign::chapter(7);
+    for m in lvl.movers.iter_mut() {
+        if matches!(m.motion, bb_level::MoverMotion::Spin { .. }) { m.lethal = true; }
+    }
+    let mut sim = Sim::new(lvl);
+    sim.add_player(0, "P", 1);
+    put(&mut sim, Vec2::new(3875.0, 1040.0));
+    let mut popped = false;
+    for _ in 0..600 {
+        let c = pbody(&sim).centroid();
+        set(&mut sim, Vec2::new(((3875.0 - c.x) / 60.0).clamp(-1.0, 1.0), 0.0), true);
+        sim.step();
+        if sim.players[0].dead.is_some() { popped = true; break; }
+    }
+    assert!(popped, "floating into a blade should pop");
+}

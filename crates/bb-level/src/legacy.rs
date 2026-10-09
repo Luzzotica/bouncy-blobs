@@ -623,6 +623,7 @@ pub fn import_legacy_with(json: &str, opts: &ImportOptions) -> Result<Imported, 
             phase: 0.0,
             material,
             trigger: if timer { String::new() } else { trigger_string(action) },
+            lethal: false,
         }
     };
 
