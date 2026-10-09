@@ -121,6 +121,8 @@ fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
             "space" => KeyCode::Space,
             "down" => KeyCode::ArrowDown,
             "right" => KeyCode::ArrowRight,
+            "left" => KeyCode::ArrowLeft,
+            "up" => KeyCode::ArrowUp,
             _ => continue,
         };
         if *frame >= f && *frame <= until {
