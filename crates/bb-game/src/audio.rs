@@ -400,6 +400,11 @@ fn sim_sounds(
             SimEvent::Phew { .. } => {
                 out.write(PlaySfx::new("powerup-sparkle", 0.4, 1.5));
             }
+            // Bouncy mushrooms boing like springs (a little lower).
+            SimEvent::Mushroom { .. } => {
+                out.write(PlaySfx::new("spring-boing", 0.03, 0.8 + rand(&mut seed) * 0.1));
+            }
+            SimEvent::SuperBounce { .. } => {}
         }
     }
 }

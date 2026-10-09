@@ -359,7 +359,8 @@ impl Controller {
             let keep = self.jump_carry * t.movement.jump_keep;
             let cur = vel.dot(right);
             let blocked = self.touching && self.contact_normal.dot(right) * keep.signum() < -0.6;
-            if !blocked && keep.abs() > 60.0 && cur * keep.signum() < keep.abs() {
+            let steering_back = stick.x * keep.signum() < -0.2;
+            if !blocked && !steering_back && keep.abs() > 60.0 && cur * keep.signum() < keep.abs() {
                 b.add_velocity(right * (keep - cur));
             }
         }
