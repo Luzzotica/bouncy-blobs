@@ -45,7 +45,9 @@ fn offscreen(
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
     for cam in cams.iter() {
-        commands.entity(cam).insert(RenderTarget::Image(handle.clone().into()));
+        // UI too: make this camera the UI's camera explicitly (otherwise
+        // the UI looks for a window camera and the shots have no HUD).
+        commands.entity(cam).insert((RenderTarget::Image(handle.clone().into()), bevy::ui::IsDefaultUiCamera));
     }
     commands.insert_resource(ShotTarget(handle));
 }

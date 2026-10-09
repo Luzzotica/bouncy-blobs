@@ -88,10 +88,15 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
                 Update,
-                (build_page, interact, menu_blobs).chain().run_if(in_state(AppState::Title).and_then(resource_exists::<Game>)),
+                (build_page, interact, menu_blobs).chain().run_if(in_state(AppState::Title).and_then(title_world)),
             )
             .add_systems(Update, boot.run_if(in_state(AppState::Boot)));
     }
+}
+
+/// The title's own world is loaded (not the level we're coming back from).
+fn title_world(game: Option<Res<Game>>) -> bool {
+    game.is_some_and(|g| g.sim.level.id == TITLE_ID)
 }
 
 /// Leave Boot for the title (unless a dev env var already chose a state).
@@ -102,11 +107,14 @@ fn boot(mut next: ResMut<NextState<AppState>>, mut frames: Local<u32>) {
     }
 }
 
+/// Level id of the title screen's world.
+pub const TITLE_ID: &str = "title";
+
 /// The v2 home screen: an open cave where soft blobs are launched up from
 /// below, arc across the screen bumping into the logo, the buttons and each
 /// other, and fall back out the bottom to be launched again.
 pub fn title_level() -> bb_level::Level {
-    let mut b = LevelBuilder::new("title", "Title", Theme::Hollow);
+    let mut b = LevelBuilder::new(TITLE_ID, "Title", Theme::Hollow);
     b.spawn(v(0.0, -2000.0))
         .kill_y(-8000.0)
         .decor("glowworm", v(-300.0, 760.0), 1.4, -1.0)
@@ -119,6 +127,9 @@ pub fn title_level() -> bb_level::Level {
 
 /// Collision layer for the previous page's tiles while they fall away.
 const FALLING_LAYER: u32 = 1 << 9;
+/// Collision layer for the new page's tiles while they drop in: they bump
+/// the old page's tiles and the launched blobs, never each other.
+const INCOMING_LAYER: u32 = 1 << 10;
 
 /// The menu blob playground (v2 `menuBlobs.ts`).
 const MENU_BLOBS: usize = 6;
@@ -317,9 +328,10 @@ fn rounded_rect(center: PVec2, size: PVec2, r: f32) -> Vec<PVec2> {
     pts
 }
 
-/// A jelly slab with a label. Tethered to where it was put, so it wobbles
-/// but never wanders off.
-pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble: f32) -> BodyId {
+/// The shape of every jelly tile and button: a soft pill (wide tiles) or a
+/// rounded square, weightless and unpoppable. Shared with the pause menu so
+/// its buttons are the very same jelly.
+pub fn tile_desc(center: PVec2, size: PVec2) -> BodyDesc {
     // Wide tiles use a uniform grid: ear-clipping a long outline makes sliver
     // triangles whose area constraints fight each other and shear the body.
     let mut d = if size.x > size.y * 1.6 {
@@ -347,6 +359,17 @@ pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wob
     d.params.internal_damping = 2.5;
     d.params.gravity_scale = 0.0;
     d.params.limits.poppable = false;
+    d
+}
+
+/// Button size and label size on the menus (the pause menu matches).
+pub const BUTTON_H: f32 = 76.0;
+pub const BUTTON_FONT: f32 = 36.0;
+
+/// A jelly slab with a label. Tethered to where it was put, so it wobbles
+/// but never wanders off.
+pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble: f32) -> BodyId {
+    let mut d = tile_desc(center, size);
     d.layer = crate::load_layer::UI;
     let id = game.sim.add_body(d, tag);
     if let Some(b) = game.sim.world.body_mut(id) {
@@ -439,6 +462,11 @@ fn build_page(
     mut overrides: ResMut<StyleOverrides>,
     mut built: Local<Option<(Page, u64)>>,
 ) {
+    // Coming back from a level, the old level's Game is still around for a
+    // frame or two: never build the menu into it.
+    if game.sim.level.id != TITLE_ID {
+        return;
+    }
     // Rebuild when the page changes or a new title world was loaded.
     let key = (menu.page, game.sim.world.time().to_bits() & 0);
     let fresh = game.is_added();
@@ -447,7 +475,11 @@ fn build_page(
     }
     *built = Some(key);
     if fresh {
+        // Body ids from another world mean nothing here (and could alias
+        // this world's new tiles): forget them rather than tumbling them.
         menu.falling.clear();
+        menu.buttons.clear();
+        menu.letters.clear();
     }
     // The old page doesn't vanish: its tiles let go and tumble out of view
     // (labels riding along) while the new page drops in.
@@ -460,7 +492,7 @@ fn build_page(
             // Still jelly as they fall: they pile into and bounce off each
             // other (and the launched blobs), but pass through the new page.
             b.layer = FALLING_LAYER;
-            b.mask = FALLING_LAYER | crate::load_layer::NPC;
+            b.mask = FALLING_LAYER | INCOMING_LAYER | crate::load_layer::NPC;
             let side = if k % 2 == 0 { 1.0 } else { -1.0 };
             b.add_velocity(PVec2::new(side * (60.0 + (k * 37 % 90) as f32), 180.0 + (k * 53 % 140) as f32));
             b.add_spin(side * (1.0 + (k % 3) as f32 * 0.6));
@@ -475,6 +507,11 @@ fn build_page(
     }
     overrides.0.retain(|id, _| keep.contains(id) || game.sim.npcs.iter().any(|n| n.ctl.body == *id));
     menu.drop.clear();
+    // The first page rains in fast; a new page drops in slower, so it
+    // arrives above the old one tumbling out — bumping it (and the blobs)
+    // on the way down.
+    let style = if fresh { DropStyle::MENU } else { DropStyle::MENU_PAGE };
+    menu.drop.style = style.colliding(INCOMING_LAYER, FALLING_LAYER | crate::load_layer::NPC);
 
     // Logo: soft letter tiles.
     let logo: &[(&str, u32)] = &[("B", 0xff5d73), ("O", 0xff9f43), ("U", 0xffd93d), ("N", 0x6bcb77), ("C", 0x4d96ff), ("Y", 0x9b5de5)];
@@ -507,11 +544,11 @@ fn build_page(
             (PVec2::new(left + 150.0, top - 2.0 * 130.0 - 20.0), PVec2::new(300.0, 76.0))
         } else {
             let w = 400.0;
-            (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, 76.0))
+            (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, BUTTON_H))
         };
         let id = jelly_tile(&mut game, center, size, BodyTag::Ui, 4e-5);
         overrides.0.insert(id, button_style(color, i == 0));
-        label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { 36.0 }, Color::WHITE);
+        label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { BUTTON_FONT }, Color::WHITE);
         menu.buttons.push(Button { body: id, action, color });
     }
     // Everything rains in from the bottom up — bottom button first, the
@@ -743,6 +780,21 @@ fn interact(
     for btn in &menu.buttons {
         if let Some(b) = game.sim.world.body_mut(btn.body) {
             b.rest_scale += (1.0 - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_menu_label_has_glyphs() {
+        let progress = StoryProgress { unlocked: CHAPTERS, current: 3, pip_color: 0xff5d73 };
+        for page in [Page::Main, Page::Play, Page::Chapters, Page::Party, Page::Settings] {
+            for (text, _, _) in page_buttons(page, &progress) {
+                assert!(crate::softtext::missing_glyphs(&text).is_empty(), "{text:?}");
+            }
         }
     }
 }

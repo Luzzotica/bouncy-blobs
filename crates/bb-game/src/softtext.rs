@@ -37,6 +37,19 @@ pub fn advance(ch: char, weight: u16) -> f32 {
     a
 }
 
+/// Does the game font have a glyph for `ch`? (Anything else draws as an
+/// empty box, so every on-screen string must pass this; see the tests.)
+pub fn has_glyph(ch: char) -> bool {
+    ch.is_whitespace() || ttf_parser::Face::parse(FONT_BYTES, 0).ok().and_then(|f| f.glyph_index(ch)).is_some()
+}
+
+/// The characters of `text` the font can't draw.
+pub fn missing_glyphs(text: &str) -> Vec<char> {
+    let mut v: Vec<char> = text.chars().filter(|c| !has_glyph(*c)).collect();
+    v.dedup();
+    v
+}
+
 fn measure(ch: char, weight: u16) -> Option<f32> {
     let mut face = ttf_parser::Face::parse(FONT_BYTES, 0).ok()?;
     let _ = face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), (weight as f32).clamp(300.0, 700.0));
@@ -584,6 +597,22 @@ mod tests {
         let left = one.slots[0].pos.x - one.slots[0].adv * 0.5;
         let right = one.slots[2].pos.x + one.slots[2].adv * 0.5;
         assert!((left + right).abs() < 1e-3);
+    }
+
+    #[test]
+    fn glyph_check_knows_the_font() {
+        assert!(missing_glyphs("Hello, Pip! 0/10 ...?").is_empty());
+        // Symbols the font lacks (they'd draw as empty boxes).
+        assert_eq!(missing_glyphs("\u{25CF}\u{25CF}"), vec!['\u{25CF}']);
+    }
+
+    /// Fixed HUD/toast strings outside the story (lobby hint, achievement
+    /// toasts) are drawable too.
+    #[test]
+    fn shared_ui_strings_have_glyphs() {
+        for t in ["Pads: press A to join  \u{b7}  Phones: scan the code!", "Story  \u{b7}  Ch 3"] {
+            assert!(missing_glyphs(t).is_empty(), "{t:?} lacks {:?}", missing_glyphs(t));
+        }
     }
 
     #[test]

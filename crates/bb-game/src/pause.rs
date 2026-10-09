@@ -2,7 +2,7 @@
 //! own little overlay physics world that keeps wobbling. They drop in
 //! gently, and every letter of their labels rides the jelly.
 
-use bb_physics::{BodyDesc, BodyId, Config, Vec2 as PVec2, World};
+use bb_physics::{BodyId, Config, Vec2 as PVec2, World};
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
@@ -10,7 +10,7 @@ use crate::camera::MainCamera;
 use crate::dropin::{DropIn, DropStyle};
 use crate::softtext::{self, GlyphQuery, Ride, SoftText};
 use crate::flow::AppState;
-use crate::menu::button_style;
+use crate::menu::{BUTTON_FONT, BUTTON_H, button_style, tile_desc};
 use crate::render::{MeshBuf, Shared, Style, body_mesh, empty_mesh};
 use crate::sim::{Game, Inputs, UnloadLevel};
 use crate::story::cutscene::Runner;
@@ -80,25 +80,34 @@ fn toggle(
     // Gravity exists only for the drop-in; settled buttons are weightless.
     let mut world = World::new(Config::default());
     let mut drop = DropIn::new(DropStyle::GENTLE);
-    let dim = commands
-        .spawn((Node { position_type: PositionType::Absolute, width: percent(100.0), height: percent(100.0), ..default() }, BackgroundColor(Color::srgba(0.05, 0.02, 0.1, 0.55)), GlobalZIndex(40)))
-        .id();
+    // The dim is a world-space veil *under* the buttons (a UI overlay would
+    // draw over the jelly and grey it out).
+    let dim = {
+        let mut buf = MeshBuf::default();
+        let (lo, hi) = (origin - PVec2::new(6000.0, 4000.0), origin + PVec2::new(6000.0, 4000.0));
+        let col = crate::palette::lin(Color::srgba(0.05, 0.02, 0.1, 0.55));
+        let i0 = buf.vert(lo, 0.0, col);
+        let i1 = buf.vert(PVec2::new(hi.x, lo.y), 0.0, col);
+        let i2 = buf.vert(hi, 0.0, col);
+        let i3 = buf.vert(PVec2::new(lo.x, hi.y), 0.0, col);
+        buf.tri(i0, i1, i2);
+        buf.tri(i0, i2, i3);
+        let mut mesh = empty_mesh();
+        buf.write(&mut mesh);
+        commands.spawn((Mesh2d(meshes.add(mesh)), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, 250.0))).id()
+    };
     let mut items = Vec::new();
     for (i, (text, action, color)) in ITEMS.iter().enumerate() {
-        let c = origin + PVec2::new(0.0, 110.0 - i as f32 * 110.0);
-        let size = PVec2::new(520.0, 86.0);
-        let mut d = BodyDesc::grid(c - size * 0.5, c + size * 0.5, 24, 4, 12.0);
-        d.params.shape_compliance = Some(2e-4);
-        d.params.edge_compliance = 2e-5;
-        d.params.tri_compliance = 2e-5;
-        d.params.gravity_scale = 0.0;
-        let id = world.add_body(d);
-        world.body_mut(id).unwrap().anchor_home(2e-4);
+        // The same jelly pill as the title-screen buttons.
+        let c = origin + PVec2::new(0.0, 100.0 - i as f32 * 100.0);
+        let size = PVec2::new(480.0, BUTTON_H);
+        let id = world.add_body(tile_desc(c, size));
+        world.body_mut(id).unwrap().anchor_home(4e-5);
         // Bottom first, so no button ever falls through another.
         drop.add(&mut world, id, (ITEMS.len() - 1 - i) as f32 * 0.07);
         let mesh = meshes.add(empty_mesh());
         let vis = commands.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, 300.0))).id();
-        let label = commands.spawn(SoftText::new(*text, 38.0).ride(Ride::Overlay(id)).z(301.0).stagger(0.02)).id();
+        let label = commands.spawn(SoftText::new(*text, BUTTON_FONT).ride(Ride::Overlay(id)).color(Color::WHITE).z(301.0).stagger(0.025)).id();
         items.push((id, *action, *color, vis, mesh, label));
     }
     let _ = &assets;
@@ -216,4 +225,14 @@ fn run(
     close(&mut commands, &pause);
     commands.remove_resource::<Pause>();
     let _ = pause.origin;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pause_labels_have_glyphs() {
+        for (text, _, _) in super::ITEMS {
+            assert!(crate::softtext::missing_glyphs(text).is_empty(), "{text:?}");
+        }
+    }
 }
