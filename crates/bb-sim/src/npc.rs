@@ -16,8 +16,17 @@ pub struct Npc {
     pub ctl: Controller,
     pub home: Vec2,
     pub dead: Option<f32>,
-    /// Trapped NPCs become followers once freed.
+    /// Trapped NPCs become followers once freed. Following lasts
+    /// [`FOLLOW_TIME`] (or until the player gets far away); then they settle
+    /// where they are and idle like any Huddle blob.
     pub following: bool,
+    /// Freed from a trap (never re-trapped).
+    pub freed: bool,
+    /// Seconds of following left (followers) / of drifting after the player
+    /// left (Glimmer).
+    pub follow_t: f32,
+    /// Seconds before a settled follower (or Glimmer) can tag along again.
+    rejoin: f32,
     /// Driven by a cutscene: the AI leaves `ctl.input` alone.
     pub scripted: bool,
     timer: f32,
@@ -25,6 +34,13 @@ pub struct Npc {
     stuck_for: f32,
     rng: u32,
 }
+
+/// How long a freed blob follows you before settling down.
+pub const FOLLOW_TIME: f32 = 25.0;
+/// Glimmer drifts over to a player near her light for this long…
+pub const GLIMMER_DRIFT: f32 = 4.0;
+/// …then goes home and won't come over again for this long.
+const GLIMMER_REST: f32 = 9.0;
 
 const HUDDLE_COLORS: [u32; 6] = [0x8fd3ff, 0xffb3c7, 0xc6f68d, 0xffd88a, 0xd7b8ff, 0x9ff0e1];
 
@@ -65,6 +81,9 @@ impl Npc {
         if def.role == NpcRole::Glimmer {
             b.params.gravity_scale = 0.0;
             b.mask = layer::WORLD;
+            // (The controller would otherwise put gravity back every step,
+            // and she sagged a body-length under wherever she meant to be.)
+            ctl.weightless = true;
         }
         if def.role == NpcRole::Trapped {
             b.anchor_home(5e-7);
@@ -82,6 +101,9 @@ impl Npc {
             home: def.pos,
             dead: None,
             following: def.role == NpcRole::Follower,
+            freed: false,
+            follow_t: if def.role == NpcRole::Glimmer { 0.0 } else { FOLLOW_TIME },
+            rejoin: 0.0,
             scripted: false,
             timer: 1.0 + index as f32 * 0.37,
             target: def.pos,
@@ -135,19 +157,66 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
                 bm.add_spin((-a * 8.0 - spin * 2.0) * dt);
             }
         }
-        if n.scripted {
-            continue;
-        }
         let Some(b) = sim.world.body(n.ctl.body) else { continue };
         let c = b.centroid();
         let v = b.velocity();
-        n.timer -= dt;
         let nearest = players.iter().copied().min_by(|a, b| a.distance(c).total_cmp(&b.distance(c)));
+        if n.role == NpcRole::Glimmer {
+            // Hover by her light (home), bobbing and drifting a little (also
+            // in cutscenes). A player who comes close gets a brief visit,
+            // then she goes back home.
+            let near_home = nearest.filter(|p| p.distance(n.home) < 420.0 && !n.scripted);
+            n.follow_t = (n.follow_t - dt).max(0.0);
+            n.rejoin = (n.rejoin - dt).max(0.0);
+            if n.rejoin <= 0.0 && n.follow_t <= 0.0 && near_home.is_some() {
+                n.follow_t = GLIMMER_DRIFT;
+                n.rejoin = GLIMMER_DRIFT + GLIMMER_REST;
+            }
+            let t = sim.time + n.index as f32 * 1.7;
+            let bob = Vec2::new(0.0, (t * 2.3).sin() * 12.0);
+            let idle = n.home + bob + Vec2::new((t * 0.6).sin() * 40.0, 0.0);
+            let anchor = match nearest {
+                Some(p) if n.follow_t > 0.0 && !n.scripted => {
+                    // Never strays far from her light.
+                    n.home + (p + Vec2::new(-70.0, 90.0) - n.home).clamp_length_max(380.0) + bob
+                }
+                _ => idle,
+            };
+            let want = (anchor - c) * 4.0 - v;
+            let bm = sim.world.body_mut(n.ctl.body).unwrap();
+            bm.add_accel(want.clamp_length_max(900.0) * 6.0);
+            if !n.scripted {
+                n.ctl.input = Input::default();
+            }
+            continue;
+        }
+        if n.scripted {
+            continue;
+        }
+        n.timer -= dt;
         let mut input = Input::default();
+        n.rejoin = (n.rejoin - dt).max(0.0);
+        if n.following {
+            n.follow_t -= dt;
+            let far = nearest.is_none_or(|p| p.distance(c) > 1100.0);
+            if n.follow_t <= 0.0 || far {
+                // Had enough: settle down right here.
+                n.following = false;
+                n.home = c;
+                n.rejoin = 8.0;
+                n.timer = 1.0;
+            }
+        } else if (n.freed || n.role == NpcRole::Follower) && n.rejoin <= 0.0 && nearest.is_some_and(|p| p.distance(c) < n.ctl.radius + 48.0) {
+            // Bumped into again: tag along for another stint.
+            n.following = true;
+            n.follow_t = FOLLOW_TIME;
+        }
         match n.role {
-            NpcRole::Trapped if !n.following => {
+            NpcRole::Trapped if !n.following && !n.freed => {
                 if nearest.is_some_and(|p| p.distance(c) < n.ctl.radius + 48.0) {
                     n.following = true;
+                    n.freed = true;
+                    n.follow_t = FOLLOW_TIME;
                     freed.push(n.index);
                 }
                 // Wriggle hopefully.
@@ -156,17 +225,7 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
                     input.button = true;
                 }
             }
-            NpcRole::Glimmer => {
-                // Hover near the nearest player (or home), bobbing.
-                let anchor = nearest.map(|p| p + Vec2::new(-70.0, 90.0)).unwrap_or(n.home);
-                let bob = Vec2::new(0.0, (sim.time * 2.3 + n.index as f32).sin() * 12.0);
-                let want = (anchor + bob - c) * 4.0 - v;
-                let bm = sim.world.body_mut(n.ctl.body).unwrap();
-                bm.add_accel(want * 6.0);
-                continue;
-            }
-            NpcRole::Huddle | NpcRole::Granny | NpcRole::Reg if !n.following => {
-
+            NpcRole::Huddle | NpcRole::Granny | NpcRole::Reg | NpcRole::Trapped | NpcRole::Follower if !n.following => {
                 if n.timer <= 0.0 {
                     n.timer = 1.5 + n.rand() * 3.0;
                     input.button = n.rand() < 0.5;
@@ -191,13 +250,6 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
                 // Follower (or freed): keep up with the nearest player.
                 let Some(p) = nearest else { continue };
                 let d = p - c;
-                if d.length() > 1100.0 {
-                    // Lost: hop back to the group.
-                    let at = p + Vec2::new(-80.0, 80.0);
-                    sim.world.respawn(n.ctl.body, at);
-                    n.ctl.reset();
-                    continue;
-                }
                 if d.x.abs() > 90.0 {
                     input.stick.x = d.x.signum();
                 }
@@ -215,8 +267,8 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
     for i in freed {
         if let Some(n) = sim.npcs.get(i as usize) {
             if let Some(b) = sim.world.body_mut(n.ctl.body) {
+                // Free to roll (and still bumps into you: chaos).
                 b.home = None;
-                b.mask &= !layer::PLAYER;
             }
         }
         sim.events.push(SimEvent::NpcFreed { index: i });

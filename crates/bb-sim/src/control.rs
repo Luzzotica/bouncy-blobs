@@ -84,6 +84,8 @@ pub struct Controller {
     /// how long the jump still keeps it.
     jump_carry: f32,
     jump_carry_t: f32,
+    /// Floats with no gravity at all (Glimmer).
+    pub weightless: bool,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -136,6 +138,7 @@ impl Controller {
             expand_scale: None,
             jump_carry: 0.0,
             jump_carry_t: 0.0,
+            weightless: false,
         }
     }
 
@@ -186,7 +189,7 @@ impl Controller {
         let vel = body.velocity();
         // The player blob falls at 2.x's (scaled) gravity whatever the level's.
         let g_len = g_world.length().max(1.0);
-        let g_scale = t.gravity.gravity / g_len;
+        let g_scale = if self.weightless { 0.0 } else { t.gravity.gravity / g_len };
         let down = g_world / g_len;
         let up = -down;
         let right = Vec2::new(-down.y, down.x);

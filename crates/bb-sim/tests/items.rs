@@ -99,7 +99,7 @@ fn downhill_builds_speed() {
     // …but you can still brake on a slope.
     let mut sim = slope_sim(false, 28.0);
     let mut bottom = 0.0;
-    for f in 0..400 {
+    for _ in 0..400 {
         let on_slope = pbody(&sim).centroid().x > 150.0;
         set(&mut sim, Vec2::new(if on_slope { -1.0 } else { 1.0 }, 0.0), false);
         sim.step();
@@ -293,4 +293,92 @@ fn ch07_blades_cut() {
         if sim.players[0].dead.is_some() { popped = true; break; }
     }
     assert!(popped, "floating into a blade should pop");
+}
+
+fn npc_level(role: bb_level::NpcRole) -> Sim {
+    let mut b = LevelBuilder::new("n", "N", Theme::CaveIn);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-3000.0, 0.0), v(6000.0, 0.0)], 300.0);
+    b.npc("g", v(300.0, 40.0), role, "#8a8f86", 28.0);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    for _ in 0..30 { sim.step(); }
+    sim
+}
+
+/// Item 8: freed Grumbles still bump into the player.
+#[test]
+fn freed_grumbles_collide_with_player() {
+    let mut sim = npc_level(bb_level::NpcRole::Trapped);
+    // Roll over to free it.
+    for _ in 0..120 { set(&mut sim, Vec2::new(1.0, 0.0), false); sim.step(); if sim.npcs[0].freed { break; } }
+    assert!(sim.npcs[0].freed && sim.npcs[0].following);
+    let nb = sim.npcs[0].ctl.body;
+    let pb = sim.players[0].ctl.body;
+    let mut bumped = false;
+    for f in 0..300 {
+        set(&mut sim, Vec2::new(if (f / 60) % 2 == 0 { 1.0 } else { -1.0 }, 0.0), false);
+        sim.step();
+        if sim.world.contacts_of(pb).any(|c| c.other == bb_physics::Collider::Body(nb)) { bumped = true; break; }
+    }
+    assert!(bumped, "the freed Grumble passes through the player");
+}
+
+/// Item 9: followers tag along for a while, then settle and idle.
+#[test]
+fn followers_settle_after_a_while() {
+    let mut sim = npc_level(bb_level::NpcRole::Trapped);
+    for _ in 0..120 { set(&mut sim, Vec2::new(1.0, 0.0), false); sim.step(); if sim.npcs[0].freed { break; } }
+    assert!(sim.npcs[0].following);
+    // Walk right for a few seconds: it follows.
+    for _ in 0..240 { set(&mut sim, Vec2::new(0.6, 0.0), false); sim.step(); }
+    let nc = |sim: &Sim| sim.world.body(sim.npcs[0].ctl.body).unwrap().centroid();
+    let p = pbody(&sim).centroid();
+    println!("after 4 s: player {p:?} npc {:?}", nc(&sim));
+    assert!(sim.npcs[0].following && nc(&sim).distance(p) < 500.0, "follows at first");
+    // Hang about for 30 s: it gives up following and settles.
+    for _ in 0..(30 * 60) { set(&mut sim, Vec2::ZERO, false); sim.step(); }
+    assert!(!sim.npcs[0].following, "still following after 30 s");
+    let home = nc(&sim);
+    // Leave: it stays put.
+    for _ in 0..(6 * 60) { set(&mut sim, Vec2::new(1.0, 0.0), false); sim.step(); }
+    println!("settled at {home:?}, now {:?}, player {:?}", nc(&sim), pbody(&sim).centroid());
+    assert!(nc(&sim).distance(home) < 150.0, "settled follower wandered after the player");
+}
+
+/// Item 9: Glimmer hovers by her light and only visits briefly.
+#[test]
+fn glimmer_stays_near_her_light() {
+    let mut b = LevelBuilder::new("g", "G", Theme::Drip);
+    b.spawn(v(0.0, 40.0)).ground(&[v(-3000.0, 0.0), v(6000.0, 0.0)], 300.0);
+    b.npc("glimmer", v(300.0, 200.0), bb_level::NpcRole::Glimmer, "", 12.0);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    let gc = |sim: &Sim| sim.world.body(sim.npcs[0].ctl.body).unwrap().centroid();
+    let home = Vec2::new(300.0, 200.0);
+    // Player runs far away to the right: she stays home.
+    let mut far_max: f32 = 0.0;
+    for f in 0..(10 * 60) {
+        set(&mut sim, Vec2::new(1.0, 0.0), false);
+        sim.step();
+        if f > 300 { far_max = far_max.max(gc(&sim).distance(home)); }
+    }
+    println!("player at {:?}, glimmer at {:?}", pbody(&sim).centroid(), gc(&sim));
+    assert!(far_max < 120.0, "Glimmer followed the player away ({far_max:.0} from home)");
+    // Player stands near her light: she drifts over briefly, then goes back.
+    put(&mut sim, Vec2::new(550.0, 40.0));
+    let mut visited: f32 = 0.0;
+    let mut dist = vec![];
+    for f in 0..(12 * 60) {
+        set(&mut sim, Vec2::ZERO, false);
+        sim.step();
+        let d = gc(&sim).distance(pbody(&sim).centroid());
+        if f < 180 { visited = visited.max(-d); }
+        dist.push(gc(&sim).distance(home));
+    }
+    let late = dist[dist.len() - 120..].iter().copied().fold(0.0f32, f32::max);
+    let peak = dist.iter().copied().fold(0.0f32, f32::max);
+    println!("visit: peak {peak:.0} from home, late {late:.0}");
+    assert!(peak > 120.0, "Glimmer never came over");
+    assert!(late < 100.0, "Glimmer didn't go back to her light");
+    let _ = visited;
 }
