@@ -993,10 +993,8 @@ fn update_movers(
 /// Which crushers carry teeth on their slamming face. The level data has no
 /// `spiked` flag yet, so every other crusher (in level order) is toothed.
 fn crusher_spiked(movers: &[bb_sim::MoverState], i: usize) -> bool {
-    if !matches!(movers.get(i).map(|m| &m.def.motion), Some(bb_level::MoverMotion::Crusher { .. })) {
-        return false;
-    }
-    movers[..i].iter().filter(|m| matches!(m.def.motion, bb_level::MoverMotion::Crusher { .. })).count() % 2 == 0
+    // Authored per mover (`Mover.spiked`; falling rocks, spiked crushers).
+    movers.get(i).is_some_and(|m| m.def.spiked)
 }
 
 /// Black teeth with hot red tips along a crusher's slamming face.

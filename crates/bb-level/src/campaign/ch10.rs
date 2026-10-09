@@ -183,6 +183,7 @@ pub fn build() -> Course {
     if let Some(m) = c.b.level.mouths.last_mut() {
         m.daylight = true;
     }
+    c.b.decor("lulu", v(-1880.0, 9650.0), 0.9, 0.0);
     c.wp(Move::Walk, -900.0, 9650.0).wp(Move::Walk, -1780.0, 9650.0);
 
     // ----------------------------------------------------------- decor

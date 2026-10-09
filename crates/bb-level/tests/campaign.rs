@@ -766,7 +766,7 @@ fn ch03_mushrooms_replace_trampolines() {
 
 /// Chapters another agent is mid-way through re-authoring (springs →
 /// bouncy mushrooms). Their hazard depths are reported, not asserted.
-const PENDING: &[u8] = &[3];
+const PENDING: &[u8] = &[];
 
 /// Points along the critical path every ~20 px (feet positions).
 fn path_samples(c: &Course) -> Vec<(Vec2, Move)> {
