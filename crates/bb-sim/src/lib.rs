@@ -23,6 +23,12 @@ pub use npc::Npc;
 pub const DT: f32 = 1.0 / 60.0;
 /// Seconds between popping and reforming at a checkpoint.
 pub const RESPAWN_DELAY: f32 = 1.1;
+/// Seconds a pop's droplets lie about (plus up to 3 s of variety)…
+pub const DROPLET_LIFE: f32 = 42.0;
+/// …melting away over the last this-many seconds.
+pub const DROPLET_MELT: f32 = 3.0;
+/// At most this many droplets at once (the oldest melt first).
+pub const MAX_DROPLETS: usize = 60;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BodyTag {
@@ -131,7 +137,7 @@ pub struct Sim {
     pub collected: Vec<bool>,
     /// Living amoebas, one per pickup (None once eaten).
     pub amoebas: Vec<Option<BodyId>>,
-    /// Droplets from popped blobs: (body, seconds left).
+    /// Droplets from popped blobs: (body, seconds left), oldest first.
     pub droplets: Vec<(BodyId, f32)>,
     pub story_fired: Vec<bool>,
     pub completed: bool,
@@ -302,7 +308,21 @@ impl Sim {
             if let Some(b) = self.world.body_mut(id) {
                 b.add_velocity(vel * 0.4 + dir * 220.0 + Vec2::new(0.0, 180.0));
             }
-            self.droplets.push((id, 4.5 + (k % 3) as f32 * 0.6));
+            self.droplets.push((id, DROPLET_LIFE + (k % 3) as f32 * 1.5));
+        }
+        // Too many lying about: the oldest melt away first.
+        let alive = self.droplets.iter().filter(|d| d.1 > DROPLET_MELT).count();
+        if alive > MAX_DROPLETS {
+            let mut excess = alive - MAX_DROPLETS;
+            for d in self.droplets.iter_mut() {
+                if excess == 0 {
+                    break;
+                }
+                if d.1 > DROPLET_MELT {
+                    d.1 = DROPLET_MELT;
+                    excess -= 1;
+                }
+            }
         }
     }
 
@@ -318,9 +338,10 @@ impl Sim {
                 if sp > 650.0 {
                     b.add_velocity(-v * (1.0 - 650.0 / sp));
                 }
-                // Melt away over the last second.
-                if *t < 1.0 {
-                    b.rest_scale = (0.25 + 0.75 * t.max(0.0)).max(0.25);
+                // Melt away over the last few seconds.
+                let melt = if *t < DROPLET_MELT { *t / DROPLET_MELT } else { 1.0 };
+                if melt < 1.0 {
+                    b.rest_scale = (0.25 + 0.75 * melt.max(0.0)).max(0.25);
                 }
             }
             if *t <= 0.0 {

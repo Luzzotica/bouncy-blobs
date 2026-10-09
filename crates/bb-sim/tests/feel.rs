@@ -229,6 +229,30 @@ fn pop_leaves_droplets() {
     for _ in 0..30 { sim.step(); }
     let p1 = sim.world.body(d0).unwrap().centroid();
     assert!(p0.distance(p1) > 20.0, "droplets fly apart");
-    for _ in 0..420 { sim.step(); }
+    // They linger for the better part of a minute…
+    for _ in 0..(30 * 60) { sim.step(); }
+    assert_eq!(sim.droplets.len(), 6, "droplets still there after 30 s");
+    assert!(sim.world.body(d0).is_some());
+    // …then melt away.
+    for _ in 0..(18 * 60) { sim.step(); }
     assert!(sim.droplets.is_empty() && sim.world.body(d0).is_none(), "droplets melt away");
+}
+
+/// Lots of pops: droplets are capped, the oldest melting first.
+#[test]
+fn droplets_are_capped() {
+    let mut sim = flat();
+    let id = sim.players[0].ctl.body;
+    let mut first = None;
+    for k in 0..20 {
+        sim.pop(id);
+        if first.is_none() { first = Some(sim.droplets[0].0); }
+        for _ in 0..90 { sim.step(); }
+        assert!(sim.players[0].dead.is_none(), "respawned ({k})");
+    }
+    for _ in 0..(4 * 60) { sim.step(); }
+    let n = sim.droplets.len();
+    println!("droplets after 20 pops: {n}");
+    assert!(n <= bb_sim::MAX_DROPLETS, "{n} droplets");
+    assert!(sim.world.body(first.unwrap()).is_none(), "oldest melted first");
 }
