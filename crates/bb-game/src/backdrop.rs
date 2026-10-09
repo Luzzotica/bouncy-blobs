@@ -172,28 +172,64 @@ struct Col {
     cx_top: f32,
 }
 
-fn build_col(l: usize, col: i32) -> Col {
+/// A level's own cave: every level shifts the rock pattern to a different
+/// stretch of the noise and leans the layer proportions its own way, so
+/// each chapter's backdrop has its own silhouette, not just its own hue.
+#[derive(Clone, Copy)]
+pub struct CaveSeed {
+    /// Column index offset into the noise.
+    off: i32,
+    /// Spike length, width, lean and column-chance multipliers.
+    len_k: f32,
+    width_k: f32,
+    lean_k: f32,
+    column_k: f32,
+    skip_k: f32,
+    /// Ceiling vs floor weighting (>1: longer stalactites).
+    roof_k: f32,
+}
+
+impl CaveSeed {
+    pub fn for_level(id: &str) -> CaveSeed {
+        let h = id.bytes().fold(0x9e37_79b9u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193));
+        let r = |k: i32| hash2(h as i32, 4000 + k);
+        CaveSeed {
+            off: (h % 20_000) as i32 * 3 - 30_000,
+            len_k: 0.75 + 0.55 * r(0),
+            width_k: 0.8 + 0.45 * r(1),
+            lean_k: 0.4 + 1.4 * r(2),
+            column_k: 0.35 + 1.3 * r(3),
+            skip_k: 0.6 + 1.0 * r(4),
+            roof_k: 0.75 + 0.5 * r(5),
+        }
+    }
+}
+
+fn build_col(l: usize, col: i32, cs: &CaveSeed) -> Col {
     let layer = &LAYERS[l];
     let li = l as i32;
+    // Same screen column, a different stretch of rock per level.
+    let col = col.wrapping_add(cs.off);
     let mut c = Col { top: None, bot: None, column: None, cx_top: 0.0 };
-    if hash2(col, li + 90) < layer.skip_chance {
+    if hash2(col, li + 90) < (layer.skip_chance * cs.skip_k).min(0.6) {
         return c;
     }
     c.cx_top = (hash2(col, li + 3) - 0.5) * layer.spacing * 0.8;
-    let half_w = layer.width * (0.28 + 0.34 * hash2(col, li + 31));
-    let seed = col as f32 * 13.13 + l as f32 * 7.7;
-    if hash2(col, li + 57) < layer.column_chance {
+    let half_w = layer.width * cs.width_k * (0.28 + 0.34 * hash2(col, li + 31));
+    let seed = (col.rem_euclid(100_000)) as f32 * 13.13 + l as f32 * 7.7;
+    if hash2(col, li + 57) < (layer.column_chance * cs.column_k).min(0.85) {
         c.column = Some(column_shape(half_w * 1.05, seed));
         return c;
     }
-    let len_t = layer.len_base + layer.len_var * fbm(col as f32 * 1.7 + l as f32 + 0.5);
-    let lean_t = (hash2(col, li + 41) - 0.5) * half_w * 0.9;
-    c.top = Some((spike_shape(half_w, lean_t, seed + 0.3), len_t));
+    let fx = col.rem_euclid(100_000) as f32;
+    let len_t = (layer.len_base + layer.len_var * fbm(fx * 1.7 + l as f32 + 0.5)) * cs.len_k * cs.roof_k;
+    let lean_t = (hash2(col, li + 41) - 0.5) * half_w * 0.9 * cs.lean_k;
+    c.top = Some((spike_shape(half_w, lean_t, seed + 0.3), len_t.min(REF_H * 0.62)));
     let cx_bot = layer.spacing * 0.5 + (hash2(col, li + 71) - 0.5) * layer.spacing * 0.6;
-    let half_wb = layer.width * (0.28 + 0.34 * hash2(col, li + 97));
-    let len_b = layer.len_base + layer.len_var * fbm(col as f32 * 2.3 + l as f32 + 9.1);
-    let lean_b = (hash2(col, li + 19) - 0.5) * half_wb * 0.9;
-    c.bot = Some((spike_shape(half_wb, lean_b, seed + 5.1), len_b, cx_bot));
+    let half_wb = layer.width * cs.width_k * (0.28 + 0.34 * hash2(col, li + 97));
+    let len_b = (layer.len_base + layer.len_var * fbm(fx * 2.3 + l as f32 + 9.1)) * cs.len_k / cs.roof_k;
+    let lean_b = (hash2(col, li + 19) - 0.5) * half_wb * 0.9 * cs.lean_k;
+    c.bot = Some((spike_shape(half_wb, lean_b, seed + 5.1), len_b.min(REF_H * 0.62), cx_bot));
     c
 }
 
@@ -205,6 +241,7 @@ pub struct Backdrop {
     cols: HashMap<(usize, i32), Col>,
     /// Pulses started by the music: (layer, pulse).
     beats: Vec<(usize, Pulse)>,
+    seed: CaveSeed,
 }
 
 /// The screen-space foreground mesh.
@@ -212,16 +249,20 @@ pub struct Backdrop {
 pub struct Foreground {
     mesh: Handle<Mesh>,
     theme: ThemeColors,
+    seed: CaveSeed,
+    /// Camera height when each piece came into view (its vertical anchor).
+    seen: HashMap<i32, f32>,
 }
 
 /// Spawn the backdrop and foreground for a dark level.
-pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, shared: &Shared, theme: &ThemeColors) {
+pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, shared: &Shared, theme: &ThemeColors, level_id: &str) {
+    let seed = CaveSeed::for_level(level_id);
     let mesh = meshes.add(crate::render::empty_mesh());
     commands.spawn((
         Mesh2d(mesh.clone()),
         MeshMaterial2d(shared.blend.clone()),
         Transform::from_xyz(0.0, 0.0, z::FAR - 20.0),
-        Backdrop { mesh, theme: *theme, cols: HashMap::new(), beats: Vec::new() },
+        Backdrop { mesh, theme: *theme, cols: HashMap::new(), beats: Vec::new(), seed },
         LevelEntity,
     ));
     let mesh = meshes.add(crate::render::empty_mesh());
@@ -229,7 +270,7 @@ pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, shared: &Shared
         Mesh2d(mesh.clone()),
         MeshMaterial2d(shared.blend.clone()),
         Transform::from_xyz(0.0, 0.0, z::DECOR_FRONT + 3.0),
-        Foreground { mesh, theme: *theme },
+        Foreground { mesh, theme: *theme, seed, seen: HashMap::new() },
         LevelEntity,
     ));
 }
@@ -302,6 +343,7 @@ fn update_backdrop(
         }
         bd.beats.retain(|(_, p)| t - p.t0 < P_LIFE);
         let beats = std::mem::take(&mut bd.beats);
+        let cs = bd.seed;
         let mut glows = MeshBuf::default();
         for (l, layer) in LAYERS.iter().enumerate() {
             let zz = 0.001 + l as f32 * 0.002;
@@ -316,7 +358,7 @@ fn update_backdrop(
             let pulses = layer_pulses(l, first, last, t, &beats);
             let dr = Dress { theme: &theme, layer, l, u, t, zz: zz + 0.0015, rock, half: PVec2::new(w * 0.5, h * 0.5) * u, off_x, pulses: &pulses };
             for col in first..=last {
-                let cc = bd.cols.entry((l, col)).or_insert_with(|| build_col(l, col));
+                let cc = bd.cols.entry((l, col)).or_insert_with(|| build_col(l, col, &cs));
                 let base_x = col as f32 * layer.spacing - off_x;
                 let grad = |i: usize, n: usize| {
                     let s = i as f32 / (n.max(2) - 1) as f32;
@@ -331,7 +373,7 @@ fn update_backdrop(
                         let e = (i as f32 / (n - 1) as f32 * 2.0 - 1.0).abs();
                         lin(mix(rock, root, (e - 0.6).max(0.0) * 2.0))
                     });
-                    dress(&mut glows, &dr, &left, &right, Part::Column, col * 3, col as f32);
+                    dress(&mut glows, &dr, &left, &right, Part::Column, (col + cs.off) * 3, col as f32);
                 }
                 if let Some((s, len)) = &cc.top {
                     let cx = base_x + cc.cx_top;
@@ -339,7 +381,7 @@ fn update_backdrop(
                     let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, -ext + p.y * (len + ext))).collect();
                     let n = left.len();
                     fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    dress(&mut glows, &dr, &left, &right, Part::Top, col * 3 + 1, col as f32);
+                    dress(&mut glows, &dr, &left, &right, Part::Top, (col + cs.off) * 3 + 1, col as f32);
                 }
                 if let Some((s, len, cx_off)) = &cc.bot {
                     let cx = base_x + cx_off;
@@ -347,7 +389,7 @@ fn update_backdrop(
                     let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, h + ext - p.y * (len + ext))).collect();
                     let n = left.len();
                     fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    dress(&mut glows, &dr, &left, &right, Part::Bot, col * 3 + 2, col as f32 + 0.5);
+                    dress(&mut glows, &dr, &left, &right, Part::Bot, (col + cs.off) * 3 + 2, col as f32 + 0.5);
                 }
             }
             // This layer's glows sit just in front of it.
@@ -984,16 +1026,32 @@ fn vignette(buf: &mut MeshBuf, c: PVec2, half: PVec2, zz: f32) {
 
 // --------------------------------------------------------------- foreground
 
-/// How much faster than the world the foreground slides (screen px per
-/// world unit of camera motion, relative to 1.0 for the play area).
-const FG_SPEED: f32 = 1.5;
-const FG_SPACING: f32 = 300.0;
+/// The foreground sits between the camera and the play area, so it slides
+/// past much faster than the world (screen motion per unit of camera
+/// motion; the play area is 1.0).
+const FG_SPEED: f32 = 2.0;
+/// World spacing of foreground spots (one spot per stretch, most empty):
+/// a piece sweeps past now and then, it never sits on screen.
+const FG_SPACING: f32 = 1500.0;
+
+/// What stands at a foreground spot.
+#[derive(Clone, Copy, PartialEq)]
+enum FgKind {
+    /// A stalactite tip hanging into the top of the view.
+    Fang,
+    /// A bundle of roots hanging from above.
+    Roots,
+    /// A rock lump rising into the bottom of the view.
+    Lump,
+    /// A tuft of cave fronds rising from below.
+    Fronds,
+}
 
 #[allow(clippy::type_complexity)]
 fn update_foreground(
     time: Res<Time>,
     cam: Query<(&Transform, &Projection), With<crate::camera::MainCamera>>,
-    mut q: Query<(&Foreground, &mut Transform, &mut Visibility), Without<crate::camera::MainCamera>>,
+    mut q: Query<(&mut Foreground, &mut Transform, &mut Visibility), Without<crate::camera::MainCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
     game: Option<Res<crate::sim::Game>>,
 ) {
@@ -1001,7 +1059,7 @@ fn update_foreground(
     let t = time.elapsed_secs();
     // The title screen is v2's clean menu: no foreground silhouettes.
     let title = game.as_ref().is_some_and(|g| g.sim.level.id == "title");
-    for (fg, mut tf, mut vis) in q.iter_mut() {
+    for (mut fg, mut tf, mut vis) in q.iter_mut() {
         *vis = if title { Visibility::Hidden } else { Visibility::Inherited };
         if title {
             continue;
@@ -1013,54 +1071,74 @@ fn update_foreground(
         let to = |x: f32, y: f32| PVec2::new((x - w * 0.5) * u, (h * 0.5 - y) * u);
         let theme = fg.theme;
         let hue = cave_hue(&theme);
-        // Near-black with a breath of the cave hue; a faint rim of light.
-        let body = mix(Color::BLACK, hue, 0.035);
-        let rim = mix(Color::BLACK, hue, 0.2);
+        // Near-black with a breath of the cave hue; a rim of cave light so
+        // the shape reads even against black rock.
+        let body = mix(Color::BLACK, hue, 0.05);
+        let rim = mix(Color::BLACK, lighten(hue, 0.2), 0.42);
         let mut buf = MeshBuf::default();
-        // Screen px of scroll: world motion in screen px times the speed-up.
-        let off_x = c.x / u * FG_SPEED;
-        let first = ((off_x - 300.0) / FG_SPACING).floor() as i32;
-        let last = ((off_x + w + 300.0) / FG_SPACING).ceil() as i32;
-        for col in first..=last {
-            let bx = col as f32 * FG_SPACING - off_x;
-            let hsh = |k: i32| hash2(col, 900 + k);
-            // Top edge: a stalactite tip or hanging roots.
-            let r = hsh(0);
-            if r < 0.32 {
-                let len = 110.0 + 150.0 * hsh(1);
-                let hw = 50.0 + 45.0 * hsh(2);
-                let s = spike_shape(hw, (hsh(3) - 0.5) * hw, col as f32 * 3.7 + 0.5);
-                let cx = bx + hsh(4) * FG_SPACING * 0.6;
-                fg_shape(&mut buf, &s, |p| to(cx + p.x, -30.0 + p.y * (len + 30.0)), body, rim, u);
-            } else if r < 0.55 {
-                let cx = bx + hsh(4) * FG_SPACING * 0.6;
-                roots(&mut buf, |x, y| to(x, y), cx, col, t, body, theme.crystal, u);
+        let off = fg.seed.off;
+        // Spots are fixed in the world; a spot at world x is drawn at
+        // screen x = (x - camera x) * FG_SPEED, so it crosses the view in
+        // half the camera travel the world needs.
+        let reach = (half.x + 400.0 * u) / FG_SPEED;
+        let first = ((c.x - reach) / FG_SPACING).floor() as i32;
+        let last = ((c.x + reach) / FG_SPACING).ceil() as i32;
+        let mut live = Vec::new();
+        for k in first..=last {
+            let hk = |n: i32| hash2(k.wrapping_add(off), 900 + n);
+            if hk(0) > 0.55 {
+                continue;
             }
-            // Bottom edge: rock lumps or a fungus stalk.
-            let r = hsh(10);
-            if r < 0.3 {
-                let len = 60.0 + 90.0 * hsh(11);
-                let hw = 70.0 + 70.0 * hsh(12);
-                let s = spike_shape(hw, (hsh(13) - 0.5) * hw * 0.6, col as f32 * 5.3 + 2.0);
-                let cx = bx + FG_SPACING * 0.5 + hsh(14) * FG_SPACING * 0.4;
-                fg_shape(&mut buf, &s, |p| to(cx + p.x, h + 30.0 - p.y * (len + 30.0)), body, rim, u);
-            } else if r < 0.48 {
-                let cx = bx + FG_SPACING * 0.5 + hsh(14) * FG_SPACING * 0.4;
-                stalk(&mut buf, |x, y| to(x, y), cx, h, col, t, body, theme.mush, u);
+            let kind = match (hk(1) * 4.0) as i32 {
+                0 => FgKind::Fang,
+                1 => FgKind::Roots,
+                2 => FgKind::Lump,
+                _ => FgKind::Fronds,
+            };
+            let wx = (k as f32 + 0.2 + 0.6 * hk(2)) * FG_SPACING;
+            let sx = (wx - c.x) * FG_SPEED / u + w * 0.5;
+            if sx < -450.0 || sx > w + 450.0 {
+                continue;
+            }
+            live.push(k);
+            // Vertical: anchored to where the camera was when the piece
+            // came into view; camera climbs move it fast too, but it may
+            // only intrude a little toward the play line.
+            let y0 = *fg.seen.entry(k).or_insert(c.y);
+            let dy = ((y0 - c.y) * FG_SPEED / u).clamp(-260.0, 260.0);
+            let top = matches!(kind, FgKind::Fang | FgKind::Roots);
+            let dy = if top { dy.max(-50.0) } else { dy.min(50.0) };
+            let seed = k.wrapping_add(off);
+            match kind {
+                FgKind::Fang => {
+                    let len = 120.0 + 110.0 * hk(3);
+                    let hw = 55.0 + 45.0 * hk(4);
+                    let s = spike_shape(hw, (hk(5) - 0.5) * hw, (seed.rem_euclid(9973)) as f32 * 3.7 + 0.5);
+                    fg_shape(&mut buf, &s, |p| to(sx + p.x, -40.0 - dy + p.y * (len + 40.0)), body, rim, u);
+                }
+                FgKind::Roots => roots(&mut buf, |x, y| to(x, y - dy), sx, seed, t, body, rim, theme.crystal, u),
+                FgKind::Lump => {
+                    let len = 70.0 + 80.0 * hk(3);
+                    let hw = 90.0 + 70.0 * hk(4);
+                    let s = spike_shape(hw, (hk(5) - 0.5) * hw * 0.6, (seed.rem_euclid(9973)) as f32 * 5.3 + 2.0);
+                    fg_shape(&mut buf, &s, |p| to(sx + p.x, h + 40.0 - dy - p.y * (len + 40.0)), body, rim, u);
+                }
+                FgKind::Fronds => fronds(&mut buf, |x, y| to(x, y - dy), sx, h, seed, t, body, rim, theme.mush, u),
             }
         }
-        // Drifting spores, 1.5x parallax in both axes, wrapping the view.
-        for k in 0..16 {
+        fg.seen.retain(|k, _| live.contains(k));
+        // A few drifting spores, close to the lens: same fast parallax in
+        // both axes, wrapping the view, kept out of the middle band.
+        for k in 0..10 {
             let hs = |n: i32| hash2(k, 1200 + n);
             let wx = w + 200.0;
             let wy = h + 200.0;
             let x = (hs(0) * wx - c.x / u * FG_SPEED + t * (6.0 + 10.0 * hs(2)) + (t * 0.4 + k as f32).sin() * 20.0).rem_euclid(wx) - 100.0;
             let y = (hs(1) * wy + c.y / u * FG_SPEED - t * (4.0 + 6.0 * hs(3))).rem_euclid(wy) - 100.0;
-            // Keep them out of the middle band mostly: fade there.
-            let mid = 1.0 - (-(((y / h) - 0.5) / 0.22).powi(2)).exp() * 0.7;
+            let mid = 1.0 - (-(((y / h) - 0.5) / 0.22).powi(2)).exp() * 0.8;
             let col = if k % 3 == 0 { theme.crystal } else { theme.mush };
             let r = (5.0 + 9.0 * hs(4)) * u;
-            let a = (0.10 + 0.08 * (t * 1.1 + k as f32).sin()) * mid;
+            let a = (0.09 + 0.07 * (t * 1.1 + k as f32).sin()) * mid;
             buf.halo(to(x, y), PVec2::splat(r * 3.0), 0.002, la(col, a));
             buf.ellipse(to(x, y), PVec2::splat(r * 0.35), 0.0, 0.0021, la(lighten(col, 0.4), a * 1.6));
         }
@@ -1092,7 +1170,7 @@ fn fg_shape(buf: &mut MeshBuf, s: &Shape, map: impl Fn(PVec2) -> PVec2, body: Co
     let n = outline.len();
     // A thin rim of cave light just inside the edge…
     let rim_in: Vec<[f32; 4]> = (0..n).map(|_| la(rim, 0.0)).collect();
-    let rim_out: Vec<[f32; 4]> = (0..n).map(|_| la(rim, 0.55)).collect();
+    let rim_out: Vec<[f32; 4]> = (0..n).map(|_| la(rim, 0.75)).collect();
     buf.band(&outline, &nrms, 5.0 * u, 0.0, 0.0006, &rim_in, &rim_out);
     // …and a wide feather outside it: out of focus, close to the lens.
     let inner: Vec<[f32; 4]> = (0..n).map(|_| la(body, 0.85)).collect();
@@ -1103,17 +1181,18 @@ fn fg_shape(buf: &mut MeshBuf, s: &Shape, map: impl Fn(PVec2) -> PVec2, body: Co
 /// Hanging roots from the top edge, swaying slowly, with tiny glowing
 /// beads at their tips.
 #[allow(clippy::too_many_arguments)]
-fn roots(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, col: i32, t: f32, body: Color, glow: Color, u: f32) {
+fn roots(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, col: i32, t: f32, body: Color, rim: Color, glow: Color, u: f32) {
     // Every strand of a bundle grows from the same point and fans out.
     let n = 2 + (hash2(col, 950) * 3.0) as i32;
     for k in 0..n {
         let spread = if n > 1 { k as f32 / (n - 1) as f32 * 2.0 - 1.0 } else { 0.0 };
         let fan = spread * 45.0 + (hash2(col * 7 + k, 951) - 0.5) * 20.0;
-        let len = 110.0 + 200.0 * hash2(col * 5 + k, 952);
+        let len = 90.0 + 150.0 * hash2(col * 5 + k, 952);
         let ph = hash2(col, 953 + k) * 6.0;
-        let pts: Vec<PVec2> = (0..=10)
+        const N: usize = 16;
+        let pts: Vec<PVec2> = (0..=N)
             .map(|i| {
-                let s = i as f32 / 10.0;
+                let s = i as f32 / N as f32;
                 let sway = (t * 0.7 + ph).sin() * 10.0 * s * s + (s * 5.0 + ph).sin() * 6.0 * s;
                 // Splay out near the root, then hang straight.
                 let out = fan * (1.0 - (1.0 - s) * (1.0 - s));
@@ -1121,45 +1200,78 @@ fn roots(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, col: i32, t
             })
             .collect();
         let wd = (9.0 + 9.0 * hash2(col + k, 954)) * u;
-        let cols: Vec<[f32; 4]> = (0..=10).map(|i| la(body, 0.92 - 0.25 * i as f32 / 10.0)).collect();
-        let pts_w: Vec<f32> = (0..=10).map(|i| wd * (1.0 - 0.75 * i as f32 / 10.0)).collect();
-        for i in 0..10 {
-            buf.stroke(&[pts[i], pts[i + 1]], pts_w[i], 0.0, cols[i]);
-        }
-        let tip = pts[10];
-        // Soft edge, then a bead of light at the tip.
-        for i in 0..10 {
-            buf.stroke(&[pts[i], pts[i + 1]], pts_w[i] + 10.0 * u, -0.0002, la(body, 0.25 * (1.0 - i as f32 / 10.0)));
-        }
+        let pts_w: Vec<f32> = (0..=N).map(|i| wd * (1.0 - 0.75 * i as f32 / N as f32)).collect();
+        // Soft out-of-focus edge, then the root itself, rounded at the tip.
+        taper(buf, &pts, &pts_w, -0.0002, la(body, 0.25), 10.0 * u);
+        taper(buf, &pts, &pts_w, 0.0, la(body, 0.92), 0.0);
+        rim_line(buf, &pts, &pts_w, rim);
+        let tip = pts[N];
         buf.halo(tip, PVec2::splat(22.0 * u), 0.001, la(glow, 0.15));
         buf.ellipse(tip, PVec2::splat(3.2 * u), 0.0, 0.0012, la(lighten(glow, 0.5), 0.65));
     }
 }
 
-/// A tall dark fungus stalk rising from the bottom edge, its cap rimmed
-/// with dim light.
+/// A tuft of out-of-focus cave fronds rising from the bottom edge: long
+/// curved blades (smooth tapered strokes), each with a dim bead of light at
+/// its tip. Close to the lens, so dark and soft.
 #[allow(clippy::too_many_arguments)]
-fn stalk(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, h: f32, col: i32, t: f32, body: Color, glow: Color, u: f32) {
-    let tall = 120.0 + 110.0 * hash2(col, 960);
-    let ph = hash2(col, 961) * 6.0;
-    let lean = (hash2(col, 962) - 0.5) * 30.0 + (t * 0.5 + ph).sin() * 3.0;
-    let pts: Vec<PVec2> = (0..=8).map(|i| {
-        let s = i as f32 / 8.0;
-        to(cx + lean * s * s, h + 20.0 - s * tall)
-    }).collect();
-    buf.stroke(&pts, 30.0 * u, -0.0002, la(body, 0.3));
-    buf.stroke(&pts, 18.0 * u, 0.0, la(body, 0.93));
-    let top = pts[8];
-    let cw = (60.0 + 35.0 * hash2(col, 963)) * u;
-    buf.halo(top + PVec2::new(0.0, 6.0 * u), PVec2::new(cw * 1.6, cw), 0.0008, la(glow, 0.14));
-    let dome: Vec<PVec2> = (0..=14)
+fn fronds(buf: &mut MeshBuf, to: impl Fn(f32, f32) -> PVec2, cx: f32, h: f32, seed: i32, t: f32, body: Color, rim: Color, glow: Color, u: f32) {
+    let n = 3 + (hash2(seed, 960) * 4.0) as i32;
+    for k in 0..n {
+        let hk = |m: i32| hash2(seed * 7 + k, 961 + m);
+        let spread = if n > 1 { k as f32 / (n - 1) as f32 * 2.0 - 1.0 } else { 0.0 };
+        let tall = 130.0 + 120.0 * hk(0) * (1.0 - 0.4 * spread.abs());
+        let bend = spread * 70.0 + (hk(1) - 0.5) * 40.0 + (t * 0.6 + hk(2) * 6.0).sin() * 6.0;
+        const N: usize = 14;
+        let pts: Vec<PVec2> = (0..=N)
+            .map(|i| {
+                let s = i as f32 / N as f32;
+                to(cx + spread * 30.0 + bend * s * s, h + 30.0 - s * tall)
+            })
+            .collect();
+        let wd = (20.0 + 12.0 * hk(3)) * u;
+        let widths: Vec<f32> = (0..=N).map(|i| wd * (1.0 - i as f32 / N as f32).powf(0.8).max(0.08)).collect();
+        taper(buf, &pts, &widths, -0.0002, la(body, 0.3), 10.0 * u);
+        taper(buf, &pts, &widths, 0.0, la(body, 0.94), 0.0);
+        rim_line(buf, &pts, &widths, rim);
+        let tip = pts[N];
+        buf.halo(tip, PVec2::splat(26.0 * u), 0.001, la(glow, 0.12));
+        buf.ellipse(tip, PVec2::splat(3.4 * u), 0.0, 0.0012, la(mix(Color::BLACK, glow, 0.6), 0.7));
+    }
+}
+
+/// A thin line of cave light along one flank of a tapered stroke.
+fn rim_line(buf: &mut MeshBuf, pts: &[PVec2], widths: &[f32], rim: Color) {
+    let n = pts.len();
+    let side: Vec<PVec2> = (0..n)
         .map(|i| {
-            let a = std::f32::consts::PI * i as f32 / 14.0;
-            top + PVec2::new(a.cos() * cw, a.sin() * cw * 0.55)
+            let d = pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)];
+            let nr = PVec2::new(-d.y, d.x).normalize_or_zero();
+            let nr = if nr.x > 0.0 { -nr } else { nr };
+            pts[i] + nr * widths[i] * 0.38
         })
         .collect();
-    buf.fan(&dome, top + PVec2::new(0.0, cw * 0.2), 0.001, la(body, 0.95), la(body, 0.95));
-    buf.stroke(&dome, 3.0 * u, 0.0012, la(mix(Color::BLACK, glow, 0.5), 0.7));
-    // Gill glow under the cap.
-    buf.stroke(&[top + PVec2::new(-cw * 0.85, 0.0), top + PVec2::new(cw * 0.85, 0.0)], 3.0 * u, 0.0013, la(mix(Color::BLACK, glow, 0.6), 0.6));
+    let cols: Vec<[f32; 4]> = (0..n).map(|i| la(rim, 0.7 * (1.0 - i as f32 / n as f32 * 0.6))).collect();
+    buf.stroke_cols(&side, widths[0] * 0.12 + 1.0, 0.0003, &cols);
+}
+
+/// A smooth tapered stroke (one strip, per-point widths, rounded tip).
+fn taper(buf: &mut MeshBuf, pts: &[PVec2], widths: &[f32], zz: f32, col: [f32; 4], extra: f32) {
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+    let base = buf.pos.len() as u32;
+    for i in 0..n {
+        let d = pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)];
+        let nr = PVec2::new(-d.y, d.x).normalize_or_zero() * (widths[i] + extra) * 0.5;
+        buf.vert(pts[i] + nr, zz, col);
+        buf.vert(pts[i] - nr, zz, col);
+    }
+    for i in 0..(n - 1) as u32 {
+        let (a, b, c, d) = (base + i * 2, base + i * 2 + 1, base + i * 2 + 2, base + i * 2 + 3);
+        buf.tri(a, b, d);
+        buf.tri(a, d, c);
+    }
+    buf.ellipse(pts[n - 1], PVec2::splat((widths[n - 1] + extra) * 0.5), 0.0, zz, col);
 }

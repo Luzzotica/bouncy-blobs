@@ -184,3 +184,9 @@ pub fn pulse_env(x: f32, lead: f32, tail: f32) -> f32 {
 pub fn screen_add(a: f32, b: f32) -> f32 {
     1.0 - (1.0 - a.clamp(0.0, 1.0)) * (1.0 - b.clamp(0.0, 1.0))
 }
+
+/// The level's one vine colour: a living green leaning toward the
+/// chapter's jelly light, the same for every vine and root in the level.
+pub fn vine(theme: &ThemeColors) -> Color {
+    if theme.dark { mix(hex(0x6fd67a), theme.jelly, 0.35) } else { hex(0x7ccf6b) }
+}

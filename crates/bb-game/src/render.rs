@@ -144,6 +144,31 @@ pub struct FaceCues(pub HashMap<BodyId, FaceCue>);
 #[derive(Resource, Default)]
 pub struct StyleOverrides(pub HashMap<BodyId, Style>);
 
+/// A colour soaking into a blob from where it ate an amoeba.
+#[derive(Clone, Copy, Debug)]
+pub struct Absorb {
+    pub from: Color,
+    pub to: Color,
+    /// The particle nearest the point of impact (the front starts there
+    /// and rides along as the blob rolls).
+    pub particle: usize,
+    pub t0: f32,
+}
+
+/// How long a new colour takes to soak through a blob (s).
+pub const ABSORB_TIME: f32 = 0.85;
+
+/// Per-player render state: colour soaking in, climbing wriggle.
+#[derive(Resource, Default)]
+pub struct BlobFx {
+    pub absorb: HashMap<BodyId, Absorb>,
+    /// 0..1 how hard each blob is wriggling up/down a vine, and the
+    /// wriggle's phase.
+    pub climb: HashMap<BodyId, (f32, f32)>,
+    /// Where each slot last ate (pos, time).
+    pickups: HashMap<u8, (PVec2, f32)>,
+}
+
 /// Shared handles for simple shapes.
 #[derive(Resource)]
 pub struct Shared {
@@ -166,9 +191,10 @@ impl Plugin for RenderPlugin {
             .init_resource::<FaceCues>()
             .init_resource::<crate::cave::Spores>()
             .init_resource::<LipGlow>()
+            .init_resource::<BlobFx>()
             .add_systems(Startup, setup_shared)
             .add_systems(PostUpdate, (track_lip_glow, sync_bodies, update_faces).chain().run_if(resource_exists::<Game>))
-            .add_systems(PostUpdate, (cleanup_bodies, clear_lip_glow).run_if(resource_removed::<Game>));
+            .add_systems(PostUpdate, (cleanup_bodies, clear_lip_glow, clear_stale_overrides).run_if(resource_removed::<Game>));
     }
 }
 
@@ -455,6 +481,144 @@ impl MeshBuf {
     }
 }
 
+impl MeshBuf {
+    /// A smooth tapered stroke: one continuous strip with a width and a
+    /// colour per point and round caps (so nothing ends in a flat cut).
+    pub fn taper(&mut self, pts: &[PVec2], w: &[f32], z: f32, cols: &[[f32; 4]], cap_start: bool, cap_end: bool) {
+        let n = pts.len();
+        if n < 2 {
+            return;
+        }
+        let start = self.pos.len() as u32;
+        for i in 0..n {
+            let d = pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)];
+            let nr = PVec2::new(-d.y, d.x).normalize_or_zero() * w[i] * 0.5;
+            self.vert(pts[i] + nr, z, cols[i]);
+            self.vert(pts[i] - nr, z, cols[i]);
+        }
+        for i in 0..(n - 1) as u32 {
+            let (a, b, c, d) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
+            self.tri(a, b, d);
+            self.tri(a, d, c);
+        }
+        let mut cap = |i: usize, j: usize| {
+            let dir = (pts[i] - pts[j]).normalize_or_zero();
+            let r = w[i] * 0.5;
+            let side = PVec2::new(-dir.y, dir.x);
+            let arc: Vec<PVec2> = (0..=8)
+                .map(|k| {
+                    let a = std::f32::consts::PI * k as f32 / 8.0;
+                    pts[i] + side * (a.cos() * r) + dir * (a.sin() * r)
+                })
+                .collect();
+            self.fan(&arc, pts[i], z, cols[i], cols[i]);
+        };
+        if cap_start {
+            cap(0, 1);
+        }
+        if cap_end {
+            cap(n - 1, n - 2);
+        }
+    }
+}
+
+/// An open polyline as a smooth curve through its points (Catmull-Rom,
+/// `sub` samples per segment).
+pub fn smooth_open(p: &[PVec2], sub: usize) -> Vec<PVec2> {
+    let n = p.len();
+    if n < 3 || sub < 2 {
+        return p.to_vec();
+    }
+    let at = |i: isize| p[i.clamp(0, n as isize - 1) as usize];
+    let mut out = Vec::with_capacity(n * sub);
+    for i in 0..n - 1 {
+        let (p0, p1, p2, p3) = (at(i as isize - 1), at(i as isize), at(i as isize + 1), at(i as isize + 2));
+        for k in 0..sub {
+            let t = k as f32 / sub as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            out.push(0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3));
+        }
+    }
+    out.push(p[n - 1]);
+    out
+}
+
+/// A leaf at `at` pointing along `dir`, `len` long.
+pub fn leaf(buf: &mut MeshBuf, at: PVec2, dir: PVec2, len: f32, z: f32, col: [f32; 4], vein: [f32; 4]) {
+    let side = PVec2::new(-dir.y, dir.x);
+    let pts: Vec<PVec2> = (0..=12)
+        .map(|k| {
+            let a = std::f32::consts::TAU * k as f32 / 12.0;
+            let u = 0.5 - 0.5 * a.cos();
+            let wdt = (std::f32::consts::PI * u).sin() * len * 0.32 * a.sin().signum();
+            at + dir * (u * len) + side * wdt
+        })
+        .collect();
+    buf.fan(&pts, at + dir * len * 0.45, z, col, col);
+    buf.stroke(&[at, at + dir * len * 0.85], (len * 0.06).max(0.8), z + 0.0001, vein);
+}
+
+/// A vine: a smooth tapered stem through `pts` (anchor first), a darker
+/// edge and a lit centre line, leaves along it in alternating pairs and a
+/// curled leafy tip at the free end. One colour per level.
+pub fn draw_vine(buf: &mut MeshBuf, raw: &[PVec2], width: f32, col: Color, z: f32, glow: f32) {
+    if raw.len() < 2 {
+        return;
+    }
+    let pts = smooth_open(raw, 4);
+    let n = pts.len();
+    let mut s = vec![0.0f32; n];
+    for i in 1..n {
+        s[i] = s[i - 1] + pts[i].distance(pts[i - 1]);
+    }
+    let total = s[n - 1].max(1.0);
+    let w: Vec<f32> = (0..n).map(|i| width * (1.0 - 0.45 * s[i] / total)).collect();
+    let edge = mix(col, Color::BLACK, 0.55);
+    let body = mix(col, Color::BLACK, 0.12);
+    let wo: Vec<f32> = w.iter().map(|x| x + 2.5).collect();
+    if glow > 0.0 {
+        let wg: Vec<f32> = w.iter().map(|x| x * 4.0).collect();
+        buf.taper(&pts, &wg, z - 0.002, &vec![la(col, glow); n], true, true);
+    }
+    buf.taper(&pts, &wo, z, &vec![lin(edge); n], true, true);
+    buf.taper(&pts, &w, z + 0.0002, &vec![lin(body); n], true, true);
+    // Lit centre line, offset toward the top-left light.
+    let hl: Vec<PVec2> = (0..n)
+        .map(|i| {
+            let d = pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)];
+            let nr = PVec2::new(-d.y, d.x).normalize_or_zero();
+            let nr = if nr.y < 0.0 { -nr } else { nr };
+            pts[i] + nr * w[i] * 0.18
+        })
+        .collect();
+    let wh: Vec<f32> = w.iter().map(|x| x * 0.28).collect();
+    buf.taper(&hl, &wh, z + 0.0004, &vec![la(lighten(col, 0.35), 0.75); n], true, true);
+    // Leaves every ~34 px, alternating sides.
+    let leaf_col = la(mix(col, Color::BLACK, 0.05), 1.0);
+    let leaf_vein = la(mix(col, Color::BLACK, 0.45), 0.8);
+    let mut next = 26.0;
+    let mut side = 1.0f32;
+    for i in 1..n - 1 {
+        if s[i] < next || s[i] > total - 12.0 {
+            continue;
+        }
+        next += 34.0;
+        let d = (pts[i + 1] - pts[i - 1]).normalize_or_zero();
+        let nr = PVec2::new(-d.y, d.x) * side;
+        let dir = (nr * 0.8 + d * 0.6).normalize_or_zero();
+        leaf(buf, pts[i] + nr * w[i] * 0.3, dir, width * 1.9, z + 0.0003, leaf_col, leaf_vein);
+        side = -side;
+    }
+    // Leafy tip: a bud and two small leaves splaying from the end.
+    let end = pts[n - 1];
+    let d = (pts[n - 1] - pts[n - 2]).normalize_or(PVec2::new(0.0, -1.0));
+    let nr = PVec2::new(-d.y, d.x);
+    for sd in [-1.0f32, 1.0] {
+        leaf(buf, end, (d + nr * sd * 0.7).normalize_or_zero(), width * 1.6, z + 0.0005, leaf_col, leaf_vein);
+    }
+    buf.ellipse(end + d * width * 0.3, PVec2::splat(width * 0.55), 0.0, z + 0.0006, lin(lighten(col, 0.2)));
+}
+
 /// A closed ring drawn as a smooth curve through its points (uniform
 /// Catmull-Rom, `sub` samples per edge), so a 16-point blob reads round even
 /// when it swells to 3×.
@@ -485,8 +649,10 @@ pub fn body_mesh(b: &Body, s: &Style, buf: &mut MeshBuf) {
     let outline: Vec<PVec2> = draw_outline(b);
     match b.kind {
         BodyKind::Rope => {
-            buf.stroke(&b.x, b.params.radius * 2.4, 0.0, lin(s.rim));
-            buf.stroke(&b.x, b.params.radius * 1.4, 0.001, lin(s.fill));
+            let pts = smooth_open(&b.x, 3);
+            let n = pts.len();
+            buf.taper(&pts, &vec![b.params.radius * 2.4; n], 0.0, &vec![lin(s.rim); n], true, true);
+            buf.taper(&pts, &vec![b.params.radius * 1.4; n], 0.001, &vec![lin(s.fill); n], true, true);
         }
         BodyKind::Mesh if !b.tris.is_empty() => {
             let (lo, hi) = b.rest.iter().fold((f32::MAX, f32::MIN), |(lo, hi), r| (lo.min(r.y), hi.max(r.y)));
@@ -544,10 +710,7 @@ pub fn body_mesh_look(b: &Body, s: &Style, look: Look, ctx: &LookCtx, buf: &mut 
         Look::Skin { trim_l, trim_r } if ctx.dark => skin_mesh(b, s, ctx, trim_l, trim_r, buf),
         Look::SoftJelly if ctx.dark => soft_mesh(b, s, ctx, buf),
         Look::Bridge { nx, ny } if ctx.dark => bridge_mesh(b, s, ctx, nx as usize, ny as usize, buf),
-        Look::Vine if ctx.dark => {
-            buf.stroke(&b.x, b.params.radius * 6.0, -0.002, la(s.fill, 0.05));
-            body_mesh(b, s, buf);
-        }
+        Look::Vine => draw_vine(buf, &b.x, b.params.radius * 2.0, s.fill, 0.0, if ctx.dark { 0.05 } else { 0.0 }),
         Look::Blob { halo } if ctx.dark && halo > 0.0 && b.closed => {
             let outline = ccw(draw_outline(b));
             let r = (b.area().abs() / std::f32::consts::PI).sqrt();
@@ -1161,7 +1324,14 @@ pub fn look_for(game: &Game, id: BodyId) -> Look {
                 _ => Look::SoftJelly,
             }
         }
-        Some(BodyTag::Rope) if sim.ropes.iter().any(|r| r.grabbable && sim.world.rope(r.rope).is_some_and(|rr| rr.body == id)) => Look::Vine,
+        Some(BodyTag::Rope)
+            if sim
+                .ropes
+                .iter()
+                .any(|r| r.style == bb_level::RopeStyle::Vine && sim.world.rope(r.rope).is_some_and(|rr| rr.body == id)) =>
+        {
+            Look::Vine
+        }
         _ => Look::Plain,
     }
 }
@@ -1214,7 +1384,7 @@ pub fn style_for(game: &Game, id: BodyId, theme: &ThemeColors) -> Style {
                 Some(bb_level::RopeStyle::Rope) => (hex(0xd9b38c), hex(0x8a6a4a)),
                 Some(bb_level::RopeStyle::Chain) => (hex(0xb0b6c0), hex(0x5d6370)),
                 Some(bb_level::RopeStyle::Slinky) => (hex(0xff8fb1), hex(0xb34d72)),
-                _ if dark => (hex(0x8fe66f), hex(0x3f8a45)),
+                _ if dark => (palette::vine(theme), darken(palette::vine(theme), 0.5)),
                 _ => (hex(0x7ccf6b), hex(0x2f6b3a)),
             };
             Style { fill, rim, rim_w: 2.0, highlight: false, z: z::ROPE, top_rim_only: false }
@@ -1257,10 +1427,17 @@ fn sync_bodies(
     lip: Res<LipGlow>,
     (interp, beat): (Res<crate::sim::Interp>, Res<crate::audio::MusicBeat>),
     mut visuals: Query<(&mut BodyVisual, &mut Transform)>,
+    (mut blob_fx, mut msgs): (ResMut<BlobFx>, MessageReader<crate::sim::SimMsg>),
 ) {
     let theme = palette::theme(game.sim.level.theme);
     let t = time.elapsed_secs();
     let dt = time.delta_secs();
+    for m in msgs.read() {
+        if let bb_sim::SimEvent::Pickup { pos, slot, .. } = m.0 {
+            blob_fx.pickups.insert(slot, (pos, t));
+        }
+    }
+    blob_fx.absorb.retain(|_, a| t - a.t0 < ABSORB_TIME + 0.1);
     // Spawn / despawn.
     let mut alive = std::collections::HashSet::new();
     let mut fresh = std::collections::HashSet::new();
@@ -1330,10 +1507,18 @@ fn sync_bodies(
         if let Some(s) = overrides.0.get(&v.id) {
             v.style = *s;
         } else if let Some(BodyTag::Player(slot)) = game.sim.tag(v.id) {
-            // Players change colour (eating amoebas): keep the style live.
+            // Players change colour (eating amoebas): keep the style live,
+            // and let the new colour soak in from where it was eaten.
             let want = game.sim.player(slot).map_or(0xffffff, |p| p.color);
             if v.style.fill != hex(want) {
+                let from = v.style.fill;
                 v.style = style_for(&game, v.id, &theme);
+                if let Some(b) = game.sim.world.body(v.id) {
+                    let c = b.centroid();
+                    let hit = blob_fx.pickups.remove(&slot).filter(|(_, at)| t - at < 0.5).map_or(c + PVec2::new(0.0, 30.0), |(p, _)| p);
+                    let particle = (0..b.x.len()).min_by(|i, j| b.x[*i].distance_squared(hit).total_cmp(&b.x[*j].distance_squared(hit))).unwrap_or(0);
+                    blob_fx.absorb.insert(v.id, Absorb { from, to: v.style.fill, particle, t0: t });
+                }
             }
         }
         let Some(b) = game.sim.world.body(v.id) else { continue };
@@ -1364,12 +1549,176 @@ fn sync_bodies(
         if fresh.contains(&v.id) {
             continue;
         }
+        // Climbing a vine: the blob wriggles in the direction it climbs.
+        let mut wriggle = None;
+        if let Some(BodyTag::Player(slot)) = game.sim.tag(v.id) {
+            let climb = game.sim.player(slot).and_then(|p| {
+                let g = p.ctl.grab.as_ref()?;
+                let y = p.ctl.input.stick.y;
+                let rope = game.sim.ropes.get(g.rope)?;
+                let rb = game.sim.world.rope(rope.rope).and_then(|r| game.sim.world.body(r.body))?;
+                let n = rb.x.len();
+                let i = (g.node as usize).min(n.saturating_sub(1));
+                let tan = (rb.x[(i + 1).min(n - 1)] - rb.x[i.saturating_sub(1)]).normalize_or(PVec2::Y);
+                let up = if tan.y < 0.0 { -tan } else { tan };
+                Some((up, y))
+            });
+            let e = blob_fx.climb.entry(v.id).or_insert((0.0, 0.0));
+            let (want, axis) = match climb {
+                Some((up, y)) if y.abs() > 0.3 => (1.0, Some(up * y.signum())),
+                Some((up, _)) => (0.0, Some(up)),
+                None => (0.0, None),
+            };
+            e.0 += (want - e.0) * (1.0 - (-10.0 * dt).exp());
+            e.1 += dt * 13.0 * e.0.max(0.25);
+            if let Some(a) = axis.filter(|_| e.0 > 0.01) {
+                wriggle = Some(Wriggle { axis: a, amount: e.0, phase: e.1 });
+            }
+        }
+        let absorb = blob_fx.absorb.get(&v.id).copied();
         let Some(mut mesh) = meshes.get_mut(&v.mesh) else { continue };
         let mut buf = MeshBuf::default();
         if b.enabled {
-            body_mesh_look(b, &v.style, v.look, &LookCtx { dark: theme.dark, react: v.react, time: t, lip: Some(&lip) }, &mut buf);
+            let ctx = LookCtx { dark: theme.dark, react: v.react, time: t, lip: Some(&lip) };
+            if wriggle.is_some() || absorb.is_some() {
+                let halo = match v.look { Look::Blob { halo } if ctx.dark => halo, _ => 0.0 };
+                blob_mesh_fx(b, &v.style, halo, wriggle, absorb, t, &mut buf);
+            } else {
+                body_mesh_look(b, &v.style, v.look, &ctx, &mut buf);
+            }
         }
         buf.write(&mut mesh);
+    }
+}
+
+/// A peristaltic wriggle along `axis` (the climb direction).
+#[derive(Clone, Copy, Debug)]
+pub struct Wriggle {
+    pub axis: PVec2,
+    pub amount: f32,
+    pub phase: f32,
+}
+
+/// Deform a blob outline with a squeeze wave travelling along the climb
+/// direction (like an inchworm pulling itself up), plus a rhythmic
+/// stretch along it.
+pub fn wriggle_outline(pts: &mut [PVec2], c: PVec2, r: f32, w: &Wriggle) {
+    let a = w.axis;
+    let side = PVec2::new(-a.y, a.x);
+    let stretch = 1.0 + 0.10 * w.amount * w.phase.sin();
+    let shift = a * r * 0.06 * w.amount * w.phase.sin();
+    for p in pts.iter_mut() {
+        let rel = *p - c;
+        let along = rel.dot(a);
+        let across = rel.dot(side);
+        // Wave travels toward +along as the phase grows.
+        let wave = (along / r.max(1.0) * 2.4 - w.phase).sin();
+        let across = across * (1.0 + 0.16 * w.amount * wave);
+        let along = along * stretch / (1.0 + 0.05 * w.amount * wave).max(0.5);
+        *p = c + shift + a * along + side * across;
+    }
+}
+
+/// How far the new colour has soaked in at a point `d` px from the
+/// impact (0 = old colour, 1 = new), and a bright fringe on the front.
+fn absorb_at(ab: &Absorb, d: f32, r: f32, t: f32) -> (f32, f32) {
+    let p = ((t - ab.t0) / ABSORB_TIME).clamp(0.0, 1.0);
+    if p >= 1.0 {
+        return (1.0, 0.0);
+    }
+    let eased = 1.0 - (1.0 - p).powf(1.6);
+    let front = eased * 2.6 * r;
+    let soft = 0.55 * r;
+    let k = ((front - d) / soft + 0.5).clamp(0.0, 1.0);
+    let k = k * k * (3.0 - 2.0 * k);
+    let fringe = (-((d - front) / (0.22 * r)).powi(2)).exp() * (1.0 - p);
+    (k, fringe)
+}
+
+/// A player blob drawn point by point: optional climbing wriggle and a
+/// new colour soaking in from the point where it ate.
+pub fn blob_mesh_fx(b: &Body, s: &Style, halo: f32, wriggle: Option<Wriggle>, absorb: Option<Absorb>, t: f32, buf: &mut MeshBuf) {
+    let mut outline = ccw(draw_outline(b));
+    if outline.len() < 3 {
+        return body_mesh(b, s, buf);
+    }
+    let c0 = geom::centroid(&outline);
+    let r = (b.area().abs() / std::f32::consts::PI).sqrt().max(1.0);
+    if let Some(w) = &wriggle {
+        wriggle_outline(&mut outline, c0, r, w);
+    }
+    let c = geom::centroid(&outline);
+    let hit = absorb.map(|a| b.x.get(a.particle).copied().unwrap_or(c));
+    // Colour at a point: the blob's fill, mid-soak where it applies.
+    let fill_at = |p: PVec2| -> (Color, f32) {
+        match (absorb, hit) {
+            (Some(ab), Some(h)) => {
+                let (k, fr) = absorb_at(&ab, p.distance(h), r, t);
+                (mix(ab.from, ab.to, k), fr)
+            }
+            _ => (s.fill, 0.0),
+        }
+    };
+    let rim_of = |f: Color, fr: f32| mix(mix(f, Color::WHITE, 0.55), Color::WHITE, fr * 0.6);
+    // Halo (in the dark): the colour it is becoming, fading in.
+    if halo > 0.0 {
+        let k = absorb.map_or(1.0, |ab| ((t - ab.t0) / ABSORB_TIME).clamp(0.0, 1.0));
+        let hc = absorb.map_or(s.fill, |ab| mix(ab.from, ab.to, k));
+        buf.ring2(&outline, r * 0.15, r * 0.75, -0.004, la(hc, halo), la(hc, 0.0));
+    }
+    // Fill: concentric rings so the soaking front reads smoothly.
+    let fracs = [0.0f32, 0.35, 0.7, 1.0];
+    let n = outline.len() as u32;
+    let mut starts = Vec::new();
+    for f in fracs {
+        let start = buf.pos.len() as u32;
+        starts.push(start);
+        for p in &outline {
+            let q = c + (*p - c) * f;
+            let (fc, fr) = fill_at(q);
+            let base = mix(lighten(fc, 0.18), fc, f);
+            buf.vert(q, 0.0, lin(mix(base, Color::WHITE, fr * 0.35)));
+            if f == 0.0 {
+                break;
+            }
+        }
+    }
+    for k in 0..n {
+        buf.tri(starts[0], starts[1] + k, starts[1] + (k + 1) % n);
+    }
+    for ring in 1..fracs.len() - 1 {
+        let (a0, b0) = (starts[ring], starts[ring + 1]);
+        for k in 0..n {
+            let j = (k + 1) % n;
+            buf.tri(a0 + k, b0 + k, b0 + j);
+            buf.tri(a0 + k, b0 + j, a0 + j);
+        }
+    }
+    // Rim, coloured point by point.
+    let start = buf.pos.len() as u32;
+    let m = outline.len();
+    for i in 0..m {
+        let prev = outline[(i + m - 1) % m];
+        let next = outline[(i + 1) % m];
+        let d = next - prev;
+        let nrm = PVec2::new(d.y, -d.x).normalize_or_zero();
+        let (fc, fr) = fill_at(outline[i]);
+        let col = if absorb.is_some() { lin(rim_of(fc, fr)) } else { lin(s.rim) };
+        buf.vert(outline[i] - nrm * s.rim_w, 0.001, col);
+        buf.vert(outline[i] + nrm * s.rim_w * 0.25, 0.001, col);
+    }
+    for i in 0..m as u32 {
+        let j = (i + 1) % m as u32;
+        let (a, b2, c2, d) = (start + i * 2, start + i * 2 + 1, start + j * 2, start + j * 2 + 1);
+        buf.tri(a, b2, d);
+        buf.tri(a, d, c2);
+    }
+    if s.highlight {
+        let (w, h) = extents(&outline);
+        let squash = PVec2::new((w / h).sqrt(), (h / w).sqrt());
+        let hp = c + PVec2::new(-0.32, 0.4) * r * squash;
+        let (fc, _) = fill_at(hp);
+        buf.ellipse(hp, PVec2::new(0.26, 0.14) * r, 0.45, 0.002, lin(lighten(fc, 0.6)));
     }
 }
 
@@ -1630,6 +1979,16 @@ pub fn draw_face(buf: &mut MeshBuf, f: &FaceParams) {
             buf.ellipse(u(side * 0.36, -0.04), PVec2::splat(0.055 * r), 0.0, 0.0, brown);
         }
     }
+}
+
+/// Body ids belong to one world: when a level unloads, every override is
+/// stale. (A speech bubble still open when a cutscene hands over to its
+/// level used to leave its white-paper, black-ink style behind, and the
+/// player body that reused its id in the next level was drawn white with
+/// a black outline.)
+fn clear_stale_overrides(mut overrides: ResMut<StyleOverrides>, mut fx: ResMut<BlobFx>) {
+    overrides.0.clear();
+    *fx = BlobFx::default();
 }
 
 fn cleanup_bodies(mut commands: Commands, mut map: ResMut<BodyEntities>, faces: Query<Entity, With<Face>>) {

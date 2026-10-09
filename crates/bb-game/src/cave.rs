@@ -154,15 +154,19 @@ pub fn spawn_reactive(
     level: &bb_level::Level,
     theme: &ThemeColors,
 ) {
+    let ground = crate::level_view::Ground::new(level);
     for (i, d) in level.decor.iter().enumerate() {
         if !is_reactive(&d.kind) || crate::level_view::near_checkpoint(level, d.pos) {
             continue;
         }
+        // Stand it on the ground under its spot, leaning with the slope
+        // (or leave it out if there is no ground there).
+        let Some((pos, ang)) = crate::level_view::place_decor(&ground, &d.kind, d.pos, d.scale) else { continue };
         // In the dark cave every glow shares the scene's smooth hue field
         // (so a pulse arriving from a vein never meets a clashing colour);
         // in daylight, vary the hue a touch so a patch isn't a row of clones.
         let col = if theme.dark {
-            palette::glow_at(theme, d.pos.x, d.pos.y + 46.0 * d.scale)
+            palette::glow_at(theme, pos.x, pos.y + 46.0 * d.scale)
         } else {
             let hue = ((i as f32 * 2.399).sin() * 0.5 + 0.5) * 0.35;
             mix(theme.mush, theme.accent, hue)
@@ -172,7 +176,8 @@ pub fn spawn_reactive(
         let mesh = meshes.add(buf.into_mesh());
         let zz = if d.depth < 0.0 { z::DECOR_BACK + 0.0005 + (i % 50) as f32 * 0.001 } else { z::DECOR_FRONT + 0.0005 + (i % 50) as f32 * 0.001 };
         let spill = mats.add(ColorMaterial { color: spill_color(col, 0.0, theme.dark), alpha_mode: bevy::sprite_render::AlphaMode2d::Blend, ..default() });
-        let cap = d.pos + PVec2::new(0.0, 46.0 * d.scale);
+        let up = PVec2::from_angle(ang).rotate(PVec2::new(0.0, 1.0));
+        let cap = pos + up * 46.0 * d.scale;
         if theme.dark {
             commands.spawn((
                 Mesh2d(shared.halo.clone()),
@@ -184,9 +189,9 @@ pub fn spawn_reactive(
         commands.spawn((
             Mesh2d(mesh.clone()),
             MeshMaterial2d(shared.blend.clone()),
-            Transform::from_xyz(d.pos.x, d.pos.y, zz),
+            Transform::from_xyz(pos.x, pos.y, zz).with_rotation(Quat::from_rotation_z(ang)),
             ReactiveDecor {
-                pos: d.pos,
+                pos,
                 scale: d.scale,
                 react: 0.0,
                 wob: 0.0,
