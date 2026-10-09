@@ -162,6 +162,8 @@ fn toast(mut commands: Commands, mut unlocked: MessageReader<Unlocked>, assets: 
                     padding: UiRect::axes(px(22.0), px(12.0)),
                     border_radius: BorderRadius::all(px(26.0)),
                     border: UiRect::all(px(4.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: px(12.0),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(1.0, 0.97, 0.88)),
@@ -170,8 +172,14 @@ fn toast(mut commands: Commands, mut unlocked: MessageReader<Unlocked>, assets: 
                 Toast(4.0),
             ))
             .with_children(|p| {
+                // A drawn gold medal (the font has no star glyph).
                 p.spawn((
-                    Text::new(format!("★ {}", a.title())),
+                    Node { width: px(24.0), height: px(24.0), border_radius: BorderRadius::all(px(12.0)), border: UiRect::all(px(3.0)), ..default() },
+                    BackgroundColor(Color::srgb(1.0, 0.82, 0.25)),
+                    BorderColor::all(Color::srgb(0.85, 0.55, 0.1)),
+                ));
+                p.spawn((
+                    Text::new(a.title()),
                     TextFont { font: assets.font.clone().into(), font_size: 26.0.into(), weight: FontWeight::BOLD, ..default() },
                     TextColor(Color::srgb(0.17, 0.13, 0.21)),
                 ));

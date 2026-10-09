@@ -69,7 +69,18 @@ struct PendingLoad(LoadLevel);
 /// Swapping levels removes the old `Game` for one frame before inserting the
 /// new one, so every presentation system sees a clean removed → added edge
 /// (and body ids from the old world can never alias the new one).
-fn load_levels(mut commands: Commands, mut reader: MessageReader<LoadLevel>, existing: Option<Res<Game>>, pending: Option<Res<PendingLoad>>) {
+fn load_levels(
+    mut commands: Commands,
+    mut reader: MessageReader<LoadLevel>,
+    mut unloads: MessageReader<UnloadLevel>,
+    existing: Option<Res<Game>>,
+    pending: Option<Res<PendingLoad>>,
+) {
+    // An unload this same frame (e.g. a state's OnExit unloading while the
+    // next state's OnEnter loads) already removed the old Game: still wait a
+    // frame, or the removed → added edge collapses into one frame and the old
+    // level's visuals and per-body caches never get cleaned up.
+    let unloaded_now = unloads.read().count() > 0;
     let req = reader.read().last().cloned();
     let req = match (req, pending) {
         (Some(r), _) => {
@@ -85,7 +96,7 @@ fn load_levels(mut commands: Commands, mut reader: MessageReader<LoadLevel>, exi
         }
         (None, None) => return,
     };
-    if existing.is_some() {
+    if existing.is_some() || unloaded_now {
         commands.remove_resource::<Game>();
         commands.insert_resource(PendingLoad(req));
         return;

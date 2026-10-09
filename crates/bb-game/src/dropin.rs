@@ -22,13 +22,29 @@ pub struct DropStyle {
     pub keep: f32,
     /// Linear damping while settling.
     pub damping: f32,
+    /// Collision layer/mask while falling. Mask 0 = a ghost that touches
+    /// nothing until it lands; otherwise it bumps whatever `fall_mask`
+    /// names (the menu's leaving tiles and launched blobs) on the way in.
+    pub fall_layer: u32,
+    pub fall_mask: u32,
 }
 
 impl DropStyle {
     /// Title screen, sub-pages and the party lobby.
-    pub const MENU: DropStyle = DropStyle { lift: 1050.0, fall_speed: 1600.0, gravity_scale: 2.2, soft: 3e-3, settle: 0.5, keep: 0.3, damping: 7.0 };
+    pub const MENU: DropStyle =
+        DropStyle { lift: 1050.0, fall_speed: 1600.0, gravity_scale: 2.2, soft: 3e-3, settle: 0.5, keep: 0.3, damping: 7.0, fall_layer: 0, fall_mask: 0 };
+    /// Changing menu page: slower, so the new page arrives above the old
+    /// one tumbling out (instead of overtaking it).
+    pub const MENU_PAGE: DropStyle =
+        DropStyle { lift: 1050.0, fall_speed: 650.0, gravity_scale: 1.1, soft: 3e-3, settle: 0.5, keep: 0.3, damping: 7.0, fall_layer: 0, fall_mask: 0 };
     /// The pause menu: shorter, softer drop.
-    pub const GENTLE: DropStyle = DropStyle { lift: 650.0, fall_speed: 700.0, gravity_scale: 1.6, soft: 4e-3, settle: 0.45, keep: 0.35, damping: 4.0 };
+    pub const GENTLE: DropStyle =
+        DropStyle { lift: 650.0, fall_speed: 700.0, gravity_scale: 1.6, soft: 4e-3, settle: 0.45, keep: 0.35, damping: 4.0, fall_layer: 0, fall_mask: 0 };
+
+    /// The same drop, bumping into `mask` while it falls (on `layer`).
+    pub const fn colliding(self, layer: u32, mask: u32) -> DropStyle {
+        DropStyle { fall_layer: layer, fall_mask: mask, ..self }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,6 +64,7 @@ struct Item {
     state: State,
     firm: f32,
     mask: u32,
+    layer: u32,
     gravity: f32,
     damping: f32,
     /// Collisions restored (only once it no longer overlaps another tile,
@@ -82,15 +99,24 @@ impl DropIn {
             state: State::Waiting,
             firm: b.home_compliance,
             mask: b.mask,
+            layer: b.layer,
             gravity: b.params.gravity_scale,
             damping: b.params.linear_damping,
             solid: false,
         };
-        b.mask = 0;
+        b.mask = self.style.fall_mask;
+        if self.style.fall_layer != 0 {
+            b.layer = self.style.fall_layer;
+        }
         b.params.gravity_scale = 0.0;
         b.translate(PVec2::new(0.0, lift));
         b.v.iter_mut().for_each(|v| *v = PVec2::ZERO);
         self.items.push(item);
+    }
+
+    /// Bodies still on their way down.
+    pub fn falling(&self) -> impl Iterator<Item = BodyId> + '_ {
+        self.items.iter().filter(|i| matches!(i.state, State::Waiting | State::Falling(_))).map(|i| i.body)
     }
 
     pub fn clear(&mut self) {
@@ -128,7 +154,9 @@ impl DropIn {
                     let t = t + dt;
                     it.state = State::Falling(t);
                     if b.centroid().y <= it.slot_y || t > 1.5 {
-                        // Caught: a soft spring to the slot, gravity off.
+                        // Caught: a soft spring to the slot, gravity off,
+                        // and back on its own layer.
+                        b.layer = it.layer;
                         b.params.gravity_scale = it.gravity;
                         b.params.linear_damping = s.damping;
                         b.home = Some(it.slot.clone());
@@ -230,5 +258,37 @@ mod tests {
         }
         assert!(drop.done());
         assert!(world.body(id).unwrap().centroid().length() < 6.0);
+    }
+
+    #[test]
+    fn a_colliding_drop_bumps_what_is_in_its_way_then_lands() {
+        let mut world = World::new(Config::default());
+        let slot = PVec2::new(0.0, 300.0);
+        let id = tile(&mut world, slot);
+        const IN: u32 = 1 << 10;
+        const OUT: u32 = 1 << 9;
+        // A leaving tile hanging in the incoming tile's path.
+        let mut d = BodyDesc::grid(PVec2::new(-150.0, 700.0), PVec2::new(150.0, 760.0), 12, 3, 11.0);
+        d.params.gravity_scale = 0.0;
+        d.layer = OUT;
+        d.mask = OUT | IN;
+        let blocker = world.add_body(d);
+        let layer0 = world.body(id).unwrap().layer;
+        let mut drop = DropIn::new(DropStyle::MENU_PAGE.colliding(IN, OUT));
+        drop.add(&mut world, id, 0.0);
+        assert_eq!(world.body(id).unwrap().layer, IN);
+        let before = world.body(blocker).unwrap().centroid();
+        let mut hit = false;
+        for _ in 0..150 {
+            drop.update(&mut world, 1.0 / 60.0);
+            world.step(1.0 / 60.0);
+            hit |= world.body(blocker).unwrap().velocity().y < -50.0;
+        }
+        assert!(hit, "the falling tile shoves the leaving one");
+        assert!(world.body(blocker).unwrap().centroid().y < before.y);
+        assert!(drop.done());
+        let b = world.body(id).unwrap();
+        assert_eq!(b.layer, layer0, "own layer back");
+        assert!((b.centroid() - slot).length() < 10.0, "home: {}", b.centroid());
     }
 }

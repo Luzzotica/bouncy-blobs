@@ -10,7 +10,7 @@ use bb_sim::Vec2 as PVec2;
 use bevy::prelude::*;
 
 use super::bubble::{SayRequest, Speaker, linger_secs, type_secs};
-use super::{Blub, Voice};
+use super::Voice;
 use crate::camera::CameraDirector;
 use crate::sim::{Game, Inputs};
 
@@ -154,7 +154,6 @@ pub fn run(
     mut cam: ResMut<CameraDirector>,
     mut cues: ResMut<Cues>,
     mut say: MessageWriter<SayRequest>,
-    mut blub: MessageWriter<Blub>,
     mut prev_button: Local<bool>,
     mut word: MessageWriter<super::WordRequest>,
     mut faces: ResMut<crate::render::FaceCues>,
@@ -250,8 +249,8 @@ pub fn run(
                     runner.last_speaker = Some(who.clone());
                     let voice = voice_for(&game, who);
                     let speaker = if who == "lulu" { Speaker::Offscreen } else { Speaker::Actor(who.clone()) };
+                    // The voice plays when the bubble actually appears.
                     say.write(SayRequest { speaker, text: text.clone(), voice, linger: linger_secs(text) });
-                    blub.write(Blub { voice, syllables: (text.len() / 3).clamp(2, 16) as u8 });
                 }
                 Beat::Walk { who, x } | Beat::Stroll { who, x } => runner.strolls.push((who.clone(), *x)),
                 Beat::Hop { who, hold } => runner.hops.push((who.clone(), *hold)),
