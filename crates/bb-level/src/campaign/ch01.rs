@@ -15,8 +15,9 @@ pub fn build() -> Course {
     c.spawn(v(250.0, 40.0));
 
     // ------------------------------------------------ the Back Drip exit
-    // The Bottom Puddle where Pip wakes up — alone — and the cave wall.
-    c.wall(-1000.0, -650.0, -1200.0, 1600.0);
+    // The Bottom Puddle where Pip wakes up — alone — and the cave wall,
+    // with the Back Drip tunnel home behind it (sealed: no going back).
+    c.entry_cave(-1000.0, -650.0, 0.0, 1600.0, Theme::Hollow);
     c.floor(&[v(-650.0, 0.0), v(900.0, 0.0), v(1150.0, 45.0), v(1400.0, 0.0), v(1700.0, 30.0), v(2150.0, 0.0)]);
     c.say(520.0, 600.0, 0.0, "ch01_goodbye");
     c.pickup_arc(v(1000.0, 60.0), v(1300.0, 60.0), 90.0, 3);
@@ -41,14 +42,15 @@ pub fn build() -> Course {
 
     // --------------------------------------- the first pointy pit
     c.say(3820.0, 3880.0, 230.0, "ch01_pointy");
-    c.ledge(4000.0, 4240.0, -200.0);
-    c.spikes(v(4000.0, -200.0), v(4240.0, -200.0));
+    // (Every pit is shallow enough that its spikes stay on screen.)
+    c.ledge(4000.0, 4240.0, -20.0);
+    c.spikes(v(4000.0, -20.0), v(4240.0, -20.0));
     c.ledge(4240.0, 4600.0, 230.0);
     c.pickup_arc(v(3980.0, 280.0), v(4280.0, 280.0), 110.0, 3);
     c.wp(Move::Jump, 4320.0, 230.0).wp(Move::Walk, 4560.0, 230.0);
     // Wobbly jelly stepping stones over a wider spiky pit.
-    c.ledge(4600.0, 5760.0, -260.0);
-    c.spikes(v(4600.0, -260.0), v(5760.0, -260.0));
+    c.ledge(4600.0, 5760.0, 30.0);
+    c.spikes(v(4600.0, 30.0), v(5760.0, 30.0));
     c.jelly(v(4760.0, 180.0), v(4960.0, 260.0), 0.8);
     c.jelly(v(5120.0, 220.0), v(5320.0, 300.0), 0.8);
     c.jelly(v(5440.0, 180.0), v(5620.0, 260.0), 0.8);
@@ -75,7 +77,6 @@ pub fn build() -> Course {
     c.wp(Move::Jump, 8040.0, 380.0).wp(Move::Jump, 8290.0, 530.0).wp(Move::Jump, 8540.0, 680.0).wp(Move::Jump, 8800.0, 830.0);
     c.cp(8950.0, 830.0);
     c.say(9100.0, 9160.0, 830.0, "ch01_big_slope");
-    c.decor("lantern", v(13820.0, 3300.0), 0.6, -1.0); // a first glint of the Glow (seen from the ridge)
 
     // -------------------------------------- the big jelly slope + kicker
     c.pickups(v(9500.0, 760.0), v(10500.0, 220.0), 6);
@@ -92,20 +93,15 @@ pub fn build() -> Course {
     c.cp(12300.0, 0.0);
 
     // ----------------------------------------------- the first look up
+    // A tall shaft (the light is somewhere far above), and at its foot the
+    // tunnel on to the Drip, glowing teal.
     c.say(13150.0, 13250.0, 0.0, "ch01_look_up");
     c.drops(12600.0, 13500.0, 0.0, 4);
-    c.wall(14400.0, 15600.0, -1200.0, 4600.0);
+    c.drops(13800.0, 14250.0, 0.0, 3);
     c.wall(12000.0, 13250.0, 1150.0, 4600.0);
-    c.goal(v(13760.0, 0.0), v(13960.0, 220.0));
-    c.wp(Move::Walk, 13860.0, 0.0);
-    c.decor("sun", v(13850.0, 3900.0), 1.4, -1.0);
-    for k in 0..7 {
-        let y = 900.0 + k as f32 * 420.0;
-        c.decor("glowworm", v(13262.0, y), 1.2, -1.0);
-        c.decor("glowworm", v(14345.0, y + 210.0), 1.2, -1.0);
-    }
+    c.exit_cave(14400.0, 15600.0, 0.0, 4600.0, Theme::Drip);
+    c.wp(Move::Walk, 14250.0, 0.0).wp(Move::Walk, 14780.0, 0.0);
     c.scatter("crystal", 13300.0, 13600.0, 0.0, 150.0, -1.0);
-    c.scatter("crystal", 14100.0, 14350.0, 0.0, 120.0, -1.0);
 
     // ---------------------------------------------------------- roof
     c.roof(&[
@@ -122,9 +118,9 @@ pub fn build() -> Course {
 
     // ---------------------------------------------------------- decor
     c.hang("glowworm", -500.0, 6200.0, 430.0);
-    c.scatter("mushroom", -600.0, 1900.0, 0.0, 380.0, -1.0);
+    c.scatter("mushroom", -450.0, 1900.0, 0.0, 380.0, -1.0);
     c.hang("drip", 400.0, 6000.0, 700.0);
-    c.scatter("crystal", 2300.0, 3100.0, 230.0, 400.0, -1.0);
+    c.scatter("crystal", 2780.0, 3180.0, 230.0, 200.0, -1.0);
     c.scatter("mushroom", 5800.0, 6300.0, 230.0, 160.0, -1.0);
     c.hang("glowworm", 7800.0, 12800.0, 520.0);
     c.scatter("mushroom", 12200.0, 13600.0, 0.0, 300.0, -1.0);

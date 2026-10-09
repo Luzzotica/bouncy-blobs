@@ -7,8 +7,8 @@
 //! climb a tower of toy blocks, and bounce up onto the toy box — where a
 //! crayon drawing says *LULU ♥ BOUNCY THINGS*.
 //!
-//! Mechanics: pushable balls, see-saws, wind-up cars (movers), slinky ropes,
-//! block towers.
+//! Mechanics: pushable balls (one, then a pair), see-saws, wind-up cars
+//! (movers), slinky ropes, block towers.
 
 use super::*;
 
@@ -41,7 +41,7 @@ pub fn build() -> Course {
     c.spawn(v(0.0, 40.0));
 
     // ----------------------------------------------------- the midden
-    c.wall(-1300.0, -500.0, -1400.0, 2400.0);
+    c.entry_cave(-1300.0, -500.0, 0.0, 2400.0, Theme::Chimney);
     c.floor(&[v(-500.0, 0.0), v(1600.0, 0.0)]);
     // The cast from the intro cutscene greets you at the start.
     c.npc("button", v(-260.0, 80.0), NpcRole::Granny, "#b07a4f", 46.0);
@@ -59,9 +59,10 @@ pub fn build() -> Course {
     c.say(1100.0, 1160.0, 0.0, "ch08_ball_bridge");
     c.prop("bigball", PropKind::Ball, v(1250.0, 135.0), Vec2::splat(260.0), 2.5, "#ff9f43");
     // The far rim is higher, so the ball settles in the V instead of rolling out.
-    c.floor(&[v(1600.0, 0.0), v(1880.0, -240.0), v(2140.0, 100.0), v(2650.0, 100.0), v(2850.0, -20.0), v(3000.0, -20.0)]);
-    c.spikes(v(1600.0, 0.0), v(1880.0, -240.0));
-    c.spikes(v(1880.0, -240.0), v(2140.0, 100.0));
+    // (Shallow enough that the spikes at the bottom are always in view.)
+    c.floor(&[v(1600.0, 0.0), v(1880.0, -190.0), v(2140.0, 100.0), v(2650.0, 100.0), v(2850.0, -20.0), v(3000.0, -20.0)]);
+    c.spikes(v(1600.0, 0.0), v(1880.0, -190.0));
+    c.spikes(v(1880.0, -190.0), v(2140.0, 100.0));
     c.pickup_arc(v(1600.0, 40.0), v(1870.0, 130.0), 120.0, 2);
     c.pickup_arc(v(1870.0, 130.0), v(2200.0, 150.0), 120.0, 2);
     c.wp(Move::Push, 1560.0, 0.0).wp(Move::Prop, 1870.0, 60.0).wp(Move::Prop, 2240.0, 100.0);
@@ -84,8 +85,8 @@ pub fn build() -> Course {
 
     // --------------------------------------- the wind-up car track
     c.say(4400.0, 4450.0, -20.0, "ch08_car");
-    c.ledge(4600.0, 5800.0, -320.0);
-    c.spikes(v(4600.0, -320.0), v(5800.0, -320.0));
+    c.ledge(4600.0, 5800.0, -270.0);
+    c.spikes(v(4600.0, -270.0), v(5800.0, -270.0));
     c.mover(car_shape(v(4750.0, -20.0), 280.0, 80.0), &[Vec2::ZERO, v(900.0, 0.0)], 6.0, MoverMotion::PingPong);
     c.b.level.movers.last_mut().unwrap().material = Material::Sticky;
     c.pickup_arc(v(4740.0, 40.0), v(5660.0, 40.0), 60.0, 4);
@@ -127,30 +128,43 @@ pub fn build() -> Course {
     // ------------------------------------------------- the toy box
     c.say(8900.0, 8950.0, 2000.0, "ch08_toybox");
     c.spring(v(9150.0, 2000.0), 90.0, 1450.0);
-    c.terrain(Shape::rect(v(9300.0, -1400.0), v(10300.0, 2560.0)), Material::Ground);
-    c.b.ground(&[v(9300.0, 2560.0), v(10300.0, 2560.0)], 60.0);
-    c.decor("block_letters", v(9600.0, 2700.0), 1.6, -1.0);
-    c.decor("crayon", v(9500.0, 2620.0), 1.4, -1.0);
-    c.decor("crayon", v(9900.0, 2640.0), 1.1, -1.0);
+    c.terrain(Shape::rect(v(9300.0, -1400.0), v(10400.0, 2560.0)), Material::Ground);
+    c.b.ground(&[v(9300.0, 2560.0), v(10400.0, 2560.0)], 60.0);
+    c.decor("block_letters", v(9330.0, 2560.0), 1.3, -1.0);
+    c.decor("crayon", v(9500.0, 2560.0), 1.4, -1.0);
     c.pickups(v(9150.0, 2200.0), v(9150.0, 2550.0), 3);
     c.wp(Move::Walk, 9150.0, 2000.0).wp(Move::Spring, 9420.0, 2560.0);
-    c.say(9600.0, 9660.0, 2560.0, "ch08_lulu_drawing");
-    c.goal(v(10000.0, 2560.0), v(10200.0, 2780.0));
-    c.wp(Move::Walk, 10100.0, 2560.0);
-    c.wall(10300.0, 11100.0, -1400.0, 4000.0);
+    c.say(9430.0, 9470.0, 2560.0, "ch08_lulu_drawing");
+
+    // ------------------------------------------- the two-ball bridge
+    // The lid ends at a spiky gap far wider than any jump. Push the balls
+    // in (one makes it possible, two make it comfy) and hop across their
+    // tops. (Develops ch02's jelly ball; ch09 remixes it with a boulder.)
+    c.say(9560.0, 9600.0, 2560.0, "ch08_two_balls");
+    c.prop("ballA", PropKind::Ball, v(9800.0, 2715.0), v(300.0, 300.0), 2.4, "#ff6b6b");
+    c.prop("ballB", PropKind::Ball, v(10110.0, 2715.0), v(300.0, 300.0), 2.4, "#4d96ff");
+    c.ledge(10400.0, 11400.0, 2320.0);
+    c.spikes(v(10400.0, 2320.0), v(11400.0, 2320.0));
+    c.pickup_arc(v(10400.0, 2680.0), v(11400.0, 2680.0), 100.0, 5);
+    c.floor(&[v(11400.0, 2560.0), v(12200.0, 2560.0)]);
+    c.wp(Move::Push, 9620.0, 2560.0).wp(Move::Prop, 10800.0, 2620.0).wp(Move::Prop, 11100.0, 2620.0).wp(Move::Prop, 11500.0, 2560.0);
+    // Out through the tunnel; the rumble (and a dusty red glow) beyond.
+    c.exit_cave(12200.0, 13000.0, 2560.0, 4200.0, Theme::CaveIn);
+    c.wp(Move::Walk, 12680.0, 2560.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 760.0), v(1400.0, 820.0), v(2300.0, 700.0), v(3000.0, 700.0), v(4600.0, 650.0), v(5800.0, 700.0), v(6060.0, 1060.0)]);
     c.roof(&[v(6140.0, 1060.0), v(6860.0, 1660.0)]);
-    c.roof(&[v(6940.0, 1660.0), v(7700.0, 2100.0), v(8450.0, 2600.0), v(9300.0, 3100.0), v(10300.0, 3300.0)]);
+    c.roof(&[v(6940.0, 1660.0), v(7700.0, 2100.0), v(8450.0, 2600.0), v(9300.0, 3100.0), v(10300.0, 3300.0), v(12200.0, 3350.0)]);
 
     // ----------------------------------------------------------- decor
-    c.hang("glowworm", -400.0, 10200.0, 480.0);
-    c.scatter("block_letters", 2350.0, 2900.0, -20.0, 320.0, -1.0);
+    c.hang("glowworm", -400.0, 12100.0, 480.0);
+    c.scatter("block_letters", 2250.0, 2600.0, 100.0, 320.0, -1.0);
+    c.decor("block_letters", v(2880.0, -20.0), 1.0, -1.0);
     c.scatter("crayon", 3850.0, 4500.0, -10.0, 220.0, -1.0);
     c.scatter("sock", 5850.0, 6250.0, -20.0, 200.0, -1.0);
     c.scatter("crayon", 7150.0, 7650.0, 1310.0, 200.0, -1.0);
     c.scatter("block_letters", 8500.0, 9100.0, 2000.0, 300.0, -1.0);
-    c.decor("sun", v(10100.0, 3150.0), 0.5, -1.0);
+    c.scatter("crayon", 11550.0, 12050.0, 2560.0, 250.0, -1.0);
     c.finish()
 }

@@ -27,7 +27,7 @@ pub fn build() -> Course {
     c.spawn(v(0.0, 40.0));
 
     // ------------------------------------------------ the first swing
-    c.wall(-1300.0, -500.0, -1400.0, 2200.0);
+    c.entry_cave(-1300.0, -500.0, 0.0, 2200.0, Theme::Fungus);
     c.floor(&[v(-500.0, 0.0), v(650.0, 0.0)]);
     // The cast from the intro cutscene greets you at the start.
     c.npc("tangle1", v(-300.0, 40.0), NpcRole::Huddle, "#6fd36a", 24.0);
@@ -42,8 +42,8 @@ pub fn build() -> Course {
     c.wp(Move::Walk, 0.0, 0.0).wp(Move::Walk, 600.0, 0.0).wp(Move::Rope, 1250.0, 0.0).wp(Move::Walk, 1440.0, 0.0);
     // A swing chain over spikes.
     c.say(1380.0, 1430.0, 0.0, "ch04_swing_chain");
-    c.ledge(1500.0, 2550.0, -350.0);
-    c.spikes(v(1500.0, -350.0), v(2550.0, -350.0));
+    c.ledge(1500.0, 2550.0, -240.0);
+    c.spikes(v(1500.0, -240.0), v(2550.0, -240.0));
     vine(&mut c, 1750.0, 660.0, 420.0);
     vine(&mut c, 2230.0, 660.0, 420.0);
     c.pickup_arc(v(1750.0, 260.0), v(2230.0, 260.0), 160.0, 3);
@@ -60,10 +60,12 @@ pub fn build() -> Course {
     c.floor(&[v(3300.0, 650.0), v(4200.0, 650.0)]);
     c.wp(Move::Walk, 3080.0, 0.0).wp(Move::Rope, 3450.0, 650.0);
     // Floppy rope bridge over spikes, then leaf slabs up to a ledge.
-    c.ledge(4200.0, 5600.0, 100.0);
-    c.spikes(v(4200.0, 100.0), v(5600.0, 100.0));
+    c.ledge(4200.0, 4850.0, 400.0);
+    c.spikes(v(4200.0, 400.0), v(4850.0, 400.0));
     rope_bridge(&mut c, v(4200.0, 650.0), v(4850.0, 650.0));
     c.ledge(4850.0, 4950.0, 650.0);
+    c.ledge(4950.0, 5600.0, 620.0);
+    c.spikes(v(4950.0, 620.0), v(5600.0, 620.0));
     c.drops(4280.0, 4780.0, 600.0, 4);
     c.slab(v(5150.0, 740.0), v(200.0, 34.0), 0.35);
     c.slab(v(5420.0, 830.0), v(200.0, 34.0), 0.35);
@@ -75,8 +77,9 @@ pub fn build() -> Course {
 
     // ------------------------------------- the rising vine traverse
     c.say(5980.0, 6040.0, 900.0, "ch04_traverse");
-    c.ledge(6100.0, 7700.0, 200.0);
-    c.spikes(v(6100.0, 200.0), v(7700.0, 200.0));
+    // The spiky gulf climbs with the vines, always a short look down.
+    c.floor(&[v(6100.0, 700.0), v(7700.0, 980.0)]);
+    c.spikes(v(6100.0, 700.0), v(7700.0, 980.0));
     vine(&mut c, 6380.0, 1650.0, 640.0);
     vine(&mut c, 6880.0, 1760.0, 640.0);
     vine(&mut c, 7360.0, 1860.0, 620.0);
@@ -113,23 +116,28 @@ pub fn build() -> Course {
     // Trampoline up to a high vine, fling to the goal.
     let (tx, cap) = (10560.0, 2365.0);
     c.trampoline(v(tx, 2250.0), cap - 2250.0 - 160.0 * 0.28, 160.0, 1150.0);
-    c.ledge(10700.0, 11250.0, 1700.0);
-    c.spikes(v(10700.0, 1700.0), v(11250.0, 1700.0));
+    c.floor(&[v(10700.0, 2150.0), v(11250.0, 2320.0)]);
+    c.spikes(v(10700.0, 2150.0), v(11250.0, 2320.0));
     vine(&mut c, 10800.0, 3120.0, 560.0);
     c.pickup_arc(v(10560.0, 2450.0), v(10800.0, 2700.0), 150.0, 2);
     c.pickup_arc(v(10800.0, 2650.0), v(11400.0, 2650.0), 200.0, 3);
     c.floor(&[v(11250.0, 2600.0), v(12100.0, 2600.0)]);
     c.wp(Move::Jump, tx, cap).wp(Move::Rope, 11400.0, 2600.0);
     c.say(11450.0, 11500.0, 2600.0, "ch04_friends");
-    c.goal(v(11700.0, 2600.0), v(11900.0, 2820.0));
-    c.wp(Move::Walk, 11800.0, 2600.0);
-    c.wall(12100.0, 12900.0, -1400.0, 4200.0);
+    // Out through the tunnel to the Stone Works (it glows amber).
+    c.exit_cave(12100.0, 12900.0, 2600.0, 4200.0, Theme::Stoneworks);
+    c.wp(Move::Walk, 11800.0, 2600.0).wp(Move::Walk, 12580.0, 2600.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 820.0), v(600.0, 860.0), v(1500.0, 900.0), v(2600.0, 900.0), v(3080.0, 1060.0)]);
     c.roof(&[v(3300.0, 1300.0), v(4200.0, 1340.0), v(5600.0, 1400.0), v(6100.0, 1480.0), v(6380.0, 1680.0), v(6880.0, 1790.0), v(7360.0, 1890.0), v(7700.0, 1900.0), v(8200.0, 1900.0)]);
     c.wall(7900.0, 8250.0, 1900.0, 3500.0);
-    c.roof(&[v(8250.0, 2950.0), v(9600.0, 2950.0), v(10300.0, 3000.0), v(10800.0, 3200.0), v(12100.0, 3250.0)]);
+    c.roof(&[v(8250.0, 2950.0), v(9600.0, 2950.0), v(10300.0, 3000.0), v(10800.0, 3150.0), v(12100.0, 3250.0)]);
+    // No crawling over the vines: wherever a vine crosses spikes, the roof
+    // above has teeth too (the roots the vines hang from stay clear).
+    c.roof_spikes(1500.0, 2550.0, &[], 0.0);
+    c.roof_spikes(6100.0, 7700.0, &[6380.0, 6880.0, 7360.0], 80.0);
+    c.roof_spikes(10700.0, 11250.0, &[10800.0], 80.0);
 
     // ----------------------------------------------------------- decor
     c.hang("glowworm", -400.0, 12000.0, 420.0);
@@ -139,7 +147,6 @@ pub fn build() -> Course {
     c.scatter("mushroom", 2600.0, 3050.0, 0.0, 150.0, -1.0);
     c.scatter("crystal", 3400.0, 4100.0, 650.0, 230.0, -1.0);
     c.scatter("mushroom", 7750.0, 8350.0, 1250.0, 150.0, -1.0);
-    c.scatter("crystal", 11300.0, 12000.0, 2600.0, 200.0, -1.0);
-    c.decor("lantern", v(11800.0, 3000.0), 0.8, -1.0);
+    c.scatter("crystal", 11300.0, 11900.0, 2600.0, 200.0, -1.0);
     c.finish()
 }

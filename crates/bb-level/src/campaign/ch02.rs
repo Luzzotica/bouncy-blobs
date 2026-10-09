@@ -5,7 +5,8 @@
 //! jelly membranes you boing up through. Glimmer the glowworm turns up,
 //! lights the first mushroom, and the tunnels start to climb.
 //!
-//! Mechanics: falling jelly drops, sagging soft bridges, one-way membranes.
+//! Mechanics: falling jelly drops, sagging soft bridges, one-way membranes,
+//! and a first push puzzle (a jelly ball into a spiky trench).
 
 use super::*;
 
@@ -19,7 +20,7 @@ pub fn build() -> Course {
     c.spawn(v(0.0, 40.0));
 
     // ------------------------------------------------ plip, plop, drip
-    c.wall(-1300.0, -500.0, -1400.0, 1700.0);
+    c.entry_cave(-1300.0, -500.0, 0.0, 1700.0, Theme::Hollow);
     c.floor(&[v(-500.0, 0.0), v(560.0, 0.0), v(700.0, -30.0), v(850.0, 0.0), v(2000.0, 0.0)]);
     // The cast from the intro cutscene greets you at the start.
     c.npc("glimmer_start", v(-200.0, 200.0), NpcRole::Glimmer, "", 12.0);
@@ -102,27 +103,39 @@ pub fn build() -> Course {
     membrane(&mut c, 9200.0, 9450.0, 1710.0);
     membrane(&mut c, 9200.0, 9450.0, 1870.0);
     c.pickup(v(9325.0, 1770.0)).pickup(v(9325.0, 1930.0));
-    c.floor(&[v(9450.0, 2030.0), v(10500.0, 2030.0)]);
-    c.drops(9600.0, 9900.0, 2030.0, 3);
+    c.floor(&[v(9450.0, 2030.0), v(10300.0, 2030.0)]);
     c.wp(Move::Walk, 8800.0, 1450.0).wp(Move::Walk, 9150.0, 1550.0);
     c.wp(Move::Jump, 9325.0, 1710.0).wp(Move::Jump, 9325.0, 1870.0).wp(Move::Jump, 9560.0, 2030.0);
-    c.say(9700.0, 9760.0, 2030.0, "ch02_mushroom_glow");
-    c.goal(v(10050.0, 2030.0), v(10250.0, 2250.0));
-    c.wp(Move::Walk, 10150.0, 2030.0);
-    c.wall(10500.0, 11300.0, -1400.0, 3200.0);
+    c.cp(9580.0, 2030.0);
+
+    // ------------------------------- the jelly ball (first push puzzle)
+    // A trench far too wide to jump, spikes in plain sight at the bottom,
+    // and a huge wobbly jelly ball parked by the edge. Roll it in, then
+    // hop onto it and across.
+    c.say(9700.0, 9740.0, 2030.0, "ch02_push");
+    c.prop("jellyball", PropKind::Ball, v(10080.0, 2225.0), v(380.0, 380.0), 3.0, "#7fd1c7");
+    c.ledge(10300.0, 11220.0, 1780.0);
+    c.spikes(v(10300.0, 1780.0), v(11220.0, 1780.0));
+    c.pickup_arc(v(10300.0, 2100.0), v(11220.0, 2100.0), 120.0, 4);
+    c.floor(&[v(11220.0, 2030.0), v(12100.0, 2030.0)]);
+    c.drops(11300.0, 11550.0, 2030.0, 3);
+    c.wp(Move::Push, 9850.0, 2030.0).wp(Move::Prop, 10850.0, 2160.0).wp(Move::Prop, 11320.0, 2030.0);
+    c.say(11500.0, 11560.0, 2030.0, "ch02_mushroom_glow");
+    // Out through the tunnel to the Fungus Caverns (it glows pink).
+    c.exit_cave(12100.0, 12900.0, 2030.0, 3300.0, Theme::Fungus);
+    c.wp(Move::Walk, 12580.0, 2030.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 560.0), v(1700.0, 600.0), v(2600.0, 640.0), v(3300.0, 700.0), v(4300.0, 720.0), v(4760.0, 760.0), v(4800.0, 1380.0), v(5000.0, 1560.0)]);
-    c.roof(&[v(5000.0, 1560.0), v(5800.0, 1600.0), v(6300.0, 1700.0), v(7100.0, 1780.0), v(8000.0, 2000.0), v(9000.0, 2200.0), v(9500.0, 2560.0), v(10500.0, 2600.0)]);
+    c.roof(&[v(5000.0, 1560.0), v(5800.0, 1600.0), v(6300.0, 1700.0), v(7100.0, 1780.0), v(8000.0, 2000.0), v(9000.0, 2200.0), v(9500.0, 2560.0), v(10500.0, 2600.0), v(12100.0, 2620.0)]);
 
     // ----------------------------------------------------------- decor
     c.hang("drip", -300.0, 4700.0, 330.0);
-    c.hang("drip", 5100.0, 10300.0, 420.0);
-    c.hang("glowworm", 100.0, 10300.0, 610.0);
+    c.hang("drip", 5100.0, 11900.0, 420.0);
+    c.hang("glowworm", 100.0, 11900.0, 610.0);
     c.scatter("crystal", 2650.0, 2950.0, 0.0, 150.0, -1.0);
     c.scatter("mushroom", 4600.0, 4950.0, 150.0, 170.0, -1.0);
     c.scatter("crystal", 7020.0, 7280.0, 1120.0, 130.0, -1.0);
-    c.scatter("mushroom", 9650.0, 10400.0, 2030.0, 180.0, -1.0);
-    c.decor("lantern", v(10150.0, 2400.0), 0.8, -1.0);
+    c.scatter("mushroom", 11300.0, 12000.0, 2030.0, 180.0, -1.0);
     c.finish()
 }

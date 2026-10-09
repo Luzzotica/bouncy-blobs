@@ -323,7 +323,7 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
 
     // Hazards: spikes, kill zones, falling out.
     let mut to_pop: Vec<BodyId> = Vec::new();
-    let spike_bands: Vec<Vec<Vec2>> = sim
+    let mut spike_bands: Vec<Vec<Vec2>> = sim
         .level
         .spikes
         .iter()
@@ -332,6 +332,14 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             vec![s.a, s.b, s.b + n * 24.0, s.a + n * 24.0]
         })
         .collect();
+    // Spiked movers (falling rocks): teeth along the underside, wherever
+    // the mover is right now.
+    for m in sim.movers.iter().filter(|m| m.def.spiked) {
+        let Some(s) = sim.world.static_collider(m.id) else { continue };
+        let bb = bb_physics::Aabb::from_points(s.poly.iter().copied());
+        let (x0, x1, y) = (bb.min.x + 4.0, bb.max.x - 4.0, bb.min.y);
+        spike_bands.push(vec![Vec2::new(x0, y - 24.0), Vec2::new(x1, y - 24.0), Vec2::new(x1, y + 2.0), Vec2::new(x0, y + 2.0)]);
+    }
     let kill_zones: Vec<Vec<Vec2>> =
         sim.level.zones.iter().filter(|z| matches!(z.kind, ZoneKind::Kill)).map(|z| z.shape.outline()).collect();
     for &(id, tag) in &bodies {

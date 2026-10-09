@@ -4,7 +4,13 @@ Every cutscene / story-trigger id used by the campaign levels, with what it
 should say or show. Intro/outro scripts play before/after a level (story
 mode); the rest fire once when a player rolls into the trigger band
 (`StoryTrigger`, a tall rectangle across the path). Mid-level beats should be
-short (a bubble or two, 3–6 s, never blocking control for long).
+short (a bubble or two, 3–6 s, never blocking control for long). The words
+live in `bb-game/src/story/scripts.rs` (`level_lines`).
+
+Every chapter begins beside a sealed **entry cave** (the way back, plugged by
+a rock-fall, glowing with the previous chapter's colour) and ends when Pip
+rolls into the **exit cave** (glowing with the next chapter's colour); the
+goal is inside that tunnel, so outros start with Pip in the glow.
 
 Cast voices: Pip (high, squeaky), Granny Gloop (low, wobbly), Glimmer
 (chimes, fortune-cookie wisdom), Reg (pompous), Huddle blobs (soft murmurs),
@@ -20,8 +26,8 @@ Lulu (only in ch10).
 | `ch01_pointy` | Pip peers into the first spike pit. Sweat drop. "Pointy." Hint: run and jump over. |
 | `ch01_squish` | The crawlspace: Pip squeezes flat to fit. "Squish… squish…" (a grin creeps back). |
 | `ch01_big_slope` | Top of the ridge, a huge jelly slope below. Pip: "Oooh." Sparkle eyes. Jump at the bottom! |
-| `ch01_look_up` | The cave opens into a tall shaft; far, far above, a pinprick of light. Pip looks UP for the first time. Camera tilts up the shaft. |
-| `ch01_outro` | Pip stares up at the light, bounces once, determined. Rolls into the Drip Tunnels. |
+| `ch01_look_up` | The cave opens into a tall shaft; far, far above, a pinprick of light. Pip looks UP for the first time. Camera tilts up the shaft. At its foot, a tunnel glowing teal. |
+| `ch01_outro` | Pip stares up at the light, bounces once, determined. Rolls into the teal tunnel to the Drip Tunnels. |
 
 ## Chapter 2 — The Drip (Drip Tunnels)
 
@@ -35,6 +41,7 @@ Lulu (only in ch10).
 | `ch02_bridge_wobble` | First soft bridge sags under Pip. Glimmer: "Wobbly isn't broken. Wobbly is just *thinking*." |
 | `ch02_membranes` | The membrane shaft. Glimmer: "Jelly doors only open one way… up!" Hint: jump up through membranes. |
 | `ch02_up_feeling` | At the top of the shaft. Glimmer: "Up is a direction AND a feeling!" Pip bounces higher than before. |
+| `ch02_push` | A trench far too wide to jump, spikes at the bottom, a huge jelly ball beside it. Pip: "Too wide to jump..." Hint: push the ball in, roll across on top. (First push puzzle.) |
 | `ch02_mushroom_glow` | Warm light ahead: the Fungus Caverns. Glimmer: "Smell that? Mushrooms. Bouncy ones." |
 | `ch02_outro` | Pip and Glimmer peer into the glowing Fungus Caverns; giant mushroom caps wobble like trampolines. |
 
@@ -127,6 +134,7 @@ Lulu (only in ch10).
 | `ch08_slinky` | Slinkies dangle from the heap. Glimmer: "Same as vines, just more… slinky." |
 | `ch08_blocks` | A staircase of giant toy blocks, each with a letter. They wobble, but they hold. |
 | `ch08_toybox` | A big toy box with a spring on top. Pip boings up onto the lid. |
+| `ch08_two_balls` | (After the drawing.) The lid ends at an ENORMOUS spiky gap; two big balls on the lid. Hint: push the balls in and hop across their tops. |
 | `ch08_lulu_drawing` | On the lid: a crayon drawing, wobbly letters: **LULU ♥ BOUNCY THINGS**, with a stick-figure girl hugging a round, smiling blob. Pip stares. Glimmer, very quietly: "…She likes bouncy things." Pip bounces once, slowly, then very fast. |
 | `ch08_outro` | A deep RUMBLE. Dust falls. From far behind and below: the faint, familiar murmur of many blobs. |
 
@@ -143,6 +151,7 @@ Lulu (only in ch10).
 | `ch09_flooded` | A flooded hall. The Huddle has never swum. Pip demonstrates: float, puff, paddle. They copy, badly, adorably. |
 | `ch09_climb` | The climb to where Granny was last seen. The Huddle chant "boing… boing… BOING" as Pip hops each step. |
 | `ch09_granny` | **Granny Gloop**, pinned under a fallen slab, too big to wriggle free. Pip touches her; she pops loose and wobbles, then says, quietly: "We were scared of how much you bounce. Turns out bouncing is how you get UP." A long, squishy hug. |
+| `ch09_boulder` | Past Granny: the last collapse left a spiky hole and a round boulder. A Grumble: "We're stuck!" Pip: "Not stuck. Just... round about." Hint: roll the boulder in (the Huddle crosses on top). |
 | `ch09_all_together` | The whole Huddle lines up behind Pip. Granny: "Lead the way, little one." Above them: the bottom of an old stone well, and a faint ring of daylight far, far up. |
 | `ch09_outro` | Everyone looks up the Old Well. Glimmer: "Well, well, well." (Nobody laughs. Glimmer laughs anyway.) |
 
@@ -155,6 +164,6 @@ Lulu (only in ch10).
 | `ch10_huddle` | First glow mushroom in the well. The Huddle cheers (softly; old habits). Hint: the well has old one-way boards; jump up through them, and a slip only drops you to the boards below. |
 | `ch10_halfway` | Halfway up. Pip looks down: the whole Huddle bouncing up behind. Granny, puffing: "In my day we never went higher than a TOE." |
 | `ch10_giggle` | The giggle again, much closer now, and humming. Light is warmer. Glimmer starts to glow brighter than ever. |
-| `ch10_daylight` | Sunlight floods the top of the well; everyone squints. Pip puffs up into the final updraft and floats. Slow motion, sparkles. |
-| `ch10_lulu` | At the lip: two enormous, gentle hands, and **Lulu's** face, eyes huge: "OH! You're SO SQUISHY!" |
+| `ch10_daylight` | Warm light spills down the well; everyone squints. Pip puffs up into the final updraft and floats up into the cave at the top. Slow motion, sparkles. |
+| `ch10_lulu` | The top cave: at its far (left) end, the mouth opens onto blazing daylight, and **Lulu** is crouched just inside it, eyes huge: "OH! You're SO SQUISHY!" (Lulu stands at about (-1880, 9650), inside the exit tunnel, facing right; the trigger is the band at x -1000..-950; the goal is at x -1890..-1660 on the tunnel floor, y 9650.) |
 | `ch10_outro` | **Finale.** Lulu scoops up every blob (Granny last, who protests and then melts) and carries them to her playroom: pillows, blankets, a trampoline bed. True Softness. Play, forever. Reg's sock turns up in the laundry basket. Credits roll in a softbody playroom you can bounce around in. |

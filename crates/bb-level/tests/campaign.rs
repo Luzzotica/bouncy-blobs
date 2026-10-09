@@ -744,3 +744,195 @@ fn bot_handles_every_assist() {
         println!("bot failed {fails:?} (advisory)");
     }
 }
+
+// ------------------------------------------------ level design rules
+
+/// Chapters another agent is mid-way through re-authoring (springs →
+/// bouncy mushrooms). Their hazard depths are reported, not asserted.
+const PENDING: &[u8] = &[3];
+
+/// Points along the critical path every ~20 px (feet positions).
+fn path_samples(c: &Course) -> Vec<(Vec2, Move)> {
+    let mut out = Vec::new();
+    for w in c.path.windows(2) {
+        let n = ((w[1].at - w[0].at).length() / 20.0).ceil().max(1.0) as usize;
+        for k in 0..=n {
+            out.push((w[0].at.lerp(w[1].at, k as f32 / n as f32), w[1].how));
+        }
+    }
+    out
+}
+
+/// Floor hazards: spike strips whose teeth point up, and kill zones (top
+/// edge). Each as a polyline (left to right).
+fn floor_hazards(l: &Level) -> Vec<(String, Vec2, Vec2)> {
+    let mut v: Vec<(String, Vec2, Vec2)> = l
+        .spikes
+        .iter()
+        .filter(|s| (s.b - s.a).perp().y > 0.0 && s.b.x > s.a.x)
+        .map(|s| (format!("spikes {}→{}", s.a, s.b), s.a, s.b))
+        .collect();
+    for z in &l.zones {
+        if matches!(z.kind, ZoneKind::Kill) {
+            let (lo, hi) = z.shape.bounds();
+            v.push((format!("kill zone {lo}..{hi}"), Vec2::new(lo.x, hi.y), hi));
+        }
+    }
+    v
+}
+
+fn hazard_depth_errors(n: u8) -> Vec<String> {
+    let c = campaign::course(n);
+    let l = &c.level;
+    let sim = Sim::new(l.clone());
+    let mut errs = Vec::new();
+    for (name, a, b) in floor_hazards(l) {
+        let mut worst: Option<(f32, Vec2)> = None;
+        for (p, how) in path_samples(&c) {
+            // Standing on a prop you pushed in: it's what's beneath you.
+            if p.x < a.x || p.x > b.x || how == Move::Prop {
+                continue;
+            }
+            let hy = a.y + (b.y - a.y) * (p.x - a.x) / (b.x - a.x).max(1e-3);
+            let depth = p.y - hy;
+            if depth <= 0.0 || depth > 2500.0 {
+                continue;
+            }
+            // Only if it's really what's beneath you (nothing solid between).
+            let hit = sim.world.raycast(p + Vec2::new(0.0, 4.0), Vec2::NEG_Y, depth - 8.0, bb_sim::load::layer::WORLD, None);
+            if hit.is_some() {
+                continue;
+            }
+            if worst.is_none_or(|(d, _)| depth > d) {
+                worst = Some((depth, p));
+            }
+        }
+        if let Some((d, p)) = worst {
+            if d > metrics::MAX_HAZARD_DEPTH + 1.0 {
+                errs.push(format!("ch{n:02}: {name} is {d:.0} px below the path at {p} (max {})", metrics::MAX_HAZARD_DEPTH));
+            }
+        }
+    }
+    errs
+}
+
+/// Rule 1: danger is always visible. No spike / kill hazard sits deeper
+/// below the player's line than the camera can show.
+#[test]
+fn hazards_are_never_deeper_than_the_screen_shows() {
+    let mut errs = Vec::new();
+    for n in 1..=CHAPTERS {
+        let e = hazard_depth_errors(n);
+        if PENDING.contains(&n) {
+            for x in &e {
+                println!("(pending) {x}");
+            }
+        } else {
+            errs.extend(e);
+        }
+    }
+    assert!(errs.is_empty(), "hazards out of sight:\n{}", errs.join("\n"));
+}
+
+/// The metric itself matches the camera framing.
+#[test]
+fn hazard_metric_fits_the_view() {
+    let below_feet = metrics::VIEW_H * 0.5 - metrics::PLAYER_R - metrics::CAM_LIFT;
+    assert!(metrics::MAX_HAZARD_DEPTH + metrics::SCREEN_MARGIN <= below_feet + 0.1);
+    assert!(metrics::MAX_HAZARD_DEPTH > metrics::JUMP_H, "pits must still be deep enough to matter");
+}
+
+/// Rule 5: no cheese. Wherever the critical path swings / climbs over a
+/// spike pit, the roof over that pit carries spikes too, so crawling along
+/// the ceiling isn't a shortcut.
+#[test]
+fn vine_crossings_have_spiked_ceilings() {
+    let mut errs = Vec::new();
+    for n in 1..=CHAPTERS {
+        if PENDING.contains(&n) {
+            continue;
+        }
+        let c = campaign::course(n);
+        let l = &c.level;
+        let ceiling: Vec<(f32, f32)> =
+            l.spikes.iter().filter(|s| (s.b - s.a).perp().y < 0.0).map(|s| (s.a.x.min(s.b.x), s.a.x.max(s.b.x))).collect();
+        for w in c.path.windows(2) {
+            if w[1].how != Move::Rope {
+                continue;
+            }
+            let (x0, x1) = (w[0].at.x.min(w[1].at.x), w[0].at.x.max(w[1].at.x));
+            for (name, a, b) in floor_hazards(l) {
+                let (o0, o1) = (a.x.max(x0), b.x.min(x1));
+                if o1 - o0 < 150.0 {
+                    continue;
+                }
+                let covered: f32 = ceiling.iter().map(|(c0, c1)| (c1.min(o1) - c0.max(o0)).max(0.0)).sum();
+                if covered < (o1 - o0) * 0.4 {
+                    errs.push(format!("ch{n:02}: rope crossing {x0}..{x1} over {name}: only {covered:.0} of {:.0} px of ceiling spiked", o1 - o0));
+                }
+            }
+        }
+    }
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
+}
+
+/// Rule 10: every chapter is bookended by a sealed entry cave and an exit
+/// cave whose glow is the neighbouring chapter's; the goal is inside the
+/// exit tunnel; no big round "sun" lights.
+#[test]
+fn chapters_are_bookended_by_caves() {
+    let themes = [Theme::Hollow, Theme::Drip, Theme::Fungus, Theme::Vines, Theme::Stoneworks, Theme::Lake, Theme::Chimney, Theme::Toys, Theme::CaveIn, Theme::Well];
+    for (n, c) in courses() {
+        let l = &c.level;
+        let i = n as usize - 1;
+        assert_eq!(l.theme, themes[i], "ch{n:02} theme");
+        if PENDING.contains(&n) && l.mouths.is_empty() {
+            println!("(pending) ch{n:02}: no cave mouths yet");
+            continue;
+        }
+        let entry: Vec<_> = l.mouths.iter().filter(|m| m.kind == MouthKind::Entry).collect();
+        let exit: Vec<_> = l.mouths.iter().filter(|m| m.kind == MouthKind::Exit).collect();
+        assert_eq!(entry.len(), 1, "ch{n:02}: one entry cave");
+        assert_eq!(exit.len(), 1, "ch{n:02}: one exit cave");
+        assert_eq!(entry[0].theme, if i == 0 { Theme::Hollow } else { themes[i - 1] }, "ch{n:02}: entry glows with the previous chapter");
+        if i + 1 < themes.len() {
+            assert_eq!(exit[0].theme, themes[i + 1], "ch{n:02}: exit glows with the next chapter");
+        } else {
+            assert!(exit[0].daylight, "ch10 opens onto daylight");
+        }
+        let (lo, hi) = exit[0].interior();
+        let g = l.goal.as_ref().unwrap().center();
+        assert!(g.x > lo.x && g.x < hi.x && g.y > lo.y && g.y < hi.y, "ch{n:02}: goal {g} not inside the exit tunnel {lo}..{hi}");
+        assert!(!l.decor.iter().any(|d| d.kind == "sun"), "ch{n:02}: no round sun lights");
+        // The tunnels are open air (you can stand in them).
+        let solid = solids(l);
+        for m in [entry[0], exit[0]] {
+            let p = m.pos + Vec2::new(m.facing * 120.0, R + 10.0);
+            assert!(!embedded(&solid, p, 8.0), "ch{n:02}: {:?} mouth at {} is filled with rock", m.kind, m.pos);
+        }
+    }
+}
+
+/// Rule 7 / feedback: ground decor (crystals, mushrooms, toys) stands on
+/// something; nothing floats in mid-air.
+#[test]
+fn ground_decor_is_grounded() {
+    let mut errs = Vec::new();
+    for (n, c) in courses() {
+        let l = &c.level;
+        let sim = Sim::new(l.clone());
+        let solid = solids(l);
+        for d in &l.decor {
+            if !matches!(d.kind.as_str(), "crystal" | "mushroom" | "sock" | "crayon" | "block_letters") {
+                continue;
+            }
+            let mask = bb_sim::load::layer::WORLD;
+            let down = sim.world.raycast(d.pos + Vec2::new(0.0, 30.0), Vec2::NEG_Y, 70.0, mask, None);
+            let inside = solid.iter().any(|s| geom::point_in_polygon(d.pos + Vec2::new(0.0, 30.0 * d.scale), s));
+            if down.is_none() || inside {
+                errs.push(format!("ch{n:02}: {} at {} is {}", d.kind, d.pos, if inside { "buried in rock" } else { "floating" }));
+            }
+        }
+    }
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
+}

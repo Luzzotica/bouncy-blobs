@@ -43,7 +43,9 @@ pub struct ThemeColors {
     pub glow: Color,
     pub water: Color,
     /// Black-cave look: black stone, near-black sky, luminous life.
-    /// False for the daylight finale (Well, Playroom) and Kids Mode.
+    /// False for the daylight playroom and Kids Mode. (The Old Well is a
+    /// cave climb like every other chapter: daylight only shows through
+    /// its exit mouth.)
     pub dark: bool,
     /// Glow-mushroom colour (per-theme tint of the luminous accents).
     pub mush: Color,
@@ -84,7 +86,10 @@ pub fn theme(t: Theme) -> ThemeColors {
         Theme::Toys => Some((0xffc94d, 0x2ee6b0, 0xff8fd0, 0xff9fc0)),
         Theme::CaveIn => Some((0xff8a6a, 0xff5a5a, 0xffb070, 0xffc0a0)),
         Theme::Party => Some((0xff9fd0, 0xffd803, 0x8fd8ff, 0xfff27a)),
-        Theme::Well | Theme::Playroom | Theme::Kids => None,
+        // The Old Well: warm gold-and-mint life, the colour of the
+        // daylight far above.
+        Theme::Well => Some((0x9fe8c8, 0xffe27a, 0xfff0b8, 0xfff2c6)),
+        Theme::Playroom | Theme::Kids => None,
     };
     let rock_c = hex(rock);
     let jelly_c = hex(jelly);
