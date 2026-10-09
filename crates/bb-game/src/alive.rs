@@ -295,6 +295,7 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
         return;
     }
     let seed = level.id.bytes().fold(0x51ed_270bu32, |h, b| h.rotate_left(5) ^ b as u32);
+    let ground = crate::level_view::Ground::new(level);
     let solids: Vec<Vec<PVec2>> = level.terrain.iter().filter(|t| !t.one_way).map(|t| ccw(t.shape.outline())).collect();
     let boxes: Vec<Aabb> = solids.iter().map(|o| Aabb::from_points(o.iter().copied())).collect();
     let solid_at = |p: PVec2| solids.iter().zip(&boxes).any(|(o, b)| b.contains(p) && geom::point_in_polygon(p, o));
@@ -315,6 +316,11 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
             "glowworm" => (HangKind::Thread, d.pos + PVec2::new(18.0 * d.scale, 70.0 * d.scale), 70.0 * d.scale),
             _ => (HangKind::Drip, d.pos + PVec2::new(0.0, 6.0), 66.0 * d.scale),
         };
+        // Only from real rock: decor authored in mid-air (dust markers in
+        // a draft, say) would hang from nothing.
+        if !(0..4).any(|k| ground.solid(root + PVec2::new(0.0, 4.0 + k as f32 * 12.0))) {
+            continue;
+        }
         hangers.push(hanger(kind, root, len, hue(root), hash1(i, seed)));
     }
 
@@ -363,7 +369,9 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
                     }
                     // Root a little into the rock so the crag edge hides it.
                     let root = p + PVec2::new(0.0, 26.0);
-                    hangers.push(hanger(kind, root, l + 26.0, hue(root), h(5)));
+                    // Roots are the level's vines: one colour for all of them.
+                    let col = if kind == HangKind::Root { palette::vine(&theme) } else { hue(root) };
+                    hangers.push(hanger(kind, root, l + 26.0, col, h(5)));
                 }
             } else if nrm.y > 0.6 {
                 // Floor: fronds (behind the jelly lip, or on bare rock).
@@ -378,20 +386,10 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
                         continue;
                     }
                     let on_jelly = under_jelly(p + PVec2::new(0.0, 8.0));
-                    // Under a jelly skin, sprout from its top instead.
-                    let base = if on_jelly {
-                        let top = jelly_boxes
-                            .iter()
-                            .filter(|(lo, hi)| p.x > lo.x && p.x < hi.x && hi.y > p.y - 4.0 && lo.y < p.y + 60.0)
-                            .map(|(_, hi)| hi.y)
-                            .fold(f32::MIN, f32::max);
-                        if top == f32::MIN {
-                            continue;
-                        }
-                        PVec2::new(p.x, top - 7.0)
-                    } else {
-                        p
-                    };
+                    // Sprout from the real surface here (the jelly skin's
+                    // top where there is one), never from a bounding box.
+                    let Some((top, _)) = ground.snap(p + nrm * 4.0, 60.0, 24.0) else { continue };
+                    let base = top - PVec2::new(0.0, 3.0);
                     fronds.push(Frond {
                         base,
                         tan: -tan,
@@ -465,7 +463,8 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
     let mut mush = Vec::new();
     for (i, d) in level.decor.iter().enumerate() {
         if crate::cave::is_reactive(&d.kind) && !near_checkpoint(level, d.pos) {
-            let n = node(vec![(d.pos - PVec2::new(0.0, 10.0), 0.0)]);
+            let Some((pos, _)) = crate::level_view::place_decor(&ground, &d.kind, d.pos, d.scale) else { continue };
+            let n = node(vec![(pos - PVec2::new(0.0, 10.0), 0.0)]);
             mush.push(Mush { decor: i, cap: 50.0 * d.scale, node: n });
         }
     }
@@ -907,16 +906,25 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
     let tip = pts[N];
     match h.kind {
         HangKind::Root => {
-            // Physical: a dim root always; it warms where the light is.
-            for i in 0..N {
-                let w = h.w * (1.0 - 0.7 * i as f32 / N as f32);
-                let body = mix(Color::BLACK, mix(h.col, Color::WHITE, 0.1), 0.13 + 0.16 * g[i]);
-                buf.stroke(&[pts[i], pts[i + 1]], w, 0.0, la(body, 1.0));
-            }
+            // Physical: a dim root always, one smooth tapered strand with a
+            // rounded tip; it warms where the light is.
+            let sp = crate::render::smooth_open(&pts, 3);
+            let m = sp.len();
+            let gs: Vec<f32> = (0..m).map(|i| { let f = i as f32 / (m - 1) as f32 * N as f32; let k = (f as usize).min(N - 1); g[k] + (g[k + 1] - g[k]) * (f - k as f32) }).collect();
+            let ws: Vec<f32> = (0..m).map(|i| h.w * (1.0 - 0.62 * i as f32 / (m - 1) as f32)).collect();
+            let cs: Vec<[f32; 4]> = gs.iter().map(|x| la(mix(Color::BLACK, mix(h.col, Color::WHITE, 0.1), 0.16 + 0.16 * x), 1.0)).collect();
+            buf.taper(&sp, &ws, 0.0, &cs, false, true);
+            // A curled rootlet near the tip so it ends in growth, not a cut.
+            let d = (sp[m - 1] - sp[m - 4]).normalize_or(PVec2::new(0.0, -1.0));
+            let side = PVec2::new(-d.y, d.x) * if h.phase.fract() > 0.5 { 1.0 } else { -1.0 };
+            let at = sp[m - 5];
+            let curl: Vec<PVec2> = (0..=5).map(|k| { let u = k as f32 / 5.0; at + (side * 0.9 + d * 0.5) * (u * h.w * 2.2) + d * (u * u * h.w * 0.8) }).collect();
+            let cw: Vec<f32> = (0..=5).map(|k| ws[m - 5] * 0.45 * (1.0 - 0.6 * k as f32 / 5.0)).collect();
+            buf.taper(&curl, &cw, -0.0001, &vec![cs[m - 5]; 6], false, true);
             if gmax > 0.004 {
                 // A glowing rim and nodes that wake as the front passes.
-                let rim: Vec<[f32; 4]> = g.iter().map(|x| la(lighten(h.col, 0.2), 0.6 * x)).collect();
-                buf.stroke_cols(&pts[2..], 1.4, 0.0005, &rim[2..]);
+                let rim: Vec<[f32; 4]> = gs.iter().map(|x| la(lighten(h.col, 0.2), 0.6 * x)).collect();
+                buf.stroke_cols(&sp[6..], 1.4, 0.0005, &rim[6..]);
                 for (k, q) in pts.iter().enumerate().skip(3).step_by(3) {
                     let a = 0.85 * g[k];
                     soft_dot(buf, *q, 7.0 + 8.0 * g[k], 0.001, la(h.col, 0.3 * a));
