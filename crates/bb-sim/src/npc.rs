@@ -42,6 +42,10 @@ pub const GLIMMER_DRIFT: f32 = 4.0;
 /// …then goes home and won't come over again for this long.
 const GLIMMER_REST: f32 = 9.0;
 
+/// Reg the sock's spin (rad/s) and speed (px/s) caps.
+const REG_MAX_SPIN: f32 = 5.0;
+const REG_MAX_SPEED: f32 = 1300.0;
+
 const HUDDLE_COLORS: [u32; 6] = [0x8fd3ff, 0xffb3c7, 0xc6f68d, 0xffd88a, 0xd7b8ff, 0x9ff0e1];
 
 impl Npc {
@@ -120,6 +124,40 @@ impl Npc {
     }
 }
 
+/// Nudge a freshly spawned body up until it no longer overlaps level rock or
+/// another solid body (a cutscene actor placed in a prop would otherwise be
+/// shoved out violently — Reg in his teacup spun off the map).
+pub(crate) fn lift_clear(world: &mut World, id: bb_physics::BodyId) {
+    let overlaps = |world: &World| {
+        let Some(b) = world.body(id) else { return false };
+        let pts: Vec<Vec2> = b.outline().collect();
+        let bb = b.aabb.expand(2.0);
+        let (layer, mask) = (b.layer, b.mask);
+        let hit_static = world.statics().any(|(_, s)| {
+            s.enabled && s.one_way.is_none() && s.layer & mask != 0 && layer & s.mask != 0 && s.aabb.overlaps(&bb)
+                && (pts.iter().any(|p| bb_physics::geom::point_in_polygon(*p, &s.poly)) || s.poly.iter().any(|q| bb_physics::geom::point_in_polygon(*q, &pts)))
+        });
+        hit_static
+            || world.bodies().any(|(oid, o)| {
+                oid != id && o.enabled && o.closed && o.layer & mask != 0 && layer & o.mask != 0 && o.aabb.overlaps(&bb)
+                    && (pts.iter().any(|p| o.contains_point(*p)) || o.outline().any(|q| bb_physics::geom::point_in_polygon(q, &pts)))
+            })
+    };
+    let mut moved = false;
+    for _ in 0..80 {
+        if !overlaps(world) {
+            break;
+        }
+        if let Some(b) = world.body_mut(id) {
+            b.translate(Vec2::new(0.0, 4.0));
+            moved = true;
+        }
+    }
+    if let Some(b) = world.body_mut(id).filter(|b| moved && b.home.is_some()) {
+        b.home = Some(b.x.clone());
+    }
+}
+
 fn sock_outline(at: Vec2, r: f32) -> Vec<Vec2> {
     // An L-shaped sock: leg up top, foot pointing right.
     let s = r / 30.0;
@@ -151,10 +189,20 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
             continue;
         }
         if n.role == NpcRole::Reg {
-            // Socks stand up (scripted or not): a gentle righting spin.
+            // Socks stand up (scripted or not): a gentle righting spin. And
+            // a sock never spins or flies like mad, whatever shoved it (an
+            // L-shape tangled with a prop could pump energy forever).
             if let Some(bm) = sim.world.body_mut(n.ctl.body) {
                 let (a, spin) = (bm.angle(), bm.angular_velocity());
-                bm.add_spin((-a * 8.0 - spin * 2.0) * dt);
+                bm.add_spin((-a * 16.0 - spin * 3.0) * dt);
+                let spin = bm.angular_velocity();
+                if spin.abs() > REG_MAX_SPIN {
+                    bm.add_spin(-(spin - REG_MAX_SPIN * spin.signum()));
+                }
+                let v = bm.velocity();
+                if v.length() > REG_MAX_SPEED {
+                    bm.add_velocity(v.normalize() * REG_MAX_SPEED - v);
+                }
             }
         }
         let Some(b) = sim.world.body(n.ctl.body) else { continue };

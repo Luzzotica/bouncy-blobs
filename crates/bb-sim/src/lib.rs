@@ -198,6 +198,7 @@ impl Sim {
         }
         for (i, n) in level.npcs.iter().enumerate() {
             let npc = Npc::spawn(&mut sim.world, i as u16, n);
+            npc::lift_clear(&mut sim.world, npc.ctl.body);
             sim.tags.insert(npc.ctl.body, BodyTag::Npc(i as u16));
             sim.npcs.push(npc);
         }
