@@ -44,6 +44,27 @@ pub struct Move {
     pub wall: f32,
     pub ceiling: f32,
     pub max_speed: f32,
+    /// Downhill momentum: refund of the rolling loss (∝ v²) on slopes.
+    #[serde(default)]
+    pub roll_refund: f32,
+    /// Slope (sin of its angle) at which the refund is full.
+    #[serde(default = "refund_slope")]
+    pub refund_slope: f32,
+    /// Speed at which the refund has faded to nothing.
+    #[serde(default = "refund_top")]
+    pub refund_top: f32,
+    /// A jump keeps this fraction of the ground speed you had (jumping off a
+    /// ramp shoves you back along its normal otherwise).
+    #[serde(default)]
+    pub jump_keep: f32,
+}
+
+fn refund_slope() -> f32 {
+    0.25
+}
+
+fn refund_top() -> f32 {
+    1800.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -33,6 +33,17 @@ accel = 2667.0
 # Soft top speed for steering: the push fades to nothing at this speed (falls,
 # slopes and springs can still carry you faster).
 max_speed = 1000.0
+# Downhill momentum. Rolling a soft blob loses energy where it squashes onto
+# the floor (roughly roll_refund × speed² per second, which is what caps flat
+# speed). On a downhill floor that loss is refunded, fully from a slope of
+# sin(angle) = refund_slope (≈15°), so slopes build real speed.
+roll_refund = 0.0033
+refund_slope = 0.25
+# …fading out toward this speed (so it can never run away).
+refund_top = 1800.0
+# A ground jump keeps at least this fraction of the ground speed you had
+# (swelling off a ramp otherwise shoves you back along its normal).
+jump_keep = 0.9
 air = 0.6
 wall = 0.4
 # Rolling along under a roof while holding up.

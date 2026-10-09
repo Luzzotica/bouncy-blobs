@@ -80,6 +80,10 @@ pub struct Controller {
     /// Override for the swell size while the button is held (Kids Mode puffs
     /// a picked-up blob bigger); `None` uses the tuning.
     pub expand_scale: Option<f32>,
+    /// Ground speed (along `right`) when the last ground jump started, and
+    /// how long the jump still keeps it.
+    jump_carry: f32,
+    jump_carry_t: f32,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -130,6 +134,8 @@ impl Controller {
             ceiling_t: 0.0,
             crouch: 0.0,
             expand_scale: None,
+            jump_carry: 0.0,
+            jump_carry_t: 0.0,
         }
     }
 
@@ -139,6 +145,7 @@ impl Controller {
         self.grounded = false;
         self.jump_buffer = 0.0;
         self.crouch = 0.0;
+        self.jump_carry_t = 0.0;
         self.grab = None;
         self.stuck = None;
     }
@@ -296,6 +303,43 @@ impl Controller {
         let frac = (along / t.movement.max_speed).max(0.0);
         let room = (1.0 - frac * frac).clamp(0.0, 1.0);
         b.add_accel(right * stick.x * t.movement.accel * strength * lateral * room);
+
+        // Downhill momentum: a rolling soft blob loses energy where it
+        // squashes onto the floor (∝ v²; it's what caps flat speed). Going
+        // downhill, refund it so slopes build real speed (unless the stick
+        // is braking).
+        if on_floor && t.movement.roll_refund > 0.0 {
+            let n = self.ground_normal;
+            let dh = down - n * down.dot(n);
+            let sin = dh.length();
+            if sin > 0.03 {
+                let dir = dh / sin;
+                let vt = vel.dot(dir).max(0.0);
+                let braking = stick.x * dir.dot(right) < -0.2;
+                if vt > 0.0 && !braking {
+                    let full = (sin / t.movement.refund_slope.max(0.01)).min(1.0);
+                    // Fades out toward refund_top so it can never run away.
+                    let top = (vt / t.movement.refund_top.max(1.0)).min(1.0);
+                    b.add_accel(dir * (t.movement.roll_refund * vt * vt * full * (1.0 - top * top)));
+                }
+            }
+        }
+
+        // A ground jump keeps its ground speed: swelling off a ramp shoves
+        // along the ramp's normal, which would kill a run-up.
+        self.jump_carry_t = (self.jump_carry_t - dt).max(0.0);
+        if pressed && on_floor && self.puff.is_none() {
+            self.jump_carry = vel.dot(right);
+            self.jump_carry_t = 0.2;
+        }
+        if self.jump_carry_t > 0.0 && self.input.button && t.movement.jump_keep > 0.0 {
+            let keep = self.jump_carry * t.movement.jump_keep;
+            let cur = vel.dot(right);
+            let blocked = self.touching && self.contact_normal.dot(right) * keep.signum() < -0.6;
+            if !blocked && keep.abs() > 60.0 && cur * keep.signum() < keep.abs() {
+                b.add_velocity(right * (keep - cur));
+            }
+        }
 
         // Stick down: press into the floor (fall faster) and squash flat.
         // Stick up: float — gentle in the air, a clamber when something's
