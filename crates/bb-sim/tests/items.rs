@@ -109,3 +109,85 @@ fn downhill_builds_speed() {
     println!("braking bottom {bottom:.0}");
     assert!(bottom < flat * 1.2, "can't brake downhill ({bottom:.0})");
 }
+
+/// Item 2: ch01's three wobbly jelly stepping stones stay put when you
+/// land, stand, hop and roll on them, and you come to rest on top.
+#[test]
+fn ch01_jelly_stones_hold_steady() {
+    let lvl = bb_level::campaign::chapter(1);
+    let stones: Vec<(Vec2, Vec2)> = lvl.jelly.iter().filter(|j| (j.wobble - 0.8).abs() < 1e-3).map(|j| j.shape.bounds()).collect();
+    assert_eq!(stones.len(), 3);
+    for (lo, hi) in stones {
+        for mode in ["stand", "hop", "wiggle"] {
+            let mut sim = Sim::new(lvl.clone());
+            sim.add_player(0, "P", 1);
+            put(&mut sim, Vec2::new((lo.x + hi.x) * 0.5, hi.y + 150.0));
+            let jid = sim.jelly.iter().map(|j| j.0).find(|id| { let c = sim.world.body(*id).unwrap().centroid(); c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y }).unwrap();
+            let home: Vec<Vec2> = sim.world.body(jid).unwrap().x.clone();
+            let mut peak_v: f32 = 0.0;
+            let mut shaky = 0;
+            for f in 0..300 {
+                let (stick, btn) = match mode {
+                    "hop" => (0.0, f > 60 && f < 200 && f % 40 < 8),
+                    "wiggle" => (if f > 60 && f < 200 { if (f / 12) % 2 == 0 { 0.6 } else { -0.6 } } else { 0.0 }, false),
+                    _ => (0.0, false),
+                };
+                set(&mut sim, Vec2::new(stick, 0.0), btn);
+                sim.step();
+                let jb = sim.world.body(jid).unwrap();
+                let jv = jb.v.iter().map(|v| v.length()).fold(0.0f32, f32::max);
+                if f > 30 { peak_v = peak_v.max(jv); if jv > 800.0 { shaky += 1; } }
+                if std::env::var("TRACE").is_ok() && jv > 300.0 { println!("  f{f} jv {jv:.0}"); }
+                assert!(sim.players[0].dead.is_none(), "popped on the stone at {lo:?} ({mode})");
+            }
+            let jb = sim.world.body(jid).unwrap();
+            let dev = jb.x.iter().zip(&home).map(|(a, b)| a.distance(*b)).fold(0.0f32, f32::max);
+            let p = pbody(&sim);
+            let c = p.centroid();
+            println!("stone {lo:?} {mode}: jelly peak v {peak_v:.0} shaky {shaky}, dev {dev:.1}; blob at ({:.0},{:.0}) v {:.0}", c.x, c.y, p.velocity().length());
+            // Landing / jump kicks give one-frame spikes; the bug was a
+            // sustained ~7000 px/s shake.
+            assert!(peak_v < 4000.0 && shaky <= 12, "jelly stone shook ({peak_v:.0} px/s, {shaky} frames) at {lo:?} ({mode})");
+            assert!(dev < 12.0, "jelly stone deformed {dev:.1}px at rest ({mode})");
+            assert!(c.x > lo.x - 10.0 && c.x < hi.x + 10.0 && c.y > hi.y && c.y < hi.y + 60.0 && p.velocity().length() < 60.0, "not resting on the stone at {lo:?}: {c:?} ({mode})");
+        }
+    }
+}
+
+#[test]
+fn probe_jelly_variants() {
+    let var = std::env::var("VAR").unwrap_or_default();
+    let mut b = LevelBuilder::new("j", "J", Theme::Hollow);
+    b.spawn(v(-500.0, 40.0)).ground(&[v(-800.0, 0.0), v(-300.0, 0.0)], 300.0);
+    b.jelly(v(0.0, 180.0), v(200.0, 260.0), 0.8);
+    let mut sim = Sim::new(b.build());
+    sim.add_player(0, "P", 1);
+    let mut jid = sim.jelly.last().unwrap().0;
+    if var.contains("ground") { jid = sim.jelly[1].0; }
+    {
+        let jb = sim.world.body_mut(jid).unwrap();
+        println!("jelly n={} boundary={} mass={} w0={}", jb.x.len(), jb.boundary.len(), jb.mass(), jb.w[0]);
+        if var.contains("home") { jb.home_compliance = 1e-6; }
+        if var.contains("damp") { jb.params.internal_damping = 30.0; }
+        if var.contains("heavy") { for w in jb.w.iter_mut() { *w *= 0.1; } for w in jb.base_w.iter_mut() { *w *= 0.1; } }
+        if let Some(c) = var.strip_prefix("shape") { jb.params.shape_compliance = Some(c.parse().unwrap_or(1e-6)); }
+    }
+    if var.contains("sub") { sim.world.config.substeps = 24; }
+    put(&mut sim, Vec2::new(100.0, 380.0));
+    if var.contains("hi") { put(&mut sim, Vec2::new(100.0, 700.0)); }
+    if var.contains("ground") { let c = sim.world.body(jid).unwrap().centroid(); put(&mut sim, c + Vec2::new(0.0, 150.0)); }
+    let home: Vec<Vec2> = sim.world.body(jid).unwrap().x.clone();
+    let mut log = vec![];
+    let mut peak: f32 = 0.0;
+    for f in 0..240 {
+        if let Some(jb) = sim.world.body(jid) { peak = peak.max(jb.x.iter().zip(&home).map(|(a, b)| a.distance(*b)).fold(0.0f32, f32::max)); }
+        set(&mut sim, Vec2::new(if var.contains("roll") && f > 100 { 1.0 } else { 0.0 }, 0.0), var.contains("jump") && f % 50 < 10);
+        sim.step();
+        let jb = sim.world.body(jid).unwrap();
+        let dev = jb.x.iter().zip(&home).map(|(a, b)| a.distance(*b)).fold(0.0f32, f32::max);
+        let vmax = jb.v.iter().map(|v| v.length()).fold(0.0f32, f32::max);
+        let pv = pbody(&sim).v.iter().map(|v| v.length()).fold(0.0f32, f32::max);
+        if f % 20 == 19 { let c = pbody(&sim).centroid(); log.push(format!("p({:.0},{:.0}) dev{:.1} jv{:.0} pv{:.0}", c.x, c.y, dev, vmax, pv)); }
+    }
+    println!("{var}: peak dev {peak:.1}: {}", log.join(" | "));
+}

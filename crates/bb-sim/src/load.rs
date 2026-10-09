@@ -49,7 +49,7 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
     }
 
     for j in &level.jelly {
-        let mut d = BodyDesc::mesh_from_outline(&j.shape.outline(), 22.0, 0.0);
+        let mut d = jelly_mesh(&j.shape);
         let area = bb_physics::geom::signed_area_slice(&d.positions).abs();
         let n = d.positions.len() as f32;
         d.masses = vec![(area / 2500.0).max(0.5) / n; d.positions.len()];
@@ -222,6 +222,25 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         sim.springs.push(crate::SpringState { def: s.clone(), id, cooldown: 0.0, squash: 0.0 });
     }
     let _ = (RopeId(0), StaticId(0));
+}
+
+/// The soft mesh for a jelly shape. Rectangles get a regular grid (with
+/// interior particles): ear-clipping a resampled rectangle makes long sliver
+/// triangles whose area constraints fight, and a free-standing block (no
+/// rock under it to steady it) shook itself to bits once touched.
+fn jelly_mesh(shape: &lvl::Shape) -> BodyDesc {
+    if let lvl::Shape::Rect { center, size, angle } = *shape {
+        let cols = (size.x / 22.0).ceil().max(1.0) as usize;
+        let rows = (size.y / 22.0).ceil().max(1.0) as usize;
+        let h = size * 0.5;
+        let mut d = BodyDesc::grid(-h, h, cols, rows, 0.0);
+        let rot = Vec2::from_angle(angle);
+        for q in d.positions.iter_mut() {
+            *q = center + rot.rotate(*q);
+        }
+        return d;
+    }
+    BodyDesc::mesh_from_outline(&shape.outline(), 22.0, 0.0)
 }
 
 fn phys_ccw(mut poly: Vec<Vec2>) -> Vec<Vec2> {
