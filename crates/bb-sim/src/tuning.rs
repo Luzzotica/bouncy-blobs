@@ -30,6 +30,14 @@ pub struct Jump {
     pub expand_rate_press: f32,
     pub expand_rate_release: f32,
     pub expand_spring_mult: f32,
+    /// Extra launch (fraction of the launch speed) from springs and bouncy
+    /// mushrooms when you swell as you hit them.
+    #[serde(default)]
+    pub bounce_boost: f32,
+    /// How long after pressing the button a hit still counts as "swelling
+    /// into it" (and how late after the hit a press still counts).
+    #[serde(default)]
+    pub bounce_window: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

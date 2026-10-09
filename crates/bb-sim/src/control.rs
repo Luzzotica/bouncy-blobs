@@ -86,6 +86,8 @@ pub struct Controller {
     jump_carry_t: f32,
     /// Floats with no gravity at all (Glimmer).
     pub weightless: bool,
+    /// Seconds since the button was pressed (while it's held).
+    press_t: f32,
 }
 
 /// What the controller did this step (for sounds and animation).
@@ -139,6 +141,7 @@ impl Controller {
             jump_carry: 0.0,
             jump_carry_t: 0.0,
             weightless: false,
+            press_t: 99.0,
         }
     }
 
@@ -163,6 +166,22 @@ impl Controller {
         }
     }
 
+    /// How much the blob is swelling *right now* (for spring / mushroom
+    /// boosts): 1 just after pressing the button, fading to 0.3 while it's
+    /// held puffed up, 0 when not pressed.
+    pub fn swell(&self, window: f32) -> f32 {
+        if !self.input.button || self.puff.is_some() {
+            return 0.0;
+        }
+        let w = window.max(0.05);
+        if self.press_t <= w { 1.0 } else { (1.0 - (self.press_t - w) / w * 0.7).max(0.3) }
+    }
+
+    /// The button went down within the last `window` seconds (still held).
+    pub fn just_pressed(&self, window: f32) -> bool {
+        self.input.button && self.press_t <= window
+    }
+
     pub fn release_grab(&mut self, world: &mut World) {
         if let Some(g) = self.grab.take() {
             world.remove_joint(g.joint);
@@ -176,6 +195,7 @@ impl Controller {
         let mut action = None;
         let pressed = self.input.button && !self.prev_button;
         self.prev_button = self.input.button;
+        self.press_t = if pressed { 0.0 } else if self.input.button { self.press_t + dt } else { 99.0 };
         self.grab_cooldown = (self.grab_cooldown - dt).max(0.0);
         self.stick_grace = (self.stick_grace - dt).max(0.0);
         self.jump_buffer = if pressed { tune::JUMP_BUFFER } else { (self.jump_buffer - dt).max(0.0) };

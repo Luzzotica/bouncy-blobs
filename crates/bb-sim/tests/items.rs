@@ -453,3 +453,91 @@ fn reg_stays_upright_ch06() {
     }
 }
 
+
+/// Drop the blob from `from` (with a sideways velocity) onto a gadget;
+/// `swell_at` = press the button when the blob's bottom comes within this
+/// many px of `surface_y` (None: never). Returns (peak height of the
+/// centroid after the bounce, velocity just after launch).
+fn bounce(level: bb_level::Level, from: Vec2, vel: Vec2, surface_y: f32, swell_at: Option<f32>) -> (f32, Vec2) {
+    let mut sim = Sim::new(level);
+    sim.add_player(0, "P", 1);
+    put(&mut sim, from);
+    let id = sim.players[0].ctl.body;
+    sim.world.body_mut(id).unwrap().add_velocity(vel);
+    let mut pressing = false;
+    let mut launched = None;
+    let mut peak = f32::MIN;
+    let mut rising = false;
+    for _ in 0..240 {
+        let b = pbody(&sim);
+        let bottom = b.outline().map(|p| p.y).fold(f32::MAX, f32::min);
+        if let Some(d) = swell_at { if bottom - surface_y < d && b.velocity().y < 0.0 { pressing = true; } }
+        set(&mut sim, Vec2::ZERO, pressing);
+        let vy0 = pbody(&sim).velocity().y;
+        sim.step();
+        let b = pbody(&sim);
+        if launched.is_none() && vy0 <= 0.0 && b.velocity().y > 300.0 { launched = Some(b.velocity()); rising = true; }
+        if rising { peak = peak.max(b.centroid().y); if b.velocity().y < -100.0 { break; } }
+    }
+    (peak, launched.unwrap_or(Vec2::ZERO))
+}
+
+fn gadget_level(f: impl FnOnce(&mut LevelBuilder)) -> bb_level::Level {
+    let mut b = LevelBuilder::new("g", "G", Theme::Fungus);
+    b.spawn(v(-900.0, 40.0)).ground(&[v(-1200.0, 0.0), v(1200.0, 0.0)], 300.0);
+    f(&mut b);
+    b.build()
+}
+
+/// Item 4: swelling as you land on a spring launches you much higher.
+#[test]
+fn swell_into_spring_launches_higher() {
+    let lvl = gadget_level(|b| { b.spring(v(0.0, 0.0), 90.0, 1400.0); });
+    let (plain, _) = bounce(lvl.clone(), Vec2::new(0.0, 300.0), Vec2::ZERO, 18.0, None);
+    let (held_long, _) = bounce(lvl.clone(), Vec2::new(0.0, 300.0), Vec2::ZERO, 18.0, Some(1000.0));
+    let (timed, _) = bounce(lvl, Vec2::new(0.0, 300.0), Vec2::ZERO, 18.0, Some(40.0));
+    println!("spring: plain {plain:.0}, puffed all the way {held_long:.0}, swell on impact {timed:.0}");
+    assert!(timed > plain * 1.3, "swelling on the spring: {timed:.0} vs {plain:.0}");
+    assert!(timed > held_long, "timing the swell beats just staying puffed");
+}
+
+/// Item 4: bouncy mushrooms launch (flat: up; dome: along its normal; ball:
+/// away from its centre), and swelling on impact launches much higher.
+#[test]
+fn bouncy_mushrooms_launch() {
+    use bb_level::MushroomShape as S;
+    let mk = |shape: S| gadget_level(move |b| { b.bouncy_mushroom(v(0.0, 0.0), 100.0, shape, 160.0, 1300.0); });
+    // Flat: straight up, swell boost.
+    let top = 100.0 + S::Flat.cap_height(160.0);
+    let (plain, v0) = bounce(mk(S::Flat), Vec2::new(30.0, top + 300.0), Vec2::ZERO, top, None);
+    let (timed, v1) = bounce(mk(S::Flat), Vec2::new(30.0, top + 300.0), Vec2::ZERO, top, Some(40.0));
+    println!("flat: plain peak {plain:.0} v{v0:?}; swell peak {timed:.0} v{v1:?}");
+    assert!(v0.y > 1100.0 && v0.x.abs() < 200.0, "flat cap launches straight up: {v0:?}");
+    assert!(timed - top > (plain - top) * 1.3, "swelling on the flat cap: {timed:.0} vs {plain:.0}");
+    // Dome: land on its right shoulder → up and to the right.
+    let top = 100.0 + S::Dome.cap_height(160.0);
+    let (_, vd) = bounce(mk(S::Dome), Vec2::new(55.0, top + 260.0), Vec2::ZERO, top - 30.0, None);
+    let (_, vdl) = bounce(mk(S::Dome), Vec2::new(-55.0, top + 260.0), Vec2::ZERO, top - 30.0, None);
+    println!("dome: right shoulder {vd:?}, left {vdl:?}");
+    assert!(vd.x > 250.0 && vd.y > 700.0 && vdl.x < -250.0, "dome launches along its normal");
+    // Ball: hit it from the side (rolling into its equator) → flung back.
+    let c = Vec2::new(0.0, 100.0 + 80.0);
+    let mut sim = Sim::new(mk(S::Ball));
+    sim.add_player(0, "P", 1);
+    put(&mut sim, c + Vec2::new(-260.0, 0.0));
+    sim.world.body_mut(sim.players[0].ctl.body).unwrap().add_velocity(Vec2::new(700.0, 150.0));
+    let mut kicked = None;
+    for _ in 0..60 {
+        let vx0 = pbody(&sim).velocity().x;
+        set(&mut sim, Vec2::ZERO, false);
+        sim.step();
+        let vv = pbody(&sim).velocity();
+        if vx0 > 0.0 && vv.x < -600.0 { kicked = Some(vv); break; }
+    }
+    println!("ball: side hit {kicked:?}");
+    assert!(kicked.is_some_and(|k| k.x < -800.0), "ball flings you back the way you came");
+    // Ball from above: straight up.
+    let top = 100.0 + 160.0;
+    let (_, vb) = bounce(mk(S::Ball), Vec2::new(0.0, top + 300.0), Vec2::ZERO, top, None);
+    assert!(vb.y > 1100.0 && vb.x.abs() < 300.0, "ball from above: {vb:?}");
+}

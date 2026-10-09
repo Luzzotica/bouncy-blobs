@@ -13,7 +13,7 @@ pub mod tuning;
 
 use std::collections::HashMap;
 
-use bb_level::{Level, Mover, NpcRole, RopeStyle, SpringPad};
+use bb_level::{BouncyMushroom, Level, Mover, NpcRole, RopeStyle, SpringPad};
 pub use bb_physics::{self as physics, BodyId, Vec2, World};
 use bb_physics::{Collider, Config, Event, RopeId, StaticId};
 
@@ -92,6 +92,29 @@ pub struct SpringState {
     pub squash: f32,
 }
 
+/// A bouncy mushroom's soft cap (also listed in `Sim::jelly` as Bouncy
+/// jelly so it renders even before it gets its own look).
+#[derive(Clone, Debug)]
+pub struct MushroomState {
+    pub def: BouncyMushroom,
+    pub body: BodyId,
+    /// Centre of the cap at rest (dome: middle of its flat base).
+    pub center: Vec2,
+    /// Recently launched bodies (no double launches): (body, seconds left).
+    pub cooldown: Vec<(BodyId, f32)>,
+    /// 0..1 visual "boing" (decays).
+    pub squash: f32,
+}
+
+/// A launch that can still be boosted by a late button press.
+#[derive(Clone, Debug)]
+pub(crate) struct LateBoost {
+    pub body: BodyId,
+    pub dir: Vec2,
+    pub speed: f32,
+    pub age: f32,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Who {
     Player(u8),
@@ -111,6 +134,10 @@ pub enum SimEvent {
     /// Two bodies hit each other (`normal` points from `b` toward `a`).
     Bump { a: BodyId, b: BodyId, pos: Vec2, normal: Vec2, speed: f32 },
     Spring { index: usize },
+    /// A bouncy mushroom launched something.
+    Mushroom { index: usize, pos: Vec2, boosted: bool },
+    /// A blob swelled into a spring / mushroom and got the big launch.
+    SuperBounce { body: BodyId, pos: Vec2 },
     Action { who: Who, action: Action },
     NpcFreed { index: u16 },
     /// A blob was squeezed next to a crush but spared.
@@ -132,6 +159,8 @@ pub struct Sim {
     pub movers: Vec<MoverState>,
     pub ropes: Vec<RopeState>,
     pub springs: Vec<SpringState>,
+    pub mushrooms: Vec<MushroomState>,
+    pub(crate) late_boosts: Vec<LateBoost>,
     /// Highest checkpoint reached (index into `level.respawn_points()`).
     pub checkpoint: usize,
     pub collected: Vec<bool>,
@@ -178,6 +207,8 @@ impl Sim {
             movers: Vec::new(),
             ropes: Vec::new(),
             springs: Vec::new(),
+            mushrooms: Vec::new(),
+            late_boosts: Vec::new(),
             checkpoint: 0,
             collected: vec![false; level.pickups.len()],
             amoebas: Vec::new(),

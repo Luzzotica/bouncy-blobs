@@ -343,6 +343,27 @@ impl LevelBuilder {
         self
     }
 
+    /// A bouncy mushroom: a rock stalk `height` tall standing at `base`,
+    /// topped by a soft physical cap `size` wide that launches you at
+    /// `power` px/s (flat: straight up; dome: along its surface normal; ball:
+    /// away from its centre). Swell as you hit it to fly much higher.
+    pub fn bouncy_mushroom(&mut self, base: Vec2, height: f32, shape: MushroomShape, size: f32, power: f32) -> &mut Self {
+        self.bouncy_mushroom_angled(base, height, shape, size, power, 90.0)
+    }
+
+    /// [`Self::bouncy_mushroom`] with a tilted flat cap (`angle_deg` is the
+    /// launch direction, 90 = up).
+    pub fn bouncy_mushroom_angled(&mut self, base: Vec2, height: f32, shape: MushroomShape, size: f32, power: f32, angle_deg: f32) -> &mut Self {
+        let stalk_w = if shape == MushroomShape::Ball { (size * 0.22).max(22.0) } else { 28.0 };
+        if height > 4.0 {
+            // The stalk tucks a little into the cap so there's no seam.
+            let tuck = if shape == MushroomShape::Ball { size * 0.25 } else { 6.0 };
+            self.block(base + v(-stalk_w * 0.5, 0.0), base + v(stalk_w * 0.5, height + tuck));
+        }
+        self.level.mushrooms.push(BouncyMushroom { pos: base + v(0.0, height), shape, size, power, angle: angle_deg.to_radians() });
+        self
+    }
+
     /// A falling spiky drip: a spiked ball of goo that waits on the ceiling
     /// at `top`, drops `fall` px fast, then slowly slurps back up. Touching
     /// it pops you.

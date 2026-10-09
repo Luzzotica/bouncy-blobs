@@ -5,19 +5,28 @@
 //! angled spring fling, a bouncy-floored cavern you climb cap by cap, and a
 //! finale that remixes drips and membranes from the Drip.
 //!
-//! Mechanics: trampoline mushrooms, spring pads, momentum chains, bouncy floors.
+//! Mechanics: bouncy mushrooms (flat, dome and ball caps — swell as you
+//! land to fly higher), spring pads, momentum chains, bouncy floors.
 
 use super::*;
 
-/// A trampoline mushroom whose cap top is at (x, cap_y), standing on `base_y`.
+/// A bouncy mushroom whose cap top is at (x, cap_y), standing on `base_y`:
+/// a soft flat cap that launches you straight up (swell as you land on it
+/// to fly much higher).
 fn tramp(c: &mut Ch, x: f32, base_y: f32, cap_y: f32, power: f32) {
-    let cap_w = 160.0;
-    let height = cap_y - base_y - cap_w * 0.28;
+    shroom(c, x, base_y, cap_y, power, MushroomShape::Flat);
+}
+
+/// A bouncy mushroom of any shape with its cap top at (x, cap_y).
+fn shroom(c: &mut Ch, x: f32, base_y: f32, cap_y: f32, power: f32, shape: MushroomShape) {
+    let size = if shape == MushroomShape::Ball { 110.0 } else { 160.0 };
+    let height = cap_y - base_y - shape.cap_height(size);
     if height < 130.0 {
         // A rock pedestal so nobody gets stuck under a low cap.
         c.poly(&[v(x - 70.0, base_y), v(x + 70.0, base_y), v(x + 40.0, base_y + height - 6.0), v(x - 40.0, base_y + height - 6.0)]);
     }
-    c.trampoline(v(x, base_y), height, cap_w, power);
+    c.bouncy_mushroom(v(x, base_y), height, shape, size, power);
+    c.decor("mushroom_spots", v(x, base_y + height), size / 120.0, 0.5);
 }
 
 pub fn build() -> Course {

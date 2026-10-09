@@ -221,7 +221,70 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         let id = w.add_static(StaticDesc::polygon(poly));
         sim.springs.push(crate::SpringState { def: s.clone(), id, cooldown: 0.0, squash: 0.0 });
     }
+    for m in &level.mushrooms {
+        let (d, center) = mushroom_cap(m);
+        let id = w.add_body(d);
+        if let Some(b) = w.body_mut(id) {
+            b.anchor_home(2.5e-5);
+        }
+        sim.tags.insert(id, BodyTag::Jelly);
+        sim.jelly.push((id, lvl::Material::Bouncy));
+        sim.mushrooms.push(crate::MushroomState { def: m.clone(), body: id, center, cooldown: Vec::new(), squash: 0.0 });
+    }
     let _ = (RopeId(0), StaticId(0));
+}
+
+/// A bouncy mushroom's soft cap and its rest centre (dome: the middle of its
+/// flat base). Springy jelly tethered home: it squishes when you land and
+/// wobbles back; the launch itself is the runtime's.
+pub(crate) fn mushroom_cap(m: &lvl::BouncyMushroom) -> (BodyDesc, Vec2) {
+    use lvl::MushroomShape as S;
+    let dir = Vec2::from_angle(m.angle);
+    let size = m.size.max(30.0);
+    let (mut d, center) = match m.shape {
+        S::Flat => {
+            let t = m.shape.cap_height(size);
+            let c = m.pos + dir * (t * 0.5);
+            let mut d = jelly_mesh(&lvl::Shape::Rect { center: c, size: Vec2::new(size, t), angle: m.angle - std::f32::consts::FRAC_PI_2 });
+            d.params.edge_compliance = 4e-6;
+            d.params.tri_compliance = 4e-6;
+            d.params.shape_compliance = Some(2e-5);
+            (d, c)
+        }
+        S::Dome => {
+            let h = m.shape.cap_height(size);
+            let pts: Vec<Vec2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI * i as f32 / 16.0;
+                    m.pos + Vec2::new(a.cos() * size * 0.5, a.sin() * h)
+                })
+                .collect();
+            let ring = bb_physics::body::resample_loop(&pts, 14.0);
+            let mut d = BodyDesc::blob_from_outline(&ring, 1.0);
+            d.params.shape_compliance = Some(2e-5);
+            d.params.volume_compliance = 1e-7;
+            (d, m.pos)
+        }
+        S::Ball => {
+            let c = m.pos + Vec2::new(0.0, size * 0.5);
+            let mut d = BodyDesc::blob(c, size * 0.5, ((size * std::f32::consts::PI / 14.0) as usize).max(12), 1.0);
+            d.params.shape_compliance = Some(2e-5);
+            d.params.volume_compliance = 1e-7;
+            (d, c)
+        }
+    };
+    let n = d.positions.len() as f32;
+    let area = bb_physics::geom::signed_area_slice(&d.positions).abs().max(1.0);
+    d.masses = vec![(area / 2500.0).max(0.5) / n; d.positions.len()];
+    d.params.material = phys::Material { static_friction: 0.8, dynamic_friction: 0.6, restitution: 0.0 };
+    d.params.internal_damping = 5.0;
+    d.params.gravity_scale = 0.0;
+    d.params.radius = 1.5;
+    d.params.limits.poppable = false;
+    d.layer = layer::WORLD | layer::JELLY;
+    // Held by its home tethers; it doesn't fight its own stalk.
+    d.mask = layer::PLAYER | layer::PROP | layer::NPC;
+    (d, center)
 }
 
 /// The soft mesh for a jelly shape. Rectangles get a regular grid (with

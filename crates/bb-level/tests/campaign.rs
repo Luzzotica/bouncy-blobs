@@ -744,3 +744,20 @@ fn bot_handles_every_assist() {
         println!("bot failed {fails:?} (advisory)");
     }
 }
+
+/// Ch03's trampolines are bouncy mushrooms now (no spring pads stuck on
+/// caps), and the bot still bounces through every mushroom segment.
+#[test]
+fn ch03_mushrooms_replace_trampolines() {
+    let c = campaign::course(3);
+    let l = &c.level;
+    assert!(l.mushrooms.len() >= 9, "{} mushrooms", l.mushrooms.len());
+    for s in &l.springs {
+        assert!(!l.mushrooms.iter().any(|m| m.pos.distance(s.pos) < 120.0), "a spring pad sits on a mushroom at {:?}", s.pos);
+    }
+    for k in [0, 1, 3, 4] {
+        let (ok, t, pops) = bot_segment(&c, k, 60.0);
+        println!("ch03 seg {k}: {ok} {t:.1}s {pops} pops");
+        assert!(ok, "bot can't get through ch03 segment {k} (mushrooms)");
+    }
+}

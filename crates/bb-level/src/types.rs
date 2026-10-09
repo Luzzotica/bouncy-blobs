@@ -326,6 +326,50 @@ pub struct SpringPad {
     pub power: f32,
 }
 
+/// Shape of a [`BouncyMushroom`] cap.
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MushroomShape {
+    /// A flat springy pad: launches along its `angle`, like a spring.
+    #[default]
+    Flat,
+    /// A rounded dome: launches along the dome's normal where you hit it.
+    Dome,
+    /// A ball on a stalk: launches straight away from its centre (any side).
+    Ball,
+}
+
+impl MushroomShape {
+    /// Height of the cap above the stalk top for a cap `size` wide.
+    pub fn cap_height(self, size: f32) -> f32 {
+        match self {
+            MushroomShape::Flat => (size * 0.2).max(18.0),
+            MushroomShape::Dome => size * 0.4,
+            MushroomShape::Ball => size,
+        }
+    }
+}
+
+/// A bouncy mushroom: a soft, physical cap on a rock stalk that launches
+/// whatever lands on it. Swelling (holding the button) as you hit it launches
+/// you much higher. The stalk is plain terrain (the builder adds it).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BouncyMushroom {
+    /// Top of the stalk (the cap sits on it).
+    pub pos: Vec2,
+    #[serde(default)]
+    pub shape: MushroomShape,
+    /// Cap width (ball: diameter).
+    #[serde(default = "cap_size")]
+    pub size: f32,
+    /// Launch speed in px/s.
+    #[serde(default = "pad_power")]
+    pub power: f32,
+    /// Flat caps: launch direction (radians, π/2 = up).
+    #[serde(default = "up")]
+    pub angle: f32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Spikes {
     /// Base line of the spike strip; teeth point to the left of a→b
@@ -427,6 +471,9 @@ pub struct Level {
     pub springs: Vec<SpringPad>,
     #[serde(default)]
     pub spikes: Vec<Spikes>,
+    /// Bouncy mushrooms (soft launch caps).
+    #[serde(default)]
+    pub mushrooms: Vec<BouncyMushroom>,
     #[serde(default)]
     pub checkpoints: Vec<Checkpoint>,
     /// Glow drops to collect.
@@ -470,6 +517,7 @@ impl Level {
             zones: Vec::new(),
             springs: Vec::new(),
             spikes: Vec::new(),
+            mushrooms: Vec::new(),
             checkpoints: Vec::new(),
             pickups: Vec::new(),
             npcs: Vec::new(),
@@ -538,6 +586,9 @@ fn yes() -> bool {
 }
 fn up() -> f32 {
     std::f32::consts::FRAC_PI_2
+}
+fn cap_size() -> f32 {
+    160.0
 }
 fn pad_width() -> f32 {
     90.0

@@ -20,6 +20,11 @@ expand_rate_press = 32.0
 expand_rate_release = 18.0
 # Springs stiffen this much while the button is held.
 expand_spring_mult = 1.45
+# Swell AS you hit a spring or bouncy mushroom and it launches you this much
+# faster (0.4 → about twice as high). Pressing within bounce_window seconds
+# before the hit (or just after it) counts; puffed up long before gets a bit.
+bounce_boost = 0.4
+bounce_window = 0.3
 
 [gravity]
 # Blobs fall at this (the rest of the world uses the level's gravity).

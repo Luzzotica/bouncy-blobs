@@ -323,6 +323,36 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
         sim.pop(id);
     }
 
+    // How hard each blob is swelling right now (spring / mushroom boosts).
+    let window = sim.tuning.jump.bounce_window;
+    let boost = sim.tuning.jump.bounce_boost;
+    let swell: Vec<(BodyId, f32, bool)> = sim
+        .players
+        .iter()
+        .filter(|p| p.dead.is_none())
+        .map(|p| &p.ctl)
+        .chain(sim.npcs.iter().filter(|n| n.dead.is_none()).map(|n| &n.ctl))
+        .map(|c| (c.body, c.swell(window), c.just_pressed(dt * 1.5)))
+        .collect();
+    let swell_of = |id: BodyId| swell.iter().find(|s| s.0 == id).map_or((0.0, false), |s| (s.1, s.2));
+
+    // Late presses: swelling just after a launch still counts.
+    let mut late = std::mem::take(&mut sim.late_boosts);
+    late.retain_mut(|l| {
+        l.age += dt;
+        if swell_of(l.body).1 {
+            if let Some(b) = sim.world.body_mut(l.body) {
+                if b.velocity().dot(l.dir) > 0.0 {
+                    b.add_velocity(l.dir * (l.speed * boost));
+                    let pos = b.centroid();
+                    sim.events.push(SimEvent::SuperBounce { body: l.body, pos });
+                }
+            }
+            return false;
+        }
+        l.age < window * 0.5
+    });
+
     // Springs.
     for si in 0..sim.springs.len() {
         if sim.springs[si].cooldown > 0.0 {
@@ -335,12 +365,21 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
         for &(id, _) in &bodies {
             let hit = sim.world.contacts_of(id).any(|c| c.other == Collider::Static(sid) && c.normal.dot(dir) > 0.5);
             if hit {
+                let (sw, _) = swell_of(id);
                 let b = sim.world.body_mut(id).unwrap();
                 let v = b.velocity();
                 // Same launch height whatever the body's gravity.
                 let power = power * gadget_gravity(b).sqrt();
-                b.add_velocity(dir * (power - v.dot(dir)));
+                // Swelling as you land on it stores and releases energy.
+                let speed = power * (1.0 + boost * sw);
+                b.add_velocity(dir * (speed - v.dot(dir)));
+                let pos = b.centroid();
                 fired = true;
+                if sw > 0.5 {
+                    sim.events.push(SimEvent::SuperBounce { body: id, pos });
+                } else if swell.iter().any(|s| s.0 == id) {
+                    late.push(crate::LateBoost { body: id, dir, speed: power, age: 0.0 });
+                }
             }
         }
         if fired {
@@ -349,6 +388,88 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             sim.events.push(SimEvent::Spring { index: si });
         }
     }
+
+    // Bouncy mushrooms: physical caps that launch whatever lands on them
+    // (flat: along the cap's direction; dome: along its surface normal;
+    // ball: away from its centre).
+    for mi in 0..sim.mushrooms.len() {
+        let m = &mut sim.mushrooms[mi];
+        m.squash = (m.squash - dt * 4.0).max(0.0);
+        m.cooldown.retain_mut(|c| {
+            c.1 -= dt;
+            c.1 > 0.0
+        });
+        let cap = m.body;
+        let (def, center, cooling) = (m.def.clone(), m.center, m.cooldown.iter().map(|c| c.0).collect::<Vec<_>>());
+        let mut launched = Vec::new();
+        for &(id, _) in &bodies {
+            if cooling.contains(&id) {
+                continue;
+            }
+            let touching = sim.world.contacts_of(id).any(|c| c.other == Collider::Body(cap)) || sim.world.contacts_of(cap).any(|c| c.other == Collider::Body(id));
+            if !touching {
+                continue;
+            }
+            let Some(b) = sim.world.body(id) else { continue };
+            let c = b.centroid();
+            let dir = match def.shape {
+                bb_level::MushroomShape::Flat => {
+                    let d = Vec2::from_angle(def.angle);
+                    // Only from the launching face.
+                    if (c - center).dot(d) <= 0.0 {
+                        continue;
+                    }
+                    d
+                }
+                bb_level::MushroomShape::Dome => {
+                    // Normal of the (half-ellipse) dome under the blob.
+                    let a = def.size * 0.5;
+                    let h = def.shape.cap_height(def.size);
+                    let r = c - center;
+                    let n = Vec2::new(r.x / (a * a), r.y / (h * h)).normalize_or(Vec2::Y);
+                    if n.y < -0.2 {
+                        continue; // bumped its underside
+                    }
+                    n
+                }
+                bb_level::MushroomShape::Ball => (c - center).normalize_or(Vec2::Y),
+            };
+            launched.push((id, dir));
+        }
+        for (id, dir) in launched {
+            let (sw, _) = swell_of(id);
+            let Some(b) = sim.world.body_mut(id) else { continue };
+            let v = b.velocity();
+            let power = def.power * gadget_gravity(b).sqrt();
+            let speed = power * (1.0 + boost * sw);
+            let along = v.dot(dir);
+            if along < speed {
+                b.add_velocity(dir * (speed - along));
+            }
+            let pos = b.centroid();
+            let blob = swell.iter().any(|s| s.0 == id);
+            if sw > 0.5 {
+                sim.events.push(SimEvent::SuperBounce { body: id, pos });
+            } else if blob {
+                late.push(crate::LateBoost { body: id, dir, speed: power, age: 0.0 });
+            }
+            // The cap gives: squish it away from the launch so it wobbles.
+            if let Some(capb) = sim.world.body_mut(cap) {
+                let n = capb.len();
+                for i in 0..n {
+                    let k = 1.0 - (capb.x[i] - pos).length() / (def.size.max(60.0) * 1.2);
+                    if k > 0.0 && capb.w[i] > 0.0 {
+                        capb.v[i] -= dir * (380.0 * k * (1.0 + sw));
+                    }
+                }
+            }
+            let m = &mut sim.mushrooms[mi];
+            m.cooldown.push((id, 0.25));
+            m.squash = 1.0;
+            sim.events.push(SimEvent::Mushroom { index: mi, pos, boosted: sw > 0.5 });
+        }
+    }
+    sim.late_boosts = late;
 
     // Hazards: spikes, kill zones, falling out.
     let mut to_pop: Vec<BodyId> = Vec::new();
