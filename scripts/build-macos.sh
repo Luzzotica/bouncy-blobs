@@ -3,6 +3,7 @@
 #   scripts/build-macos.sh          # build
 #   scripts/build-macos.sh --run    # build, then launch the bundle
 #   scripts/build-macos.sh --zip    # also produce build/macos/BouncyBlobs-<ver>-macos.zip
+#   ARCHS=aarch64-apple-darwin scripts/build-macos.sh   # one arch (quick test builds)
 # Signing: ad-hoc by default. Set MACOS_SIGN_IDENTITY="Developer ID Application: …"
 # to sign for distribution (notarize with `xcrun notarytool submit`).
 set -euo pipefail
@@ -21,17 +22,18 @@ done
 VERSION="$(awk -F'"' '/^\[workspace.package\]/{f=1} f&&/^version/{print $2; exit}' Cargo.toml)"
 BUILD="${MACOS_BUILD_NUMBER:-$VERSION}"
 
-for t in aarch64-apple-darwin x86_64-apple-darwin; do
+ARCHS="${ARCHS:-aarch64-apple-darwin x86_64-apple-darwin}"
+BINS=()
+for t in $ARCHS; do
   rustup target add "$t" >/dev/null 2>&1 || true
   cargo build --release --target "$t" -p bb-game --bin bouncy-blobs
+  BINS+=("$TARGET_DIR/$t/release/bouncy-blobs")
 done
 
 APP="$ROOT/build/macos/Bouncy Blobs.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-lipo -create -output "$APP/Contents/MacOS/bouncy-blobs" \
-  "$TARGET_DIR/aarch64-apple-darwin/release/bouncy-blobs" \
-  "$TARGET_DIR/x86_64-apple-darwin/release/bouncy-blobs"
+lipo -create -output "$APP/Contents/MacOS/bouncy-blobs" "${BINS[@]}"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" macos/Info.plist > "$APP/Contents/Info.plist"
 cp macos/BouncyBlobs.icns "$APP/Contents/Resources/"
 # bb_game::platform looks in Contents/Resources/assets when bundled.
