@@ -1,36 +1,24 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RoomService } from '../lib/party';
-import { roomConfig } from '../lib/partyConfig';
+import { carriedQuery } from '../lib/partii';
 import { COLORS } from '../theme/uiTheme';
 
 export default function JoinLobby() {
   const navigate = useNavigate();
   const [joinCode, setJoinCode] = useState('');
   const [codeError, setCodeError] = useState('');
-  const [lookingUp, setLookingUp] = useState(false);
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
-  const roomRef = useRef(new RoomService(roomConfig));
-
-  const handleCodeSubmit = useCallback(async () => {
-    if (!joinCode.trim()) return;
+  // Rooms are joined by code directly; an unknown code is reported by the
+  // controller page when the join fails ("No game found with that code").
+  const handleCodeSubmit = useCallback(() => {
+    const code = joinCode.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!code) return;
     setCodeError('');
-    setLookingUp(true);
-
-    try {
-      const room = await roomRef.current.lookupByCode(joinCode.trim());
-      navigate(`/controller/${room.room_id}`);
-    } catch (err: any) {
-      setCodeError(err.message?.includes('404') || err.message?.includes('No active')
-        ? 'No game found with that code'
-        : 'Failed to look up code');
-    } finally {
-      setLookingUp(false);
-    }
+    navigate(`/controller/${code}${carriedQuery()}`);
   }, [joinCode, navigate]);
 
   // QR scanner — uses camera + BarcodeDetector API (Chrome/Safari)
@@ -59,11 +47,11 @@ export default function JoinLobby() {
             const barcodes = await detector.detect(videoRef.current);
             for (const barcode of barcodes) {
               const url = barcode.rawValue as string;
-              // Match /controller/<sessionId> in the URL
-              const match = url.match(/\/controller\/([a-f0-9-]+)/i);
+              // Match /controller/<CODE> in the URL (keeping its ?k=&e= overrides)
+              const match = url.match(/\/controller\/([A-Za-z0-9]+)(\?[^#]*)?/);
               if (match) {
                 stopScanning();
-                navigate(`/controller/${match[1]}`);
+                navigate(`/controller/${match[1].toUpperCase()}${carriedQuery(match[2] ?? window.location.search)}`);
                 return;
               }
             }
@@ -127,7 +115,7 @@ export default function JoinLobby() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <input
             type="text"
-            placeholder="ABC123"
+            placeholder="ABCDE"
             value={joinCode}
             onChange={e => {
               setJoinCode(e.target.value.toUpperCase());
@@ -153,7 +141,7 @@ export default function JoinLobby() {
           />
           <button
             onClick={handleCodeSubmit}
-            disabled={lookingUp || !joinCode.trim()}
+            disabled={!joinCode.trim()}
             style={{
               width: '100%',
               padding: '14px 22px',
@@ -164,10 +152,9 @@ export default function JoinLobby() {
               border: 'none',
               borderRadius: 8,
               cursor: joinCode.trim() ? 'pointer' : 'default',
-              opacity: lookingUp ? 0.6 : 1,
             }}
           >
-            {lookingUp ? '...' : 'Join'}
+            Join
           </button>
         </div>
         {codeError && (

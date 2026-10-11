@@ -1,8 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { joinAsPeer, PeerManager, RoomService } from '../lib/party';
-import type { PeerCallbacks } from '../lib/party';
-import { roomConfig } from '../lib/partyConfig';
+import { startEngine, partiiSettings, encodeText, decodeText, type Engine, type EngineEvent } from '../lib/partii';
 import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
 import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
@@ -415,15 +413,15 @@ export default function Controller() {
   navigateRef.current = navigate;
 
   const [phase, setPhase] = useState<ControllerPhase>('joining');
-  // Mirror so the WebRTC callbacks (captured once) can read the CURRENT phase.
+  // Mirror so the engine event handlers (captured once) can read the CURRENT phase.
   const phaseRef = useRef<ControllerPhase>('joining');
   phaseRef.current = phase;
   const [playerName, setPlayerName] = useState('');
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   // Connection flow log (mirrors the host/guest phase log) so a phone can SEE and
-  // COPY exactly how far the WebRTC handshake got — invaluable for debugging
-  // flaky phone connects. Fed by the party SDK's onPhase + manual milestones.
+  // COPY exactly how far the connection got — invaluable for debugging flaky
+  // phone connects. Fed by the partii engine's events.
   const [phaseLog, setPhaseLog] = useState<PhaseEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const addPhase = useCallback((phase: string, detail?: string) => {
@@ -448,11 +446,23 @@ export default function Controller() {
   const [itemSelected, setItemSelected] = useState(false);
   const [placementConfirmed, setPlacementConfirmed] = useState(false);
 
-  const managerRef = useRef<PeerManager | null>(null);
-  const roomRef = useRef<RoomService | null>(null);
+  const engineRef = useRef<Engine | null>(null);
+  const hostRef = useRef<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval>>();
   const playerIdRef = useRef<string>('');
   const inputRef = useRef({ moveX: 0, moveY: 0, expanding: false });
   const sendIntervalRef = useRef<ReturnType<typeof setInterval>>();
+
+  /** What used to ride the reliable `data` channel: same JSON, reliable to the host. */
+  const sendData = useCallback((json: string) => {
+    const e = engineRef.current, host = hostRef.current;
+    if (e && host !== null) e.send(host, true, encodeText(json));
+  }, []);
+  /** What used to ride the `input` channel: same JSON, unreliable to the host. */
+  const sendInput = useCallback((json: string) => {
+    const e = engineRef.current, host = hostRef.current;
+    if (e && host !== null) e.send(host, false, encodeText(json));
+  }, []);
 
   // Debounce for party box navigation
   const lastNavRef = useRef(0);
@@ -479,7 +489,7 @@ export default function Controller() {
     if (controllerMode === 'party_box' && !itemSelected) {
       // Select the highlighted item
       setItemSelected(true);
-      managerRef.current?.sendPrimary("host", JSON.stringify({
+      sendData(JSON.stringify({
         type: 'item_select',
         value: { itemIndex: highlightedItem },
       }));
@@ -488,14 +498,14 @@ export default function Controller() {
     if (controllerMode === 'placement' && !placementConfirmed) {
       // Confirm placement
       setPlacementConfirmed(true);
-      managerRef.current?.sendPrimary("host", JSON.stringify({
+      sendData(JSON.stringify({
         type: 'placement_confirm',
       }));
       return;
     }
     inputRef.current.expanding = true;
     setExpanding(true);
-  }, [controllerMode, itemSelected, highlightedItem, placementConfirmed]);
+  }, [controllerMode, itemSelected, highlightedItem, placementConfirmed, sendData]);
 
   const handleExpandRelease = useCallback(() => {
     if (controllerMode !== 'normal') return;
@@ -503,38 +513,105 @@ export default function Controller() {
     setExpanding(false);
   }, [controllerMode]);
 
-  /** Release our server-side room peer row so a phone that failed to connect (or
-   *  is leaving) stops counting toward the lobby total. Only WE can delete our
-   *  row — the DELETE is keyed by our own peer secret, so the host can't evict a
-   *  stuck phone; without this the row lingers until the server TTL, inflating
-   *  the "N/8" the lobby browser shows. `leaveRoom` uses keepalive so it still
-   *  lands during page teardown. Safe to call repeatedly (a stale DELETE 404s). */
+  /** Leave the room and stop the engine, so a phone that failed to connect (or
+   *  is leaving) stops counting toward the lobby total. Safe to call repeatedly. */
   const releaseRoom = useCallback(() => {
-    void roomRef.current?.leaveRoom().catch(() => {});
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = undefined; }
+    const e = engineRef.current;
+    engineRef.current = null;
+    hostRef.current = null;
+    try { e?.leave(); } catch { /* already gone */ }
   }, []);
+
+  /** A JSON message from the game (formerly the `data` channel). */
+  const handleHostMessage = useCallback((text: string) => {
+    try {
+      const message: WebRTCMessage = JSON.parse(text);
+      if (message.type === 'customization_update' && message.value) {
+        setTakenColors(message.value.takenColors ?? []);
+        setTakenFaces(message.value.takenFaces ?? []);
+      } else if (message.type === 'controller_config' && message.config) {
+        // Could update controller layout here
+      } else if (message.type === 'host_phase_update') {
+        const { phase: newPhase, items } = message.value ?? {};
+        if (newPhase === 'party_box' && items) {
+          setControllerMode('party_box');
+          setPartyBoxItems(items);
+          setHighlightedItem(0);
+          setItemSelected(false);
+        } else if (newPhase === 'placement') {
+          setControllerMode('placement');
+          setPlacementConfirmed(false);
+        } else {
+          setControllerMode('normal');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse message:', e);
+    }
+  }, []);
+
+  /** The host left / the room closed. */
+  const handleHostGone = useCallback((why: string) => {
+    addPhase('disconnected', why);
+    releaseRoom();
+    // If we never finished connecting (still on connecting / info screen),
+    // STAY on an error screen with the copyable flow — don't bounce to /join.
+    if (phaseRef.current === 'joining' || phaseRef.current === 'waiting') {
+      setErrorMsg('Connection lost before it was ready.');
+      setPhase('error');
+    } else {
+      // We were actually playing and the host closed — back to the lobby.
+      navigateRef.current(`/join${window.location.search}`);
+    }
+  }, [addPhase, releaseRoom]);
 
   const handleJoin = useCallback(async () => {
     if (!sessionId || !playerName.trim()) return;
+    const name = playerName.trim();
+    const code = sessionId.toUpperCase();
     setNameSubmitted(true);
     setPhaseLog([]);
-    addPhase('joining-room', `session=${sessionId.slice(0, 8)}…`);
+    setPhase('waiting');
+    const { edge, key } = partiiSettings();
+    addPhase('starting-engine', `edge=${edge.replace(/^https?:\/\//, '')}`);
 
+    let engine: Engine;
     try {
-      const callbacks: PeerCallbacks = {
-        // Full WebRTC handshake trace (offer/answer/ICE/candidates/timeouts).
-        onPhase: (_peerId, phase, detail) => {
-          const fmt = (v: unknown) => (v == null ? String(v) : Array.isArray(v) ? `[${v.length}]` : typeof v === 'object' ? '{…}' : String(v));
-          const d = detail ? Object.entries(detail).map(([k, v]) => `${k}=${fmt(v)}`).join(' ') : undefined;
-          addPhase(phase, d);
-        },
-        onPeerConnected: () => {
-          addPhase('connected', '✅ data channel open');
+      engine = await startEngine(edge, key);
+    } catch (err: any) {
+      addPhase('engine-failed', String(err?.message ?? err));
+      setErrorMsg(`Could not start: ${err?.message ?? err}`);
+      setPhase('error');
+      return;
+    }
+    engineRef.current = engine;
+    let joinSent = false;
+
+    const onEvent = (ev: EngineEvent) => {
+      switch (ev.ev) {
+        case 'online':
+          addPhase('online', `relay=${ev.relay}${ev.resumed ? ' (resumed)' : ''}`);
+          if (!joinSent) {
+            joinSent = true;
+            addPhase('joining-room', `code=${code}`);
+            engine.join(code, 'phone', name, {});
+          }
+          break;
+        case 'offline':
+          addPhase('offline', 'reconnecting…');
+          break;
+        case 'joined': {
+          const host: number = ev.room.host;
+          hostRef.current = host;
+          playerIdRef.current = String(ev.room.you);
+          addPhase('joined-room', `you=${ev.room.you} host=${host}`);
           // Immediately join the game with default appearance — blob spawns right away
-          managerRef.current?.sendPrimary('host', JSON.stringify({
+          sendData(JSON.stringify({
             type: 'player_join',
             player: {
               player_id: playerIdRef.current,
-              name: playerName.trim(),
+              name,
               session_id: sessionId,
               slot: 0,
               status: 'connected',
@@ -548,97 +625,52 @@ export default function Controller() {
           // connection-flow log is only surfaced on FAILURE (the Error screen),
           // where it's copyable next to a Retry button.
           setPhase('customizing');
-        },
-        onMessage: (_peerId, _channel, data) => {
-          try {
-            const message: WebRTCMessage = JSON.parse(data as string);
-            if (message.type === 'customization_update' && message.value) {
-              setTakenColors(message.value.takenColors ?? []);
-              setTakenFaces(message.value.takenFaces ?? []);
-            } else if (message.type === 'controller_config' && message.config) {
-              // Could update controller layout here
-            } else if (message.type === 'host_phase_update') {
-              const { phase: newPhase, items } = message.value ?? {};
-              if (newPhase === 'party_box' && items) {
-                setControllerMode('party_box');
-                setPartyBoxItems(items);
-                setHighlightedItem(0);
-                setItemSelected(false);
-              } else if (newPhase === 'placement') {
-                setControllerMode('placement');
-                setPlacementConfirmed(false);
-              } else {
-                setControllerMode('normal');
-              }
-            }
-          } catch (e) {
-            console.error('Failed to parse message:', e);
-          }
-        },
-        onPeerDisconnected: () => {
-          addPhase('disconnected', 'link dropped / timed out');
-          // If we never finished connecting (still on connecting / info screen),
-          // STAY on an error screen with the copyable flow — don't bounce to /join.
-          if (phaseRef.current === 'joining' || phaseRef.current === 'waiting') {
-            setErrorMsg('Connection lost before it was ready.');
-            setPhase('error');
-            // We never made it into the game — drop our room row so we stop
-            // counting toward the lobby total while we sit on the error screen.
-            releaseRoom();
-          } else {
-            // We were actually playing and the host closed — back to the lobby.
-            navigateRef.current('/join');
-          }
-        },
-        onError: (err) => {
-          addPhase('error', err.message);
-          setErrorMsg(err.message);
+          break;
+        }
+        case 'failed':
+          addPhase('join-failed', `${ev.code}: ${ev.message}`);
+          setErrorMsg(ev.code === 'not_found' ? 'No game found with that code' : ev.message || 'Failed to join');
           setPhase('error');
           releaseRoom();
-        },
-      };
-
-      // The URL param may be a room UUID (from the QR) OR a human join code
-      // (shared verbally / typed). The /peers endpoint only accepts the UUID,
-      // so resolve a code to its room_id first.
-      let roomId = sessionId;
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(sessionId)) {
-        addPhase('lookup-code', sessionId);
-        const summary = await new RoomService(roomConfig).lookupByCode(sessionId);
-        roomId = summary.room_id;
-        addPhase('resolved-room', `${roomId.slice(0, 8)}…`);
+          break;
+        case 'peer_connected':
+          if (ev.mid === hostRef.current) addPhase('connected', `path=${engine.pathName(ev.path)}`);
+          break;
+        case 'path_changed':
+          if (ev.mid === hostRef.current) addPhase('path', `${engine.pathName(ev.from)} → ${engine.pathName(ev.to)}`);
+          break;
+        case 'member_left':
+          if (ev.mid === hostRef.current) handleHostGone(`host left (${ev.reason})`);
+          break;
+        case 'room_closed':
+          handleHostGone(`room closed (${ev.reason})`);
+          break;
+        case 'message':
+          if (ev.from === hostRef.current) handleHostMessage(decodeText(ev.bytes));
+          break;
+        case 'error':
+          addPhase('error', ev.message);
+          break;
       }
+    };
 
-      const { result, manager, room } = await joinAsPeer(
-        roomConfig,
-        roomId,
-        { kind: 'phone', display_name: playerName.trim() },
-        callbacks,
-      );
-
-      playerIdRef.current = result.peer_id;
-      managerRef.current = manager;
-      roomRef.current = room;
-      addPhase('joined-room', `peer=${result.peer_id?.slice(0, 8)}… — waiting for host`);
-
-      setPhase('waiting');
-    } catch (err: any) {
-      addPhase('join-failed', err?.message || 'error');
-      setErrorMsg(err.message || 'Failed to join');
-      setPhase('error');
-      // joinAsPeer may have allocated a server-side peer row before it threw —
-      // drop it so the host doesn't keep counting us.
-      releaseRoom();
-    }
-  }, [sessionId, playerName, addPhase, releaseRoom]);
+    pollRef.current = setInterval(() => {
+      const e = engineRef.current;
+      if (!e) return;
+      for (const ev of e.poll()) {
+        onEvent(ev);
+        if (engineRef.current !== e) return; // released mid-batch
+      }
+    }, 16);
+  }, [sessionId, playerName, addPhase, releaseRoom, sendData, handleHostGone, handleHostMessage]);
 
   /** Send a live customization update to the host. */
   const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
-    managerRef.current?.sendPrimary("host", JSON.stringify({
+    sendData(JSON.stringify({
       type: 'customization_update',
       value: { color, faceId },
     }));
-  }, []);
+  }, [sendData]);
 
   /** Confirm customization and move to controller UI. */
   const handleConfirmCustomization = useCallback(() => {
@@ -650,20 +682,14 @@ export default function Controller() {
     if (phase !== 'connected' && phase !== 'customizing') return;
 
     sendIntervalRef.current = setInterval(() => {
-      const manager = managerRef.current;
-      if (!manager) return;
+      if (hostRef.current === null) return;
 
       const { moveX, moveY, expanding } = inputRef.current;
 
-      // Continuous level-state input rides the unreliable "input" channel:
-      // latest-value, no head-of-line blocking on a lossy link. A dropped
-      // packet is superseded by the next 30Hz sample 33ms later, and the host
-      // coasts on its last-known joystick value in the meantime. Fall back to
-      // the reliable channel if "input" isn't open yet (early in connect).
-      const sendInput = (data: string): void => {
-        if (!manager.send("host", "input", data)) manager.sendPrimary("host", data);
-      };
-
+      // Continuous level-state input goes unreliable: latest-value, no
+      // head-of-line blocking on a lossy link. A dropped packet is superseded
+      // by the next 30Hz sample 33ms later, and the host coasts on its
+      // last-known joystick value in the meantime.
       if (controllerMode === 'placement') {
         // In placement mode, send cursor movement
         sendInput(JSON.stringify({
@@ -686,7 +712,7 @@ export default function Controller() {
     return () => {
       if (sendIntervalRef.current) clearInterval(sendIntervalRef.current);
     };
-  }, [phase, controllerMode]);
+  }, [phase, controllerMode, sendInput]);
 
   // Keyboard input (WASD + Space)
   useEffect(() => {
@@ -736,17 +762,15 @@ export default function Controller() {
     };
   }, [phase]);
 
-  // Cleanup: release our room peer row + tear down the transport on unmount
-  // (e.g. navigating back to /join). `pagehide` covers tab close / refresh /
-  // mobile-Safari swipe-away, where React cleanup never runs — leaveRoom's
-  // keepalive still lands so we don't leak a peer row into the lobby count.
+  // Cleanup: leave the room + stop the engine on unmount (e.g. navigating back
+  // to /join). `pagehide` covers tab close / refresh / mobile-Safari
+  // swipe-away, where React cleanup never runs.
   useEffect(() => {
     const onPageHide = () => releaseRoom();
     window.addEventListener('pagehide', onPageHide);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
       releaseRoom();
-      managerRef.current?.dispose();
       if (sendIntervalRef.current) clearInterval(sendIntervalRef.current);
     };
   }, [releaseRoom]);
@@ -840,7 +864,7 @@ export default function Controller() {
         </button>
 
         <button
-          onClick={() => navigate('/join')}
+          onClick={() => navigate(`/join${window.location.search}`)}
           style={{
             ...btnStyle,
             marginTop: 12,
@@ -862,7 +886,7 @@ export default function Controller() {
       <div style={fullCenter}>
         <p style={{ color: '#aaa', fontSize: 16 }}>Connecting…</p>
         {flowPanel}
-        <button onClick={() => navigate('/join')} style={{ ...btnStyle, marginTop: 14, background: 'transparent', color: '#888', fontSize: 14, padding: '8px 24px', border: '1px solid #444' }}>
+        <button onClick={() => navigate(`/join${window.location.search}`)} style={{ ...btnStyle, marginTop: 14, background: 'transparent', color: '#888', fontSize: 14, padding: '8px 24px', border: '1px solid #444' }}>
           Cancel
         </button>
       </div>
@@ -915,6 +939,9 @@ export default function Controller() {
               return (
                 <div
                   key={color}
+                  data-testid="color-swatch"
+                  data-color={color}
+                  data-taken={taken ? '1' : '0'}
                   onClick={() => { if (!taken) { setSelectedColor(color); sendCustomizationUpdate(color, selectedFace); } }}
                   style={{
                     width: 32,
@@ -960,6 +987,9 @@ export default function Controller() {
               return (
                 <div
                   key={face.id}
+                  data-testid="face-swatch"
+                  data-face={face.id}
+                  data-taken={taken ? '1' : '0'}
                   onClick={() => { if (!taken) { setSelectedFace(face.id); sendCustomizationUpdate(selectedColor, face.id); } }}
                   style={{
                     width: 44,

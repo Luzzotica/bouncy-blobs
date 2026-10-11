@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "engine": "cp ../../partii/platform/sdk/engine-web/partii_engine.js ../../partii/platform/sdk/engine-web/partii_engine_bg.wasm public/engine/",
+    "test": "node test/e2e.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -17,6 +19,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "1.56.1",
     "typescript": "~5.6.2",
     "vite": "^6.0.0"
   }
