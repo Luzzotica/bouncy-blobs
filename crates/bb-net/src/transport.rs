@@ -186,26 +186,6 @@ pub(crate) fn link_pair(remote_id: impl Into<String>, kind: PeerKind) -> (PeerLi
     )
 }
 
-/// Shared closed/open view of a link for the session bookkeeping.
-#[derive(Clone)]
-pub(crate) struct LinkWatch(Arc<LinkFlags>);
-
-impl LinkWatch {
-    pub fn is_closed(&self) -> bool {
-        self.0.closed.load(Ordering::Acquire)
-    }
-
-    pub fn is_open(&self) -> bool {
-        self.0.open.load(Ordering::Acquire) && !self.is_closed()
-    }
-}
-
-impl PeerLink {
-    pub(crate) fn watch(&self) -> LinkWatch {
-        LinkWatch(self.flags.clone())
-    }
-}
-
 impl Transport for PeerLink {
     fn remote_id(&self) -> &str {
         &self.remote_id

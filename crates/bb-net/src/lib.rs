@@ -1,35 +1,23 @@
 //! Bouncy Blobs networking.
 //!
-//! * [`lobbii`]: the Lobbii rooms/signaling REST client (same backend and
-//!   payloads as the TS party-kit, so web phones and the Bevy host meet in the
-//!   same rooms).
 //! * [`transport`]: the `Transport` trait, channel-backed peer links, and an
-//!   in-memory loopback for tests. WebRTC drivers live in `rtc_native`
-//!   (webrtc-rs on a background tokio runtime) and `rtc_web` (browser RTC).
-//! * [`session`]: host / guest lifecycles: create or join a room, poll
-//!   signals, open a link per peer. Everything runs off the game thread; the
-//!   game drains events with non-blocking `poll`s.
+//!   in-memory loopback for tests.
+//! * [`session`]: host / guest lifecycles on the partii engine (rooms by
+//!   code, relay → TURN → direct paths, reconnects): a link per member.
+//!   Everything runs off the game thread; the game drains events with
+//!   non-blocking `poll`s.
 //! * [`phone`]: the existing phone-controller JSON protocol.
 //! * [`wire`] + [`blend`]: eventual-consistency body sync for screen-to-screen
 //!   play (owner-authoritative, no rollback).
 
 pub mod blend;
 pub mod config;
-pub mod lobbii;
 pub mod phone;
 pub mod rt;
 pub mod session;
 pub mod transport;
 pub mod wire;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod rtc_native;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rtc_native as rtc;
-#[cfg(target_arch = "wasm32")]
-mod rtc_web;
-#[cfg(target_arch = "wasm32")]
-pub(crate) use rtc_web as rtc;
 
 pub use config::{GAME_ID, NetConfig};
 pub use transport::{Channel, LinkEvent, Payload, PeerKind, PeerLink, Transport};

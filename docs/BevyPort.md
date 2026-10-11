@@ -10,8 +10,8 @@
 | Engine | Rust + **Bevy 0.19**. Hard cutover: the TS/React app is frozen; no Kids Mode updates until 3.0 ships. |
 | Physics | New **`bb-physics`**: f32 **XPBD** (small steps). Replaces the Q32.32 fixed-point crate — determinism is no longer needed. |
 | Netcode | **Eventual consistency**, owner-authoritative. No input delay, no rollback, no lockstep. Up to 8 players. |
-| Phones | Stay a **web controller page** (no install). Host speaks the existing Lobbii signaling + controller JSON protocol, so current phones work unchanged. |
-| Online | Lobbii rooms/signaling/TURN (sterlinglong.me) over WebRTC — native (webrtc-rs) and web (browser RTC). `Transport` trait leaves room for an Epic Online Services backend later (EOS has no browser SDK, so it can't be the only path). |
+| Phones | Stay a **web controller page** (no install, `web-controller/`). Phones join the host's partii room by code and speak the controller JSON protocol. |
+| Online | **partii** rooms by code on the shared partii engine (native and wasm): relay first, then TURN or direct WebRTC when faster, reconnects across network changes. |
 | Steam | Achievements only (lobbies optional later). |
 | Targets | macOS, Windows, Linux, iOS (Xcode project), Android, **Web** (wasm). Tests run headless everywhere. |
 | Editor | Rebuilt in-game with **bevy_egui**; imports legacy level JSON. |
@@ -25,7 +25,7 @@
 crates/
   bb-physics/   XPBD softbody core. glam only. Headless tests.            ✅
   bb-level/     Level format (serde), legacy JSON importer, campaign data.
-  bb-net/       Wire codecs, Transport trait, Lobbii signaling, WebRTC
+  bb-net/       Wire codecs, Transport trait, sessions on the partii engine
                 (native + wasm), phone-controller protocol.
   bb-game/      Bevy app (lib + desktop bin + mobile/web entry).
 web-controller/ Slim web app for phones (carried over from the TS app).
@@ -93,7 +93,7 @@ and crushes cascaded.
 | Menus | ✅ Softbody title, chapter select, settings, softbody pause menu. |
 | Kids Mode + audio | ✅ Ported (see kids/), sfx/music/voice clips, blub voices. |
 | Party | ✅ Jelly lobby, drop-in, 2 built-in + 27 imported maps, Race / KOTH / Chained (real ropes). |
-| Net (`bb-net`) | ✅ Lobbii rooms + WebRTC (native + web); **deployed phone controller verified joining the native host live**; eventual-consistency screen sync; Join a Friend. |
+| Net (`bb-net`) | ✅ partii rooms on the shared engine (native + web); controller page on partii (e2e test); eventual-consistency screen sync; Join a Friend. Live host/guest test: `BB_PARTII_API=… BB_PARTII_KEY=… cargo test -p bb-net --test partii_live`. |
 | Editor | ✅ egui editor + legacy importer. |
 | Platforms | ✅ macOS .app, iOS simulator + signed IPA export, web (WebGL2). ⏳ Android (needs SDK/NDK locally; CI builds it), Windows/Linux via CI. |
 | Achievements | ✅ Local everywhere; Steam with `--features steam` (app 4485010). |
@@ -109,8 +109,8 @@ cargo test --workspace                    # 113 tests, headless
 cargo run --release -p bb-sim --example chbench
 ```
 
-Multiplayer needs `BB_MP_API_KEY` (the legacy `VITE_MP_API_KEY` from
-`.env.local`; the one in `.env.production.local` is revoked). Phones join via
+Multiplayer needs `BB_PARTII_KEY` (the game's partii publishable key;
+`BB_PARTII_API` picks the platform, default partii staging). Phones join via
 the QR code (`BB_CONTROLLER_URL` overrides the controller page origin).
 See [`Platforms.md`](Platforms.md) for building and shipping each target.
 

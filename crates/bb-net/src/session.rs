@@ -1,72 +1,131 @@
-//! Room lifecycles, run off the game thread.
+//! Room lifecycles on the partii engine, run off the game thread.
 //!
-//! [`HostSession`] creates a Lobbii room, polls the roster for new peers and
-//! opens an offerer link to each (phones and guest screens alike), routing
-//! signals both ways. [`GuestSession`] joins a room as a screen and answers
-//! the host's offer. The game drains events with `try_recv` each frame and
-//! never awaits anything.
+//! [`HostSession`] creates a room and hands the game a [`PeerLink`] per member
+//! (phones and guest screens alike). [`GuestSession`] joins a room as a screen
+//! and hands over the link to the host. The engine does signaling, paths
+//! (relay → TURN → direct), reliability and reconnects; this layer only maps
+//! its members and messages onto links. The game drains events with
+//! `try_recv` each frame and never awaits anything.
+//!
+//! On the wire, phones speak UTF-8 JSON text (the controller page's
+//! protocol). Screens are both this crate, so their frames carry a one-byte
+//! tag: [`TAG_TEXT`] or [`TAG_BINARY`]. `Channel::Reliable` is the engine's
+//! reliable, ordered stream; `Channel::Unreliable` its latest-wins datagrams.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
 use async_channel::{Receiver, Sender};
-use serde_json::Value;
+use partii_engine::{Config, Engine, Event};
+use serde_json::json;
 
-use crate::lobbii::{Auth, CreateRoomOpts, JoinRoomOpts, Lobbii, Signal, SignalType, default_ice_servers};
-use crate::transport::{LinkWatch, PeerKind, PeerLink};
-use crate::{NetConfig, NetError, rt};
+use crate::transport::{link_pair, Channel, LinkDriver, Outgoing, Payload, PeerKind, PeerLink};
+use crate::{NetConfig, NetError};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
-    /// Creates the channels and sends the offer. The host is always this.
-    Offerer,
-    Answerer,
-}
+/// Screen-to-screen frame tags.
+pub const TAG_TEXT: u8 = 0;
+pub const TAG_BINARY: u8 = 1;
 
-/// A signal a link wants delivered to `to` via Lobbii.
-#[derive(Debug)]
-pub(crate) struct OutSignal {
-    pub to: String,
-    pub kind: SignalType,
-    pub payload: Value,
-}
+/// Pump interval: how often outgoing link queues are flushed to the engine.
+#[cfg(not(target_arch = "wasm32"))]
+const PUMP_MS: u64 = 2;
+#[cfg(target_arch = "wasm32")]
+const PUMP_MS: u32 = 4;
 
-/// Pre-connect attempts per peer before the host gives up on it (TS
-/// `MAX_CONNECT_ATTEMPTS`).
-const MAX_CONNECT_ATTEMPTS: u32 = 3;
-const RETRY_BACKOFF_MS: f64 = 1000.0;
-const TICK_MS: u32 = 100;
-
-/// Exactly-once signal delivery across the poll and push paths.
-#[derive(Default)]
-struct Seen {
-    set: HashSet<i64>,
-    order: VecDeque<i64>,
-}
-
-impl Seen {
-    fn first_time(&mut self, id: i64) -> bool {
-        if !self.set.insert(id) {
-            return false;
+/// Bytes on the wire for a payload to a peer of `kind`.
+pub(crate) fn encode(kind: PeerKind, msg: Payload) -> Vec<u8> {
+    match (kind, msg) {
+        (PeerKind::Phone, Payload::Text(t)) => t.into_bytes(),
+        (PeerKind::Phone, Payload::Binary(b)) => b,
+        (_, Payload::Text(t)) => {
+            let mut v = Vec::with_capacity(t.len() + 1);
+            v.push(TAG_TEXT);
+            v.extend_from_slice(t.as_bytes());
+            v
         }
-        self.order.push_back(id);
-        while self.order.len() > 2048 {
-            if let Some(old) = self.order.pop_front() {
-                self.set.remove(&old);
+        (_, Payload::Binary(b)) => {
+            let mut v = Vec::with_capacity(b.len() + 1);
+            v.push(TAG_BINARY);
+            v.extend_from_slice(&b);
+            v
+        }
+    }
+}
+
+/// A payload from bytes a peer of `kind` sent. `None` for an empty or
+/// unknown-tag screen frame (dropped like a corrupt packet).
+pub(crate) fn decode(kind: PeerKind, bytes: Vec<u8>) -> Option<Payload> {
+    match kind {
+        PeerKind::Phone => Some(Payload::Text(String::from_utf8_lossy(&bytes).into_owned())),
+        _ => match bytes.split_first() {
+            Some((&TAG_TEXT, rest)) => Some(Payload::Text(String::from_utf8_lossy(rest).into_owned())),
+            Some((&TAG_BINARY, rest)) => Some(Payload::Binary(rest.to_vec())),
+            _ => None,
+        },
+    }
+}
+
+fn engine_config(cfg: &NetConfig, client: &str) -> Config {
+    Config {
+        edge: cfg.edge.clone(),
+        key: cfg.key.clone(),
+        conn: Engine::new_conn_id(),
+        client: format!("bouncy-blobs/{} {client}", env!("CARGO_PKG_VERSION")),
+        player_token: cfg.player_token.clone(),
+        no_webrtc: false,
+    }
+}
+
+/// Run `step` every pump interval until it returns `false`: on its own
+/// thread natively (the engine owns its runtime), on the browser loop on wasm.
+fn spawn_pump(mut step: impl FnMut() -> bool + crate::rt::MaybeSend + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = std::thread::Builder::new().name("bb-net".into()).spawn(move || {
+            while step() {
+                std::thread::sleep(std::time::Duration::from_millis(PUMP_MS));
+            }
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::rt::spawn(async move {
+            while step() {
+                crate::rt::sleep_ms(PUMP_MS).await;
+            }
+        });
+    }
+}
+
+/// One member's link, engine side.
+struct Wire {
+    kind: PeerKind,
+    driver: LinkDriver,
+}
+
+impl Wire {
+    /// Flush what the game queued. `false` once the game closed the link.
+    fn flush(&self, engine: &Engine, mid: u16) -> bool {
+        while let Ok(out) = self.driver.outgoing.try_recv() {
+            match out {
+                Outgoing::Send(ch, msg) => engine.send(mid, ch == Channel::Reliable, encode(self.kind, msg)),
+                Outgoing::Close => return false,
             }
         }
         true
     }
+
+    fn deliver(&self, reliable: bool, bytes: Vec<u8>) {
+        if let Some(p) = decode(self.kind, bytes) {
+            self.driver.deliver(if reliable { Channel::Reliable } else { Channel::Unreliable }, p);
+        }
+    }
 }
 
-/// Sends queued signals in order (an answer must not overtake its offer).
-fn spawn_poster(api: Lobbii, room_id: String, auth: Auth, rx: Receiver<OutSignal>) {
-    rt::spawn(async move {
-        while let Ok(s) = rx.recv().await {
-            if let Err(e) = api.post_signal(&room_id, &auth, &s.to, s.kind, &s.payload).await {
-                log::warn!("lobbii: signal to {} failed: {e}", s.to);
-            }
-        }
-    });
+fn failed(code: &str, message: &str) -> NetError {
+    match code {
+        "offline" | "timeout" => NetError::Io(message.into()),
+        _ => NetError::Http { status: 0, message: format!("{code}: {message}") },
+    }
 }
 
 // ─── Host ───────────────────────────────────────────────────────────────────
@@ -96,11 +155,10 @@ pub struct RoomInfo {
 
 pub enum HostEvent {
     Ready(RoomInfo),
-    /// A peer joined the room and we're connecting to it. Watch the link for
-    /// `Open` / messages / `Closed`. A retry after a failed attempt arrives as
-    /// a fresh `Peer` with a new link.
+    /// A member joined the room. Watch the link for `Open` / messages /
+    /// `Closed`. `peer_id` is the member id.
     Peer { peer_id: String, kind: PeerKind, name: Option<String>, link: PeerLink },
-    /// The peer's row left the room (or we gave up on it).
+    /// The member left the room (or was kicked).
     PeerLeft(String),
     Error(NetError),
     Ended,
@@ -122,12 +180,13 @@ impl HostSession {
     pub fn start(cfg: NetConfig, opts: HostOptions) -> HostSession {
         let (ev_tx, ev_rx) = async_channel::unbounded();
         let (cmd_tx, cmd_rx) = async_channel::unbounded();
-        rt::spawn(async move {
-            if let Err(e) = host_loop(cfg, opts, &ev_tx, cmd_rx).await {
-                let _ = ev_tx.try_send(HostEvent::Error(e));
-            }
+        if cfg.key.is_empty() {
+            let _ = ev_tx.try_send(HostEvent::Error(NetError::Config("no partii key (set BB_PARTII_KEY)".into())));
             let _ = ev_tx.try_send(HostEvent::Ended);
-        });
+            return HostSession { events: ev_rx, cmds: cmd_tx };
+        }
+        let mut host = Host::new(&cfg, &opts, ev_tx, cmd_rx);
+        spawn_pump(move || host.step());
         HostSession { events: ev_rx, cmds: cmd_tx }
     }
 
@@ -156,183 +215,106 @@ impl Drop for HostSession {
     }
 }
 
-struct HostPeer {
-    signals: Sender<Signal>,
-    watch: LinkWatch,
-    attempts: u32,
-    retry_at: f64,
+struct Host {
+    engine: Engine,
+    cfg: NetConfig,
+    /// Sent once the engine is online (it refuses rooms before that).
+    pending: Option<HostOptions>,
+    ev: Sender<HostEvent>,
+    cmds: Receiver<HostCmd>,
+    wires: HashMap<u16, Wire>,
+    created: bool,
 }
 
-async fn host_loop(cfg: NetConfig, opts: HostOptions, ev: &Sender<HostEvent>, cmds: Receiver<HostCmd>) -> crate::Result<()> {
-    let api = Lobbii::new(cfg.clone())?;
-    api.ensure_token().await;
-    let created = api
-        .create_room(&CreateRoomOpts {
-            game_id: cfg.game_id.clone(),
-            display_name: Some(opts.display_name.clone()),
-            host_kind: Some("screen".into()),
-            host_display_name: Some(opts.display_name.clone()),
-            max_peers: Some(opts.max_peers),
-            password: opts.password.clone().filter(|p| !p.is_empty()),
-            visibility: Some(if opts.public { "public" } else { "private" }.into()),
-            metadata: None,
-        })
-        .await?;
-    let room_id = created.room_id.clone();
-    let secret = created.host_secret.clone();
-    let ice = created.ice_servers.clone().filter(|v| !v.is_empty()).unwrap_or_else(default_ice_servers);
-    let _ = ev.try_send(HostEvent::Ready(RoomInfo {
-        room_id: room_id.clone(),
-        join_code: created.join_code.clone(),
-        controller_url: cfg.controller_link(&room_id),
-    }));
-
-    let (out_tx, out_rx) = async_channel::unbounded();
-    spawn_poster(api.clone(), room_id.clone(), Auth::Host { secret: secret.clone() }, out_rx);
-    let push = match (&created.signal_gw, &created.room_token) {
-        (Some(gw), Some(tok)) if !gw.is_empty() && !tok.is_empty() => Some(api.push_signals(&room_id, gw, tok)),
-        _ => None,
-    };
-
-    let mut peers: HashMap<String, HostPeer> = HashMap::new();
-    let mut seen = Seen::default();
-    let mut since_id = 0i64;
-    let mut next_signal_poll = 0.0;
-    let mut next_room_poll = 0.0;
-
-    let deliver = |sig: Signal, seen: &mut Seen, peers: &HashMap<String, HostPeer>| {
-        if seen.first_time(sig.signal_id) {
-            if let Some(p) = peers.get(&sig.sender_peer_id) {
-                let _ = p.signals.try_send(sig);
-            }
-        }
-    };
-
-    loop {
-        if ev.is_closed() {
-            break;
-        }
-        let mut end = false;
-        while let Ok(cmd) = cmds.try_recv() {
-            match cmd {
-                HostCmd::End => end = true,
-                HostCmd::SetJoinable(j) => {
-                    let (api, room, s) = (api.clone(), room_id.clone(), secret.clone());
-                    rt::spawn(async move {
-                        if let Err(e) = api.set_joinable(&room, &s, j).await {
-                            log::warn!("lobbii: set_joinable failed: {e}");
-                        }
-                    });
-                }
-                HostCmd::Kick(peer) => {
-                    peers.remove(&peer);
-                    let _ = ev.try_send(HostEvent::PeerLeft(peer.clone()));
-                    let (api, room, s) = (api.clone(), room_id.clone(), secret.clone());
-                    rt::spawn(async move {
-                        let _ = api.disconnect_peer(&room, &s, &peer).await;
-                    });
-                }
-            }
-        }
-        if end || cmds.is_closed() {
-            break;
-        }
-
-        if let Some((rx, _)) = &push {
-            while let Ok(sig) = rx.try_recv() {
-                deliver(sig, &mut seen, &peers);
-            }
-        }
-
-        let now = rt::now_ms();
-        if now >= next_signal_poll {
-            // Push healthy and nobody mid-handshake → polling is just
-            // reconciliation. During a handshake keep polling tight anyway:
-            // the gateway has been seen accepting sockets without pushing.
-            let handshaking = peers.values().any(|p| !p.watch.is_open() && !p.watch.is_closed());
-            let push_up = !handshaking && push.as_ref().is_some_and(|(_, h)| h.is_up());
-            next_signal_poll = now + if push_up { cfg.signal_poll_ms.max(5000) } else { cfg.signal_poll_ms } as f64;
-            match api.poll_signals(&room_id, "host", since_id).await {
-                Ok(r) => {
-                    for sig in r.signals {
-                        deliver(sig, &mut seen, &peers);
-                    }
-                    since_id = since_id.max(r.next_since_id);
-                }
-                Err(e) => log::warn!("lobbii: signal poll failed: {e}"),
-            }
-        }
-
-        if now >= next_room_poll {
-            next_room_poll = now + cfg.room_poll_ms as f64;
-            match api.get_room(&room_id).await {
-                Ok(room) => {
-                    if room.status == "ended" {
-                        return Err(NetError::Http { status: 410, message: "room ended".into() });
-                    }
-                    let listed: HashSet<&str> = room
-                        .peers
-                        .iter()
-                        .filter(|p| !p.is_host && p.status != "disconnected")
-                        .map(|p| p.peer_id.as_str())
-                        .collect();
-                    // Gone from the roster → drop (closing its signal feed ends the link).
-                    let gone: Vec<String> = peers.keys().filter(|id| !listed.contains(id.as_str())).cloned().collect();
-                    for id in gone {
-                        peers.remove(&id);
-                        let _ = ev.try_send(HostEvent::PeerLeft(id));
-                    }
-                    for p in room.peers.iter().filter(|p| listed.contains(p.peer_id.as_str())) {
-                        let kind = PeerKind::parse(&p.kind);
-                        let (attempts, ready) = match peers.get(&p.peer_id) {
-                            None => (0, true),
-                            Some(e) if e.watch.is_closed() => (e.attempts, now >= e.retry_at),
-                            Some(_) => continue,
-                        };
-                        if attempts >= MAX_CONNECT_ATTEMPTS {
-                            // Gave up: free the seat so the room count stays honest.
-                            peers.remove(&p.peer_id);
-                            let (api, room, s, id) = (api.clone(), room_id.clone(), secret.clone(), p.peer_id.clone());
-                            rt::spawn(async move {
-                                let _ = api.disconnect_peer(&room, &s, &id).await;
-                            });
-                            let _ = ev.try_send(HostEvent::PeerLeft(p.peer_id.clone()));
-                            continue;
-                        }
-                        if !ready {
-                            continue;
-                        }
-                        // A handshake starts: poll tightly from now on.
-                        next_signal_poll = 0.0;
-                        let (link, signals) = crate::rtc::spawn_peer(Role::Offerer, p.peer_id.clone(), kind, ice.clone(), out_tx.clone());
-                        peers.insert(
-                            p.peer_id.clone(),
-                            HostPeer { signals, watch: link.watch(), attempts: attempts + 1, retry_at: now + RETRY_BACKOFF_MS },
-                        );
-                        let _ = ev.try_send(HostEvent::Peer {
-                            peer_id: p.peer_id.clone(),
-                            kind,
-                            name: p.display_name.clone(),
-                            link,
-                        });
-                    }
-                }
-                Err(NetError::Http { status: 404, .. }) => return Err(NetError::Http { status: 404, message: "room gone".into() }),
-                Err(e) => log::warn!("lobbii: room poll failed: {e}"),
-            }
-        }
-        rt::sleep_ms(TICK_MS).await;
+impl Host {
+    fn new(cfg: &NetConfig, opts: &HostOptions, ev: Sender<HostEvent>, cmds: Receiver<HostCmd>) -> Host {
+        let engine = Engine::start(engine_config(cfg, "host"));
+        Host { engine, cfg: cfg.clone(), pending: Some(opts.clone()), ev, cmds, wires: HashMap::new(), created: false }
     }
 
-    drop(peers);
-    api.end_room(&room_id, &secret).await
+    fn end(&mut self) -> bool {
+        for (_, w) in self.wires.drain() {
+            w.driver.closed("room ended");
+        }
+        self.engine.leave();
+        let _ = self.ev.try_send(HostEvent::Ended);
+        false
+    }
+
+    fn step(&mut self) -> bool {
+        while let Ok(cmd) = self.cmds.try_recv() {
+            match cmd {
+                HostCmd::SetJoinable(j) => self.engine.update(json!({ "joinable": j })),
+                HostCmd::Kick(id) => {
+                    if let Ok(mid) = id.parse::<u16>() {
+                        self.engine.kick(mid);
+                    }
+                }
+                HostCmd::End => return self.end(),
+            }
+        }
+        if self.ev.is_closed() {
+            return self.end();
+        }
+        for e in self.engine.poll() {
+            match e {
+                Event::Online { .. } => {
+                    if let Some(o) = self.pending.take() {
+                        self.engine.create(&self.cfg.game_id, Some(o.max_peers + 1), "screen", &o.display_name, json!({}));
+                    }
+                }
+                Event::Created { room, .. } => {
+                    self.created = true;
+                    let info = RoomInfo { room_id: room.code.clone(), join_code: room.code.clone(), controller_url: self.cfg.controller_link(&room.code) };
+                    let _ = self.ev.try_send(HostEvent::Ready(info));
+                }
+                Event::Failed { code, message, .. } if !self.created => {
+                    let _ = self.ev.try_send(HostEvent::Error(failed(&code, &message)));
+                    return self.end();
+                }
+                Event::MemberJoined { member } => {
+                    let kind = PeerKind::parse(&member.kind);
+                    let (link, driver) = link_pair(member.mid.to_string(), kind);
+                    self.wires.insert(member.mid, Wire { kind, driver });
+                    let _ = self.ev.try_send(HostEvent::Peer { peer_id: member.mid.to_string(), kind, name: Some(member.name), link });
+                }
+                Event::PeerConnected { mid, .. } => {
+                    if let Some(w) = self.wires.get(&mid) {
+                        w.driver.opened();
+                    }
+                }
+                Event::Message { from, reliable, bytes } => {
+                    if let Some(w) = self.wires.get(&from) {
+                        w.deliver(reliable, bytes);
+                    }
+                }
+                Event::MemberLeft { mid, reason } => {
+                    if let Some(w) = self.wires.remove(&mid) {
+                        w.driver.closed(reason);
+                        let _ = self.ev.try_send(HostEvent::PeerLeft(mid.to_string()));
+                    }
+                }
+                Event::RoomClosed { reason } => {
+                    let _ = self.ev.try_send(HostEvent::Error(NetError::Io(format!("room closed: {reason}"))));
+                    return self.end();
+                }
+                _ => {}
+            }
+        }
+        let engine = &self.engine;
+        let kicked: Vec<u16> = self.wires.iter().filter(|(mid, w)| !w.flush(engine, **mid)).map(|(mid, _)| *mid).collect();
+        for mid in kicked {
+            self.engine.kick(mid);
+        }
+        true
+    }
 }
 
 // ─── Guest ──────────────────────────────────────────────────────────────────
 
 pub enum GuestEvent {
     Joined { room_id: String, peer_id: String },
-    /// The link to the host (a fresh one after each pre-connect re-arm).
+    /// The link to the host.
     Host(PeerLink),
     Error(NetError),
     Ended,
@@ -343,26 +325,19 @@ pub struct GuestSession {
     stop: Sender<()>,
 }
 
-/// Silent answerer re-arms before a guest gives up (TS `MAX_HOST_REARMS`).
-const MAX_REARMS: u32 = 4;
-
-fn looks_like_room_id(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() >= 24 && b[8] == b'-' && b[13] == b'-' && b[18] == b'-' && s.chars().filter(|c| *c != '-').all(|c| c.is_ascii_hexdigit())
-}
-
 impl GuestSession {
-    /// Join `room` (a room id or a join code) as `kind` (`Screen` for a
-    /// second Bevy screen).
-    pub fn join(cfg: NetConfig, room: String, display_name: String, kind: PeerKind) -> GuestSession {
+    /// Join room `code` as `kind` (`Screen` for a second Bevy screen).
+    pub fn join(cfg: NetConfig, code: String, display_name: String, kind: PeerKind) -> GuestSession {
         let (ev_tx, ev_rx) = async_channel::unbounded();
         let (stop_tx, stop_rx) = async_channel::bounded(1);
-        rt::spawn(async move {
-            if let Err(e) = guest_loop(cfg, room, display_name, kind, &ev_tx, stop_rx).await {
-                let _ = ev_tx.try_send(GuestEvent::Error(e));
-            }
+        if cfg.key.is_empty() {
+            let _ = ev_tx.try_send(GuestEvent::Error(NetError::Config("no partii key (set BB_PARTII_KEY)".into())));
             let _ = ev_tx.try_send(GuestEvent::Ended);
-        });
+            return GuestSession { events: ev_rx, stop: stop_tx };
+        }
+        let engine = Engine::start(engine_config(&cfg, "guest"));
+        let mut guest = Guest { engine, kind, pending: Some((code.trim().to_ascii_uppercase(), display_name)), ev: ev_tx, stop: stop_rx, host: None };
+        spawn_pump(move || guest.step());
         GuestSession { events: ev_rx, stop: stop_tx }
     }
 
@@ -381,79 +356,73 @@ impl Drop for GuestSession {
     }
 }
 
-async fn guest_loop(cfg: NetConfig, room: String, name: String, kind: PeerKind, ev: &Sender<GuestEvent>, stop: Receiver<()>) -> crate::Result<()> {
-    let api = Lobbii::new(cfg.clone())?;
-    api.ensure_token().await;
-    let room_id = if looks_like_room_id(&room) { room } else { api.lookup_by_code(&room).await?.room_id };
-    let joined = api
-        .join_room(&room_id, &JoinRoomOpts { kind: kind.as_str().into(), display_name: Some(name), password: None, metadata: None })
-        .await?;
-    let peer_id = joined.peer_id.clone();
-    let auth = Auth::Peer { id: peer_id.clone(), secret: joined.peer_secret.clone() };
-    let ice = joined.ice_servers.clone().filter(|v| !v.is_empty()).unwrap_or_else(default_ice_servers);
-    let _ = ev.try_send(GuestEvent::Joined { room_id: room_id.clone(), peer_id: peer_id.clone() });
+struct Guest {
+    engine: Engine,
+    kind: PeerKind,
+    /// (code, name), joined once the engine is online.
+    pending: Option<(String, String)>,
+    ev: Sender<GuestEvent>,
+    stop: Receiver<()>,
+    host: Option<(u16, Wire)>,
+}
 
-    let (out_tx, out_rx) = async_channel::unbounded();
-    spawn_poster(api.clone(), room_id.clone(), auth.clone(), out_rx);
-    let push = match (&joined.signal_gw, &joined.room_token) {
-        (Some(gw), Some(tok)) if !gw.is_empty() && !tok.is_empty() => Some(api.push_signals(&room_id, gw, tok)),
-        _ => None,
-    };
-
-    let arm = |ev: &Sender<GuestEvent>| {
-        let (link, signals) = crate::rtc::spawn_peer(Role::Answerer, "host".into(), kind, ice.clone(), out_tx.clone());
-        let watch = link.watch();
-        let _ = ev.try_send(GuestEvent::Host(link));
-        (signals, watch)
-    };
-    let (mut signals, mut watch) = arm(ev);
-    let mut rearms = 0;
-    let mut ever_open = false;
-    let mut seen = Seen::default();
-    let mut since_id = 0i64;
-    let mut next_poll = 0.0;
-
-    loop {
-        if ev.is_closed() || stop.try_recv().is_ok() || stop.is_closed() {
-            break;
+impl Guest {
+    fn end(&mut self, why: &str) -> bool {
+        if let Some((_, w)) = self.host.take() {
+            w.driver.closed(why);
         }
-        if watch.is_closed() {
-            // Pre-connect failure: re-arm quietly; a lost live link is final.
-            if ever_open || rearms >= MAX_REARMS {
-                break;
-            }
-            rearms += 1;
-            (signals, watch) = arm(ev);
-        }
-        ever_open |= watch.is_open();
+        self.engine.leave();
+        let _ = self.ev.try_send(GuestEvent::Ended);
+        false
+    }
 
-        if let Some((rx, _)) = &push {
-            while let Ok(sig) = rx.try_recv() {
-                if seen.first_time(sig.signal_id) {
-                    let _ = signals.try_send(sig);
+    fn step(&mut self) -> bool {
+        if self.stop.try_recv().is_ok() || self.ev.is_closed() {
+            return self.end("left");
+        }
+        for e in self.engine.poll() {
+            match e {
+                Event::Online { .. } => {
+                    if let Some((code, name)) = self.pending.take() {
+                        self.engine.join(&code, self.kind.as_str(), &name, json!({}));
+                    }
                 }
-            }
-        }
-        let now = rt::now_ms();
-        if now >= next_poll {
-            let push_up = ever_open && push.as_ref().is_some_and(|(_, h)| h.is_up());
-            next_poll = now + if push_up { cfg.signal_poll_ms.max(5000) } else { cfg.signal_poll_ms } as f64;
-            match api.poll_signals(&room_id, &peer_id, since_id).await {
-                Ok(r) => {
-                    for sig in r.signals {
-                        if seen.first_time(sig.signal_id) {
-                            let _ = signals.try_send(sig);
+                Event::Joined { room, .. } => {
+                    let _ = self.ev.try_send(GuestEvent::Joined { room_id: room.code.clone(), peer_id: room.you.to_string() });
+                    let (link, driver) = link_pair(room.host.to_string(), self.kind);
+                    self.host = Some((room.host, Wire { kind: self.kind, driver }));
+                    let _ = self.ev.try_send(GuestEvent::Host(link));
+                }
+                Event::Failed { code, message, .. } if self.host.is_none() => {
+                    let _ = self.ev.try_send(GuestEvent::Error(failed(&code, &message)));
+                    return self.end("join failed");
+                }
+                Event::PeerConnected { mid, .. } => {
+                    if let Some((h, w)) = &self.host {
+                        if *h == mid {
+                            w.driver.opened();
                         }
                     }
-                    since_id = since_id.max(r.next_since_id);
                 }
-                Err(e) => log::warn!("lobbii: signal poll failed: {e}"),
+                Event::Message { from, reliable, bytes } => {
+                    if let Some((h, w)) = &self.host {
+                        if *h == from {
+                            w.deliver(reliable, bytes);
+                        }
+                    }
+                }
+                Event::MemberLeft { mid, .. } if self.host.as_ref().is_some_and(|(h, _)| *h == mid) => return self.end("host left"),
+                Event::RoomClosed { reason } => return self.end(&reason),
+                _ => {}
             }
         }
-        rt::sleep_ms(TICK_MS).await;
+        if let Some((mid, w)) = &self.host {
+            if !w.flush(&self.engine, *mid) {
+                return self.end("closed");
+            }
+        }
+        true
     }
-    drop(signals);
-    api.leave_room(&room_id, &peer_id, &joined.peer_secret).await
 }
 
 #[cfg(test)]
@@ -461,20 +430,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dedupes_and_bounds() {
-        let mut s = Seen::default();
-        assert!(s.first_time(1));
-        assert!(!s.first_time(1));
-        for i in 2..5000 {
-            s.first_time(i);
+    fn phones_get_bare_text_and_screens_tagged_frames() {
+        assert_eq!(encode(PeerKind::Phone, Payload::Text("{\"t\":1}".into())), b"{\"t\":1}".to_vec());
+        for kind in [PeerKind::Phone, PeerKind::Screen] {
+            for p in [Payload::Text("héllo".into()), Payload::Binary(vec![0, 1, 2, 255])] {
+                if kind == PeerKind::Phone && matches!(p, Payload::Binary(_)) {
+                    continue;
+                }
+                assert_eq!(decode(kind, encode(kind, p.clone())), Some(p), "{kind:?}");
+            }
         }
-        assert!(s.set.len() <= 2048);
-    }
-
-    #[test]
-    fn room_id_vs_code() {
-        assert!(looks_like_room_id("8c1e7a2b-1234-4abc-8def-0123456789ab"));
-        assert!(!looks_like_room_id("ABC123"));
-        assert!(!looks_like_room_id("zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"));
+        assert_eq!(decode(PeerKind::Screen, vec![]), None);
+        assert_eq!(decode(PeerKind::Screen, vec![9, 1]), None);
     }
 }

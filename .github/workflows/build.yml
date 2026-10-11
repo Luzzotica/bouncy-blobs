@@ -9,8 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # Lobbii key baked into builds by bb-net (option_env!). Add it as a repo secret.
-  BB_MP_API_KEY: ${{ secrets.BB_MP_API_KEY }}
+  # partii publishable key baked into builds by bb-net (option_env!). Add it as a repo secret.
+  BB_PARTII_KEY: ${{ secrets.BB_PARTII_KEY }}
 
 jobs:
   native:

@@ -1,51 +1,31 @@
-//! Where the backend lives and who we are to it.
+//! Where the platform lives and who we are to it.
 
-/// Lobbii game id shared with the TS app (rooms, telemetry, cloud content).
+/// partii game id (rooms, telemetry, store).
 pub const GAME_ID: &str = "bouncy-blobs";
-/// Production Lobbii backend (the TS app's `VITE_PARTY_API_URL`).
-pub const DEFAULT_API: &str = "https://www.sterlinglong.me";
-/// Where phones open the controller page. The legacy app builds
-/// `${window.location.origin}/controller/<room_id>`; a native host has no
-/// origin of its own, so this points at the deployed web app and can be
-/// overridden with `BB_CONTROLLER_URL` (anything ending in `/controller/`).
-/// Production alias of the (2.x) web app, whose `/controller/:room` page is
-/// the phone controller. Verified live 2026-10-07.
-pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-sterling-longs-projects.vercel.app/controller/";
+/// The partii staging edge until production exists.
+pub const DEFAULT_EDGE: &str = "https://partii-edge-staging.partii-games.workers.dev";
+/// Where phones open the controller page (`web-controller/`, deployed on
+/// partii staging); the room code is appended. Override with
+/// `BB_CONTROLLER_URL` (anything ending in `/controller/`).
+pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-controller-staging.partii-games.workers.dev/controller/";
 
 #[derive(Clone, Debug)]
 pub struct NetConfig {
-    pub api_base: String,
-    /// Project API key (`X-API-Key`), exchanged for a short-lived session token.
-    pub api_key: String,
+    /// partii edge base URL.
+    pub edge: String,
+    /// The game's publishable key (`pk_…`).
+    pub key: String,
     pub game_id: String,
-    /// Prefix the room id is appended to for the phone QR code.
+    /// Prefix the room code is appended to for the phone QR code.
     pub controller_url: String,
-    /// Platform claimed at token exchange (`web` | `steam` | `player` | `dev`).
-    pub platform: String,
-    /// Signal poll interval while the push socket is down (TS: 500 ms for BB).
-    pub signal_poll_ms: u32,
-    /// Room roster poll interval (TS host: 2000 ms).
-    pub room_poll_ms: u32,
+    /// The signed-in player's token, when there is one.
+    pub player_token: Option<String>,
 }
 
 impl Default for NetConfig {
     fn default() -> Self {
-        NetConfig {
-            api_base: DEFAULT_API.into(),
-            api_key: String::new(),
-            game_id: GAME_ID.into(),
-            controller_url: DEFAULT_CONTROLLER_URL.into(),
-            platform: default_platform().into(),
-            signal_poll_ms: 500,
-            room_poll_ms: 2000,
-        }
+        NetConfig { edge: DEFAULT_EDGE.into(), key: String::new(), game_id: GAME_ID.into(), controller_url: DEFAULT_CONTROLLER_URL.into(), player_token: None }
     }
-}
-
-fn default_platform() -> &'static str {
-    // Native has no Steam ticket (yet) or Turnstile, but can always attest
-    // as an anonymous Lobbii player. The browser build is the `web` platform.
-    if cfg!(target_arch = "wasm32") { "web" } else { "player" }
 }
 
 /// Runtime env var (native only; the browser has no env), then the value
@@ -62,8 +42,8 @@ fn env(name: &str, baked: Option<&'static str>) -> Option<String> {
 }
 
 impl NetConfig {
-    /// `BB_PARTY_API`, `BB_MP_API_KEY`, `BB_CONTROLLER_URL`, `BB_PARTY_PLATFORM`
-    /// at runtime, falling back to the same names at compile time.
+    /// `BB_PARTII_API`, `BB_PARTII_KEY`, `BB_CONTROLLER_URL` at runtime,
+    /// falling back to the same names at compile time.
     pub fn from_env() -> NetConfig {
         let d = NetConfig::default();
         let mut controller_url = env("BB_CONTROLLER_URL", option_env!("BB_CONTROLLER_URL")).unwrap_or(d.controller_url);
@@ -71,21 +51,33 @@ impl NetConfig {
             controller_url.push('/');
         }
         NetConfig {
-            api_base: env("BB_PARTY_API", option_env!("BB_PARTY_API"))
-                .unwrap_or(d.api_base)
-                .trim_end_matches('/')
-                .to_string(),
-            api_key: env("BB_MP_API_KEY", option_env!("BB_MP_API_KEY")).unwrap_or_default(),
+            edge: env("BB_PARTII_API", option_env!("BB_PARTII_API")).unwrap_or(d.edge).trim_end_matches('/').to_string(),
+            key: env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_default(),
             controller_url,
-            platform: env("BB_PARTY_PLATFORM", option_env!("BB_PARTY_PLATFORM")).unwrap_or(d.platform),
+            player_token: env("BB_PARTII_PLAYER_TOKEN", None),
             ..d
         }
     }
 
-    /// The URL phones scan: `<controller_url><room_id>`.
-    pub fn controller_link(&self, room_id: &str) -> String {
-        format!("{}{}", self.controller_url, room_id)
+    /// The URL phones scan: `<controller_url><CODE>`, plus the platform when
+    /// it isn't the default the page was built with.
+    pub fn controller_link(&self, code: &str) -> String {
+        let mut url = format!("{}{}", self.controller_url, code);
+        if self.edge != DEFAULT_EDGE {
+            url.push_str(&format!("?k={}&e={}", self.key, encode(&self.edge)));
+        }
+        url
     }
+}
+
+/// Percent-encode a URL for a query value.
+fn encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -93,8 +85,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn controller_link_appends_room() {
+    fn controller_link_appends_code() {
         let c = NetConfig::default();
-        assert_eq!(c.controller_link("abc"), "https://bouncy-blobs-sterling-longs-projects.vercel.app/controller/abc");
+        assert_eq!(c.controller_link("KXQPT"), format!("{DEFAULT_CONTROLLER_URL}KXQPT"));
+    }
+
+    #[test]
+    fn controller_link_names_a_non_default_platform() {
+        let c = NetConfig { edge: "http://192.168.1.5:8787".into(), key: "pk_demo_k1_x".into(), ..NetConfig::default() };
+        assert_eq!(c.controller_link("KXQPT"), format!("{DEFAULT_CONTROLLER_URL}KXQPT?k=pk_demo_k1_x&e=http%3A%2F%2F192.168.1.5%3A8787"));
     }
 }

@@ -1,10 +1,10 @@
-//! Host a room and wait for a real phone controller page to join, e.g. the
-//! legacy web app's `/controller/<room_id>` in a browser. Prints `ROOM <id>`
+//! Host a room and wait for a real phone controller page to join
+//! (`web-controller`'s `/controller/<CODE>` in a browser). Prints `ROOM <code>`
 //! once the room exists, then logs the controller protocol and exits 0 when
 //! it has seen a join, a stick push and a button press.
 //!
 //! ```sh
-//! BB_MP_API_KEY=... cargo run -p bb-net --example phone_host
+//! BB_PARTII_API=http://127.0.0.1:8787 BB_PARTII_KEY=pk_... cargo run -p bb-net --example phone_host
 //! ```
 
 use std::io::Write;

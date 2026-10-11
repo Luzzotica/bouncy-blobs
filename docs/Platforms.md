@@ -26,18 +26,20 @@ script respects it.
 
 ## Multiplayer API key
 
-`bb-net` reads `BB_MP_API_KEY` at **compile time** (`option_env!`), with the
-runtime env var as a fallback, so shipped builds must have it exported before
-`cargo` runs. Every build script (`build-macos.sh`, `web-build.sh`,
-`android-build.sh`, and `ios/build-rust.sh`, which also covers Xcode and
-`ios-build.sh`) sources `scripts/lib/mp-api-key.sh`. That helper uses
-`$BB_MP_API_KEY` if it is already set. Otherwise it reads `VITE_MP_API_KEY=`
-from `$BB_ENV_FILE`, then `./.env.local`, then `../bouncy-blobs/.env.local`. It
-never prints the value. **`.env.production.local` holds a revoked key; don't
-use it.** CI reads the repo secret `BB_MP_API_KEY`, which must be added. Plain
-`cargo run` without the variable builds fine, but online and phone play are
-disabled. On web the key ends up in the public wasm, as it did in the Vite
-build.
+`bb-net` reads `BB_PARTII_KEY` (the game's partii publishable key) and
+`BB_PARTII_API` (the platform, default partii staging) at **compile time**
+(`option_env!`), with runtime env vars as a fallback, so shipped builds must
+have them exported before `cargo` runs. Every build script (`build-macos.sh`,
+`web-build.sh`, `android-build.sh`, and `ios/build-rust.sh`, which also covers
+Xcode and `ios-build.sh`) sources `scripts/lib/mp-api-key.sh`. That helper uses
+`$BB_PARTII_KEY` if it is already set, else `STAGING_BB_KEY` from
+`~/.config/partii/staging.env`. It never prints the value. CI reads the repo
+secret `BB_PARTII_KEY`. Plain `cargo run` without the variable builds fine, but
+online and phone play are disabled. Publishable keys are public by design (they
+ship in every client).
+
+`bb-net` depends on `partii-engine` by path (`../partii/platform`), so builds
+need the partii repo checked out next to this one.
 
 ## Assets
 
@@ -240,7 +242,7 @@ build.
 | Android | ❌ **Not built.** `~/Library/Android/sdk` is empty: no SDK and no NDK. Even `cargo check --target aarch64-linux-android` fails: `android-activity@0.6.1: failed to find tool "aarch64-linux-android-clang++"` (it compiles GameActivity's C++ glue). The project and script are written; CI builds the APK on GitHub's macOS runner, which ships the SDK and NDK |
 | Windows | ⚠️ Not built locally. `cargo check --target x86_64-pc-windows-msvc` passed before the merge, with `CARGO_FEATURE_PURE=1` to skip blake3's asm. Without it: `blake3: failed to find tool "ml64.exe"`. Full builds run in CI |
 | Linux | ⚠️ Not built locally. `cargo check --target x86_64-unknown-linux-gnu` fails on macOS with `wayland-sys: pkg-config has not been configured to support cross-compilation` (it needs a Linux sysroot). Full builds run in CI |
-| CI workflow | Written, not yet run. It needs the repo secret `BB_MP_API_KEY` |
+| CI workflow | Written, not yet run. It needs the repo secret `BB_PARTII_KEY` and the partii repo next to this one |
 
 ### Known issues
 

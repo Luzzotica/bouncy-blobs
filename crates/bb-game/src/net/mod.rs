@@ -1,4 +1,4 @@
-//! Networking in the Bevy app: hosting a Lobbii room for phones and guest
+//! Networking in the Bevy app: hosting a partii room for phones and guest
 //! screens, or joining one as a guest screen.
 //!
 //! * Phones speak the existing controller JSON and get slots 1..7 (slot 0 is
@@ -112,7 +112,7 @@ pub struct NetSession {
     pub role: NetRole,
     pub status: NetStatus,
     pub room: Option<RoomInfo>,
-    /// `"host"` on the host, our Lobbii peer id on a guest.
+    /// `"host"` on the host, our partii member id on a guest.
     pub self_id: String,
     pub roster: BTreeMap<u8, RosterEntry>,
     host: Option<HostSession>,
@@ -152,7 +152,7 @@ impl NetSession {
         self.role == NetRole::Host
     }
 
-    /// Lobbii peers with an open link (phones and screens).
+    /// Room members with an open link (phones and screens).
     pub fn connected(&self) -> impl Iterator<Item = (&str, PeerKind, Option<&str>)> {
         self.peers.iter().filter(|(_, p)| p.open).map(|(id, p)| (id.as_str(), p.kind, p.name.as_deref()))
     }

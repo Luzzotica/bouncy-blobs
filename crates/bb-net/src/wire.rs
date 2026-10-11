@@ -361,7 +361,7 @@ pub struct PlayerInfo {
     pub color: u32,
     #[serde(default)]
     pub face: u8,
-    /// Lobbii peer id of the owning screen; `"host"` for host-owned (host
+    /// partii member id of the owning screen; `"host"` for host-owned (host
     /// keyboard and phone players).
     pub owner: String,
 }
