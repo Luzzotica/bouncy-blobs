@@ -201,7 +201,35 @@ mod imp {
     }
 }
 
-pub use imp::{delete, export, list, location, read, read_path, write};
+pub use imp::{export, list, location, read, read_path};
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use imp::maps_dir;
+
+/// Write a map file (and roam it on native).
+pub fn write(id: &str, json: &str) -> Result<String, String> {
+    let r = imp::write(id, json);
+    #[cfg(not(target_arch = "wasm32"))]
+    if r.is_ok() {
+        crate::account::map_changed(id, false);
+    }
+    r
+}
+
+/// Delete a map file (and roam the deletion on native).
+pub fn delete(id: &str) -> Result<(), String> {
+    let r = imp::delete(id);
+    #[cfg(not(target_arch = "wasm32"))]
+    if r.is_ok() {
+        crate::account::map_changed(id, true);
+    }
+    r
+}
+
+/// Write a map file without roaming it (applying the cloud copy).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn write_local(id: &str, json: &str) -> Result<String, String> {
+    imp::write(id, json)
+}
 
 /// Save a level under `id`, returning where it went.
 pub fn save(id: &str, level: &Level) -> Result<String, String> {

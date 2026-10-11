@@ -39,6 +39,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+partii-account = { path = "../../../partii/platform/crates/partii-account" }
 dirs = "6"
 
 # Web: browser time source + getrandom's wasm_js backend (no RUSTFLAGS needed

@@ -1,5 +1,7 @@
 //! Bouncy Blobs — the Bevy app.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod account;
 pub mod achievements;
 pub mod alive;
 pub mod assets;
@@ -68,6 +70,8 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(account::AccountPlugin);
         app.insert_resource(ClearColor(Color::srgb(0.02, 0.015, 0.03)))
             .add_plugins((
                 assets::AssetsPlugin,

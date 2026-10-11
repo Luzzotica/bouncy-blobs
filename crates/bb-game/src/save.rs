@@ -36,7 +36,26 @@ pub fn get(key: &str) -> Option<String> {
     }
 }
 
+/// The folder `save.txt` lives in (native).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    path().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+}
+
+/// Every key and value (native).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn all() -> Vec<(String, String)> {
+    read_all()
+}
+
 pub fn set(key: &str, value: &str) {
+    set_local(key, value);
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::account::push_progress();
+}
+
+/// Set without roaming the change (applying the cloud copy).
+pub(crate) fn set_local(key: &str, value: &str) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let Some(p) = path() else { return };
