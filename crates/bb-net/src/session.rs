@@ -218,8 +218,6 @@ impl Drop for HostSession {
 struct Host {
     engine: Engine,
     cfg: NetConfig,
-    /// Sent once the engine is online (it refuses rooms before that).
-    pending: Option<HostOptions>,
     ev: Sender<HostEvent>,
     cmds: Receiver<HostCmd>,
     wires: HashMap<u16, Wire>,
@@ -229,7 +227,9 @@ struct Host {
 impl Host {
     fn new(cfg: &NetConfig, opts: &HostOptions, ev: Sender<HostEvent>, cmds: Receiver<HostCmd>) -> Host {
         let engine = Engine::start(engine_config(cfg, "host"));
-        Host { engine, cfg: cfg.clone(), pending: Some(opts.clone()), ev, cmds, wires: HashMap::new(), created: false }
+        // The engine holds this until it is online.
+        engine.create(&cfg.game_id, Some(opts.max_peers + 1), "screen", &opts.display_name, json!({}));
+        Host { engine, cfg: cfg.clone(), ev, cmds, wires: HashMap::new(), created: false }
     }
 
     fn end(&mut self) -> bool {
@@ -258,11 +258,6 @@ impl Host {
         }
         for e in self.engine.poll() {
             match e {
-                Event::Online { .. } => {
-                    if let Some(o) = self.pending.take() {
-                        self.engine.create(&self.cfg.game_id, Some(o.max_peers + 1), "screen", &o.display_name, json!({}));
-                    }
-                }
                 Event::Created { room, .. } => {
                     self.created = true;
                     let info = RoomInfo { room_id: room.code.clone(), join_code: room.code.clone(), controller_url: self.cfg.controller_link(&room.code) };
@@ -336,7 +331,8 @@ impl GuestSession {
             return GuestSession { events: ev_rx, stop: stop_tx };
         }
         let engine = Engine::start(engine_config(&cfg, "guest"));
-        let mut guest = Guest { engine, kind, pending: Some((code.trim().to_ascii_uppercase(), display_name)), ev: ev_tx, stop: stop_rx, host: None };
+        engine.join(&code.trim().to_ascii_uppercase(), kind.as_str(), &display_name, json!({}));
+        let mut guest = Guest { engine, kind, ev: ev_tx, stop: stop_rx, host: None };
         spawn_pump(move || guest.step());
         GuestSession { events: ev_rx, stop: stop_tx }
     }
@@ -359,8 +355,6 @@ impl Drop for GuestSession {
 struct Guest {
     engine: Engine,
     kind: PeerKind,
-    /// (code, name), joined once the engine is online.
-    pending: Option<(String, String)>,
     ev: Sender<GuestEvent>,
     stop: Receiver<()>,
     host: Option<(u16, Wire)>,
@@ -382,11 +376,6 @@ impl Guest {
         }
         for e in self.engine.poll() {
             match e {
-                Event::Online { .. } => {
-                    if let Some((code, name)) = self.pending.take() {
-                        self.engine.join(&code, self.kind.as_str(), &name, json!({}));
-                    }
-                }
                 Event::Joined { room, .. } => {
                     let _ = self.ev.try_send(GuestEvent::Joined { room_id: room.code.clone(), peer_id: room.you.to_string() });
                     let (link, driver) = link_pair(room.host.to_string(), self.kind);
