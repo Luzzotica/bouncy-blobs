@@ -4,10 +4,10 @@
 pub const GAME_ID: &str = "bouncy-blobs";
 /// The partii staging edge until production exists.
 pub const DEFAULT_EDGE: &str = "https://partii-edge-staging.partii-games.workers.dev";
-/// Where phones open the controller page (`web-controller/`, deployed on
-/// partii staging); the room code is appended. Override with
+/// Where phones open the controller page (`web-controller/`, on Vercel
+/// staging); the room code is appended. Override with
 /// `BB_CONTROLLER_URL` (anything ending in `/controller/`).
-pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-controller-staging.partii-games.workers.dev/controller/";
+pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-controller-staging.vercel.app/controller/";
 
 #[derive(Clone, Debug)]
 pub struct NetConfig {
