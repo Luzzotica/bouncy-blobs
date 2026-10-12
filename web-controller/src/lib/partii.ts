@@ -8,7 +8,7 @@
 
 export const GAME_ID = 'bouncy-blobs';
 
-const DEFAULT_EDGE = 'https://partii-edge-staging.partii-games.workers.dev';
+const DEFAULT_EDGE = 'https://partii-edge.partii-games.workers.dev';
 
 export interface EngineEvent {
   ev: string;

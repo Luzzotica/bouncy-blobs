@@ -2,8 +2,11 @@
 
 /// partii game id (rooms, telemetry, store).
 pub const GAME_ID: &str = "bouncy-blobs";
-/// The partii staging edge until production exists.
-pub const DEFAULT_EDGE: &str = "https://partii-edge-staging.partii-games.workers.dev";
+/// The partii production edge.
+pub const DEFAULT_EDGE: &str = "https://partii-edge.partii-games.workers.dev";
+/// bouncy-blobs' production publishable key (public by design), used when
+/// the edge is the default one and no key was given.
+pub const DEFAULT_KEY: &str = "pk_bouncyblobs_game_ChoZroQWd5sqZiwXtLpY-k";
 /// Where phones open the controller page (`web-controller/`, on Vercel
 /// production); the room code is appended. Override with
 /// `BB_CONTROLLER_URL` (anything ending in `/controller/`).
@@ -50,9 +53,11 @@ impl NetConfig {
         if !controller_url.ends_with('/') {
             controller_url.push('/');
         }
+        let edge = env("BB_PARTII_API", option_env!("BB_PARTII_API")).unwrap_or(d.edge).trim_end_matches('/').to_string();
+        let key = env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_else(|| if edge == DEFAULT_EDGE { DEFAULT_KEY.into() } else { String::new() });
         NetConfig {
-            edge: env("BB_PARTII_API", option_env!("BB_PARTII_API")).unwrap_or(d.edge).trim_end_matches('/').to_string(),
-            key: env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_default(),
+            edge,
+            key,
             controller_url,
             player_token: env("BB_PARTII_PLAYER_TOKEN", None),
             ..d
