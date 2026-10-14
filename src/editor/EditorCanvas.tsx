@@ -8,7 +8,7 @@ import { drawLava } from '../renderer/lavaRenderer';
 import { computeLevelAABB, FALL_KILL_MARGIN } from '../game/mapBounds';
 import { BLOB_RADIUS, BLOB_EXPAND_MAX_SCALE, BLOB_SQUASH_X_AMOUNT, BLOB_SQUASH_Y_AMOUNT } from '../physics/slimeBlob';
 import type { SpringPadDef, ActionTarget } from '../levels/types';
-import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+import { rect as hullRect, rectAnchorIndices, clampRectSegments } from '../physics/hullPresets';
 import { shouldUsePad } from '../game/touchInput';
 
 /** Detect macOS for platform-appropriate modifier labels. On Mac the
@@ -304,8 +304,9 @@ export default function EditorCanvas({ state, onUpdate }: EditorCanvasProps) {
       ctx.stroke();
       // Hull preview — show every particle the loader will create from the
       // current segW/segH/rotation, with anchored ones highlighted.
-      const segW = sp.segW ?? 8;
-      const segH = sp.segH ?? 1;
+      const clampedSeg = clampRectSegments(sp.segW ?? 8, sp.segH ?? 1);
+      const segW = clampedSeg.segW;
+      const segH = clampedSeg.segH;
       const hullPts = hullRect(sp.width, sp.height, segW, segH);
       const anchorSet = new Set(
         Array.isArray(sp.anchors) ? sp.anchors : rectAnchorIndices(segW, segH, sp.anchors ?? 'corners'),

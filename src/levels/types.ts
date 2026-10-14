@@ -109,6 +109,12 @@ export interface SoftPlatformDef {
   anchors?: SoftAnchorPattern | number[];
   /** Multiplier on spring stiffness (defaults to 1.0). Higher = more rigid. */
   stiffness?: number;
+  /** Multiplier on platform mass (defaults to 1). A hanging swing seat wants
+   *  this well below 1 so a player can actually push it. */
+  massScale?: number;
+  /** Project the hull back to a rigid plank every substep. It can swing and
+   *  tip as one piece, but it cannot fold. For ropes, not for floors. */
+  rigid?: boolean;
   /** When true, every unanchored hull vertex gets an individual home-spring
    *  pulling it toward its original rest world position. The platform stays
    *  rooted in place without per-vertex anchors, but each vertex remains

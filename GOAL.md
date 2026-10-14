@@ -1,5 +1,7 @@
 # Bouncy Blobs — Kids Mode (iPad)
 
+> **2026-10-12:** The Steam launch is **October 30, 2026**. The cave is the public story. The king text on the Steam page is not what we post. The date is not on that page yet. He could not set it in Steamworks. Posts may still say "coming October 30." **Climb-2 version 9 is a pass.** Do not edit `climb-2.json`, `climb-1.json`, or `swing.json`. Bouncy Blobs content is un-paused. Launch is still October 30, 2026. Do not record the web game. First Rust clips are Kids Mode for the Bubbles video, then Pip bouncing in the ready biomes, and only after the Bevy capture mode exists. No Apple beta in public posts. Beats 5–8 are not started. The `bevy-port` branch is not this slice. Do not start the menu rebuild, the app rewrite, or the online rewrite. Do not mention the Apple beta in public posts.
+
 ## Mission
 
 Ship a **gorgeous, simple kids mode** for Bouncy Blobs that works great on **iPad (and iOS)**, is easy for toddlers/preschoolers to use, and is **buildable + deployable** for App Store / TestFlight.
@@ -58,8 +60,8 @@ When this is done, a parent can put an iPad in a kid’s hands and:
 - [x] **Sterling playtest** approval (web) — *Sterling* · feedback `62c86918` **resolved** + **GO SHIP** directed 2026-07-20
 - [x] **Tester kid-lens re-pass (web prod + itch)** — *tester* · **PASS** 2026-07-21 (REPORT.md; no S0/S1); device matrix still gated on TF Available
 - [x] **Re-TF** (CFBundleVersion **2.0.0.9**) — *eng* · **SUCCESS** Delivery UUID `b613b950-7745-4bd3-b116-3f5aacf08f4a` (Distribution signed; `fea02972` resolved)
-- [x] **TF 2.0.0.9 ASC status** — *eng* 2026-07-21: build **VALID**; was blocked **MISSING_EXPORT_COMPLIANCE** → set `usesNonExemptEncryption=false` → **internalBuildState READY_FOR_BETA_TESTING** (installable via TestFlight for Sterling/internal)
-- [ ] **TF install + device QA** — *Sterling* install **2.0.0.9** (or **2.0.0.10** when processing) on Padii then *tester* device matrix
+- [x] **TF 2.0.0.9 Available** (ASC VALID / READY_FOR_BETA_TESTING) — *eng* confirmed 2026-07-21 ~03:09 UTC · Delivery `b613b950-7745-4bd3-b116-3f5aacf08f4a`
+- [ ] **TF internal testers + install + device QA** — *Sterling* (`75073fea`) · **blocked**: Padii still **2.0.0.6** and **TestFlight app not on device** (tester cannot self-install beta); then *tester* matrix
 
 ### 10. Sterling P0 kids v3.1 polish (web first) — *directed 2026-07-19*
 - [x] **Fix sung clips** — no literal `[singing…]`; bare word clips — *eng Dia-ready*
@@ -85,21 +87,21 @@ When this is done, a parent can put an iPad in a kid’s hands and:
 - [x] **Color mode** in picker (fourth sticky ⬤) — *ui* chrome DONE
 - [x] **Mode owns ALL taps** — Music=music anywhere; ABC=next letter on any NPC tap; Shape=shape; Color mode=colors — *eng* in **2.0.0.7+**
 - [x] **Stop ALL kids audio** on app background/close (iOS + web) — *eng* in **2.0.0.7+**
-- [ ] **Device walk-away / TF install** latest binary — *tester*/*Sterling* · **2.0.0.9 READY_FOR_BETA_TESTING**; **2.0.0.10** packs hold-back+green+grab-hold
+- [ ] **Device walk-away / TF install** latest binary (**2.0.0.9**) — *Sterling* · install **TestFlight app** + Bouncy Blobs **2.0.0.9** on Padii (cable install of store binary fails; beta path required)
 
 ### 15. Sterling GO SHIP + Home sticky — *directed 2026-07-20*
 - [x] Commit kids work · push GitHub (`mobile-port` + `main`) — *eng* · SHAs **6982db1** then **68d8b09**
 - [x] Deploy web **PROD** (Vercel Ready) — *eng*
 - [x] Publish **itch** html5 (#1812136 @ 2.0.0) — *eng*
 - [x] Home: **Kids Mode below Multiplayer**, same size as other stickies (not hero) — *ui*
-- [x] **TestFlight 2.0.0.9** upload — *eng* · Delivery `b613b950-7745-4bd3-b116-3f5aacf08f4a` · ASC **VALID** + export compliance cleared → **READY_FOR_BETA_TESTING**
+- [x] **TestFlight 2.0.0.9** upload — *eng* · Delivery `b613b950-7745-4bd3-b116-3f5aacf08f4a` · *await ASC Available*
 
 ### 16. Sterling P0 polish + kid-proof exit — *directed 2026-07-21*
-- [x] Softer **color-green** sung clip regen — *eng*
-- [x] Kids **grab hold-expand** (stay expanded while finger held/dragging) — *eng*
-- [x] **Kid-proof Back** hold ~1.5s (`KidsHoldBack`) — *eng* · leave also silences kids audio (teardown + visibility/pagehide/blur)
-- [x] **Confirm TF 2.0.0.9** — *eng*: VALID; was MISSING_EXPORT_COMPLIANCE → fixed → READY_FOR_BETA_TESTING
-- [x] **TF 2.0.0.10** upload (green + hold-expand + Back + `ITSAppUsesNonExemptEncryption=false`) — *eng* · Delivery `c6e53771-49b3-49b7-b3b1-cecd7895d1f7` · SHA `967c5d5` · await ASC processing → Available
+- [x] Softer **color-green** sung clip regen — *eng* (web tree; **not** in TF 2.0.0.9)
+- [x] Kids **grab hold-expand** (stay expanded while finger held/dragging) — *eng* (web tree; **not** in TF 2.0.0.9)
+- [x] **Kid-proof Back** hold/long-press exit — *ui* · `KidsHoldBack` 1.5s progress (top-left); *eng* optional SFX/teardown
+- [x] **Confirm TF 2.0.0.9 Available** in ASC/TestFlight — *eng* · Available · READY_FOR_BETA_TESTING (2026-07-21)
+- [ ] **Next TF 2.0.0.10** (green + hold-expand + Back) for device parity — *eng* when Sterling asks
 
 ### 12. Sterling Padii dogfood / walk-away install — *directed 2026-07-19*
 - [x] Production **walk-away install** on connected iPad (not tethered vite) — *eng* · **2.0.0.4** then **2.0.0.5**
@@ -109,11 +111,59 @@ When this is done, a parent can put an iPad in a kid’s hands and:
 - [x] **Bottom chrome**: colors **between** stick + puff at **true bottom** (`KidsBottomBar`) — *ui* (+ eng merge)
 - [x] **2.0.0.5 LIVE** walk-away on Padii (immersive + landscape + bottom bar) — *eng report just now*
 
-## Non-goals (for this slice)
+## 17. The climb — Sterling, 2026-10-06
+
+He asked for this whole game. The choice card was skipped, so these calls stand until he corrects them.
+
+**The story.** You are a soft body. Your pack kicks you out. You climb out of a cave to find comfort, and true softness. A loving little girl finds you and whisks you away to play forever. Hope, joy, and a little silly. Nothing scary. She is a character we design, not a photo of his daughter. The old king story (`docs/Story.md`, Reginald Plopp) steps aside for this climb. Party modes stay until the climb is the main way to play.
+
+**2026-10-12.** Sterling confirmed the cave is the public story. The Steam launch is October 30, 2026. The store page still says "Coming soon" and still tells the king story. Content is un-paused. Do not record the web game. First Rust clips are Kids Mode for the Bubbles video, then Pip bouncing in the ready biomes, only after the Bevy capture mode exists. The capture build is on branch `port-capture`. First Pip clips are estimated around 7 pm MDT on 2026-10-14. Kids Mode and Host with Phones (8 slots) are in the Rust game and are not on the polish-cut list. Whether they are in the October 30 Steam upload is Sterling's call. The level editor is being removed. Do not edit the web level files.
+
+**The world.** The whole climb is soft bodies: ground, objects, ropes, and the things you tap. Blobs flying up can hit them. The home menu becomes soft bodies too. Kids-mode buttons stay big and steady so a toddler can still hit them.
+
+**Already true, so we do not rebuild it first.** The bounce brain is already Rust (`crates/softbody`) and already runs in the browser and the iPad app. Menus, kids mode, level flow, and online play still live in the web app.
+
+**Order.**
+
+### Phase A — pops, platforms, ropes — *eng tests green; play pass open*
+- [x] **Stretch pop stays local.** Stretch limit is now **5× rest radius** (`CRUSH_HULL_SPREAD_RATIO_SQ` 100 → **25**, ~25× area, same order as the 1/15-area squash). The old 10× hull was reset only after collisions, so it shoved neighbors first. Reset now happens before contact. Neighbor blob + platform keep their points and stay near rest size. `cargo test -p softbody`: 108 passed.
+- [x] **Soft platforms stay solid with lots of points.** 64-point floor holds a bouncing blob for 10s. Stress through **640** points did not explode or tunnel (no hard failure count below that). **Safe / editor cap: 256** hull points (`clampRectSegments`); loader auto-clamps higher. Expand-inside tunnel tests stay green.
+- [x] **Ropes hold in the sim.** Cause: chain solve moved the blob center, then the centroid pin threw that correction away, so segments ran away (thousands of units). Ends now move as a whole body, and the chain is solved again after the pin. Slack **10%** (`ROPE_SEGMENT_SLACK`). 10s tests: two soft bodies, and player vs fixed anchor.
+- [x] **Play pass on Swing** — *PASS, level v6, 2026-10-07* · Disk and vite :5170 were version 6. Seat stayed a flat plank. Rope stayed 320. Seat rests at (500, 480). Steady rides lit Level Complete at 0:03.433 and 0:03.333 with 0 deaths. One hard ride finished at about (934, 472) after 2 pit falls. A later replay: a flat jump (apex y=241) hit the seat and pitted with no finish. A higher jump (apex y=260) landed on the seat, the seat swung, and the ride finished. No jump finished with the seat left at rest. That is not a reopen. A skip from the left ledge did not finish. A rougher hard ride flew over the box at about y=400 (box starts at y=430) and fell in the pit. That overshoot is a note for the climb, not a reopen. Stills: `agents/bouncy-blobs-tester/swing-pass-v5/`.
+
+### Phase B — the climb you can play — *second room passed*
+
+Story, unless Sterling corrects it. Hope and joy, a little silly. Nothing scary. The little girl is a character we design.
+
+1. The pack. You bounce with the others. They push you out.
+2. The way back is shut. The only way is up.
+3. The first rope.
+4. Darker caves. Soft floors and soft things you can bump.
+5. Something kind helps you up.
+6. Light from above.
+7. The cave mouth. The ground is gentle. This is comfort.
+8. A little girl finds you and takes you away to play forever.
+
+- [x] **First room** — *PASS, version 7, 2026-10-07* · Three rides got on the seat and were still standing a second later: 0:02.466 at (1047, 460.3); hard 0:03.766 at (1022.3, 460.1); 0:02.316 at (1077.7, 460.2). 0 deaths. Skip peaked near (316, 374) and did not finish. Plank flat. Rope 320. Stills: `agents/bouncy-blobs-tester/climb-pass-v7/`. Disk is still that file. Do not edit it.
+- [x] **Second room** — *PASS, version 9, 2026-10-07* · Three rides were still standing a second after Level Complete: 0:02.366 at (375.4, 399.2); hard 0:02.766 at (391.4, 399.4); 0:02.783 at (386.5, 400.7). 0 deaths. Skip peaked near (266, 274) and did not finish. Seat rests at (500, 410). Plank flat. Rope 320. Stills: `agents/bouncy-blobs-tester/climb-pass-2v9/`. Deck x 360–1480, top y=440. Finish x 370–1216, y 388–452. Version 8 is not a pass: all three lit and a second later were left of the deck, around x=380. Stills: `agents/bouncy-blobs-tester/climb-pass-2v8/`. Do not edit version 9. Do not put version 8 or version 7 back. Eng confirmed editing is stopped. The tester did not reload. File mtime 02:30:01.
+- [ ] Beats 5–8, the scenes between levels, and the squishy home menu are next. They are not started.
+
+### Phase C — one brain on every computer and phone — *after the climb plays*
+- [ ] The game rules that still live in the web app move to Rust, so Mac, Windows, Linux, Android, and iPhone/iPad share one brain.
+- [ ] Kids mode still works on each of those.
+- [ ] Tests run on every target we can actually run here. A phone target is called out when a device is required.
+
+### Phase D — online catch-up — *after C*
+- [ ] Each device runs its own game. Nobody waits on another player's button.
+- [ ] Up to 8 players. Send only what changed, packed small.
+- [ ] The screen eases to the true spot, and jumps if it is too far. Local play owns the juice and the little animations.
+- [ ] A phone can be a full player, not only a remote control.
+
+## Non-goals (for the kids slice — section 17 overrides these for the climb)
 
 - Full multiplayer kids lobbies (unless trivial)
-- Android (nice-to-have after iPad)
-- Rewriting the entire game — prefer a **dedicated kids mode / play path**
+- Kids mode does not become the cave story
+- Do not rewrite menus, online play, or the app shell during Phase A
 
 ## Product principles
 
@@ -150,4 +200,4 @@ Producer heartbeat every **15 minutes** during work hours: score checklist above
 
 ## QA status (2026-07-21)
 - [x] Kid-lens web/itch PASS (tester) — prod Vercel + itch #1812136
-- [ ] Device/TestFlight kid-lens on **2.0.0.9** — *tester* standby until TF Available + install on Padii (`75073fea`)
+- [ ] Device/TestFlight kid-lens on **2.0.0.9** — *tester* **UNBLOCK when installed** on Padii (`75073fea`)

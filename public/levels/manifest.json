@@ -67,6 +67,27 @@
       "hidden": true
     },
     {
+      "id": "swing",
+      "name": "Swing",
+      "file": "swing.json",
+      "levelTypes": ["solo_racing"],
+      "hidden": true
+    },
+    {
+      "id": "climb-1",
+      "name": "Climb 1",
+      "file": "climb-1.json",
+      "levelTypes": ["solo_racing"],
+      "hidden": true
+    },
+    {
+      "id": "climb-2",
+      "name": "Climb 2",
+      "file": "climb-2.json",
+      "levelTypes": ["solo_racing"],
+      "hidden": true
+    },
+    {
       "id": "det-test",
       "name": "Determinism Test Arena",
       "file": "det-test.json",

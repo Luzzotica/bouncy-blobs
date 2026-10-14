@@ -106,6 +106,7 @@ export const softbodyworldhandle_setBlobGravityOverride: (a: number, b: number, 
 export const softbodyworldhandle_setBlobGroundContacts: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setBlobMassScale: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setBlobRestLocal: (a: number, b: number, c: number, d: number) => void;
+export const softbodyworldhandle_setBlobRigid: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setBlobRole: (a: number, b: number, c: number, d: number) => void;
 export const softbodyworldhandle_setBlobShapeMatchRestScale: (a: number, b: number, c: number) => void;
 export const softbodyworldhandle_setBlobSpringStiffnessScale: (a: number, b: number, c: number, d: number) => void;

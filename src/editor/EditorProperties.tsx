@@ -283,6 +283,7 @@ export default function EditorProperties({ state, onUpdate }: EditorPropertiesPr
         <NumInput label="Stiffness" value={sp.stiffness ?? 1.0} step={0.1} onChange={v => { state.updateProperty('stiffness', Math.max(0.1, v)); onUpdate(); }} />
         <NumInput label="Segments W" value={sp.segW ?? 8} step={1} onChange={v => { state.updateProperty('segW', Math.max(2, Math.floor(v))); onUpdate(); }} />
         <NumInput label="Segments H" value={sp.segH ?? 1} step={1} onChange={v => { state.updateProperty('segH', Math.max(1, Math.floor(v))); onUpdate(); }} />
+        <p style={{ color: COLORS.inkFaint, fontSize: 10, margin: '0 0 6px' }}>Hull points cap at 256 (2× width segments + 2× height segments). Higher values are clamped.</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <label style={{ color: COLORS.inkDim, fontSize: 12, width: 70 }}>Pinned</label>
           <input type="checkbox" checked={!!sp.pinned}

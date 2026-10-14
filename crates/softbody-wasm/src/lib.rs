@@ -397,6 +397,10 @@ impl SoftBodyWorldHandle {
     pub fn set_blob_role(&mut self, blob_id: u32, role: u8, gameplay_id: u32) {
         self.inner.set_blob_role(blob_id, role, gameplay_id);
     }
+    #[wasm_bindgen(js_name = setBlobRigid)]
+    pub fn set_blob_rigid(&mut self, blob_id: u32, rigid: bool) {
+        self.inner.set_blob_rigid(blob_id, rigid);
+    }
     #[wasm_bindgen(js_name = addGameTrigger)]
     pub fn add_game_trigger(&mut self, id: u32, shape_idx: u32, charge_seconds: f64, ignore_npcs: bool) -> u32 {
         self.inner.add_game_trigger(id, shape_idx, Fx::from_f64(charge_seconds), ignore_npcs)

@@ -1,0 +1,61 @@
+{
+  "name": "Climb 1",
+  "version": 7,
+  "levelTypes": ["solo_racing"],
+  "bounds": { "width": 1800, "height": 1000 },
+  "platforms": [
+    { "id": "way-back", "x": 36, "y": 500, "width": 48, "height": 1000, "rotation": 0 },
+    { "id": "start", "x": 200, "y": 534, "width": 280, "height": 48, "rotation": 0 },
+    { "id": "exit", "x": 950, "y": 532, "width": 1060, "height": 64, "rotation": 0 },
+    { "id": "backstop", "x": 1504, "y": 420, "width": 36, "height": 280, "rotation": 0 },
+    { "id": "ceiling", "x": 900, "y": 16, "width": 1800, "height": 16, "rotation": 0 },
+    { "id": "flight-wall", "x": 900, "y": 155, "width": 1200, "height": 270, "rotation": 0 }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    { "id": "sp1", "x": 180, "y": 450, "type": "player" }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    { "id": "goal", "x": 818, "y": 478, "width": 796, "height": 64 }
+  ],
+  "softPlatforms": [
+    {
+      "id": "cave-floor",
+      "x": 800,
+      "y": 720,
+      "width": 1500,
+      "height": 56,
+      "rotation": 0,
+      "segW": 18,
+      "segH": 1
+    },
+    {
+      "id": "seat",
+      "x": 500,
+      "y": 460,
+      "width": 220,
+      "height": 36,
+      "rotation": 0,
+      "segW": 4,
+      "segH": 1,
+      "anchors": [],
+      "stiffness": 6,
+      "massScale": 0.2,
+      "rigid": true
+    }
+  ],
+  "chains": [
+    {
+      "id": "climb-rope",
+      "endpointA": { "kind": "fixed", "x": 500, "y": 160 },
+      "endpointB": { "kind": "blob", "entity": "softPlatform", "id": "seat" },
+      "totalLength": 320,
+      "maxSegmentLength": 40,
+      "segmentMass": 0.05,
+      "segmentRadius": 5,
+      "iterations": 12
+    }
+  ],
+  "showLava": false
+}

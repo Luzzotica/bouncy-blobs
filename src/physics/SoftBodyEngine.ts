@@ -255,6 +255,8 @@ export interface SoftBodyEngine extends BulkParticleSetter {
   // ---- Phase 6: blob roles + trigger charge machines ----
   /** Tag a blob's gameplay role (0 structural / 1 player / 2 npc) + stable slot id. */
   setBlobRole(blobId: number, role: number, gameplayId: number): void;
+  /** Keep this blob a rigid plank (swing seats). It can swing, but it cannot fold. */
+  setBlobRigid(blobId: number, rigid: boolean): void;
   addGameTrigger(id: number, shapeIdx: number, chargeSeconds: number, ignoreNpcs: boolean): number;
   clearGameTriggers(): void;
   triggerPressed(idx: number): boolean;

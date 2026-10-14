@@ -1,7 +1,7 @@
 import type { SoftBodyEngine } from '../physics/SoftBodyEngine';
 import { SlimeBlob } from '../physics/slimeBlob';
 import { Vec2, vec2 } from '../physics/vec2';
-import { rect as hullRect, rectAnchorIndices, circle as hullCircle } from '../physics/hullPresets';
+import { rect as hullRect, rectAnchorIndices, circle as hullCircle, clampRectSegments } from '../physics/hullPresets';
 import * as Tuning from '../physics/tuning';
 import { LevelData, PlatformDef, TriggerDef, SoftPlatformDef, PointShapeDef, ZoneDef, SpriteInstanceDef, ChainDef, ChainAnchorRef } from './types';
 import type { StaticSurface } from '../physics/types';
@@ -402,8 +402,9 @@ function expandSoftPlatform(
   def: SoftPlatformDef,
   staticParticleMap: Map<string, number[]>,
 ): SoftPlatformInfo {
-  const segW = def.segW ?? 8;
-  const segH = def.segH ?? 1;
+  const clampedSeg = clampRectSegments(def.segW ?? 8, def.segH ?? 1);
+  const segW = clampedSeg.segW;
+  const segH = clampedSeg.segH;
   let hullLocal = hullRect(def.width, def.height, segW, segH);
   // Pre-rotate the hull around its center so anchored corners + free vertices
   // end up at their world-rotated rest positions.
@@ -423,13 +424,14 @@ function expandSoftPlatform(
   }
 
   const stiffness = def.stiffness ?? 1.0;
+  const massMul = def.massScale ?? 1;
 
   const worldOrigin = vec2(def.x, def.y);
   const result = world.addBlobFromHull({
     hullRestLocal: hullLocal,
     centerLocal: { x: 0, y: 0 },
-    centerMass: Tuning.CENTER_MASS * PLATFORM_CENTER_MASS_MUL,
-    hullMass: Tuning.HULL_MASS * PLATFORM_HULL_MASS_MUL,
+    centerMass: Tuning.CENTER_MASS * PLATFORM_CENTER_MASS_MUL * massMul,
+    hullMass: Tuning.HULL_MASS * PLATFORM_HULL_MASS_MUL * massMul,
     springK: Tuning.SPRING_K * PLATFORM_SPRING_K_MUL * stiffness,
     springDamp: Tuning.SPRING_DAMP * PLATFORM_SPRING_DAMP_MUL,
     radialK: Tuning.RADIAL_K * PLATFORM_RADIAL_K_MUL * stiffness,
@@ -444,6 +446,7 @@ function expandSoftPlatform(
     staticHullIndices: anchorIdxs,
     pinFrame: def.frameLocked === true,
   });
+  if (def.rigid) world.setBlobRigid(result.blobId, true);
 
   // `pinned` → per-vertex home-springs back to rest world position. Skips
   // anchored verts (they're already mass=0). Strength scales with stiffness.

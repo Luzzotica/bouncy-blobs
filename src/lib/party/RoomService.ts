@@ -244,6 +244,44 @@ export class RoomService {
     }
   }
 
+  /**
+   * Host frees one seat after a guest WebRTC drop / kick. Uses host_secret
+   * so the host does not need the guest's peer_secret.
+   */
+  async disconnectPeer(peerId: string): Promise<void> {
+    if (!this.roomId || !this.hostSecret) throw new Error("Not hosting a room");
+    await fetch(
+      `${this.baseUrl}/api/rooms/${this.roomId}/peers/${encodeURIComponent(peerId)}` +
+        `?host_secret=${encodeURIComponent(this.hostSecret)}`,
+      { method: "DELETE", headers: this.authHeaders(), keepalive: true },
+    ).then(async (res) => {
+      if (!res.ok && res.status !== 404) {
+        const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        throw new Error(`disconnectPeer → ${res.status}: ${b?.error ?? res.statusText}`);
+      }
+    });
+  }
+
+  /**
+   * Host absolute roster ping — call on every host-side join/leave delta with
+   * the current set of **live guest** peer ids (omit host). Server soft-
+   * disconnects any non-host peer not listed so max_peers capacity stays true.
+   */
+  async reconcilePeers(activePeerIds: string[]): Promise<{
+    peer_count: number;
+    disconnected_peer_ids: string[];
+  }> {
+    if (!this.roomId || !this.hostSecret) throw new Error("Not hosting a room");
+    const r = (await this.post(`/api/rooms/${this.roomId}/peers/reconcile`, {
+      host_secret: this.hostSecret,
+      active_peer_ids: activePeerIds,
+    })) as { peer_count: number; disconnected_peer_ids: string[] };
+    return {
+      peer_count: r.peer_count ?? 0,
+      disconnected_peer_ids: r.disconnected_peer_ids ?? [],
+    };
+  }
+
   // ─── Signaling ────────────────────────────────────────────────────────────
 
   async sendSignal(
@@ -475,7 +513,11 @@ export class RoomService {
         let attestation: string | undefined;
         let steamId: string | undefined;
         if (this.getAttestation) {
-          const a = await this.getAttestation();
+          // Never block join forever on Turnstile / player JWT (CWTNMZ).
+          const a = await Promise.race([
+            this.getAttestation(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6_000)),
+          ]);
           if (typeof a === "string") attestation = a;
           else if (a) {
             attestation = a.token;

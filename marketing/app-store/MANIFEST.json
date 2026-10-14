@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-07-19T16:52:13.928Z",
+  "gameRoot": "/Users/sterlinglong/NonCloud/PAZA/Projects/games/bouncy-blobs",
+  "iconSource": "/Users/sterlinglong/NonCloud/PAZA/Projects/games/bouncy-blobs/marketing/steam/v3/client-icon.png",
+  "icon1024": "icon-1024.png",
+  "icon512": "icon-512.png",
+  "screenshotSources": [],
+  "deviceClasses": {
+    "iphone-6.9": {
+      "width": 2868,
+      "height": 1320,
+      "count": 0
+    },
+    "iphone-6.7": {
+      "width": 2796,
+      "height": 1290,
+      "count": 0
+    },
+    "iphone-6.5": {
+      "width": 2778,
+      "height": 1284,
+      "count": 0
+    },
+    "ipad-13": {
+      "width": 2752,
+      "height": 2064,
+      "count": 0
+    },
+    "ipad-12.9": {
+      "width": 2732,
+      "height": 2048,
+      "count": 0
+    }
+  },
+  "play": {
+    "featureGraphic": "play/feature-graphic.png",
+    "phone": 0
+  }
+}

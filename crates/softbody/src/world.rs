@@ -52,10 +52,18 @@ const EPS: Fx = Fx::from_raw(1 << 14); // ~4.3e-6, mirrors TS EPS=1e-6
 //       axis. Belt-and-suspenders for Fx saturation / NaN-style blowups
 //       that the ratio check might miss if both rest and current grow
 //       together.
-// 10² = 100 in Fx. Generous headroom for legitimate squish/stretch under
-// normal play (incl. fast falls); only a true blow-up exceeds it. Per-substep
-// over-expansion is constrained separately by the integrity pass below.
-pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(100i64 << 32);
+// Stretch limit, as a multiple of rest radius². A squash dies near 1/15 of
+// the rest area (~3.9× linear compression). The old limit was 100 (10×
+// radius, 100× area): the hull became a map-sized collider and the pop
+// shoved every neighbor before the end-of-step reset. 25 is 5× rest radius
+// (~25× area) — same order as the squash, and above the old 3×-radius
+// false-positive band. The body is reset BEFORE contact so the pop stays local.
+pub const CRUSH_HULL_SPREAD_RATIO_SQ: Fx = Fx::from_raw(25i64 << 32);
+
+/// Rope segments may finish a step this far past the authored max length.
+/// 10% covers one PBD residual after collisions move a dynamic end. A wider
+/// gap means the rope stopped holding.
+pub const ROPE_SEGMENT_SLACK: f64 = 1.10;
 
 // The inverse "crush" failure: a blob squeezed (pinched between a wall and a
 // moving platform, etc.) until its hull surface area collapses below 1/15 of
@@ -280,6 +288,11 @@ pub struct SoftBodyWorld {
     /// false crush. Side-channel (gates the crush event only; never mutates
     /// pos/vel), so it isn't snapshotted.
     pub(crate) blob_crush_frames: Vec<i32>,
+    /// When set, the blob is projected back onto its rest hull every substep
+    /// (free centroid + best-fit angle). It can swing and tip as one piece,
+    /// but it cannot fold. Set at spawn; not snapshotted (both peers load it
+    /// from the level, and rollback restores positions onto the same world).
+    pub(crate) blob_rigid: Vec<bool>,
     /// Consecutive SUBSTEPS each blob has been continuously crushed by the
     /// per-substep integrity pass (`enforce_blob_integrity`). Fires a crush
     /// death at `INTEGRITY_DEATH_SUBSTEPS`. Side-channel like
@@ -450,6 +463,7 @@ impl SoftBodyWorld {
             blob_gravity_override: Vec::new(),
             blob_tread_strength: Vec::new(),
             blob_crush_frames: Vec::new(),
+            blob_rigid: Vec::new(),
             blob_integrity_violations: Vec::new(),
             blob_safe_centroid: Vec::new(),
             blob_crush_dbg: Vec::new(),
@@ -679,6 +693,7 @@ impl SoftBodyWorld {
             role: 0,
             gameplay_id: 0,
         });
+        self.blob_rigid.push(false);
 
         BlobResult {
             blob_id,
@@ -693,6 +708,15 @@ impl SoftBodyWorld {
     /// Tag a blob with its gameplay role (0 structural / 1 player / 2 npc) and
     /// stable per-player slot id. Called at spawn. Triggers/spikes/modes use
     /// these to tell agents from structural blobs and to key per-player state.
+    /// Keep this blob's outline rigid (swing seats). See `blob_rigid`.
+    pub fn set_blob_rigid(&mut self, blob_id: BlobId, rigid: bool) {
+        let i = blob_id as usize;
+        if self.blob_rigid.len() <= i {
+            self.blob_rigid.resize(i + 1, false);
+        }
+        self.blob_rigid[i] = rigid;
+    }
+
     pub fn set_blob_role(&mut self, blob_id: BlobId, role: u8, gameplay_id: u32) {
         if let Some(r) = self.blob_ranges.get_mut(blob_id as usize) {
             r.role = role;
@@ -1010,6 +1034,61 @@ impl SoftBodyWorld {
         self.tick += 1;
     }
 
+    /// `Some(centroid)` when this blob's hull is past the stretch limit or
+    /// out of the world. Area-crush is a separate, sustained check.
+    fn overstretch_centroid(&self, bi: usize) -> Option<FxVec2> {
+        let r = self.blob_ranges.get(bi)?;
+        if r.inactive || r.hull.is_empty() { return None; }
+        let sh = self.shapes.get(r.shape_idx as usize)?;
+        if sh.rest_local.is_empty() { return None; }
+        let scale_sq = sh.shape_match_rest_scale * sh.shape_match_rest_scale;
+        let mut rest_max_sq = Fx::ZERO;
+        for &p in &sh.rest_local {
+            let r_sq = p.x * p.x + p.y * p.y;
+            if r_sq > rest_max_sq { rest_max_sq = r_sq; }
+        }
+        let hull_us: Vec<usize> = r.hull.iter().map(|&i| i as usize).collect();
+        let c = centroid_from_indices(&self.pos, &hull_us);
+        let mut cur_max_sq = Fx::ZERO;
+        let mut out_of_bounds = false;
+        for &idx in &r.hull {
+            let p = self.pos[idx as usize];
+            if p.x.abs() > CRUSH_MAX_COORD || p.y.abs() > CRUSH_MAX_COORD {
+                out_of_bounds = true;
+            }
+            let dx = p.x - c.x;
+            let dy = p.y - c.y;
+            let r_sq = dx * dx + dy * dy;
+            if r_sq > cur_max_sq { cur_max_sq = r_sq; }
+        }
+        let threshold = rest_max_sq * scale_sq * CRUSH_HULL_SPREAD_RATIO_SQ;
+        if out_of_bounds || cur_max_sq > threshold { Some(c) } else { None }
+    }
+
+    /// Pop every over-stretched blob back to its rest pose before it can
+    /// touch anyone else. One pop, one body.
+    fn isolate_overstretched_blobs(&mut self) {
+        let n = self.blob_ranges.len();
+        let mut hits: Vec<(usize, FxVec2)> = Vec::new();
+        for bi in 0..n {
+            // A rigid seat is rebuilt flat every substep. Do not pop it for a
+            // dent the projection is about to erase — that pop was the fold.
+            if self.blob_rigid.get(bi).copied().unwrap_or(false) { continue; }
+            if let Some(c) = self.overstretch_centroid(bi) {
+                hits.push((bi, c));
+            }
+        }
+        for (bi, c) in hits {
+            let cx = c.x.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
+            let cy = c.y.clamp(-CRUSH_MAX_COORD, CRUSH_MAX_COORD);
+            self.reset_blob_to_rest(bi as BlobId, FxVec2::new(cx, cy));
+            let bid = bi as BlobId;
+            if !self.pending_crush_events.contains(&bid) {
+                self.pending_crush_events.push(bid);
+            }
+        }
+    }
+
     /// Flag any blob whose hull has stretched beyond a plausible
     /// multiple of its rest extent, or whose particles have escaped
     /// world sanity bounds. See `CRUSH_HULL_SPREAD_RATIO_SQ` /
@@ -1234,9 +1313,13 @@ impl SoftBodyWorld {
         self.particle_static_normal_this_step.clear(); self.particle_static_normal_this_step.resize(self.pos.len(), FxVec2::ZERO);
         self.particle_contact_normal_this_step.clear(); self.particle_contact_normal_this_step.resize(self.pos.len(), FxVec2::ZERO);
 
-        // 6c. CCD sweep: tunneling through static geometry.
+        // 6c. A hull that already blew up must reset BEFORE any contact pass.
+        // Otherwise the giant polygon shoves neighbors (and they pop with it).
+        self.isolate_overstretched_blobs();
+
+        // 6d. CCD sweep: tunneling through static geometry.
         self.sweep_static_ccd(&prev_pos);
-        // 6d. CCD sweep: tunneling between moving blobs.
+        // 6e. CCD sweep: tunneling between moving blobs.
         self.sweep_blob_ccd(&prev_pos);
 
         // 7. Constraints (welds + anchors + distance-max + chains).
@@ -1261,6 +1344,10 @@ impl SoftBodyWorld {
         // sweeps (6b); the solvers accumulate into the same buffers.
         self.solve_collisions(dt);
         self.solve_particle_collisions(dt);
+
+        // Flatten rigid seats before the crush test, so a landing dent is not
+        // a fold and not a pop.
+        self.project_rigid_blobs();
 
         // 9b. Per-substep blob integrity: stop the depenetration solver from
         // teleporting a squeezed blob through a collider, cap hull over-spread,
@@ -1300,6 +1387,13 @@ impl SoftBodyWorld {
         // under expand), and (b) the center can never be wedged inside
         // a polygon since it's always recomputed from hull positions.
         self.pin_blob_centers_to_hull_centroid();
+
+        // Flatten the seat first, then let the rope be the last word. A rigid
+        // projection after the chain solve was leaving the plank below the
+        // rope. At game gravity (4g) the mass-weighted solver also failed to
+        // pull a heavy seat all the way back, so the hang ran long.
+        self.project_rigid_blobs();
+        self.solve_chains();
     }
 
     /// Per-substep "blob integrity" pass. For every active hull blob:
@@ -1321,6 +1415,9 @@ impl SoftBodyWorld {
     /// All fixed-point + fixed iteration order → deterministic. The counters are
     /// side-channels; the pos/vel writes are part of the snapshotted sim.
     fn enforce_blob_integrity(&mut self) {
+        // Drop any hull that collision itself just blew up, before the
+        // sandwich test can read that giant as a crushing surface.
+        self.isolate_overstretched_blobs();
         let nb = self.blob_ranges.len();
         if self.blob_integrity_violations.len() < nb { self.blob_integrity_violations.resize(nb, 0); }
         if self.blob_safe_centroid.len() < nb { self.blob_safe_centroid.resize(nb, FxVec2::ZERO); }
@@ -1697,6 +1794,7 @@ impl SoftBodyWorld {
         // exit direction. 3 iters is enough for typical hull overlaps.
         let iters = self.config.collision_iterations.max(1);
         for it in 0..iters {
+            self.isolate_overstretched_blobs();
             let last = it == iters - 1;
             // Blob-vs-blob (asymmetric: A's hull pushed out of B, then B out of A).
             for ai in 0..sorted.len() {
@@ -1732,6 +1830,12 @@ impl SoftBodyWorld {
     }
 
     fn collide_blobs(&mut self, a_id: usize, b_id: usize, apply_velocity_impulses: bool) {
+        // A blown hull is not a collider. Reset it and skip this pair so the
+        // pop cannot sandwich or stretch whoever it was touching.
+        if self.overstretch_centroid(a_id).is_some() || self.overstretch_centroid(b_id).is_some() {
+            self.isolate_overstretched_blobs();
+            return;
+        }
         let ra = self.blob_ranges[a_id].clone();
         let rb = self.blob_ranges[b_id].clone();
         let poly_a: Vec<FxVec2> = ra.hull.iter().map(|&i| self.pos[i as usize]).collect();
@@ -2666,42 +2770,221 @@ impl SoftBodyWorld {
         }
     }
 
-    fn solve_chains(&mut self) {
-        for chain in self.chains.clone() {
-            let idx = chain.particle_indices;
-            let max_l = chain.max_segment_length;
-            for _ in 0..chain.iterations {
-                for k in 0..idx.len().saturating_sub(1) {
-                    self.solve_chain_pair(idx[k], idx[k + 1], max_l);
-                }
-                for k in (0..idx.len().saturating_sub(1)).rev() {
-                    self.solve_chain_pair(idx[k], idx[k + 1], max_l);
-                }
+    /// Project rigid blobs onto their rest hull at the current center of mass
+    /// and best-fit angle. Collision may dent a few vertices; this puts them
+    /// back without throwing away the shove (the center of mass and the
+    /// angular velocity stay). A rope can then swing the whole plank.
+    fn project_rigid_blobs(&mut self) {
+        let n = self.blob_ranges.len();
+        for bi in 0..n {
+            if !self.blob_rigid.get(bi).copied().unwrap_or(false) { continue; }
+            let r = self.blob_ranges[bi].clone();
+            if r.inactive || r.hull.is_empty() { continue; }
+            let si = r.shape_idx as usize;
+            let Some(sh) = self.shapes.get(si) else { continue; };
+            if sh.rest_local.len() != r.hull.len() { continue; }
+            let rest = sh.rest_local.clone();
+            let scale = sh.shape_match_rest_scale.max(fx_lit(5, 100));
+
+            let hull_us: Vec<usize> = r.hull.iter().map(|&i| i as usize).collect();
+            let c = centroid_from_indices(&self.pos, &hull_us);
+            // Stay on the authored horizontal rest pose. Fitting an angle to
+            // the dented hull is what turned a hard landing into a vertical
+            // bar and left it there. The center of mass still carries the shove,
+            // so the plank swings, but the long side stays the long side.
+            let ang = Fx::ZERO;
+
+            let mut v_com = FxVec2::ZERO;
+            let mut m_sum = Fx::ZERO;
+            for &hu in &hull_us {
+                let m = self.mass[hu];
+                if m <= Fx::ZERO { continue; }
+                v_com = v_com.add(self.vel[hu].scale(m));
+                m_sum += m;
+            }
+            if m_sum > Fx::from_raw(1 << 6) {
+                v_com = v_com.scale(Fx::ONE / m_sum);
+            }
+
+            let frame = frame_transform(c, ang);
+            for (k, &hu) in hull_us.iter().enumerate() {
+                let target = apply_transform(frame, rest[k].scale(scale));
+                self.pos[hu] = target;
+                self.vel[hu] = v_com;
+            }
+            let center = r.start as usize;
+            if center < self.pos.len() {
+                self.pos[center] = c;
+                self.vel[center] = v_com;
             }
         }
     }
 
-    fn solve_chain_pair(&mut self, i: usize, j: usize, max_l: Fx) {
+    fn solve_chains(&mut self) {
+        for chain in self.chains.clone() {
+            let idx = chain.particle_indices;
+            let max_l = chain.max_segment_length;
+            let iters = chain.iterations.max(1);
+            for iter in 0..iters {
+                // Killing separating velocity on every iteration eats the swing:
+                // the link at the seat goes taut first and damps the plank
+                // before the rest of the rope has swung out. Position-project
+                // all iteration, then bleed stretch speed once at the end.
+                let correct_v = iter + 1 == iters;
+                for k in 0..idx.len().saturating_sub(1) {
+                    self.solve_chain_pair(idx[k], idx[k + 1], max_l, correct_v);
+                }
+                for k in (0..idx.len().saturating_sub(1)).rev() {
+                    self.solve_chain_pair(idx[k], idx[k + 1], max_l, correct_v);
+                }
+            }
+            // One geometric pass from a fixed end. Mass-weighted PBD leaves
+            // leftover stretch when the seat outweighs the links; this puts
+            // every link on its max length so the hang matches the author.
+            self.project_chain_from_fixed_end(&idx, max_l);
+        }
+    }
+
+    /// A nailed rope is one distance: the blob end stays inside
+    /// `max_l * links` of the nail, and the links are laid along that span.
+    /// Per-link PBD was leaving the seat below the authored hang at game
+    /// gravity, and a link-by-link pull snapped the swing back under the nail.
+    fn project_chain_from_fixed_end(&mut self, idx: &[usize], max_l: Fx) {
+        let n = idx.len();
+        if n < 2 || max_l.raw() <= 0 { return; }
+        let is_nail = |s: &Self, i: usize| {
+            s.inv_mass[i].is_zero() && s.blob_index_of_particle(i).is_none()
+        };
+        let (nail, blob_end) = if is_nail(self, idx[0]) && !is_nail(self, idx[n - 1]) {
+            (idx[0], idx[n - 1])
+        } else if is_nail(self, idx[n - 1]) && !is_nail(self, idx[0]) {
+            (idx[n - 1], idx[0])
+        } else {
+            return;
+        };
+        let max_total = max_l * Fx::from_int((n - 1) as i32);
+        let d = self.pos[blob_end].sub(self.pos[nail]);
+        let len = d.length();
+        if len > max_total && len >= EPS {
+            let dir = d.scale(Fx::ONE / len);
+            let target = self.pos[nail].add(dir.scale(max_total));
+            let delta = target.sub(self.pos[blob_end]);
+            if let Some(b) = self.blob_index_of_particle(blob_end) {
+                self.translate_blob_dynamic(b, delta);
+                let v_out = self.vel[blob_end].dot(dir);
+                if v_out > Fx::ZERO {
+                    self.push_blob_velocity(b, dir.scale(v_out).neg());
+                }
+            }
+        }
+        // Lay the loose links along the span so they follow the seat instead
+        // of dragging it back under the nail.
+        let origin = self.pos[idx[0]];
+        let span = self.pos[idx[n - 1]].sub(origin);
+        let steps = Fx::from_int((n - 1) as i32);
+        for k in 1..n - 1 {
+            if self.blob_index_of_particle(idx[k]).is_some() { continue; }
+            let t = Fx::from_int(k as i32) / steps;
+            self.pos[idx[k]] = origin.add(span.scale(t));
+            self.vel[idx[k]] = FxVec2::ZERO;
+        }
+    }
+
+    fn blob_index_of_particle(&self, idx: usize) -> Option<usize> {
+        for (bi, r) in self.blob_ranges.iter().enumerate() {
+            if r.inactive { continue; }
+            if idx >= r.start as usize && idx < r.end as usize {
+                return Some(bi);
+            }
+        }
+        None
+    }
+
+    /// Inverse mass of a whole blob (dynamic particles only). A rope end
+    /// that is a blob center must pull the body, not one virtual point the
+    /// centroid pin will throw away.
+    fn blob_dynamic_inv_mass(&self, bi: usize) -> Fx {
+        let r = &self.blob_ranges[bi];
+        let mut m = Fx::ZERO;
+        for i in r.start..r.end {
+            m += self.mass[i as usize];
+        }
+        if m > fx_lit(1, 1000) { Fx::ONE / m } else { Fx::ZERO }
+    }
+
+    fn translate_blob_dynamic(&mut self, bi: usize, delta: FxVec2) {
+        if delta.x.is_zero() && delta.y.is_zero() { return; }
+        let r = self.blob_ranges[bi].clone();
+        for i in r.start..r.end {
+            let u = i as usize;
+            if self.inv_mass[u].is_zero() { continue; }
+            self.pos[u] = self.pos[u].add(delta);
+        }
+    }
+
+    fn push_blob_velocity(&mut self, bi: usize, delta: FxVec2) {
+        if delta.x.is_zero() && delta.y.is_zero() { return; }
+        let r = self.blob_ranges[bi].clone();
+        for i in r.start..r.end {
+            let u = i as usize;
+            if self.inv_mass[u].is_zero() { continue; }
+            self.vel[u] = self.vel[u].add(delta);
+        }
+    }
+
+    fn solve_chain_pair(&mut self, i: usize, j: usize, max_l: Fx, correct_velocity: bool) {
         let d = self.pos[j].sub(self.pos[i]);
         let len = d.length();
         if len <= max_l || len < EPS { return; }
         let n = d.scale(Fx::ONE / len);
         let overlap = len - max_l;
-        let wi = self.inv_mass[i];
-        let wj = self.inv_mass[j];
+        let bi = self.blob_index_of_particle(i);
+        let bj = self.blob_index_of_particle(j);
+        // Two particles of the SAME blob: a whole-body translate would not
+        // change their separation. Fall back to the per-point correction.
+        let same_blob = bi.is_some() && bi == bj;
+        let wi = if same_blob {
+            self.inv_mass[i]
+        } else {
+            bi.map(|b| self.blob_dynamic_inv_mass(b)).unwrap_or(self.inv_mass[i])
+        };
+        let wj = if same_blob {
+            self.inv_mass[j]
+        } else {
+            bj.map(|b| self.blob_dynamic_inv_mass(b)).unwrap_or(self.inv_mass[j])
+        };
         let w_sum = wi + wj;
         if w_sum < EPS { return; }
-        // PBD: each particle moves/decelerates by its OWN inv-mass fraction.
-        // Anchor (wi=0) stays put, free particle absorbs the full correction.
-        // The TS sim swapped these weights — see constraints::solve_weld.
+        // PBD: each side moves by its own inv-mass fraction. A fixed anchor
+        // (inv-mass 0) stays put. A blob end moves as a rigid translation so
+        // the rope cannot tear one vertex off and pop the body.
         let corr = overlap / w_sum;
-        self.pos[i] = self.pos[i].add(n.scale(corr * wi));
-        self.pos[j] = self.pos[j].sub(n.scale(corr * wj));
+        let di = n.scale(corr * wi);
+        let dj = n.scale(corr * wj).neg();
+        if same_blob {
+            self.pos[i] = self.pos[i].add(di);
+            self.pos[j] = self.pos[j].add(dj);
+        } else {
+            if let Some(b) = bi { self.translate_blob_dynamic(b, di); }
+            else { self.pos[i] = self.pos[i].add(di); }
+            if let Some(b) = bj { self.translate_blob_dynamic(b, dj); }
+            else { self.pos[j] = self.pos[j].add(dj); }
+        }
+        if !correct_velocity { return; }
         let v_rel = self.vel[j].sub(self.vel[i]).dot(n);
         if v_rel > Fx::ZERO {
             let v_corr = v_rel / w_sum;
-            self.vel[i] = self.vel[i].add(n.scale(v_corr * wi));
-            self.vel[j] = self.vel[j].sub(n.scale(v_corr * wj));
+            let vi = n.scale(v_corr * wi);
+            let vj = n.scale(v_corr * wj).neg();
+            if same_blob {
+                self.vel[i] = self.vel[i].add(vi);
+                self.vel[j] = self.vel[j].add(vj);
+            } else {
+                if let Some(b) = bi { self.push_blob_velocity(b, vi); }
+                else { self.vel[i] = self.vel[i].add(vi); }
+                if let Some(b) = bj { self.push_blob_velocity(b, vj); }
+                else { self.vel[j] = self.vel[j].add(vj); }
+            }
         }
     }
 
@@ -4852,11 +5135,8 @@ mod tests {
         // A "healthy" blob's max radius from centroid sits near ~28 (half
         // diagonal). Anything dramatically larger means the blob exploded.
 
-        // Regression assertion: with the 10× rest-extent threshold (RATIO_SQ
-        // = 100, raised from 3× to stop false-positive deaths during normal
-        // squish/stretch play), the catastrophic explosion reaches the new
-        // threshold around frame ~168. 200 keeps generous headroom while
-        // still proving the detector fires on a genuine blow-up.
+        // Regression assertion: stretch limit is 5× rest radius (RATIO_SQ = 25).
+        // A real blow-up still crosses it well before frame 200.
         let first = first_crush_frame.expect("crush detector failed to flag any frame");
         assert!(
             first <= 200,
@@ -4930,5 +5210,438 @@ mod tests {
             "normal squish (0.56 area) must not be crush-flagged, got {:?}",
             flagged,
         );
+    }
+
+    /// CCW rectangle outline. Point count = 2*seg_w + 2*seg_h.
+    fn rect_hull(width: i32, height: i32, seg_w: i32, seg_h: i32) -> Vec<FxVec2> {
+        let sw = seg_w.max(1);
+        let sh = seg_h.max(1);
+        let hw = Fx::from_int(width) * Fx::HALF;
+        let hh = Fx::from_int(height) * Fx::HALF;
+        let width_fx = Fx::from_int(width);
+        let height_fx = Fx::from_int(height);
+        let mut pts = Vec::new();
+        for i in 0..sw {
+            let t = Fx::from_int(i) / Fx::from_int(sw);
+            pts.push(FxVec2::new(-hw + width_fx * t, -hh));
+        }
+        for i in 0..sh {
+            let t = Fx::from_int(i) / Fx::from_int(sh);
+            pts.push(FxVec2::new(hw, -hh + height_fx * t));
+        }
+        for i in 0..sw {
+            let t = Fx::from_int(i) / Fx::from_int(sw);
+            pts.push(FxVec2::new(hw - width_fx * t, hh));
+        }
+        for i in 0..sh {
+            let t = Fx::from_int(i) / Fx::from_int(sh);
+            pts.push(FxVec2::new(-hw, hh - height_fx * t));
+        }
+        pts
+    }
+
+    fn corner_anchors(seg_w: i32, seg_h: i32) -> Vec<usize> {
+        let n = seg_w.max(1);
+        let m = seg_h.max(1);
+        vec![0, n as usize, (n + m) as usize, (2 * n + m) as usize]
+    }
+
+    /// Production soft-platform tuning (levelLoader multipliers).
+    fn add_soft_platform(w: &mut SoftBodyWorld, origin: FxVec2, width: i32, height: i32, seg_w: i32, seg_h: i32) -> BlobResult {
+        let hull = rect_hull(width, height, seg_w, seg_h);
+        let ten = Fx::from_int(10);
+        let four = Fx::from_int(4);
+        let twelve = Fx::from_int(12);
+        w.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: hull,
+            center_local: FxVec2::ZERO,
+            center_mass: crate::tuning::CENTER_MASS * twelve,
+            hull_mass: crate::tuning::HULL_MASS * twelve,
+            spring_k: crate::tuning::SPRING_K * ten,
+            spring_damp: crate::tuning::SPRING_DAMP * four,
+            radial_k: crate::tuning::RADIAL_K * fx_lit(3, 2),
+            radial_damp: crate::tuning::RADIAL_DAMP * Fx::from_int(2),
+            pressure_k: Fx::ZERO,
+            shape_match_k: crate::tuning::SHAPE_MATCH_K * fx_lit(3, 5),
+            shape_match_damp: crate::tuning::SHAPE_MATCH_DAMP * Fx::from_int(2),
+            world_origin: origin,
+            sort_key: Some(format!("plat-{}-{}", seg_w, seg_h)),
+            static_hull_indices: corner_anchors(seg_w, seg_h),
+            static_center: false,
+            pin_frame: false,
+        })
+    }
+
+    fn max_hull_radius(w: &SoftBodyWorld, hull: &[ParticleIdx]) -> f64 {
+        let c = hull_centroid(w, hull);
+        let mut m = 0.0f64;
+        for &h in hull {
+            m = m.max(w.pos[h as usize].sub(c).length().to_f64());
+        }
+        m
+    }
+
+    // A stretch pop must kill only the blob that blew up. A neighbor blob and
+    // a soft platform in contact keep their hull points, are not crush-flagged,
+    // and are still about rest size 5 seconds later.
+    #[test]
+    fn stretch_pop_does_not_cascade() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(980));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 11);
+        w.register_static_polygon(vec![
+            FxVec2::new(fx(-600), fx(200)), FxVec2::new(fx(600), fx(200)),
+            FxVec2::new(fx(600), fx(280)), FxVec2::new(fx(-600), fx(280)),
+        ], SurfaceMaterial::Default, None, None, None);
+        // Platform beside the victim, touching it once both settle.
+        let plat = add_soft_platform(&mut w, FxVec2::new(fx(70), fx(160)), 120, 40, 4, 1);
+        let victim = standard_square_blob(&mut w, FxVec2::new(fx(-10), fx(40)), "victim");
+        let neighbor = standard_square_blob(&mut w, FxVec2::new(fx(-55), fx(40)), "neighbor");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..90 { w.step(dt); }
+        let _ = w.take_crush_events();
+
+        let plat_n = w.blob_ranges[plat.blob_id as usize].hull.len();
+        let nei_n = w.blob_ranges[neighbor.blob_id as usize].hull.len();
+        let plat_rest = max_hull_radius(&w, &plat.hull_indices);
+        let nei_rest = max_hull_radius(&w, &neighbor.hull_indices);
+
+        // Blow the victim up past the stretch limit (rest corner ~28, 8× ≈ 224).
+        let c = hull_centroid(&w, &victim.hull_indices);
+        for &h in &victim.hull_indices {
+            let p = w.pos[h as usize];
+            w.pos[h as usize] = c.add(p.sub(c).scale(Fx::from_int(8)));
+        }
+
+        let mut victim_popped = false;
+        let mut neighbor_crushed = false;
+        let mut plat_crushed = false;
+        for _ in 0..300 {
+            w.step(dt);
+            for id in w.take_crush_events() {
+                if id == victim.blob_id { victim_popped = true; }
+                if id == neighbor.blob_id { neighbor_crushed = true; }
+                if id == plat.blob_id { plat_crushed = true; }
+            }
+        }
+        assert!(victim_popped, "the stretched blob must still pop");
+        assert!(!neighbor_crushed, "neighbor must not be crush-flagged by the pop");
+        assert!(!plat_crushed, "platform must not be crush-flagged by the pop");
+        assert_eq!(w.blob_ranges[neighbor.blob_id as usize].hull.len(), nei_n, "neighbor lost hull points");
+        assert_eq!(w.blob_ranges[plat.blob_id as usize].hull.len(), plat_n, "platform lost hull points");
+        let nei_r = max_hull_radius(&w, &neighbor.hull_indices);
+        let plat_r = max_hull_radius(&w, &plat.hull_indices);
+        assert!(
+            nei_r < nei_rest * 1.8 + 8.0,
+            "neighbor size drifted: rest {:.1} now {:.1}", nei_rest, nei_r,
+        );
+        assert!(
+            plat_r < plat_rest * 1.8 + 8.0,
+            "platform size drifted: rest {:.1} now {:.1}", plat_rest, plat_r,
+        );
+    }
+
+    #[test]
+    fn long_platform_64_holds_blob_for_10s() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(980));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 3);
+        // segW=31, segH=1 → 64 hull points. Long floor, corners anchored.
+        let plat = add_soft_platform(&mut w, FxVec2::new(fx(0), fx(200)), 1600, 48, 31, 1);
+        assert_eq!(plat.hull_indices.len(), 64);
+        let blob = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(80)), "stand");
+        let dt = Fx::ONE / Fx::from_int(60);
+        let top = 200.0 - 24.0;
+        let mut crushed = false;
+        let mut tunneled = false;
+        let mut max_r = 0.0f64;
+        for _ in 0..600 {
+            // Bounce: occasional upward kick so it isn't a dead rest.
+            if w.tick % 90 == 0 {
+                w.apply_blob_linear_velocity_delta(blob.blob_id, FxVec2::new(Fx::ZERO, fx(-400)));
+            }
+            w.step(dt);
+            if !w.take_crush_events().is_empty() { crushed = true; break; }
+            let cy = w.pos[blob.center_idx as usize].y.to_f64();
+            if cy > top + 80.0 { tunneled = true; break; }
+            max_r = max_r.max(max_hull_radius(&w, &plat.hull_indices));
+        }
+        assert!(!crushed, "64-point platform or the blob exploded");
+        assert!(!tunneled, "blob tunneled through the 64-point platform");
+        // Rest half-diagonal of 1600×48 is ~800. A fold/explode is far past that.
+        assert!(max_r < 900.0, "platform hull spread {:.0} (exploded or folded)", max_r);
+        assert_eq!(w.blob_ranges[plat.blob_id as usize].hull.len(), 64);
+    }
+
+    /// Stress above the 64-point target. Anchored floors held through 640 hull
+    /// points in a probe (long span and a short dense plank). 256 is the
+    /// count the editor and loader will accept; this test locks that budget.
+    #[test]
+    fn platform_256_hull_points_hold() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(980));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 3);
+        // segW=127, segH=1 → 256 points.
+        let plat = add_soft_platform(&mut w, FxVec2::new(fx(0), fx(200)), 2000, 48, 127, 1);
+        assert_eq!(plat.hull_indices.len(), 256);
+        let blob = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(40)), "stand");
+        let dt = Fx::ONE / Fx::from_int(60);
+        for _ in 0..180 {
+            if w.tick % 90 == 0 {
+                w.apply_blob_linear_velocity_delta(blob.blob_id, FxVec2::new(Fx::ZERO, fx(-350)));
+            }
+            w.step(dt);
+            assert!(w.take_crush_events().is_empty(), "256-point platform exploded");
+            let cy = w.pos[blob.center_idx as usize].y.to_f64();
+            assert!(cy < 280.0, "blob tunneled a 256-point platform, cy={cy}");
+        }
+        assert_eq!(w.blob_ranges[plat.blob_id as usize].hull.len(), 256);
+    }
+
+    fn chain_max_ratio(w: &SoftBodyWorld, indices: &[usize]) -> f64 {
+        let mut worst = 0.0f64;
+        for k in 0..indices.len() - 1 {
+            let d = w.pos[indices[k]].sub(w.pos[indices[k + 1]]).length().to_f64();
+            worst = worst.max(d);
+        }
+        worst
+    }
+
+    #[test]
+    fn rope_between_soft_bodies_holds_10s() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(980));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 5);
+        // Ceiling so they can swing rather than fall forever.
+        let a = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(0)), "a");
+        let b = standard_square_blob(&mut w, FxVec2::new(fx(80), fx(40)), "b");
+        // Pin blob A's center by making it... we need one end fixed OR both dynamic.
+        // Packet: rope between two soft bodies under gravity + swinging load.
+        let max_seg = fx(12);
+        let inner = w.add_rope_chain(
+            a.center_idx, b.center_idx,
+            fx(160), max_seg, fx_lit(5, 10), fx(4),
+            crate::layers::LAYER_CHAIN, crate::layers::LAYER_WORLD, 16,
+        );
+        let mut indices = vec![a.center_idx as usize];
+        for i in &inner { indices.push(*i as usize); }
+        indices.push(b.center_idx as usize);
+        // Swing: kick B sideways.
+        w.apply_blob_linear_velocity_delta(b.blob_id, FxVec2::new(fx(400), Fx::ZERO));
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut worst = 0.0f64;
+        let mut popped = false;
+        let chains_before = w.chains.len();
+        for _ in 0..600 {
+            w.step(dt);
+            if !w.take_crush_events().is_empty() { popped = true; }
+            worst = worst.max(chain_max_ratio(&w, &indices));
+        }
+        eprintln!("rope soft-soft worst seg {:.2} (max 12) popped={popped} chains {}->{}",
+            worst, chains_before, w.chains.len());
+        assert!(!popped, "rope pull popped an end");
+        assert_eq!(w.chains.len(), chains_before, "rope deleted itself");
+        assert!(worst <= 12.0 * 1.10 + 0.5, "segment stretched to {worst:.2}");
+    }
+
+    #[test]
+    fn rope_player_to_anchor_swings_10s() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(980));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 9);
+        let anchor = w.add_particle(FxVec2::new(fx(0), fx(-200)), FxVec2::ZERO, Fx::ZERO, Fx::ZERO);
+        let player = standard_square_blob(&mut w, FxVec2::new(fx(30), fx(-40)), "player");
+        w.set_blob_role(player.blob_id, 1, 0);
+        let max_seg = fx(15);
+        let inner = w.add_rope_chain(
+            anchor, player.center_idx,
+            fx(180), max_seg, fx_lit(4, 10), fx(4),
+            crate::layers::LAYER_CHAIN, crate::layers::LAYER_WORLD, 20,
+        );
+        let mut indices = vec![anchor as usize];
+        for i in &inner { indices.push(*i as usize); }
+        indices.push(player.center_idx as usize);
+        w.apply_blob_linear_velocity_delta(player.blob_id, FxVec2::new(fx(500), Fx::ZERO));
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut worst = 0.0f64;
+        let mut popped = false;
+        let chains_before = w.chains.len();
+        let y0 = w.pos[player.center_idx as usize].y.to_f64();
+        for _ in 0..600 {
+            w.step(dt);
+            if w.take_crush_events().contains(&player.blob_id) { popped = true; }
+            worst = worst.max(chain_max_ratio(&w, &indices));
+        }
+        let y1 = w.pos[player.center_idx as usize].y.to_f64();
+        eprintln!("rope anchor-player worst {:.2} y {y0:.0}->{y1:.0} popped={popped}", worst);
+        assert!(!popped, "player popped from the rope");
+        assert_eq!(w.chains.len(), chains_before);
+        assert!(worst <= 15.0 * 1.10 + 0.5, "segment stretched to {worst:.2}");
+        // It should hang, not fall without limit.
+        assert!(y1 < y0 + 400.0, "player fell through the rope to y={y1:.0}");
+    }
+
+    /// The swing seat must stay a flat plank under a rider and actually move
+    /// sideways on the rope. This is the play-pass failure: the seat folded
+    /// into a vertical bar and its center never left the anchor's x.
+    #[test]
+    fn rigid_swing_seat_stays_flat_and_swings() {
+        let mut cfg = WorldConfig::default();
+        // Play mode runs at gravityScale 4 (3920), not 1g. The hang that
+        // failed in the replay only shows up there.
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(3920));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 4);
+        let anchor = w.add_particle(FxVec2::new(fx(0), fx(-240)), FxVec2::ZERO, Fx::ZERO, Fx::ZERO);
+        // Light plank, player-scale mass, so a rider can push it.
+        let hull = rect_hull(160, 36, 4, 1);
+        let seat = w.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: hull,
+            center_local: FxVec2::ZERO,
+            center_mass: crate::tuning::CENTER_MASS,
+            hull_mass: crate::tuning::HULL_MASS,
+            spring_k: crate::tuning::SPRING_K * Fx::from_int(8),
+            spring_damp: crate::tuning::SPRING_DAMP * Fx::from_int(4),
+            radial_k: crate::tuning::RADIAL_K,
+            radial_damp: crate::tuning::RADIAL_DAMP,
+            pressure_k: Fx::ZERO,
+            shape_match_k: crate::tuning::SHAPE_MATCH_K * Fx::from_int(4),
+            shape_match_damp: crate::tuning::SHAPE_MATCH_DAMP * Fx::from_int(2),
+            world_origin: FxVec2::new(fx(0), fx(0)),
+            sort_key: Some("seat".into()),
+            static_hull_indices: Vec::new(),
+            static_center: false,
+            pin_frame: false,
+        });
+        w.set_blob_rigid(seat.blob_id, true);
+        // Rider already standing on the plank (slight overlap).
+        let rider = standard_square_blob(&mut w, FxVec2::new(fx(0), fx(-40)), "rider");
+        w.add_rope_chain(
+            anchor, seat.center_idx,
+            fx(260), fx(40), fx_lit(5, 100), fx(4),
+            crate::layers::LAYER_CHAIN, crate::layers::LAYER_WORLD, 16,
+        );
+        // A landing shove. The rope has slack, so this should carry the seat out.
+        w.apply_blob_linear_velocity_delta(seat.blob_id, FxVec2::new(fx(220), Fx::ZERO));
+        w.apply_blob_linear_velocity_delta(rider.blob_id, FxVec2::new(fx(220), Fx::ZERO));
+        let dt = Fx::ONE / Fx::from_int(60);
+        let mut max_abs_x = 0.0f64;
+        let mut came_back = false;
+        for _ in 0..300 {
+            w.step(dt);
+            let mut min_x = f64::MAX;
+            let mut max_x = f64::MIN;
+            let mut min_y = f64::MAX;
+            let mut max_y = f64::MIN;
+            for &h in &seat.hull_indices {
+                let p = w.pos[h as usize];
+                min_x = min_x.min(p.x.to_f64());
+                max_x = max_x.max(p.x.to_f64());
+                min_y = min_y.min(p.y.to_f64());
+                max_y = max_y.max(p.y.to_f64());
+            }
+            let width = max_x - min_x;
+            let height = max_y - min_y;
+            assert!(width > height * 2.0, "long side flipped: {width:.0}×{height:.0}");
+            assert!(height < 55.0, "seat not a flat plank: height {height:.0}");
+            let x = w.pos[seat.center_idx as usize].x.to_f64();
+            let hang = w.pos[seat.center_idx as usize].sub(w.pos[anchor as usize]).length().to_f64();
+            // Rope budget is max_segment * link count. 10% over authored is the cap.
+            assert!(hang < 290.0, "rope hang ran long: {hang:.0}");
+            max_abs_x = max_abs_x.max(x.abs());
+            if max_abs_x > 60.0 && x.abs() < 25.0 { came_back = true; }
+        }
+        // At game gravity a 220px/s shove clears 70px. 30px was the fail.
+        assert!(max_abs_x > 50.0, "seat never swung (max |x| = {max_abs_x:.0})");
+        assert!(came_back, "seat swung out to {max_abs_x:.0} but did not come back");
+    }
+
+    /// The v2 replay: rope authored at 320, segment mass 0.05, rigid seat,
+    /// game gravity. The hang ran to 376–434 and the plank sat below the
+    /// ledges. This is that level. Ledge top is y=510. Far ledge starts at
+    /// x=650. A taut 320 hang puts the seat bottom at 498, above that top.
+    #[test]
+    fn swing_v2_hang_stays_above_the_ledges_and_reaches() {
+        let mut cfg = WorldConfig::default();
+        cfg.gravity = FxVec2::new(Fx::ZERO, fx(3920));
+        cfg.substeps = 4;
+        let mut w = SoftBodyWorld::new(cfg, 7);
+        let anchor = w.add_particle(FxVec2::new(fx(500), fx(160)), FxVec2::ZERO, Fx::ZERO, Fx::ZERO);
+        let hull = rect_hull(220, 36, 4, 1);
+        let seat = w.add_blob_from_hull(AddBlobParams {
+            hull_rest_local: hull,
+            center_local: FxVec2::ZERO,
+            center_mass: crate::tuning::CENTER_MASS * Fx::from_int(12) * fx_lit(1, 5),
+            hull_mass: crate::tuning::HULL_MASS * Fx::from_int(12) * fx_lit(1, 5),
+            spring_k: crate::tuning::SPRING_K * Fx::from_int(8),
+            spring_damp: crate::tuning::SPRING_DAMP * Fx::from_int(4),
+            radial_k: crate::tuning::RADIAL_K,
+            radial_damp: crate::tuning::RADIAL_DAMP,
+            pressure_k: Fx::ZERO,
+            shape_match_k: crate::tuning::SHAPE_MATCH_K * Fx::from_int(4),
+            shape_match_damp: crate::tuning::SHAPE_MATCH_DAMP * Fx::from_int(2),
+            world_origin: FxVec2::new(fx(500), fx(460)),
+            sort_key: Some("seat".into()),
+            static_hull_indices: Vec::new(),
+            static_center: false,
+            pin_frame: false,
+        });
+        w.set_blob_rigid(seat.blob_id, true);
+        w.add_rope_chain(
+            anchor, seat.center_idx,
+            fx(320), fx(40), fx_lit(5, 100), fx(5),
+            crate::layers::LAYER_CHAIN, crate::layers::LAYER_WORLD, 12,
+        );
+        let dt = Fx::ONE / Fx::from_int(60);
+        let ledge_top = 510.0;
+        let far_left = 650.0;
+        let mut hang_of = |w: &SoftBodyWorld| {
+            w.pos[seat.center_idx as usize].sub(w.pos[anchor as usize]).length().to_f64()
+        };
+        for _ in 0..180 {
+            w.step(dt);
+            let hang = hang_of(&w);
+            assert!(hang <= 320.0 * 1.10, "empty hang {hang:.0} past 352");
+            let bottom = w.pos[seat.center_idx as usize].y.to_f64() + 18.0;
+            assert!(bottom < ledge_top, "empty seat bottom {bottom:.0} is below the ledge");
+        }
+        let rider = standard_square_blob(&mut w, FxVec2::new(fx(500), fx(400)), "rider");
+        for _ in 0..120 {
+            w.step(dt);
+            let hang = hang_of(&w);
+            assert!(hang <= 320.0 * 1.10, "ridden hang {hang:.0} past 352");
+            let bottom = w.pos[seat.center_idx as usize].y.to_f64() + 18.0;
+            assert!(bottom < ledge_top, "ridden seat bottom {bottom:.0} is below the ledge");
+        }
+        w.apply_blob_linear_velocity_delta(seat.blob_id, FxVec2::new(fx(280), Fx::ZERO));
+        w.apply_blob_linear_velocity_delta(rider.blob_id, FxVec2::new(fx(280), Fx::ZERO));
+        let mut reached = false;
+        let mut max_x = 0.0f64;
+        for _ in 0..180 {
+            w.step(dt);
+            let mut min_x = f64::MAX;
+            let mut max_xx = f64::MIN;
+            let mut min_y = f64::MAX;
+            let mut max_y = f64::MIN;
+            for &h in &seat.hull_indices {
+                let p = w.pos[h as usize];
+                min_x = min_x.min(p.x.to_f64());
+                max_xx = max_xx.max(p.x.to_f64());
+                min_y = min_y.min(p.y.to_f64());
+                max_y = max_y.max(p.y.to_f64());
+            }
+            assert!(max_xx - min_x > (max_y - min_y) * 2.0, "long side flipped");
+            let hang = hang_of(&w);
+            assert!(hang <= 320.0 * 1.10 + 1.0, "swing hang {hang:.0}");
+            let right = max_xx;
+            max_x = max_x.max(right);
+            if right >= far_left { reached = true; }
+        }
+        assert!(reached, "seat right edge only got to {max_x:.0}, far ledge is {far_left:.0}");
     }
 }

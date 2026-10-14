@@ -355,7 +355,9 @@ export class WebRtcTransport implements Transport {
       if (s === "failed" || s === "disconnected") {
         void this.collectCandidatePairs().then((pairs) => {
           if (pairs.length > 0) {
-            console.error(`[webrtc] iceConnectionState=${s} pairs for peer ${this.remoteId}`, pairs);
+            console.error(
+              `[webrtc] iceConnectionState=${s} peer=${this.remoteId} pairs=${JSON.stringify(pairs)}`,
+            );
             this.emit("pairs-on-fail", { state: s, pairs });
           }
         }).catch(() => { /* PC may already be gone */ });
@@ -385,10 +387,22 @@ export class WebRtcTransport implements Transport {
       //   - "failed" on every pair → routing impossible from this network.
       //   - pairs missing entirely → SDP/candidate desync between sides.
       const pairs = await this.collectCandidatePairs().catch(() => null);
-      if (pairs) {
-        console.error("[webrtc] connect-timeout: candidate pairs for peer", this.remoteId, pairs);
-        this.emit("timeout-pairs", { pairs });
-      }
+      // Always JSON-stringify: console.error of arrays of objects prints [Object]
+      // in Playwright harnesses (HWCMKU S1) and loses type/state for triage.
+      const pairSummary = (pairs ?? []).map((p) => ({
+        state: p.state,
+        nominated: p.nominated,
+        local: p.local,
+        remote: p.remote,
+      }));
+      const candTypes = [...this.seenCandidateTypes];
+      console.error(
+        `[webrtc] connect-timeout peer=${this.remoteId} elapsedMs=${elapsed} ` +
+          `connectionState=${cs} iceConnectionState=${ics} ` +
+          `localCandidateTypes=${JSON.stringify(candTypes)} ` +
+          `pairs=${JSON.stringify(pairSummary)}`,
+      );
+      this.emit("timeout-pairs", { pairs: pairSummary, localCandidateTypes: candTypes });
       this.emit("timeout", { elapsedMs: elapsed, connectionState: cs, iceConnectionState: ics });
       this.callbacks.onError?.(new WebRtcConnectTimeoutError(this.remoteId, elapsed));
       this.fireDisconnectOnce("connect-timeout");

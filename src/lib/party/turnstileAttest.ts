@@ -43,12 +43,24 @@ function loadScript(): Promise<TurnstileApi | null> {
   if (window.turnstile) return Promise.resolve(window.turnstile);
   if (scriptPromise) return scriptPromise;
 
+  // CWTNMZ S1: neither onload nor onerror hung join forever.
   scriptPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (api: TurnstileApi | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(api);
+    };
+    const timer = setTimeout(() => {
+      console.warn("[turnstile] script load timed out after 5s — join will use API key");
+      finish(null);
+    }, 5_000);
     const s = document.createElement("script");
     s.src = SCRIPT_SRC;
     s.async = true;
-    s.onload = () => resolve(window.turnstile ?? null);
-    s.onerror = () => resolve(null);
+    s.onload = () => finish(window.turnstile ?? null);
+    s.onerror = () => finish(null);
     document.head.appendChild(s);
   });
   return scriptPromise;

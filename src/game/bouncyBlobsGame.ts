@@ -661,9 +661,8 @@ export class BouncyBlobsGame implements Game {
 
     // Physics crush events: wired unconditionally. The Rust solver flags
     // a blob whose hull has stretched past CRUSH_HULL_SPREAD_RATIO_SQ ×
-    // rest extent — typically a blob pinched against static geometry by
-    // a moving platform. The Rust side has already collapsed the blob's
-    // particles back to its centroid (defense in depth); here we route
+    // rest radius² (5× radius). The Rust side resets that blob only, before
+    // the giant hull can touch its neighbors. Here we route
     // the event through the death pipeline when a spike manager exists,
     // and log otherwise so the dev-mode dropout is visible.
     const sm = spikeManager;

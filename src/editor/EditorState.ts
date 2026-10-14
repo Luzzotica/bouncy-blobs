@@ -1,5 +1,5 @@
 import { LevelData, LevelType, PlatformDef, SpawnPointDef, NpcBlobDef, SpringPadDef, SpikeDef, ZoneDef, PowerupSpawnDef, PointShapeDef, PointShapePoint, TriggerDef, ActionDef, ActionTarget, SoftPlatformDef, SoftAnchorPattern, SpriteInstanceDef, ChainDef, ChainAnchorRef, GravityZoneDef } from '../levels/types';
-import { rect as hullRect, rectAnchorIndices } from '../physics/hullPresets';
+import { rect as hullRect, rectAnchorIndices, clampRectSegments } from '../physics/hullPresets';
 import { allSprites } from '../assets/spriteRegistry';
 import { defaultLevel } from '../levels/defaultLevel';
 import type { HullPreset } from '../physics/slimeBlob';
@@ -1881,6 +1881,12 @@ export class EditorState {
       data[key] = r;
     } else {
       data[key] = value;
+    }
+    // Soft platforms: hull points = 2*segW + 2*segH. Clamp to the tested budget.
+    if (this.selectedElement?.type === 'softPlatform' && (key === 'segW' || key === 'segH')) {
+      const next = clampRectSegments(data.segW ?? 8, data.segH ?? 1);
+      data.segW = next.segW;
+      data.segH = next.segH;
     }
     // x/y/width/height edits on a point-gravity zone need to drag the
     // field's centre along so it stays at the zone centre.

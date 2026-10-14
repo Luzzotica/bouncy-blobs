@@ -49,6 +49,29 @@ export function hexagon(r: number): Vec2[] {
   return circle(6, r);
 }
 
+/**
+ * Soft-platform hull budget. Point count = 2*segW + 2*segH.
+ * The sim held a bouncing blob on floors from 64 through 640 points (10s at
+ * 64, 3s at 256). Above 256 the editor and loader clamp — a typo must not
+ * ship an untested mesh. There was no hard explode-count below that; the
+ * old "platform breaks" report matched a neighbor getting wrecked by someone
+ * else's stretch pop, which is fixed separately.
+ */
+export const MAX_SOFT_PLATFORM_HULL_POINTS = 256;
+
+/** Reduce segW/segH until the outline fits `MAX_SOFT_PLATFORM_HULL_POINTS`. */
+export function clampRectSegments(segW: number, segH: number): { segW: number; segH: number } {
+  let sw = Math.max(1, Math.floor(segW));
+  let sh = Math.max(1, Math.floor(segH));
+  const maxSum = Math.floor(MAX_SOFT_PLATFORM_HULL_POINTS / 2);
+  while (sw + sh > maxSum) {
+    if (sw >= sh && sw > 1) sw -= 1;
+    else if (sh > 1) sh -= 1;
+    else break;
+  }
+  return { segW: sw, segH: sh };
+}
+
 /** Rectangle hull subdivided along both axes. Returns points CCW starting at
  * top-left. `segW` and `segH` are the number of segments along each axis
  * (so an edge with N segments has N+1 points). Corners are shared between

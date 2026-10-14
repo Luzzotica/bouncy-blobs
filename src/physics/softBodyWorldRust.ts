@@ -412,6 +412,7 @@ export class SoftBodyWorldRust implements SoftBodyEngine {
 
   // ---- Phase 6: blob roles + trigger charge machines ----
   setBlobRole(blobId: number, role: number, gameplayId: number): void { this.h.setBlobRole(blobId, role, gameplayId); }
+  setBlobRigid(blobId: number, rigid: boolean): void { this.h.setBlobRigid(blobId, rigid); }
   addGameTrigger(id: number, shapeIdx: number, chargeSeconds: number, ignoreNpcs: boolean): number { return this.h.addGameTrigger(id, shapeIdx, chargeSeconds, ignoreNpcs); }
   clearGameTriggers(): void { this.h.clearGameTriggers(); }
   triggerPressed(idx: number): boolean { return this.h.triggerPressed(idx); }

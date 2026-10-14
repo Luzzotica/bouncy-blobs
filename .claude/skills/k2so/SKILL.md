@@ -1,1 +1,0 @@
-/Users/sterlinglong/NonCloud/PAZA/Projects/bouncy-blobs/.k2so/skills/k2so/SKILL.md

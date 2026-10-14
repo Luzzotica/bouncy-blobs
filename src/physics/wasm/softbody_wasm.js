@@ -1056,6 +1056,13 @@ export class SoftBodyWorldHandle {
     }
     /**
      * @param {number} blob_id
+     * @param {boolean} rigid
+     */
+    setBlobRigid(blob_id, rigid) {
+        wasm.softbodyworldhandle_setBlobRigid(this.__wbg_ptr, blob_id, rigid);
+    }
+    /**
+     * @param {number} blob_id
      * @param {number} role
      * @param {number} gameplay_id
      */

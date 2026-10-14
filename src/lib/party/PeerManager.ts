@@ -28,6 +28,13 @@ import { WebRtcTransport } from "./webrtcTransport";
 
 export class PeerManager {
   private peers: Map<string, Transport> = new Map();
+  /** Peer ids that have fired onPeerConnected at least once. */
+  private everConnected = new Set<string>();
+  /** Joiner's own kind (for re-arming the answerer after a failed connect). */
+  private joinerSelfKind: string | null = null;
+  /** How many times we've re-armed the answerer after a pre-open disconnect. */
+  private hostRearmAttempts = 0;
+  private static readonly MAX_HOST_REARMS = 4;
 
   constructor(
     /** WebRTC signaling backend. Only required when a WebRTC transport is used —
@@ -52,9 +59,15 @@ export class PeerManager {
   }
 
   /** Host-side: open an outbound (offerer) WebRTC connection to a peer that
-   * just joined the room. Called once per peer; idempotent. */
+   * just joined the room. Idempotent while a handshake is in flight (host poll
+   * is 2s; connect budget is 15s — must NOT tear down mid-ICE). After a terminal
+   * disconnect, `onPeerDisconnected` removes the transport so the next call
+   * creates a fresh offerer. */
   async connectTo(peerId: string, peerKind: string): Promise<void> {
-    if (this.peers.has(peerId)) return;
+    const existing = this.peers.get(peerId);
+    // Open *or* still connecting — leave alone. Dead transports are removed
+    // from the map on disconnect before the poll re-offers.
+    if (existing) return;
     if (!this.room) throw new Error("PeerManager: WebRTC connectTo requires a RoomService");
     const peer = new WebRtcTransport(
       this.room,
@@ -72,10 +85,14 @@ export class PeerManager {
    *
    * `selfKind` is the joiner's *own* kind, NOT the host's. The host always
    * opens channels based on the remote peer's kind, so the answerer must
-   * mirror that to find the right channel names in `sendPrimary`. */
+   * mirror that to find the right channel names in `sendPrimary`.
+   * After connect-timeout the disconnect path disposes then re-arms here. */
   async prepareForHost(selfKind: string): Promise<void> {
+    this.joinerSelfKind = selfKind;
     const key = "host";
-    if (this.peers.has(key)) return;
+    const existing = this.peers.get(key);
+    // Same rule as connectTo: never kill an in-flight answerer mid-ICE.
+    if (existing) return;
     if (!this.room) throw new Error("PeerManager: WebRTC prepareForHost requires a RoomService");
     const peer = new WebRtcTransport(
       this.room,
@@ -91,11 +108,44 @@ export class PeerManager {
 
   private makePeerCallbacks(peerId: string): PeerCallbacks {
     return {
-      onPeerConnected: (id, kind) => this.callbacks.onPeerConnected?.(id, kind),
+      onPeerConnected: (id, kind) => {
+        this.everConnected.add(id);
+        this.hostRearmAttempts = 0;
+        this.callbacks.onPeerConnected?.(id, kind);
+      },
       onPeerDisconnected: (id) => {
+        // Terminal disconnect (connect-timeout / failed recovery). Drop the
+        // dead transport so the next connectTo / prepareForHost is not a no-op.
+        // In-transport ICE recovery never reaches here (grace + restart only).
+        const wasConnected = this.everConnected.has(id);
+        this.everConnected.delete(id);
+        this.disposePeer(id);
+
+        // Pre-connect joiner failure: re-arm answerer silently so host's next
+        // offer (after knownPeers reconnect poll) can land. Do not surface a
+        // disconnect to the app until rearm budget is exhausted — otherwise
+        // Play.tsx jumps to "Lost connection" on the first 15s ICE miss.
+        if (
+          this.role === "joiner" &&
+          id === "host" &&
+          !wasConnected &&
+          this.joinerSelfKind &&
+          this.hostRearmAttempts < PeerManager.MAX_HOST_REARMS &&
+          this.room
+        ) {
+          this.hostRearmAttempts += 1;
+          const kind = this.joinerSelfKind;
+          this.callbacks.onPhase?.(id, "connect-retry", {
+            attempt: this.hostRearmAttempts,
+            max: PeerManager.MAX_HOST_REARMS,
+          });
+          void this.prepareForHost(kind).catch((err) => {
+            this.callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
+          });
+          return;
+        }
+
         this.callbacks.onPeerDisconnected?.(id);
-        // Note: don't auto-delete from this.peers — connection state may
-        // recover. Caller (or explicit disposePeer) decides when to clean up.
       },
       onMessage: (id, channel, data) => this.callbacks.onMessage?.(id, channel, data),
       onError: (err) => this.callbacks.onError?.(err),
@@ -109,9 +159,23 @@ export class PeerManager {
   async handleSignal(signal: Signal): Promise<void> {
     const senderId = signal.sender_peer_id;
     // Joiners only have one peer (the host), keyed by literal "host".
-    const peer = this.role === "joiner"
+    let peer = this.role === "joiner"
       ? this.peers.get("host")
       : this.peers.get(senderId);
+
+    // Race: host re-offers after timeout while the joiner's answerer was
+    // briefly disposed between disconnect and re-arm. Signals are exactly-once
+    // (seen ids) — drop here and the offer is gone forever.
+    if (
+      this.role === "joiner" &&
+      !(peer instanceof WebRtcTransport) &&
+      signal.signal_type === "offer" &&
+      this.joinerSelfKind
+    ) {
+      await this.prepareForHost(this.joinerSelfKind);
+      peer = this.peers.get("host");
+    }
+
     if (peer instanceof WebRtcTransport) {
       await peer.handleSignal(signal);
     }

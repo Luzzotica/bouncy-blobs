@@ -1,0 +1,49 @@
+{
+  "name": "Swing",
+  "version": 6,
+  "levelTypes": ["solo_racing"],
+  "bounds": { "width": 1400, "height": 900 },
+  "platforms": [
+    { "id": "ledge", "x": 170, "y": 400, "width": 280, "height": 48, "rotation": 0 },
+    { "id": "far", "x": 860, "y": 534, "width": 480, "height": 48, "rotation": 0 },
+    { "id": "ceiling", "x": 560, "y": 24, "width": 1100, "height": 16, "rotation": 0 },
+    { "id": "flight-wall", "x": 760, "y": 170, "width": 820, "height": 300, "rotation": 0 }
+  ],
+  "walls": [],
+  "spawnPoints": [
+    { "id": "sp1", "x": 150, "y": 340, "type": "player" }
+  ],
+  "npcBlobs": [],
+  "goalZones": [
+    { "id": "goal", "x": 840, "y": 470, "width": 280, "height": 80 }
+  ],
+  "softPlatforms": [
+    {
+      "id": "seat",
+      "x": 500,
+      "y": 460,
+      "width": 220,
+      "height": 36,
+      "rotation": 0,
+      "segW": 4,
+      "segH": 1,
+      "anchors": [],
+      "stiffness": 6,
+      "massScale": 0.2,
+      "rigid": true
+    }
+  ],
+  "chains": [
+    {
+      "id": "swing-rope",
+      "endpointA": { "kind": "fixed", "x": 500, "y": 160 },
+      "endpointB": { "kind": "blob", "entity": "softPlatform", "id": "seat" },
+      "totalLength": 320,
+      "maxSegmentLength": 40,
+      "segmentMass": 0.05,
+      "segmentRadius": 5,
+      "iterations": 12
+    }
+  ],
+  "showLava": false
+}

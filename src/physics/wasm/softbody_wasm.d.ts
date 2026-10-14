@@ -253,6 +253,7 @@ export class SoftBodyWorldHandle {
     setBlobGroundContacts(blob_id: number, count: number): void;
     setBlobMassScale(blob_id: number, scale: number): void;
     setBlobRestLocal(blob_id: number, rest_local: Float64Array): void;
+    setBlobRigid(blob_id: number, rigid: boolean): void;
     setBlobRole(blob_id: number, role: number, gameplay_id: number): void;
     setBlobShapeMatchRestScale(blob_id: number, s: number): void;
     setBlobSpringStiffnessScale(blob_id: number, stiffness: number, damp: number): void;
@@ -480,6 +481,7 @@ export interface InitOutput {
     readonly softbodyworldhandle_setBlobGroundContacts: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobMassScale: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobRestLocal: (a: number, b: number, c: number, d: number) => void;
+    readonly softbodyworldhandle_setBlobRigid: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobRole: (a: number, b: number, c: number, d: number) => void;
     readonly softbodyworldhandle_setBlobShapeMatchRestScale: (a: number, b: number, c: number) => void;
     readonly softbodyworldhandle_setBlobSpringStiffnessScale: (a: number, b: number, c: number, d: number) => void;
