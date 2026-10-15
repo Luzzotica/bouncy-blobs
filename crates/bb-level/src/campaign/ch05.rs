@@ -5,11 +5,12 @@
 //! again — until it clicks: "You popped. You came back. That's the whole
 //! trick." Crushers on a corridor, an against-the-flow conveyor, a ferry
 //! platform over spikes, a lift, a conveyor that rushes you under a row of
-//! pistons, a lift relay up the works, the grand crusher hall, and a last
-//! trampoline out into the light.
+//! pistons, a lift relay up the works, the grand crusher hall, and the
+//! great spinning gears that fling you up into the light.
 //!
 //! Mechanics: crushers (pop limits!; some spiked underneath), moving
-//! platforms, elevators, conveyors.
+//! platforms, elevators, conveyors, spinning launch gears (swell as they
+//! let go to fly higher).
 
 use super::*;
 
@@ -28,6 +29,14 @@ fn spiked_piston(c: &mut Ch, x: f32, roof: f32, floor: f32, phase: f32) {
 /// A ferry platform (top surface at y) ping-ponging between x0 and x1.
 fn ferry(c: &mut Ch, x0: f32, x1: f32, y: f32, width: f32, period: f32) {
     c.mover(Shape::rect_at(v(x0, y - 13.0), v(width, 26.0), 0.0), &[Vec2::ZERO, v(x1 - x0, 0.0)], period, MoverMotion::PingPong);
+}
+
+/// A spinning launch gear (radius 130) hanging just above the floor at
+/// `floor`, so a rolling blob touches its underside: it grips, spins up and
+/// flings you along `angle` (degrees) at `speed` px/s (clockwise, so it
+/// throws you to the right).
+fn gear(c: &mut Ch, x: f32, floor: f32, speed: f32, angle: f32) {
+    c.launch_plate(v(x, floor + 192.0), 130.0, speed, angle, true);
 }
 
 /// A lift (top surface at y0 → y1) at x.
@@ -120,30 +129,42 @@ pub fn build() -> Course {
     }
     c.wp(Move::Walk, 8400.0, 1500.0).wp(Move::Dash, 8700.0, 1500.0).wp(Move::Dash, 9000.0, 1500.0).wp(Move::Dash, 9300.0, 1500.0).wp(Move::Dash, 9620.0, 1500.0);
     c.cp(9720.0, 1500.0);
-    // Last ferry over spikes, a trampoline up into the light.
-    c.ledge(9900.0, 10700.0, 1250.0);
-    c.spikes(v(9900.0, 1250.0), v(10700.0, 1250.0));
-    ferry(&mut c, 10020.0, 10580.0, 1500.0, 220.0, 4.5);
-    c.pickup_arc(v(10020.0, 1560.0), v(10580.0, 1560.0), 80.0, 3);
-    c.floor(&[v(10700.0, 1500.0), v(11050.0, 1500.0)]);
-    c.wp(Move::Walk, 9850.0, 1500.0).wp(Move::Ride, 10020.0, 1500.0).wp(Move::Ride, 10760.0, 1500.0);
-    let cap = 1615.0;
-    c.poly(&[v(10810.0, 1500.0), v(10950.0, 1500.0), v(10920.0, cap - 51.0), v(10840.0, cap - 51.0)]);
-    c.trampoline(v(10880.0, 1500.0), cap - 1500.0 - 45.0, 160.0, 1250.0);
-    c.floor(&[v(11050.0, 1950.0), v(12000.0, 1950.0)]);
-    c.pickups(v(10880.0, 1700.0), v(10880.0, 2000.0), 3);
-    c.wp(Move::Jump, 10880.0, cap).wp(Move::Spring, 11150.0, 1950.0);
-    c.say(11250.0, 11300.0, 1950.0, "ch05_light");
-    // Secret: a little shelf up by the roof with a stash of drops.
-    c.shelf(11420.0, 11600.0, 2150.0, 40.0);
-    c.pickups(v(11440.0, 2200.0), v(11580.0, 2200.0), 4);
-    c.drops(11150.0, 11400.0, 1950.0, 3);
+
+    // --------------------------------------------- the spinning gears
+    // The works' great stone gears still turn. Touch one and it grips you
+    // to its rim, winds up and FLINGS you. A first gear tosses you up onto
+    // a ledge over safe floor; the next throws you across a spike pit; the
+    // last one only gets you up to the light if you swell as it lets go.
+    c.ledge(9900.0, 10650.0, 1500.0);
+    gear(&mut c, 10350.0, 1500.0, 1300.0, 62.0);
+    c.pickup_arc(v(10230.0, 1800.0), v(10720.0, 1860.0), 230.0, 4);
+    c.ledge(10650.0, 11400.0, 1800.0);
+    c.wp(Move::Walk, 10330.0, 1500.0).wp(Move::Spring, 10760.0, 1800.0);
+    // Across the pit (wider than any jump; roof far out of reach).
+    gear(&mut c, 11250.0, 1800.0, 1700.0, 40.0);
+    c.ledge(11400.0, 12350.0, 1560.0);
+    c.spikes(v(11400.0, 1560.0), v(12350.0, 1560.0));
+    c.pickup_arc(v(11160.0, 2140.0), v(12450.0, 1900.0), 220.0, 5);
+    c.ledge(12350.0, 14000.0, 1800.0);
+    c.wp(Move::Walk, 11230.0, 1800.0).wp(Move::Spring, 12560.0, 1800.0);
+    c.cp(12750.0, 1800.0);
+    // The last gear: a plain fling falls back beside it; swell as it lets
+    // go and it throws you twice as high, up onto the floating shelf.
+    gear(&mut c, 13300.0, 1800.0, 1250.0, 75.0);
+    c.drops(12900.0, 13100.0, 1800.0, 2);
+    c.pickups(v(13330.0, 2350.0), v(13450.0, 2560.0), 2);
+    c.shelf(13480.0, 15000.0, 2430.0, 70.0);
+    c.ledge(14000.0, 15800.0, 1560.0);
+    c.spikes(v(14000.0, 1560.0), v(15000.0, 1560.0));
+    c.wp(Move::Walk, 13280.0, 1800.0).wp(Move::Spring, 13700.0, 2430.0);
+    c.say(13900.0, 13950.0, 2430.0, "ch05_light");
+    c.drops(13800.0, 14700.0, 2430.0, 4);
     // Out through the tunnel; damp blue light from the Lake beyond.
-    c.exit_cave(12000.0, 12800.0, 1950.0, 3500.0, Theme::Lake);
-    c.wp(Move::Walk, 11600.0, 1950.0).wp(Move::Walk, 12480.0, 1950.0);
+    c.exit_cave(15000.0, 15800.0, 2430.0, 4000.0, Theme::Lake);
+    c.wp(Move::Walk, 14600.0, 2430.0).wp(Move::Walk, 15480.0, 2430.0);
 
     // ------------------------------------------------------------ roof
-    c.roof(&[v(-1300.0, 560.0), v(2600.0, 560.0), v(2650.0, 700.0), v(3500.0, 700.0), v(3600.0, 820.0), v(4700.0, 820.0), v(4720.0, 1100.0), v(7100.0, 1100.0), v(7150.0, 2000.0), v(9900.0, 2000.0), v(10000.0, 2350.0), v(11000.0, 2450.0), v(12000.0, 2550.0)]);
+    c.roof(&[v(-1300.0, 560.0), v(2600.0, 560.0), v(2650.0, 700.0), v(3500.0, 700.0), v(3600.0, 820.0), v(4700.0, 820.0), v(4720.0, 1100.0), v(7100.0, 1100.0), v(7150.0, 2000.0), v(9900.0, 2000.0), v(10000.0, 2500.0), v(11000.0, 2750.0), v(12300.0, 2800.0), v(13300.0, 3000.0), v(15000.0, 3000.0)]);
 
     // ----------------------------------------------------------- decor
     c.hang("drip", 300.0, 2500.0, 700.0);
@@ -152,7 +173,7 @@ pub fn build() -> Course {
     c.hang("glowworm", 4800.0, 7000.0, 450.0);
     c.scatter("crystal", -450.0, 400.0, 0.0, 200.0, -1.0);
     c.scatter("crystal", 4950.0, 5550.0, 600.0, 200.0, -1.0);
-    c.scatter("mushroom", 9700.0, 9850.0, 1500.0, 80.0, -1.0);
-    c.scatter("mushroom", 11100.0, 11900.0, 1950.0, 150.0, -1.0);
+    c.scatter("mushroom", 10750.0, 11050.0, 1800.0, 150.0, -1.0);
+    c.scatter("mushroom", 14100.0, 14800.0, 2430.0, 175.0, -1.0);
     c.finish()
 }

@@ -5,6 +5,7 @@
 //! and NPCs. Bevy renders it; the netcode syncs it; tests drive it headless.
 
 pub mod control;
+pub mod gadgets;
 pub mod load;
 pub mod modes;
 pub mod npc;
@@ -143,6 +144,8 @@ pub enum SimEvent {
     NpcFreed { index: u16 },
     /// A blob was squeezed next to a crush but spared.
     Phew { body: BodyId },
+    /// A gadget did something (`index` into `Sim::gadgets`).
+    Gadget { index: usize, what: gadgets::GadgetEvent, pos: Vec2 },
 }
 
 pub struct Sim {
@@ -161,6 +164,8 @@ pub struct Sim {
     pub ropes: Vec<RopeState>,
     pub springs: Vec<SpringState>,
     pub mushrooms: Vec<MushroomState>,
+    /// Launch plates, seed pods, balloons, claw cranes.
+    pub gadgets: Vec<gadgets::GadgetState>,
     pub(crate) late_boosts: Vec<LateBoost>,
     /// Highest checkpoint reached (index into `level.respawn_points()`).
     pub checkpoint: usize,
@@ -209,6 +214,7 @@ impl Sim {
             ropes: Vec::new(),
             springs: Vec::new(),
             mushrooms: Vec::new(),
+            gadgets: Vec::new(),
             late_boosts: Vec::new(),
             checkpoint: 0,
             collected: vec![false; level.pickups.len()],
@@ -223,6 +229,7 @@ impl Sim {
             level: level.clone(),
         };
         load::load(&mut sim, &level);
+        gadgets::load(&mut sim);
         for i in 0..level.pickups.len() {
             let id = load::spawn_amoeba(&mut sim.world, level.pickups[i], i);
             sim.tags.insert(id, BodyTag::Amoeba(i as u16));
