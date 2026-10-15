@@ -25,6 +25,7 @@ It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 | `BB_CAPTURE_ZOOM=z` | 1 = normal view, smaller = closer |
 | `BB_CAPTURE_PULL=z0,z1` | zoom eases z0 → z1 over the clip (smoothstep) |
 | `BB_CAPTURE_LIFT=px` | follow modes: view centre this far above Pip at zoom 1 (default 200 portrait, 40 landscape) |
+| `BB_CAPTURE_TRACK=k` | follow stiffness × k (e.g. 20 keeps a fast fall locked in frame) |
 | `BB_CAPTURE_AT=x,y` | put Pip at world x,y when the level loads |
 | `BB_CAPTURE_NO_PICKUPS=1` | clear the level's glow-drop amoebas at load (as if already eaten) |
 | `BB_CAPTURE_CRF=q` | x264 quality (default 16) |

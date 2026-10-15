@@ -19,6 +19,8 @@
 //!   to x,y).
 //! * `BB_CAPTURE_LIFT=px` — view centre this far above Pip (follow modes;
 //!   default 200 portrait, 40 landscape).
+//! * `BB_CAPTURE_TRACK=k` — follow stiffness × k (e.g. 20 to stay locked
+//!   on a fast fall).
 //! * `BB_CAPTURE_AT=x,y` — put Pip at x,y when the level loads (shot setup).
 //! * `BB_CAPTURE_NO_PICKUPS=1` — clear the level's glow-drop amoebas at
 //!   load (as if already eaten), for shots that mustn't show Pip eating one.
@@ -84,6 +86,9 @@ pub struct CaptureConfig {
     pub no_pickups: bool,
     /// World px the view centre sits above Pip (at zoom 1).
     pub lift: Option<f32>,
+    /// Follow stiffness multiplier (higher = the camera keeps up with fast
+    /// falls).
+    pub track: f32,
 }
 
 impl Default for CaptureConfig {
@@ -102,6 +107,7 @@ impl Default for CaptureConfig {
             keep_ui: false,
             no_pickups: false,
             lift: None,
+            track: 1.0,
         }
     }
 }
@@ -139,6 +145,9 @@ impl CaptureConfig {
             c.zoom = Some(z.max(0.05));
         }
         c.lift = num("BB_CAPTURE_LIFT");
+        if let Some(t) = num("BB_CAPTURE_TRACK") {
+            c.track = t.clamp(0.1, 100.0);
+        }
         if let Some(q) = num("BB_CAPTURE_CRF") {
             c.crf = q as u32;
         }
@@ -322,7 +331,7 @@ fn frame_camera(
         let cur = state.centre.unwrap_or(target);
         // Lazier vertically so a bounce doesn't bob the whole frame.
         // Closer views track harder, so Pip stays put in a tight frame.
-        let tight = 1.0 / zoom.clamp(0.2, 1.0);
+        let tight = cfg.track / zoom.clamp(0.2, 1.0);
         let kx = 1.0 - (-dt * 4.0 * tight).exp();
         let ky = 1.0 - (-dt * 2.2 * tight).exp();
         let next = Vec2::new(cur.x + (target.x - cur.x) * kx, cur.y + (target.y - cur.y) * ky);
@@ -830,6 +839,7 @@ mod tests {
             ("BB_CAPTURE_ZOOM", "0.6"),
             ("BB_CAPTURE_PULL", "0.4,1.6"),
             ("BB_CAPTURE_AT", "300,500"),
+            ("BB_CAPTURE_TRACK", "20"),
         ])
         .unwrap();
         assert_eq!(c.size, UVec2::new(1080, 1920));
@@ -839,6 +849,7 @@ mod tests {
         assert_eq!(c.zoom, Some(0.6));
         assert_eq!(c.pull, Some((0.4, 1.6)));
         assert_eq!(c.at, Some(Vec2::new(300.0, 500.0)));
+        assert_eq!(c.track, 20.0);
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "tight")]).unwrap().cam, CamMode::Tight);
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "reveal:1,2")]).unwrap().cam, CamMode::Reveal(Vec2::new(1.0, 2.0)));
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "followx:360")]).unwrap().cam, CamMode::FollowX(360.0));
