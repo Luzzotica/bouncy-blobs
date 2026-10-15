@@ -17,7 +17,7 @@ It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 |---|---|
 | `BB_CAPTURE=1` | capture mode on (clean screen) |
 | `BB_CAPTURE_SIZE=WxH` | frame size, e.g. `1080x1920` (portrait) or `1920x1080`. Portrait shows the landscape view's world *height* as its width (860 world px wide, 1529 tall), so it fills the frame with no bars. |
-| `BB_CAPTURE_OUT=clip.mp4` | headless render to this file (no window), then exit |
+| `BB_CAPTURE_OUT=clip.mp4` | headless render to this file (no window), then exit. A `.png` path writes every frame as a lossless PNG (`clip_0001.png`, …) for stills. |
 | `BB_CAPTURE_FRAMES=n` | frames to record (default 300) |
 | `BB_CAPTURE_SPEED=s` | sim time per frame = s/60 s; `0.25` is 4× slow motion |
 | `BB_CAPTURE_START=t` | pre-roll t sim ticks (1/60 s, at 1×) before frame 1 |

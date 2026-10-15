@@ -9,6 +9,8 @@
 //!   exactly n frames, each one a fixed slice of sim time (1/60 s at 1×,
 //!   independent of the wall clock), streamed into ffmpeg (H.264, 60 fps,
 //!   yuv420p, `BB_CAPTURE_CRF`, default 16). Exits when the file is done.
+//!   An output ending in `.png` writes every frame as a lossless PNG
+//!   (`<stem>_0001.png`, …) instead, for stills.
 //! * `BB_CAPTURE_SPEED=0.25` — slow motion: 1/240 s of sim per frame. Body
 //!   outlines are interpolated between sim steps so it stays smooth.
 //! * `BB_CAPTURE_START=t` — pre-roll t sim ticks (1/60 s, run at 1×) before
@@ -535,15 +537,21 @@ fn spawn_ffmpeg(cfg: &CaptureConfig, out: &std::path::Path) -> std::io::Result<(
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut child = Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
         .arg(format!("{}x{}", cfg.size.x, cfg.size.y))
-        .args(["-r", "60", "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf"])
-        .arg(cfg.crf.to_string())
-        .args(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
-        .arg(out)
-        .stdin(Stdio::piped())
-        .spawn()?;
+        .args(["-r", "60", "-i", "-"]);
+    if out.extension().is_some_and(|e| e == "png") {
+        // Stills: every recorded frame as a lossless PNG, `<stem>_0001.png`…
+        let stem = out.with_extension("");
+        cmd.args(["-pix_fmt", "rgb24", "-f", "image2"]).arg(format!("{}_%04d.png", stem.display()));
+    } else {
+        cmd.args(["-c:v", "libx264", "-preset", "slow", "-crf"])
+            .arg(cfg.crf.to_string())
+            .args(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+            .arg(out);
+    }
+    let mut child = cmd.stdin(Stdio::piped()).spawn()?;
     let stdin = child.stdin.take().expect("piped stdin");
     Ok((child, stdin))
 }

@@ -6,6 +6,7 @@
 //!   "Coming October 30". No menu buttons. Pip and friends jump in from the
 //!   sides and below, bounce off the logo and the block, and land on it.
 //!   `BB_CAPTURE_SCENE_SEED=n` varies the choreography (takes).
+//! * `logo` — the same without the block: logo and blobs in the title cave.
 
 use bb_physics::Vec2 as PVec2;
 use bb_level::{LevelBuilder, NpcRole, Theme, v};
@@ -27,7 +28,7 @@ pub struct CaptureScenePlugin;
 
 impl Plugin for CaptureScenePlugin {
     fn build(&self, app: &mut App) {
-        if scene().as_deref() != Some("endcard") {
+        if !matches!(scene().as_deref(), Some("endcard" | "logo")) {
             return;
         }
         app.add_systems(Startup, start)
@@ -87,6 +88,10 @@ fn build_endcard(mut commands: Commands, mut game: ResMut<Game>, mut overrides: 
             overrides.0.insert(id, Style { fill: hex(*col), rim: darken(hex(*col), 0.4), rim_w: 5.0, highlight: true, z: z::PROP + 0.5, top_rim_only: false });
             text(&mut commands, id, ch, 60.0 * s, Vec2::ZERO);
         }
+    }
+    // `logo`: just the cave, the logo and the blobs (store stills).
+    if scene().as_deref() == Some("logo") {
+        return;
     }
     // The Wishlist block: a solid jelly slab the blobs land on.
     // Blue, so pink Pip stands out on it.
