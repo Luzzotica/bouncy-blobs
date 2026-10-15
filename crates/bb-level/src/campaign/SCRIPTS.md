@@ -188,3 +188,14 @@ Hints sit only where the old tips were: she doesn't nag.
 | `ch10_daylight` | Warm light spills down the well; everyone squints. Pip puffs up into the final updraft and floats up into the cave at the top. Slow motion, sparkles. |
 | `ch10_lulu` | The top cave: at its far (left) end, the mouth opens onto blazing daylight, and **Lulu** is crouched just inside it, eyes huge: "OH! You're SO SQUISHY!" (Lulu stands at about (-1880, 9650), inside the exit tunnel, facing right; the trigger is the band at x -1000..-950; the goal is at x -1890..-1660 on the tunnel floor, y 9650.) |
 | `ch10_outro` | **Finale.** Lulu scoops up every blob (Granny last, who protests and then melts) and carries them to her playroom: pillows, blankets, a trampoline bed. True Softness. Play, forever. Reg's sock turns up in the laundry basket. Credits roll in a softbody playroom you can bounce around in. |
+
+## Gadget hints (Glimmer)
+
+| Trigger | Line |
+|---|---|
+| `ch04_pods` | Seed pods: roll in, {jump} to fire. |
+| `ch05_gears` | Gears grab you; {hold} on release to fly farther. |
+| `ch07_balloon` | Balloons: {hold} to float, let go to sink; sharp things pop them. |
+| `ch07_needles` | The needle flue: stay in the middle. |
+| `ch08_claw` | The claw machine carries you. |
+| `ch08_claw_chute` | Swell when the claw lets go so you don't fall down the chute. |

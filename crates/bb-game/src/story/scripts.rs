@@ -599,6 +599,12 @@ pub fn level_lines(id: &str) -> Vec<(&'static str, &'static str)> {
         "ch07_hello" => &[("gust1", "Wheee! The blob's back!"), ("gust2", "Blow it! Blow it!"), ("pip", "Please don't blow it.")],
         "ch08_hello" => &[("button", "You again. Still looking for friends?"), ("pip", "Yep!"), ("button", "...Hmph. Good luck, kid.")],
         "ch09_hello" => &[("grumble", "Don't go in there. It's all rocks."), ("pip", "Is anybody stuck?"), ("grumble", "...maybe. Ugh. Fine. YES.")],
+        "ch04_pods" => &[("tip", "A seed pod! Roll in and it swallows you. Press {jump} to fire when the barrel points where you want to go."), ("pip", "Ptoo!")],
+        "ch05_gears" => &[("tip", "Touch a gear and it grabs you. {Hold} as it lets go to fly much farther!")],
+        "ch07_balloon" => &[("tip", "A glow-moth balloon! {Hold} to puff up and float, let go to sink."), ("glimmer", "Don't pop it. Anything sharp pops it.")],
+        "ch07_needles" => &[("glimmer", "Needles up top, needles down below. Stay in the middle, blob."), ("pip", "Middle. Got it. Gulp.")],
+        "ch08_claw" => &[("pip", "A claw machine! I'm the prize!"), ("tip", "Sit under the claw and it'll carry you over.")],
+        "ch08_claw_chute" => &[("tip", "Be BIG when it lets go. {Hold} to swell so you don't slip down the chute!")],
         "ch01_goodbye" => &[("pip", "Hello? Anybody?"), ("pip", "...just me, then.")],
         "ch01_meet_glimmer" => &[
             ("glimmer", "EEK!"),

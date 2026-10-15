@@ -141,6 +141,7 @@ pub fn build() -> Course {
     // one's barrel nods up and down over a bramble gulf, so fire when it
     // points high; the last fires you into a pod hanging in mid-air, which
     // catches you and nods too.
+    c.say(11850.0, 11910.0, 2600.0, "ch04_pods");
     pod(&mut c, 12000.0, 2600.0, 50.0, 0.0, 1150.0);
     c.pickup_arc(v(12000.0, 2700.0), v(12560.0, 2800.0), 220.0, 3);
     c.ledge(12350.0, 12950.0, 2760.0);

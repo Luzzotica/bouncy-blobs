@@ -158,12 +158,14 @@ pub fn build() -> Course {
     // prize chute beside the toy-box lid: drop in at normal size and you
     // fall through, but swell as it opens and you're too fat for the slot,
     // wedge across it, and roll onto the lid.
+    c.say(11600.0, 11660.0, 2560.0, "ch08_claw");
     c.crane(v(11740.0, 2710.0), v(13060.0, 2710.0), 2.6);
     c.ledge(12000.0, 12950.0, 2320.0);
     c.spikes(v(12000.0, 2320.0), v(12950.0, 2320.0));
     c.pickups(v(12150.0, 2730.0), v(12800.0, 2730.0), 4);
     c.floor(&[v(12950.0, 2560.0), v(13500.0, 2560.0)]);
     c.wp(Move::Walk, 11740.0, 2560.0).wp(Move::Ride, 13060.0, 2560.0);
+    c.say(13080.0, 13140.0, 2560.0, "ch08_claw_chute");
     c.crane(v(13260.0, 2710.0), v(14490.0, 2710.0), 2.6);
     c.ledge(13500.0, 14530.0, 2320.0);
     c.spikes(v(13500.0, 2320.0), v(14530.0, 2320.0));

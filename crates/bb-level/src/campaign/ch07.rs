@@ -123,6 +123,7 @@ pub fn build() -> Course {
     // {hold} to puff up and it lifts you (more puff, more lift), let go and
     // you sink. They don't last, and they pop on anything sharp.
     // First: float up onto a shelf high over safe floor.
+    c.say(9300.0, 9360.0, 4500.0, "ch07_balloon");
     c.balloon(v(9450.0, 4590.0), 7.0);
     c.shelf(9800.0, 10300.0, 5120.0, 80.0);
     c.pickups(v(9500.0, 4800.0), v(9700.0, 5150.0), 3);
@@ -137,6 +138,7 @@ pub fn build() -> Course {
     c.cp(11500.0, 5120.0);
     // Last: a spiky flue, sharp above and below, with a fang hanging in the
     // middle. Rise too high and the balloon pops.
+    c.say(11550.0, 11610.0, 5120.0, "ch07_needles");
     c.balloon(v(11760.0, 5210.0), 7.0);
     c.ledge(11900.0, 12900.0, 4880.0);
     c.spikes(v(11900.0, 4880.0), v(12900.0, 4880.0));

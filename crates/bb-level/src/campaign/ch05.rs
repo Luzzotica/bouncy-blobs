@@ -136,6 +136,7 @@ pub fn build() -> Course {
     // a ledge over safe floor; the next throws you across a spike pit; the
     // last one only gets you up to the light if you swell as it lets go.
     c.ledge(9900.0, 10650.0, 1500.0);
+    c.say(9950.0, 10010.0, 1500.0, "ch05_gears");
     gear(&mut c, 10350.0, 1500.0, 1300.0, 62.0);
     c.pickup_arc(v(10230.0, 1800.0), v(10720.0, 1860.0), 230.0, 4);
     c.ledge(10650.0, 11400.0, 1800.0);

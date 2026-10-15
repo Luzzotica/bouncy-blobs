@@ -214,7 +214,10 @@ pub fn spawn_bubbles(
                 let total = b.text.chars().count() as f32;
                 b.shown = total;
                 let typed = total / CHARS_PER_SEC;
-                b.linger = b.linger.min((b.age - typed).max(0.0));
+                // Close now even if it was still typing (a negative linger
+                // puts its end in the past), so the next speaker's bubble
+                // never opens on top of it.
+                b.linger = b.linger.min(b.age - typed);
             }
         }
         if let Some(r) = queue.push(r.clone(), &talking) {
