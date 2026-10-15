@@ -144,28 +144,15 @@ pub struct FaceCues(pub HashMap<BodyId, FaceCue>);
 #[derive(Resource, Default)]
 pub struct StyleOverrides(pub HashMap<BodyId, Style>);
 
-/// A colour soaking into a blob from where it ate an amoeba.
-#[derive(Clone, Copy, Debug)]
-pub struct Absorb {
-    pub from: Color,
-    pub to: Color,
-    /// The particle nearest the point of impact (the front starts there
-    /// and rides along as the blob rolls).
-    pub particle: usize,
-    pub t0: f32,
-}
-
-/// How long a new colour takes to soak through a blob (s).
-pub const ABSORB_TIME: f32 = 0.85;
-
 /// Per-player render state: colour soaking in, climbing wriggle.
 #[derive(Resource, Default)]
 pub struct BlobFx {
-    pub absorb: HashMap<BodyId, Absorb>,
+    /// Eaten colours spreading through blobs like ink (see `ink.rs`).
+    pub ink: crate::ink::Inks,
     /// 0..1 how hard each blob is wriggling up/down a vine, and the
     /// wriggle's phase.
     pub climb: HashMap<BodyId, (f32, f32)>,
-    /// Where each slot last ate (pos, time).
+    /// Where each slot last ate: the hull point it went in at, and when.
     pickups: HashMap<u8, (PVec2, f32)>,
 }
 
@@ -1433,11 +1420,11 @@ fn sync_bodies(
     let t = time.elapsed_secs();
     let dt = time.delta_secs();
     for m in msgs.read() {
-        if let bb_sim::SimEvent::Pickup { pos, slot, .. } = m.0 {
-            blob_fx.pickups.insert(slot, (pos, t));
+        if let bb_sim::SimEvent::Pickup { contact, slot, .. } = m.0 {
+            blob_fx.pickups.insert(slot, (contact, t));
         }
     }
-    blob_fx.absorb.retain(|_, a| t - a.t0 < ABSORB_TIME + 0.1);
+    blob_fx.ink.retain(|id| game.sim.world.body(id).is_some());
     // Spawn / despawn.
     let mut alive = std::collections::HashSet::new();
     let mut fresh = std::collections::HashSet::new();
@@ -1508,16 +1495,18 @@ fn sync_bodies(
             v.style = *s;
         } else if let Some(BodyTag::Player(slot)) = game.sim.tag(v.id) {
             // Players change colour (eating amoebas): keep the style live,
-            // and let the new colour soak in from where it was eaten.
+            // and let the new colour spread in like ink from where it was
+            // eaten (the gameplay colour is already the new one).
             let want = game.sim.player(slot).map_or(0xffffff, |p| p.color);
             if v.style.fill != hex(want) {
                 let from = v.style.fill;
                 v.style = style_for(&game, v.id, &theme);
                 if let Some(b) = game.sim.world.body(v.id) {
-                    let c = b.centroid();
-                    let hit = blob_fx.pickups.remove(&slot).filter(|(_, at)| t - at < 0.5).map_or(c + PVec2::new(0.0, 30.0), |(p, _)| p);
-                    let particle = (0..b.x.len()).min_by(|i, j| b.x[*i].distance_squared(hit).total_cmp(&b.x[*j].distance_squared(hit))).unwrap_or(0);
-                    blob_fx.absorb.insert(v.id, Absorb { from, to: v.style.fill, particle, t0: t });
+                    // No event (e.g. a network guest): it went in at the
+                    // leading edge.
+                    let lead = b.centroid() + b.velocity().normalize_or(PVec2::NEG_Y) * 1000.0;
+                    let hit = blob_fx.pickups.remove(&slot).filter(|(_, at)| t - at < 0.5).map_or(lead, |(p, _)| p);
+                    blob_fx.ink.add(v.id, b, from, v.style.fill, hit);
                 }
             }
         }
@@ -1575,14 +1564,15 @@ fn sync_bodies(
                 wriggle = Some(Wriggle { axis: a, amount: e.0, phase: e.1 });
             }
         }
-        let absorb = blob_fx.absorb.get(&v.id).copied();
+        blob_fx.ink.step(v.id, b, dt);
+        let ink = blob_fx.ink.get(v.id);
         let Some(mut mesh) = meshes.get_mut(&v.mesh) else { continue };
         let mut buf = MeshBuf::default();
         if b.enabled {
             let ctx = LookCtx { dark: theme.dark, react: v.react, time: t, lip: Some(&lip) };
-            if wriggle.is_some() || absorb.is_some() {
+            if wriggle.is_some() || ink.is_some() {
                 let halo = match v.look { Look::Blob { halo } if ctx.dark => halo, _ => 0.0 };
-                blob_mesh_fx(b, &v.style, halo, wriggle, absorb, t, &mut buf);
+                blob_mesh_fx(b, &v.style, halo, theme.dark, wriggle, ink, &mut buf);
             } else {
                 body_mesh_look(b, &v.style, v.look, &ctx, &mut buf);
             }
@@ -1619,26 +1609,12 @@ pub fn wriggle_outline(pts: &mut [PVec2], c: PVec2, r: f32, w: &Wriggle) {
     }
 }
 
-/// How far the new colour has soaked in at a point `d` px from the
-/// impact (0 = old colour, 1 = new), and a bright fringe on the front.
-fn absorb_at(ab: &Absorb, d: f32, r: f32, t: f32) -> (f32, f32) {
-    let p = ((t - ab.t0) / ABSORB_TIME).clamp(0.0, 1.0);
-    if p >= 1.0 {
-        return (1.0, 0.0);
-    }
-    let eased = 1.0 - (1.0 - p).powf(1.6);
-    let front = eased * 2.6 * r;
-    let soft = 0.55 * r;
-    let k = ((front - d) / soft + 0.5).clamp(0.0, 1.0);
-    let k = k * k * (3.0 - 2.0 * k);
-    let fringe = (-((d - front) / (0.22 * r)).powi(2)).exp() * (1.0 - p);
-    (k, fringe)
-}
-
-/// A player blob drawn point by point: optional climbing wriggle and a
-/// new colour soaking in from the point where it ate.
-pub fn blob_mesh_fx(b: &Body, s: &Style, halo: f32, wriggle: Option<Wriggle>, absorb: Option<Absorb>, t: f32, buf: &mut MeshBuf) {
-    let mut outline = ccw(draw_outline(b));
+/// A player blob drawn point by point: optional climbing wriggle and
+/// eaten colours spreading through it like ink.
+pub fn blob_mesh_fx(b: &Body, s: &Style, halo: f32, dark: bool, wriggle: Option<Wriggle>, ink: Option<&crate::ink::InkField>, buf: &mut MeshBuf) {
+    let raw = draw_outline(b);
+    let reversed = geom::signed_area_slice(&raw) < 0.0;
+    let mut outline = ccw(raw);
     if outline.len() < 3 {
         return body_mesh(b, s, buf);
     }
@@ -1648,67 +1624,56 @@ pub fn blob_mesh_fx(b: &Body, s: &Style, halo: f32, wriggle: Option<Wriggle>, ab
         wriggle_outline(&mut outline, c0, r, w);
     }
     let c = geom::centroid(&outline);
-    let hit = absorb.map(|a| b.x.get(a.particle).copied().unwrap_or(c));
-    // Colour at a point: the blob's fill, mid-soak where it applies.
-    let fill_at = |p: PVec2| -> (Color, f32) {
-        match (absorb, hit) {
-            (Some(ab), Some(h)) => {
-                let (k, fr) = absorb_at(&ab, p.distance(h), r, t);
-                (mix(ab.from, ab.to, k), fr)
-            }
-            _ => (s.fill, 0.0),
-        }
-    };
-    let rim_of = |f: Color, fr: f32| mix(mix(f, Color::WHITE, 0.55), Color::WHITE, fr * 0.6);
-    // Halo (in the dark): the colour it is becoming, fading in.
+    let n = outline.len();
+    // Each outline vertex's spot in the blob's own (material) unit disc.
+    let dirs: Vec<PVec2> = (0..n).map(|j| crate::ink::outline_dir(j, n, reversed)).collect();
+    // Colour at a material point: the fill, or the ink there.
+    let fill_at = |p: PVec2| ink.map_or(s.fill, |f| f.color_at(p));
+    // Same rule as the style's rim, so the outline matches the fill.
+    let rim_of = |f: Color| if dark { lighten(f, 0.55) } else { darken(f, 0.35) };
     if halo > 0.0 {
-        let k = absorb.map_or(1.0, |ab| ((t - ab.t0) / ABSORB_TIME).clamp(0.0, 1.0));
-        let hc = absorb.map_or(s.fill, |ab| mix(ab.from, ab.to, k));
+        let hc = ink.map_or(s.fill, |f| f.mean_color());
         buf.ring2(&outline, r * 0.15, r * 0.75, -0.004, la(hc, halo), la(hc, 0.0));
     }
-    // Fill: concentric rings so the soaking front reads smoothly.
-    let fracs = [0.0f32, 0.35, 0.7, 1.0];
-    let n = outline.len() as u32;
+    // Fill: concentric rings (finer while ink is swirling about).
+    let fracs: &[f32] = if ink.is_some() { &[0.0, 0.14, 0.28, 0.42, 0.56, 0.7, 0.82, 0.92, 1.0] } else { &[0.0, 0.35, 0.7, 1.0] };
     let mut starts = Vec::new();
-    for f in fracs {
-        let start = buf.pos.len() as u32;
-        starts.push(start);
-        for p in &outline {
+    for &f in fracs {
+        starts.push(buf.pos.len() as u32);
+        for (p, d) in outline.iter().zip(&dirs) {
             let q = c + (*p - c) * f;
-            let (fc, fr) = fill_at(q);
-            let base = mix(lighten(fc, 0.18), fc, f);
-            buf.vert(q, 0.0, lin(mix(base, Color::WHITE, fr * 0.35)));
+            let fc = if ink.is_some() { fill_at(*d * f) } else { s.fill };
+            buf.vert(q, 0.0, lin(mix(lighten(fc, 0.18), fc, f)));
             if f == 0.0 {
                 break;
             }
         }
     }
-    for k in 0..n {
-        buf.tri(starts[0], starts[1] + k, starts[1] + (k + 1) % n);
+    let n32 = n as u32;
+    for k in 0..n32 {
+        buf.tri(starts[0], starts[1] + k, starts[1] + (k + 1) % n32);
     }
     for ring in 1..fracs.len() - 1 {
         let (a0, b0) = (starts[ring], starts[ring + 1]);
-        for k in 0..n {
-            let j = (k + 1) % n;
+        for k in 0..n32 {
+            let j = (k + 1) % n32;
             buf.tri(a0 + k, b0 + k, b0 + j);
             buf.tri(a0 + k, b0 + j, a0 + j);
         }
     }
     // Rim, coloured point by point.
     let start = buf.pos.len() as u32;
-    let m = outline.len();
-    for i in 0..m {
-        let prev = outline[(i + m - 1) % m];
-        let next = outline[(i + 1) % m];
+    for i in 0..n {
+        let prev = outline[(i + n - 1) % n];
+        let next = outline[(i + 1) % n];
         let d = next - prev;
         let nrm = PVec2::new(d.y, -d.x).normalize_or_zero();
-        let (fc, fr) = fill_at(outline[i]);
-        let col = if absorb.is_some() { lin(rim_of(fc, fr)) } else { lin(s.rim) };
+        let col = if ink.is_some() { lin(rim_of(fill_at(dirs[i]))) } else { lin(s.rim) };
         buf.vert(outline[i] - nrm * s.rim_w, 0.001, col);
         buf.vert(outline[i] + nrm * s.rim_w * 0.25, 0.001, col);
     }
-    for i in 0..m as u32 {
-        let j = (i + 1) % m as u32;
+    for i in 0..n32 {
+        let j = (i + 1) % n32;
         let (a, b2, c2, d) = (start + i * 2, start + i * 2 + 1, start + j * 2, start + j * 2 + 1);
         buf.tri(a, b2, d);
         buf.tri(a, d, c2);
@@ -1716,9 +1681,9 @@ pub fn blob_mesh_fx(b: &Body, s: &Style, halo: f32, wriggle: Option<Wriggle>, ab
     if s.highlight {
         let (w, h) = extents(&outline);
         let squash = PVec2::new((w / h).sqrt(), (h / w).sqrt());
-        let hp = c + PVec2::new(-0.32, 0.4) * r * squash;
-        let (fc, _) = fill_at(hp);
-        buf.ellipse(hp, PVec2::new(0.26, 0.14) * r, 0.45, 0.002, lin(lighten(fc, 0.6)));
+        let off = PVec2::new(-0.32, 0.4) * squash;
+        let fc = ink.map_or(s.fill, |f| f.color_at(f.to_local(off)));
+        buf.ellipse(c + off * r, PVec2::new(0.26, 0.14) * r, 0.45, 0.002, lin(lighten(fc, 0.6)));
     }
 }
 

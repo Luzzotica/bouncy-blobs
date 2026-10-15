@@ -4,6 +4,7 @@
 //!   (default 150) and exit. `BB_SHOT_COUNT=n BB_SHOT_EVERY=k` saves a
 //!   flipbook of n shots k frames apart.
 //! * `BB_AUTOPLAY=1` — slot 0 holds right and jumps every second.
+//! * `BB_AMOEBA=frame:deg,…` — feed player 1 an amoeba from a side (ink.rs).
 //! * `BB_START=kids` — boot straight into Kids Mode (skips the sandbox).
 //! * `BB_PRESS=...` — scripted keys (see [`PressItem`]). In capture mode
 //!   (`crate::capture`) the numbers are sim ticks (1/60 s of game time), so
@@ -30,6 +31,9 @@ impl Plugin for DevToolsPlugin {
         }
         if std::env::var("BB_POP").is_ok() {
             app.add_systems(Update, dev_pop);
+        }
+        if std::env::var("BB_AMOEBA").is_ok() {
+            app.add_systems(Update, crate::ink::dev_amoeba);
         }
         if std::env::var("BB_AUTOPLAY").is_ok() {
             app.add_systems(PreUpdate, autoplay.after(crate::input::InputPlugin::gather_set()));

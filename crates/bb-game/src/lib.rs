@@ -17,6 +17,7 @@ pub mod dropin;
 pub mod flow;
 pub mod fx;
 pub mod hud;
+pub mod ink;
 pub mod input;
 pub mod kids;
 pub mod level_view;

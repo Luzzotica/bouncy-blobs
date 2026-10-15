@@ -591,11 +591,18 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             sim.tags.remove(&id);
             sim.world.remove_body(id);
             let color = crate::amoeba_color(i);
+            // Where on the eater's hull it went in: the hull point nearest
+            // the amoeba (the colour soaks in from there).
+            let contact = sim
+                .player(slot)
+                .and_then(|p| sim.world.body(p.ctl.body))
+                .and_then(|pb| pb.outline().min_by(|a, b| a.distance_squared(c).total_cmp(&b.distance_squared(c))))
+                .unwrap_or(c);
             if let Some(pl) = sim.player_mut(slot) {
                 pl.pickups += 1;
                 pl.color = color;
             }
-            sim.events.push(SimEvent::Pickup { index: i, pos: c, slot, color });
+            sim.events.push(SimEvent::Pickup { index: i, pos: c, slot, color, contact });
         }
     }
     if let Some(goal) = sim.level.goal.as_ref().map(|g| g.outline()) {
