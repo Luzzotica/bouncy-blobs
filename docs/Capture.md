@@ -7,7 +7,7 @@ Clean, repeatable gameplay footage for trailers and social clips
 
 `BB_CAPTURE=1` hides every screen-space UI element: the glow-drop counter,
 letterbox bars, "hold to skip", fades, toasts, the Kids portrait gate.
-Mid-level story lines and tips are not spawned. Gameplay is unchanged.
+No speech or tip bubbles are spawned at all (mid-level lines, tips, Glimmer, cutscene dialogue). Gameplay is unchanged.
 It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 `BB_CAPTURE_UI=1` keeps the UI if a shot needs it.
 

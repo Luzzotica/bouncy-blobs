@@ -279,6 +279,9 @@ impl Plugin for CapturePlugin {
 #[derive(Resource, Default)]
 struct CapCam {
     centre: Option<Vec2>,
+    /// Pip popped during the shot: keep holding the framing (even after
+    /// the respawn), so the pop and its droplets stay the subject.
+    lost: bool,
 }
 
 fn setup_camera(mut cams: Query<&mut Projection, With<MainCamera>>) {
@@ -315,7 +318,14 @@ fn frame_camera(
     });
     // Menus and cutscenes drive their own camera; leave them alone unless
     // the shot asks for a zoom or a fixed point.
-    let directed = dir.target.is_some() || pip.is_none();
+    // Pip popped (or between lives) mid-shot: hold the framing rather than
+    // swinging off to the respawn point, so the pop stays in frame.
+    if pip.is_none() && game.is_some() && state.centre.is_some() {
+        state.lost = true;
+    }
+    let pip = pip.filter(|_| !state.lost);
+    let held = state.lost;
+    let directed = dir.target.is_some() || (pip.is_none() && !held);
     let asked = cfg.zoom.is_some() || cfg.pull.is_some() || !matches!(cfg.cam, CamMode::Follow | CamMode::Tight);
     if directed && !asked {
         return;
@@ -323,7 +333,7 @@ fn frame_camera(
     let zoom = cfg.zoom_at(r);
     let dt = time.delta_secs();
     let follow = |state: &mut CapCam, lead: f32| -> Option<Vec2> {
-        let (p, v) = pip?;
+        let Some((p, v)) = pip else { return state.centre };
         // Portrait: Pip sits in the lower-middle so the frame shows the
         // space Pip bounces into, not a half-frame of rock below.
         let lift = cfg.lift.unwrap_or(if cfg.portrait() { 200.0 } else { CAM_LIFT * 0.5 }) * zoom;
@@ -358,6 +368,7 @@ fn frame_camera(
 /// `BB_CAPTURE_NO_PICKUPS=1`: clear the glow drops.
 fn place_pip(mut game: ResMut<Game>, mut state: ResMut<CapCam>) {
     state.centre = None;
+    state.lost = false;
     let Some(cfg) = config() else { return };
     if cfg.no_pickups {
         let sim = &mut game.sim;

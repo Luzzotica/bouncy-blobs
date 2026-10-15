@@ -134,7 +134,8 @@ impl Plugin for StoryPlugin {
                     .chain(),
             )
             .add_systems(Update, end_card.run_if(in_state(AppState::Story)))
-            .add_systems(Update, (bubble::spawn_bubbles, bubble::update_bubbles, words, cues_ui).chain())
+            // Capture mode: no speech or tip bubbles at all.
+            .add_systems(Update, (bubble::spawn_bubbles.run_if(crate::capture::off), bubble::update_bubbles, words, cues_ui).chain())
             .add_systems(Update, glimmer::glow.after(bubble::update_bubbles))
             .add_systems(PreUpdate, merge_inputs_into_pip.after(crate::input::GatherInput).run_if(in_state(AppState::Story)))
             .add_systems(Startup, setup_cues_ui)
