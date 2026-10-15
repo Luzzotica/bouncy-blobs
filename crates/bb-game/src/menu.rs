@@ -365,6 +365,12 @@ pub fn tile_desc(center: PVec2, size: PVec2) -> BodyDesc {
 pub const BUTTON_H: f32 = 76.0;
 pub const BUTTON_FONT: f32 = 36.0;
 
+/// Home-spring compliance for logo letters and buttons. Soft enough that a
+/// tile can be pushed or dragged well away from its spot and wobble back
+/// (a spring, not an anchor); stiffer values snap them home in a frame.
+pub const LETTER_SPRING: f32 = 1.2e-3;
+pub const BUTTON_SPRING: f32 = 7e-4;
+
 /// A jelly slab with a label. Tethered to where it was put, so it wobbles
 /// but never wanders off.
 pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wobble: f32) -> BodyId {
@@ -373,6 +379,8 @@ pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wob
     let id = game.sim.add_body(d, tag);
     if let Some(b) = game.sim.world.body_mut(id) {
         b.anchor_home(wobble);
+        // Hover swell and click puff scale the tether too.
+        b.home_scales = true;
     }
     id
 }
@@ -523,7 +531,7 @@ fn build_page(
             // Tilted up to the right (v2's -2° title), plus a hand-placed wobble.
             let tilt = ((i * 7 + row * 3) % 5) as f32 - 2.0;
             let rise = i as f32 * 4.0 * scale;
-            let id = jelly_tile(&mut game, PVec2::new(x, *y + rise + tilt * 3.0), PVec2::splat(88.0 * scale), BodyTag::Ui, 3e-5);
+            let id = jelly_tile(&mut game, PVec2::new(x, *y + rise + tilt * 3.0), PVec2::splat(88.0 * scale), BodyTag::Ui, LETTER_SPRING);
             overrides.0.insert(id, Style { fill: hex(*col), rim: darken(hex(*col), 0.4), rim_w: 5.0, highlight: true, z: z::PROP + 0.5, top_rim_only: false });
             label(&mut commands, &assets, id, ch, 60.0 * scale, Color::WHITE);
             menu.letters.push(id);
@@ -544,7 +552,7 @@ fn build_page(
             let w = 400.0;
             (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, BUTTON_H))
         };
-        let id = jelly_tile(&mut game, center, size, BodyTag::Ui, 4e-5);
+        let id = jelly_tile(&mut game, center, size, BodyTag::Ui, BUTTON_SPRING);
         overrides.0.insert(id, button_style(color, i == 0));
         label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { BUTTON_FONT }, Color::WHITE);
         menu.buttons.push(Button { body: id, action, color });
@@ -766,7 +774,9 @@ fn interact(
     // Relax any puffed button.
     for btn in &menu.buttons {
         if let Some(b) = game.sim.world.body_mut(btn.body) {
-            b.rest_scale += (1.0 - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
+            // Hovered buttons swell a little (5%); everything relaxes back.
+            let want = if pointer.hovered() == Some(btn.body) { 1.05 } else { 1.0 };
+            b.rest_scale += (want - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
         }
     }
 }

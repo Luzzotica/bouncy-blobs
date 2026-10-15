@@ -471,8 +471,12 @@ fn music(
     settings: Res<AudioSettings>,
     time: Res<Time<Real>>,
     mut q: Query<(Entity, &mut Music, Option<&mut AudioSink>)>,
+    global: Res<bevy::audio::GlobalVolume>,
 ) {
     let Some(server) = server else { return };
+    // `set_volume` below replaces the sink's volume outright, bypassing the
+    // global volume, so fold it in here (headless/test runs set it silent).
+    let global = global.volume.to_linear();
     let booting = state.is_some_and(|s| *s.get() == AppState::Boot) && game.is_none();
     let want = over.0.or_else(|| game.as_ref().map(|g| theme_music(g.sim.level.theme))).or((!booting).then_some(("music/theme-cave.mp3", 1.0)));
     let dt = time.delta_secs();
@@ -487,7 +491,7 @@ fn music(
         }
         m.level = if m.fading_out { (m.level - dt / 0.8).max(0.0) } else { (m.level + dt / 1.2).min(1.0) };
         if let Some(mut sink) = sink {
-            sink.set_volume(Volume::Linear(m.level * m.gain * settings.music_gain()));
+            sink.set_volume(Volume::Linear(m.level * m.gain * settings.music_gain() * global));
         }
         if m.fading_out && m.level <= 0.0 {
             commands.entity(e).despawn();

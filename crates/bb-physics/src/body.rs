@@ -488,6 +488,9 @@ pub struct Body {
     pub home: Option<Vec<Vec2>>,
     /// XPBD compliance of the home tethers (scaled by particle mass).
     pub home_compliance: f32,
+    /// The home tether follows `rest_scale` (scaled about the home
+    /// centroid), so a tethered body can still puff up (menu tiles).
+    pub home_scales: bool,
     pub(crate) strain_time: f32,
     pub(crate) immunity: f32,
     /// Worst limit overshoot measured in the last step (0 = within limits).
@@ -552,6 +555,7 @@ impl Body {
             kinematic: Vec::new(),
             home: None,
             home_compliance: 1e-4,
+            home_scales: false,
             strain_time: 0.0,
             immunity: 0.0,
             strain: 0.0,
