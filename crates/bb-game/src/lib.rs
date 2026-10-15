@@ -67,6 +67,12 @@ pub fn app() -> App {
     app
         .add_plugins(platform::PlatformPlugin)
         .add_plugins(GamePlugin);
+    // Headless runs (screenshots, captures, test playthroughs) and BB_MUTE=1
+    // never make a sound through the speakers. Capture still logs every
+    // sound for its own mixdown.
+    if platform::headless() || std::env::var("BB_MUTE").is_ok_and(|v| v != "0") {
+        app.insert_resource(bevy::audio::GlobalVolume::from(bevy::audio::Volume::SILENT));
+    }
     app
 }
 

@@ -17,6 +17,8 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
+    // Tests never play sound through the speakers (video recording still works).
+    launchOptions: { args: ['--mute-audio'] },
     baseURL: 'http://localhost:5170',
     viewport: { width: 1280, height: 720 },
     trace: 'retain-on-failure',
@@ -28,7 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], launchOptions: { args: ['--mute-audio'] } },
       testIgnore: 'match-short.spec.ts',
     },
     {
@@ -38,6 +40,7 @@ export default defineConfig({
       name: 'shorts',
       use: {
         ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--mute-audio'] },
         viewport: { width: 1080, height: 1920 },
         video: {
           mode: 'on',
