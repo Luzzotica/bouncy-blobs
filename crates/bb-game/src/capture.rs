@@ -26,6 +26,9 @@
 //! * `BB_CAPTURE_AT=x,y` — put Pip at x,y when the level loads (shot setup).
 //! * `BB_CAPTURE_NO_PICKUPS=1` — clear the level's glow-drop amoebas at
 //!   load (as if already eaten), for shots that mustn't show Pip eating one.
+//! * `BB_CAPTURE_RESPAWN=s`, `BB_CAPTURE_RESPAWN_AT=x,y` — after a pop,
+//!   Pip's next life comes s seconds later at x,y (`x,y;x,y;...` cycles
+//!   through several; capture only, the level and checkpoints are unchanged).
 //! * `BB_CAPTURE_UI=1` — keep screen UI (title-menu text, HUD) anyway.
 //! * `BB_TAP=target@f[-g];...` — scripted touches (finger down on tick f,
 //!   up after g, default f+6). Targets: `x,y` (world), `chip:green` (a Kids
@@ -87,6 +90,11 @@ pub struct CaptureConfig {
     pub keep_ui: bool,
     /// Transparent stills: only blobs and their faces are drawn, over alpha 0.
     pub transparent: bool,
+    /// Seconds from a pop to the next life (capture only; game default 1.1).
+    pub respawn: Option<f32>,
+    /// Where Pip comes back after each pop, cycling (capture only; not a
+    /// level change).
+    pub respawn_at: Vec<Vec2>,
     pub no_pickups: bool,
     /// World px the view centre sits above Pip (at zoom 1).
     pub lift: Option<f32>,
@@ -110,6 +118,8 @@ impl Default for CaptureConfig {
             crf: 16,
             keep_ui: false,
             transparent: false,
+            respawn: None,
+            respawn_at: Vec::new(),
             no_pickups: false,
             lift: None,
             track: 1.0,
@@ -160,6 +170,8 @@ impl CaptureConfig {
         c.at = get("BB_CAPTURE_AT").and_then(|s| pair(&s, ',')).map(|(x, y)| Vec2::new(x, y));
         c.keep_ui = get("BB_CAPTURE_UI").is_some_and(|v| v == "1");
         c.transparent = get("BB_CAPTURE_TRANSPARENT").is_some_and(|v| v == "1");
+        c.respawn = num("BB_CAPTURE_RESPAWN").map(|s| s.max(0.0));
+        c.respawn_at = get("BB_CAPTURE_RESPAWN_AT").map(|s| s.split(';').filter_map(|p| pair(p, ',')).map(|(x, y)| Vec2::new(x, y)).collect()).unwrap_or_default();
         c.no_pickups = get("BB_CAPTURE_NO_PICKUPS").is_some_and(|v| v == "1");
         if let Some(m) = get("BB_CAPTURE_CAM") {
             let (kind, arg) = m.split_once(':').unwrap_or((m.as_str(), ""));
@@ -252,6 +264,7 @@ impl Plugin for CapturePlugin {
             .init_resource::<ShapeLerp>()
             .add_systems(PostStartup, setup_camera)
             .add_systems(PostUpdate, place_pip.run_if(resource_added::<Game>))
+            .add_systems(FixedPostUpdate, capture_respawn.run_if(resource_exists::<Game>))
             .add_systems(
                 PostUpdate,
                 frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
@@ -392,11 +405,27 @@ fn place_pip(mut game: ResMut<Game>, mut state: ResMut<CapCam>) {
             }
         }
     }
+    if let Some(d) = cfg.respawn {
+        game.sim.rules.respawn_delay = d;
+    }
     let Some(at) = cfg.at else { return };
     let bodies: Vec<_> = game.sim.players.iter().map(|p| p.ctl.body).collect();
     for b in bodies {
         game.sim.world.respawn(b, bb_physics::Vec2::new(at.x, at.y));
     }
+}
+
+/// `BB_CAPTURE_RESPAWN_AT`: a life that just began starts there instead.
+fn capture_respawn(mut game: ResMut<Game>, mut was_dead: Local<Vec<bool>>, mut lives: Local<usize>) {
+    let Some(pts) = config().map(|c| &c.respawn_at).filter(|p| !p.is_empty()) else { return };
+    let dead: Vec<bool> = game.sim.players.iter().map(|p| p.dead.is_some()).collect();
+    let back: Vec<_> = game.sim.players.iter().enumerate().filter(|(i, p)| p.dead.is_none() && was_dead.get(*i).copied().unwrap_or(false)).map(|(_, p)| p.ctl.body).collect();
+    for b in back {
+        let at = pts[*lives % pts.len()];
+        *lives += 1;
+        game.sim.world.respawn(b, bb_physics::Vec2::new(at.x, at.y));
+    }
+    *was_dead = dead;
 }
 
 /// Hide every root UI node (HUD, letterbox, skip hint, fades, toasts).
@@ -941,6 +970,8 @@ mod tests {
         assert_eq!(c.pull, Some((0.4, 1.6)));
         assert_eq!(c.at, Some(Vec2::new(300.0, 500.0)));
         assert_eq!(c.track, 20.0);
+        let r = cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_RESPAWN", "0.3"), ("BB_CAPTURE_RESPAWN_AT", "10600,2100;10700,2100")]).unwrap();
+        assert_eq!((r.respawn, r.respawn_at), (Some(0.3), vec![Vec2::new(10600.0, 2100.0), Vec2::new(10700.0, 2100.0)]));
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "tight")]).unwrap().cam, CamMode::Tight);
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "reveal:1,2")]).unwrap().cam, CamMode::Reveal(Vec2::new(1.0, 2.0)));
         assert_eq!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_CAM", "followx:360")]).unwrap().cam, CamMode::FollowX(360.0));
