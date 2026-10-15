@@ -85,6 +85,8 @@ pub struct CaptureConfig {
     pub at: Option<Vec2>,
     pub crf: u32,
     pub keep_ui: bool,
+    /// Transparent stills: only blobs and their faces are drawn, over alpha 0.
+    pub transparent: bool,
     pub no_pickups: bool,
     /// World px the view centre sits above Pip (at zoom 1).
     pub lift: Option<f32>,
@@ -107,6 +109,7 @@ impl Default for CaptureConfig {
             at: None,
             crf: 16,
             keep_ui: false,
+            transparent: false,
             no_pickups: false,
             lift: None,
             track: 1.0,
@@ -156,6 +159,7 @@ impl CaptureConfig {
         c.pull = get("BB_CAPTURE_PULL").and_then(|s| pair(&s, ','));
         c.at = get("BB_CAPTURE_AT").and_then(|s| pair(&s, ',')).map(|(x, y)| Vec2::new(x, y));
         c.keep_ui = get("BB_CAPTURE_UI").is_some_and(|v| v == "1");
+        c.transparent = get("BB_CAPTURE_TRANSPARENT").is_some_and(|v| v == "1");
         c.no_pickups = get("BB_CAPTURE_NO_PICKUPS").is_some_and(|v| v == "1");
         if let Some(m) = get("BB_CAPTURE_CAM") {
             let (kind, arg) = m.split_once(':').unwrap_or((m.as_str(), ""));
@@ -252,6 +256,12 @@ impl Plugin for CapturePlugin {
                 PostUpdate,
                 frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
             );
+        if cfg.transparent {
+            app.add_systems(Startup, |mut c: ResMut<ClearColor>| c.0 = Color::NONE).add_systems(
+                PostUpdate,
+                only_blobs.after(crate::backdrop::BackdropSystems).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+            );
+        }
         if !cfg.keep_ui {
             app.add_systems(PostUpdate, hide_ui.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
         }
@@ -544,7 +554,7 @@ fn spawn_ffmpeg(cfg: &CaptureConfig, out: &std::path::Path) -> std::io::Result<(
     if out.extension().is_some_and(|e| e == "png") {
         // Stills: every recorded frame as a lossless PNG, `<stem>_0001.png`…
         let stem = out.with_extension("");
-        cmd.args(["-pix_fmt", "rgb24", "-f", "image2"]).arg(format!("{}_%04d.png", stem.display()));
+        cmd.args(["-pix_fmt", if cfg.transparent { "rgba" } else { "rgb24" }, "-f", "image2"]).arg(format!("{}_%04d.png", stem.display()));
     } else {
         cmd.args(["-c:v", "libx264", "-preset", "slow", "-crf"])
             .arg(cfg.crf.to_string())
@@ -598,6 +608,7 @@ fn record(
             let i = rec.requested;
             let frames = rec.frames.clone();
             let size = cfg.size;
+            let transparent = cfg.transparent;
             commands.spawn(Screenshot::image(t.0.clone())).observe(move |shot: On<ScreenshotCaptured>| {
                 let img = &shot.image;
                 let Some(data) = img.data.as_ref() else { return };
@@ -606,7 +617,11 @@ fn record(
                     error!("capture: frame {i} is {} bytes, expected {want}", data.len());
                     return;
                 }
-                frames.lock().unwrap().insert(i, data.clone());
+                let mut data = data.clone();
+                if transparent {
+                    unpremultiply(&mut data);
+                }
+                frames.lock().unwrap().insert(i, data);
             });
             rec.requested += 1;
         }
@@ -643,6 +658,63 @@ fn record(
         rec.failed = true;
         rec.written = 0;
         rec.requested = u32::MAX;
+    }
+}
+
+// ─────────────────────────────────────────────────── transparent stills
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+}
+
+/// The render target holds alpha-blended colour over a clear of alpha 0,
+/// i.e. premultiplied colour (blending happens in linear space; the texture
+/// stores sRGB). Turn RGBA8 sRGB-premultiplied into straight alpha so the
+/// PNG composites cleanly in an editor: glows keep their colour instead of
+/// darkening toward black at the edges.
+pub fn unpremultiply(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3];
+        if a == 0 {
+            px[0] = 0;
+            px[1] = 0;
+            px[2] = 0;
+        } else if a < 255 {
+            let af = a as f32 / 255.0;
+            for c in &mut px[..3] {
+                let lin = srgb_to_linear(*c as f32 / 255.0) / af;
+                *c = (linear_to_srgb(lin.min(1.0)) * 255.0).round() as u8;
+            }
+        }
+    }
+}
+
+/// Transparent mode: hide everything but player/NPC blobs and their faces
+/// (no backdrop, terrain, water, decor, mouths, FX, UI chips). Glimmer is
+/// hidden too.
+#[allow(clippy::type_complexity)]
+fn only_blobs(
+    game: Option<Res<Game>>,
+    mut q: Query<(&mut Visibility, Option<&crate::render::BodyVisual>, Option<&crate::render::Face>), Or<(With<Mesh2d>, With<Sprite>, With<Text2d>)>>,
+) {
+    let keep = |id: bb_sim::BodyId| {
+        let Some(g) = game.as_ref() else { return false };
+        match g.sim.tag(id) {
+            Some(bb_sim::BodyTag::Player(_)) => true,
+            Some(bb_sim::BodyTag::Npc(i)) => g.sim.npc_role(i) != Some(&bb_level::NpcRole::Glimmer),
+            _ => false,
+        }
+    };
+    for (mut v, body, face) in q.iter_mut() {
+        let show = body.map(|b| keep(b.id)).or(face.map(|f| keep(f.body))).unwrap_or(false);
+        let want = if show { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
+        }
     }
 }
 
@@ -923,6 +995,21 @@ mod tests {
             steps.push(n);
         }
         assert_eq!(steps, [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn unpremultiply_restores_straight_colour() {
+        // Opaque and empty pixels.
+        let mut px = [200u8, 100, 50, 255, 9, 9, 9, 0];
+        unpremultiply(&mut px);
+        assert_eq!(px, [200, 100, 50, 255, 0, 0, 0, 0]);
+        // A white glow at 50% over transparent: stored premultiplied as
+        // linear 0.5 (sRGB ~188); straight it is white again.
+        let mut g = [188u8, 188, 188, 128];
+        unpremultiply(&mut g);
+        assert!(g[0] >= 253, "{g:?}");
+        assert_eq!(g[3], 128);
+        assert!(cfg(&[("BB_CAPTURE", "1"), ("BB_CAPTURE_TRANSPARENT", "1")]).unwrap().transparent);
     }
 
     #[test]

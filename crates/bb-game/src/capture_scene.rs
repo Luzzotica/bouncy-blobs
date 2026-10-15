@@ -7,6 +7,12 @@
 //!   sides and below, bounce off the logo and the block, and land on it.
 //!   `BB_CAPTURE_SCENE_SEED=n` varies the choreography (takes).
 //! * `logo` — the same without the block: logo and blobs in the title cave.
+//! * `stage` — an empty posing stage for transparent stills
+//!   (`BB_CAPTURE_TRANSPARENT=1`): a flat floor (hidden in transparent mode)
+//!   and `BB_STAGE=solo` (Pip alone; place with `BB_CAPTURE_AT`, drive with
+//!   `BB_PRESS`), `pile` (Pip and four friends dropped into a narrow funnel;
+//!   `BB_CAPTURE_SCENE_SEED` varies the drop) or `trio` (three Kids Mode
+//!   shape friends: star, square, triangle).
 
 use bb_physics::Vec2 as PVec2;
 use bb_level::{LevelBuilder, NpcRole, Theme, v};
@@ -28,6 +34,10 @@ pub struct CaptureScenePlugin;
 
 impl Plugin for CaptureScenePlugin {
     fn build(&self, app: &mut App) {
+        if scene().as_deref() == Some("stage") {
+            app.add_systems(Startup, start_stage).add_systems(PostUpdate, setup_stage.run_if(resource_added::<Game>));
+            return;
+        }
         if !matches!(scene().as_deref(), Some("endcard" | "logo")) {
             return;
         }
@@ -237,6 +247,66 @@ mod tests {
     fn both_takes_launch_pip() {
         for seed in [0, 1] {
             assert!(entrances(seed).iter().any(|e| e.blob == 0));
+        }
+    }
+}
+
+// ------------------------------------------------------------------ stage
+
+fn stage_kind() -> String {
+    std::env::var("BB_STAGE").unwrap_or_else(|_| "solo".into())
+}
+
+fn stage_seed() -> u32 {
+    std::env::var("BB_CAPTURE_SCENE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0)
+}
+
+/// Friends' colours on the stage (no named characters).
+pub const STAGE_COLORS: [u32; 4] = [0x4ac8c8, 0xffd54a, 0x8fe36b, 0xb98cff];
+
+/// The posing stage: dark-cave look (so blobs get their glow), a wide
+/// floor, and for `pile` a narrow funnel the friends drop into.
+pub fn stage_level(kind: &str, seed: u32) -> bb_level::Level {
+    let mut b = LevelBuilder::new("stage", "Stage", Theme::Hollow);
+    b.spawn(v(0.0, 40.0)).kill_y(-3000.0);
+    if kind == "pile" {
+        b.ground(&[v(-2000.0, 600.0), v(-170.0, 600.0), v(-110.0, 0.0), v(110.0, 0.0), v(170.0, 600.0), v(2000.0, 600.0)], 400.0);
+        // Friends drop in one by one from above the funnel.
+        for (i, c) in STAGE_COLORS.iter().enumerate() {
+            let jitter = ((i as u32 * 7 + seed * 13) % 5) as f32 * 14.0 - 28.0;
+            let y = 220.0 + i as f32 * 120.0 + (seed % 3) as f32 * 40.0;
+            b.npc(&format!("s{i}"), v(jitter, y), NpcRole::Huddle, &format!("#{c:06x}"), 32.0);
+        }
+    } else {
+        b.ground(&[v(-3000.0, 0.0), v(3000.0, 0.0)], 400.0);
+    }
+    b.build()
+}
+
+fn start_stage(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+    next.set(AppState::Playing);
+    let kind = stage_kind();
+    let players = if kind == "trio" { Vec::new() } else { vec![(0u8, "Pip".to_string(), 0xff5d73u32)] };
+    load.write(LoadLevel { level: stage_level(&kind, stage_seed()), players });
+}
+
+fn setup_stage(mut game: ResMut<Game>) {
+    for n in game.sim.npcs.iter_mut() {
+        n.scripted = true;
+    }
+    if stage_kind() == "trio" {
+        use crate::kids::level::KidsShape;
+        let seed = stage_seed();
+        let spread = 150.0 + (seed % 2) as f32 * 30.0;
+        let trio = [(KidsShape::Star, 0xe8c54a, -spread), (KidsShape::Square, 0x5a8ae0, 0.0), (KidsShape::Triangle, 0xd06eb0, spread)];
+        for (i, (shape, color, x)) in trio.into_iter().enumerate() {
+            let body = game.sim.add_player(i as u8 + 1, "", color).ctl.body;
+            if let Some(b) = game.sim.world.body_mut(body) {
+                b.set_rest_shape(&shape.outline());
+            }
+            // Take 2 drops them from different heights so they land unevenly.
+            let y = 60.0 + if seed % 2 == 1 { i as f32 * 90.0 } else { 0.0 };
+            game.sim.world.respawn(body, PVec2::new(x, y));
         }
     }
 }

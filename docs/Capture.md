@@ -29,6 +29,7 @@ It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 | `BB_CAPTURE_AT=x,y` | put Pip at world x,y when the level loads |
 | `BB_CAPTURE_NO_PICKUPS=1` | clear the level's glow-drop amoebas at load (as if already eaten) |
 | `BB_CAPTURE_SCENE=endcard` | capture-only end card: title cave, jelly logo, a "Wishlist on Steam / Coming October 30" block, blobs jumping in and landing on it (`crates/bb-game/src/capture_scene.rs`); `BB_CAPTURE_SCENE_SEED=1` is a mirrored take. Frame it with `BB_CAPTURE_CAM=static:0,600 BB_CAPTURE_ZOOM=0.8` (portrait). |
+| `BB_CAPTURE_TRANSPARENT=1` | transparent stills: clear alpha 0, only player/NPC blobs and their faces drawn (no backdrop, terrain, water, decor, mouths, FX, UI; Glimmer hidden). With a `.png` `BB_CAPTURE_OUT` the frames are RGBA with straight (un-premultiplied) alpha, so glows composite cleanly over dark or light. Any size, e.g. `BB_CAPTURE_SIZE=2048x2048`. Pair with `BB_CAPTURE_SCENE=stage` (`BB_STAGE=solo|pile|trio`) for an empty posing stage. |
 | `BB_CAPTURE_CRF=q` | x264 quality (default 16) |
 | `BB_PRESS=...` | scripted keys (existing): `key@f`, `key@a-b`, `key@a-` (hold from a on), `key@every:P:H[:from[:to]]` (hold H ticks every P). In a headless capture these are **sim ticks**, so a script is the same at any speed. |
 | `BB_TAP=target@f[-g];...` | scripted touches: `x,y` (world), `chip:green` (Kids colour chip), `blob:n` (player slot n). Finger up at g (default f+6). |

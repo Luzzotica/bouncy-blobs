@@ -33,9 +33,14 @@ use crate::sim::Game;
 
 pub struct BackdropPlugin;
 
+/// The backdrop and foreground updates (they also set their own visibility
+/// each frame; capture's transparent mode runs after them).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BackdropSystems;
+
 impl Plugin for BackdropPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, (update_backdrop, update_foreground).after(crate::camera::CameraFraming).after(bevy::camera::CameraUpdateSystems).before(bevy::transform::TransformSystems::Propagate).run_if(resource_exists::<Game>));
+        app.add_systems(PostUpdate, (update_backdrop, update_foreground).in_set(BackdropSystems).after(crate::camera::CameraFraming).after(bevy::camera::CameraUpdateSystems).before(bevy::transform::TransformSystems::Propagate).run_if(resource_exists::<Game>));
     }
 }
 
