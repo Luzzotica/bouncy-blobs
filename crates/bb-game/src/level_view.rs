@@ -5,7 +5,7 @@ use bb_physics::{Vec2 as PVec2, geom};
 use bevy::prelude::*;
 
 use crate::palette::{self, darken, hex, lighten, lin, mix};
-use crate::render::{MeshBuf, Shared, ccw, empty_mesh, la, z};
+use crate::render::{Ends, MeshBuf, Shared, ccw, empty_mesh, la, z};
 use crate::sim::Game;
 
 /// Everything spawned for the current level (despawned on unload).
@@ -678,7 +678,7 @@ pub fn decor_seeded(buf: &mut MeshBuf, kind: &str, p: PVec2, s: f32, theme: &pal
                 buf.tri(i1, i3, i2);
                 buf.tri(i1, i4, i5);
                 buf.tri(i1, i5, i3);
-                buf.stroke(&[base + side * 0.1, tip], 1.5 * s, 0.001, la(lighten(c, 0.8), 0.7));
+                buf.stroke_taper(&[base + side * 0.1, tip], 1.5 * s, 0.001, &[la(lighten(c, 0.8), 0.7)], h * s * 0.25, Ends::Both);
             }
         }
         "crystal" => {
@@ -697,7 +697,7 @@ pub fn decor_seeded(buf: &mut MeshBuf, kind: &str, p: PVec2, s: f32, theme: &pal
             let c = if dark { theme.crystal } else { theme.glow };
             if dark {
                 // Silk thread up to the ceiling.
-                buf.stroke(&[p + PVec2::new(18.0 * s, 0.0), p + PVec2::new(18.0 * s, 70.0 * s)], 1.2, -0.001, la(lighten(c, 0.3), 0.25));
+                buf.stroke_taper(&[p + PVec2::new(18.0 * s, 0.0), p + PVec2::new(18.0 * s, 70.0 * s)], 1.2, -0.001, &[la(lighten(c, 0.3), 0.25)], 24.0 * s, Ends::End);
             }
             for k in 0..5 {
                 let q = p + PVec2::new(k as f32 * 9.0, -(k as f32 * 0.8).sin() * 6.0) * s;
@@ -1922,7 +1922,7 @@ fn update_wind(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Assets<Mesh>
             shape.extend(bot.iter().rev().copied());
             buf.fan(&shape, vent_c - d * 10.0, 0.0, la(lighten(glow, 0.35), 0.95 * breathe), lin(mix(Color::BLACK, glow, 0.08)));
             let rim: Vec<[f32; 4]> = (0..top.len()).map(|k| { let u = k as f32 / 16.0 * 2.0 - 1.0; la(lighten(glow, 0.3), 0.8 * (1.0 - u * u) * breathe) }).collect();
-            buf.stroke_cols(&top, 2.5, 0.0005, &rim);
+            buf.stroke_taper(&top, 2.5, 0.0005, &rim, vent_hw * 0.4, Ends::Both);
             buf.stroke(&bot, 2.0, 0.0005, lin(mix(Color::BLACK, glow, 0.12)));
         }
         // A plume of light breathing out of the vent along the draft.
@@ -1955,23 +1955,22 @@ fn update_wind(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Assets<Mesh>
             let travel = len + sl;
             let ph = ((t * sp + h(3) * travel) % travel + travel) % travel;
             let head = ph;
-            let pts: Vec<PVec2> = (0..=6)
-                .map(|i| {
-                    let along = head - sl * i as f32 / 6.0;
-                    let across = across0 + (along * 0.012 + h(4) * 6.0 + t * 0.8).sin() * 14.0;
-                    pos(along.clamp(0.0, len), across)
+            // Only the part inside the zone, so the taper lands on what shows.
+            let (a1, a0) = (head.min(len), (head - sl).max(0.0));
+            if a1 - a0 < 4.0 {
+                continue;
+            }
+            let alongs: Vec<f32> = (0..=6).map(|i| a1 - (a1 - a0) * i as f32 / 6.0).collect();
+            let pts: Vec<PVec2> = alongs.iter().map(|along| pos(*along, across0 + (along * 0.012 + h(4) * 6.0 + t * 0.8).sin() * 14.0)).collect();
+            let cs: Vec<[f32; 4]> = alongs
+                .iter()
+                .map(|along| {
+                    let tail = 1.0 - (head - along) / sl;
+                    la(air, (if theme.dark { 0.42 } else { 0.55 }) * tail * vis(*along, across0) * (0.6 + 0.4 * h(5)))
                 })
                 .collect();
-            let cs: Vec<[f32; 4]> = (0..=6)
-                .map(|i| {
-                    let along = head - sl * i as f32 / 6.0;
-                    let across = across0;
-                    let tail = 1.0 - i as f32 / 6.0;
-                    let inside = if (0.0..=len).contains(&along) { 1.0 } else { 0.0 };
-                    la(air, (if theme.dark { 0.42 } else { 0.55 }) * tail * vis(along.max(0.0), across) * inside * (0.6 + 0.4 * h(5)))
-                })
-                .collect();
-            buf.stroke_cols(&pts, 2.0 + 1.8 * h(6), 0.0, &cs);
+            // Head and tail both thin away: a wisp, not a dash.
+            buf.stroke_taper(&pts, 2.0 + 1.8 * h(6), 0.0, &cs, sl * 0.3, Ends::Both);
         }
         // Broad wisps: the volume of air itself, slow curling ribbons.
         let ribbons = ((wid / 70.0) as i32).clamp(2, 8);
@@ -1982,21 +1981,20 @@ fn update_wind(game: Res<Game>, time: Res<Time>, mut meshes: ResMut<Assets<Mesh>
             let sp = speed * 0.55;
             let travel = len + sl;
             let head = ((t * sp + h(1) * travel) % travel + travel) % travel;
-            let pts: Vec<PVec2> = (0..=10)
-                .map(|i| {
-                    let along = (head - sl * i as f32 / 10.0).clamp(0.0, len);
-                    pos(along, across0 + (along * 0.008 + t * 0.9 + h(2) * 6.0).sin() * 22.0)
+            let (a1, a0) = (head.min(len), (head - sl).max(0.0));
+            if a1 - a0 < 8.0 {
+                continue;
+            }
+            let alongs: Vec<f32> = (0..=10).map(|i| a1 - (a1 - a0) * i as f32 / 10.0).collect();
+            let pts: Vec<PVec2> = alongs.iter().map(|along| pos(*along, across0 + (along * 0.008 + t * 0.9 + h(2) * 6.0).sin() * 22.0)).collect();
+            let cs: Vec<[f32; 4]> = alongs
+                .iter()
+                .map(|along| {
+                    let env = (std::f32::consts::PI * (head - along) / sl).sin().max(0.0);
+                    la(air, 0.08 * env * vis(*along, across0))
                 })
                 .collect();
-            let cs: Vec<[f32; 4]> = (0..=10)
-                .map(|i| {
-                    let along = head - sl * i as f32 / 10.0;
-                    let env = (std::f32::consts::PI * i as f32 / 10.0).sin();
-                    let inside = if (0.0..=len).contains(&along) { 1.0 } else { 0.0 };
-                    la(air, 0.08 * env * inside * vis(along.clamp(0.0, len), across0))
-                })
-                .collect();
-            buf.stroke_cols(&pts, 26.0 + 20.0 * h(3), -0.001, &cs);
+            buf.stroke_taper(&pts, 26.0 + 20.0 * h(3), -0.001, &cs, sl * 0.3, Ends::Both);
         }
         // ---- spores and dust carried along (lit motes, a little faster)
         let m = ((len * wid) / (140.0 * 140.0)).clamp(4.0, 50.0) as i32;
