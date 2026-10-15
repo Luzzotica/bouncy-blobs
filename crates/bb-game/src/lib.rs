@@ -7,6 +7,7 @@ pub mod audio;
 pub mod backdrop;
 pub mod camera;
 pub mod capture;
+pub mod capture_scene;
 pub mod cave;
 pub mod crag;
 pub mod dance;
@@ -97,6 +98,7 @@ impl Plugin for GamePlugin {
                 achievements::AchievementsPlugin,
                 devtools::DevToolsPlugin,
                 capture::CapturePlugin,
+                capture_scene::CaptureScenePlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
                 editor::EditorPlugin,
