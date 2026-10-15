@@ -1,9 +1,15 @@
-//! Party mode: a jelly lobby where phones drop in, then Race / KOTH /
-//! Chained rounds on party maps.
+//! Party mode: a jelly lobby where phones and pads drop in, then King of
+//! the Hill rounds on party maps.
+//!
+//! Rounds are picked by [`PartyRule`]. Only King of the Hill exists today;
+//! a build-then-run round (Ultimate Chicken Horse style: everyone places a
+//! trap, then everyone runs the course) is meant to slot in as another
+//! variant, with its own phases driven from [`tick_match`] and its own map
+//! prep in [`prepare_map`].
 
 use bb_level::{Level, LevelBuilder, NpcRole, Shape, Theme, v};
 use bb_physics::{BodyId, Vec2 as PVec2};
-use bb_sim::BodyTag;
+use bb_sim::{BodyTag, SimEvent};
 use bb_sim::modes::{KOTH_TARGET, Match, MatchPhase, ModeKind};
 use bevy::prelude::*;
 
@@ -13,8 +19,8 @@ use crate::flow::AppState;
 use crate::dropin::{DropIn, DropStyle};
 use crate::menu::{BodyLabel, button_style, jelly_tile, kick_label, label_with};
 use crate::softtext::{JiggleText, SoftText};
-use crate::palette::hex;
-use crate::render::StyleOverrides;
+use crate::palette::{hex, lin};
+use crate::render::{MeshBuf, Shared, StyleOverrides, la, z};
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
 use crate::story::StoryProgress;
 
@@ -24,17 +30,42 @@ enum PartyPhase {
     Match,
 }
 
+/// What a party round plays. Rounds are King of the Hill for now; new
+/// round types (e.g. build-then-run) add a variant here.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PartyRule {
+    #[default]
+    Koth,
+}
+
+impl PartyRule {
+    pub fn name(self) -> &'static str {
+        match self {
+            PartyRule::Koth => "King of the Hill",
+        }
+    }
+
+    /// The sim-side match rules this round runs on.
+    fn match_kind(self) -> ModeKind {
+        match self {
+            PartyRule::Koth => ModeKind::Koth,
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct Party {
     phase: PartyPhase,
     pub maps: Vec<Level>,
     pub map: usize,
-    pub mode: ModeKind,
+    pub rule: PartyRule,
     /// Players carried between lobby and rounds: (slot, name, colour).
     pub roster: Vec<(u8, String, u32)>,
     pub current: Option<Match>,
     buttons: Vec<(BodyId, PartyButton, u32)>,
     pending_start: bool,
+    /// The round's winner has been cheered (one `SimEvent::Goal`).
+    cheered: bool,
     built: bool,
     /// Re-open the room for joins once back in the lobby.
     reopen: bool,
@@ -45,16 +76,24 @@ pub struct Party {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PartyButton {
     Map,
-    Mode,
     Start,
     Back,
 }
 
+/// Lives for the whole party screen (the phone join panel).
 #[derive(Component)]
 struct PartyEntity;
 
+/// Lobby button labels and hints, rebuilt with the lobby world.
+#[derive(Component)]
+struct LobbyItem;
+
 #[derive(Component)]
 struct MatchHud;
+
+/// The active hill's glowing zone (rebuilt every frame).
+#[derive(Component)]
+struct HillMark;
 
 #[derive(Component)]
 enum HudText {
@@ -69,33 +108,19 @@ impl Plugin for PartyPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Party), enter)
             .add_systems(OnExit(AppState::Party), exit)
-            .add_systems(Update, (lobby_ui, lobby_input, hud).run_if(in_state(AppState::Party).and_then(resource_exists::<Game>)))
+            .add_systems(Update, (lobby_ui, lobby_input, hud, draw_hill, join_panel_visibility).run_if(in_state(AppState::Party).and_then(resource_exists::<Game>)))
             .add_systems(FixedPostUpdate, tick_match.run_if(in_state(AppState::Party).and_then(resource_exists::<Game>)));
     }
 }
 
-/// Built-in party maps; imported 2.x maps are appended from assets when present.
+/// Party maps: two built here plus the imported 2.x maps. Every one plays
+/// as King of the Hill (see [`prepare_map`]).
 pub fn builtin_maps() -> Vec<Level> {
     let mut maps = Vec::new();
 
-    let mut b = LevelBuilder::new("party_mushroom_dash", "Mushroom Dash", Theme::Fungus);
-    b.spawn(v(-1400.0, 80.0))
-        .ground(&[v(-1700.0, 0.0), v(-600.0, 0.0), v(-300.0, 140.0), v(300.0, 140.0)], 400.0)
-        .mushroom(v(450.0, 0.0), 90.0, 200.0)
-        .ground(&[v(300.0, 0.0), v(900.0, 0.0)], 400.0)
-        .bridge(v(900.0, 0.0), v(1400.0, 0.0), 26.0, 0.3)
-        .ground(&[v(1400.0, 0.0), v(2000.0, 220.0), v(2600.0, 220.0)], 600.0)
-        .vine(v(2200.0, 760.0), 300.0)
-        .block(v(-1800.0, -400.0), v(-1700.0, 1600.0))
-        .block(v(2600.0, -400.0), v(2700.0, 1600.0))
-        .goal(v(2400.0, 220.0), v(2580.0, 420.0))
-        .kill_y(-900.0);
-    let mut l = b.build();
-    l.modes = vec![bb_level::Mode::Race];
-    maps.push(l);
-
     let mut b = LevelBuilder::new("party_wobble_hill", "Wobble Hill", Theme::Party);
-    b.spawn(v(0.0, 80.0))
+    // Spawn above the raised middle (ground is at y = 220 there).
+    b.spawn(v(0.0, 300.0))
         .ground(&[v(-1300.0, 0.0), v(-500.0, 0.0), v(-200.0, 220.0), v(200.0, 220.0), v(500.0, 0.0), v(1300.0, 0.0)], 400.0)
         .slab(v(-800.0, 420.0), v(260.0, 40.0), 0.3)
         .slab(v(800.0, 420.0), v(260.0, 40.0), 0.3)
@@ -109,8 +134,58 @@ pub fn builtin_maps() -> Vec<Level> {
     l.modes = vec![bb_level::Mode::Koth];
     maps.push(l);
 
+    let mut b = LevelBuilder::new("party_mushroom_dash", "Mushroom Dash", Theme::Fungus);
+    b.spawn(v(-1400.0, 80.0))
+        .ground(&[v(-1700.0, 0.0), v(-600.0, 0.0), v(-300.0, 140.0), v(300.0, 140.0)], 400.0)
+        .mushroom(v(450.0, 0.0), 90.0, 200.0)
+        .ground(&[v(300.0, 0.0), v(900.0, 0.0)], 400.0)
+        .bridge(v(900.0, 0.0), v(1400.0, 0.0), 26.0, 0.3)
+        .ground(&[v(1400.0, 0.0), v(2000.0, 220.0), v(2600.0, 220.0)], 600.0)
+        .vine(v(2200.0, 760.0), 300.0)
+        .block(v(-1800.0, -400.0), v(-1700.0, 1600.0))
+        .block(v(2600.0, -400.0), v(2700.0, 1600.0))
+        .goal(v(2400.0, 220.0), v(2580.0, 420.0))
+        .kill_y(-900.0);
+    // The old finish line is the hill: dash there, then shove for it.
+    let mut l = b.build();
+    l.modes = vec![bb_level::Mode::Koth];
+    maps.push(l);
+
     maps.extend(crate::party_assets::imported_maps());
     maps
+}
+
+/// Smallest hill made from a map's old finish zone.
+const MIN_HILL: PVec2 = PVec2::new(320.0, 260.0);
+
+/// Ready a map for a round of `rule`.
+///
+/// King of the Hill: maps without hills (the 2.x race maps) get their
+/// finish zone as the hill, grown to at least [`MIN_HILL`] and resting on
+/// the zone's floor; maps with neither get one over the spawn. The goal is
+/// dropped so no flag is drawn and touching it doesn't end anything.
+pub fn prepare_map(mut level: Level, rule: PartyRule) -> Level {
+    match rule {
+        PartyRule::Koth => {
+            if level.hills.is_empty() {
+                let hill = match level.goal.as_ref().map(Shape::bounds) {
+                    Some((lo, hi)) => {
+                        let c = (lo.x + hi.x) * 0.5;
+                        let size = (hi - lo).max(MIN_HILL);
+                        Shape::rect(PVec2::new(c - size.x * 0.5, lo.y), PVec2::new(c + size.x * 0.5, lo.y + size.y))
+                    }
+                    None => {
+                        let s = level.spawn;
+                        Shape::rect(PVec2::new(s.x - MIN_HILL.x * 0.5, s.y - 80.0), PVec2::new(s.x + MIN_HILL.x * 0.5, s.y - 80.0 + MIN_HILL.y))
+                    }
+                };
+                level.hills.push(hill);
+            }
+            level.goal = None;
+            level.modes = vec![bb_level::Mode::Koth];
+        }
+    }
+    level
 }
 
 fn lobby_level() -> Level {
@@ -148,11 +223,12 @@ fn enter(
         phase: PartyPhase::Lobby,
         maps: builtin_maps(),
         map: 0,
-        mode: ModeKind::Race,
+        rule: PartyRule::Koth,
         roster,
         current: None,
         buttons: Vec::new(),
         pending_start: false,
+        cheered: false,
         built: false,
         reopen: false,
         drop: DropIn::new(DropStyle::MENU),
@@ -161,7 +237,7 @@ fn enter(
 
 fn exit(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<PartyEntity>, With<MatchHud>)>>,
+    q: Query<Entity, Or<(With<PartyEntity>, With<LobbyItem>, With<MatchHud>, With<HillMark>)>>,
     mut cam: ResMut<CameraDirector>,
     mut unload: MessageWriter<UnloadLevel>,
     mut overrides: ResMut<StyleOverrides>,
@@ -180,7 +256,6 @@ fn exit(
 fn button_label(b: PartyButton, party: &Party) -> String {
     match b {
         PartyButton::Map => format!("Map: {}", party.maps.get(party.map).map_or("?", |m| m.name.as_str())),
-        PartyButton::Mode => format!("Mode: {}", party.mode.name()),
         PartyButton::Start => "Start!".into(),
         PartyButton::Back => "Back".into(),
     }
@@ -193,7 +268,7 @@ fn lobby_ui(
     mut game: ResMut<Game>,
     assets: Res<GameAssets>,
     mut overrides: ResMut<StyleOverrides>,
-    labels: Query<Entity, With<PartyEntity>>,
+    labels: Query<Entity, With<LobbyItem>>,
     mut texts: Query<(&BodyLabel, &mut SoftText)>,
 ) {
     if party.phase != PartyPhase::Lobby {
@@ -209,22 +284,23 @@ fn lobby_ui(
         }
         party.buttons.clear();
         party.drop.clear();
-        let items = [(PartyButton::Map, 0x5dd6ff), (PartyButton::Mode, 0xffc75f), (PartyButton::Start, 0x6bcb77), (PartyButton::Back, 0xd0c4e8)];
+        let items = [(PartyButton::Map, 0x5dd6ff), (PartyButton::Start, 0x6bcb77), (PartyButton::Back, 0xd0c4e8)];
         for (i, (b, color)) in items.iter().enumerate() {
-            let center = PVec2::new(260.0, 620.0 - i as f32 * 96.0);
+            // Left of centre so the phone join panel (top right) stays clear.
+            let center = PVec2::new(140.0, 620.0 - i as f32 * 96.0);
             let id = jelly_tile(&mut game, center, PVec2::new(520.0, 78.0), BodyTag::Ui, 2e-4);
             overrides.0.insert(id, button_style(*color, false));
             let text = button_label(*b, &party);
-            label_with(&mut commands, &assets, id, &text, 34.0, Color::WHITE, PartyEntity);
+            label_with(&mut commands, &assets, id, &text, 34.0, Color::WHITE, LobbyItem);
             party.buttons.push((id, *b, *color));
             party.drop.add(&mut game.sim.world, id, 0.12 + (items.len() - 1 - i) as f32 * 0.07);
         }
         // Title tile.
-        let id = jelly_tile(&mut game, PVec2::new(-420.0, 640.0), PVec2::new(420.0, 110.0), BodyTag::Ui, 6e-5);
+        let id = jelly_tile(&mut game, PVec2::new(-480.0, 640.0), PVec2::new(420.0, 110.0), BodyTag::Ui, 6e-5);
         overrides.0.insert(id, button_style(0xff8fab, false));
-        label_with(&mut commands, &assets, id, "PARTY!", 72.0, Color::WHITE, PartyEntity);
+        label_with(&mut commands, &assets, id, "PARTY!", 72.0, Color::WHITE, LobbyItem);
         party.drop.add(&mut game.sim.world, id, 0.0);
-        crate::party_assets::spawn_join_hint(&mut commands, &assets, PartyEntity);
+        crate::party_assets::spawn_join_hint(&mut commands, &assets, LobbyItem);
     }
     // Keep labels current.
     for (bl, mut t) in texts.iter_mut() {
@@ -308,25 +384,10 @@ fn lobby_input(
     kick_label(&mut labels, body, 1.2);
     match which {
         PartyButton::Map => party.map = (party.map + 1) % party.maps.len().max(1),
-        PartyButton::Mode => {
-            party.mode = match party.mode {
-                ModeKind::Race => ModeKind::Koth,
-                ModeKind::Koth => ModeKind::Chained,
-                ModeKind::Chained => ModeKind::Race,
-            }
-        }
         PartyButton::Back => next.set(AppState::Title),
         PartyButton::Start => {
-            let Some(mut level) = party.maps.get(party.map).cloned() else { return };
-            // KOTH needs a hill; races need a goal. Fall back sensibly.
-            if party.mode == ModeKind::Koth && level.hills.is_empty() {
-                let (min, max) = level.bounds();
-                let c = (min + max) * 0.5;
-                level.hills.push(Shape::rect(PVec2::new(c.x - 180.0, max.y - 600.0), PVec2::new(c.x + 180.0, max.y)));
-            }
-            if party.mode != ModeKind::Koth && level.goal.is_none() {
-                party.mode = ModeKind::Koth;
-            }
+            let Some(level) = party.maps.get(party.map).cloned() else { return };
+            let level = prepare_map(level, party.rule);
             party.roster = game.sim.players.iter().map(|p| (p.slot, p.name.clone(), p.color)).collect();
             party.phase = PartyPhase::Match;
             party.pending_start = true;
@@ -353,16 +414,69 @@ fn tick_match(mut party: ResMut<Party>, mut game: ResMut<Game>, mut load: Messag
     }
     if party.pending_start && game.sim.level.id != "party_lobby" {
         party.pending_start = false;
-        let mut m = Match::new(party.mode);
+        let mut m = Match::new(party.rule.match_kind());
         m.start(&mut game.sim);
         party.current = Some(m);
+        party.cheered = false;
     }
     let Some(m) = party.current.as_mut() else { return };
     m.update(&mut game.sim, bb_sim::DT);
-    if m.phase == MatchPhase::Over {
+    let (phase, winner) = (m.phase, m.winner);
+    if let (MatchPhase::Results(_), Some(slot)) = (phase, winner) {
+        if !std::mem::replace(&mut party.cheered, true) {
+            // The round-win sting and the Party Winner achievement.
+            game.sim.events.push(SimEvent::Goal { slot });
+        }
+    }
+    if phase == MatchPhase::Over {
         let mut m = party.current.take().unwrap();
         m.cleanup(&mut game.sim);
         back_to_lobby(&mut party, &mut load, &mut cam);
+    }
+}
+
+/// The phone join panel and lobby hints show in the lobby only (rounds are
+/// closed to joins and the panel would cover the scores).
+fn join_panel_visibility(party: Res<Party>, mut q: Query<&mut Visibility, Or<(With<PartyEntity>, With<LobbyItem>)>>) {
+    let want = if party.phase == PartyPhase::Lobby { Visibility::Inherited } else { Visibility::Hidden };
+    for mut v in q.iter_mut() {
+        v.set_if_neq(want);
+    }
+}
+
+/// Glow the active hill: gold while empty or contested, the king's colour
+/// while one blob holds it.
+fn draw_hill(
+    mut commands: Commands,
+    party: Res<Party>,
+    game: Res<Game>,
+    time: Res<Time>,
+    shared: Res<Shared>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mark: Query<(Entity, &Mesh2d), With<HillMark>>,
+) {
+    let hill = party.current.as_ref().and_then(|m| m.active_hill(&game.sim).map(|h| (m, h.outline())));
+    let Some((m, pts)) = hill else {
+        for (e, _) in mark.iter() {
+            commands.entity(e).despawn();
+        }
+        return;
+    };
+    let color = m.king.and_then(|s| game.sim.player(s)).map_or(hex(0xffd93d), |p| hex(p.color));
+    let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 4.0).sin();
+    let mut buf = MeshBuf::default();
+    let c = pts.iter().copied().sum::<PVec2>() / pts.len().max(1) as f32;
+    buf.fan(&pts, c, 0.0, la(color, 0.04 + 0.04 * pulse), la(color, 0.14 + 0.06 * pulse));
+    buf.ring(&pts, 4.0, 4.0, 0.0, lin(color));
+    match mark.iter_mut().next() {
+        Some((_, h)) => {
+            if let Some(mut mesh) = meshes.get_mut(&h.0) {
+                buf.write(&mut mesh);
+            }
+        }
+        None => {
+            commands.spawn((Mesh2d(meshes.add(buf.into_mesh())), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, z::ZONES + 0.5), HillMark));
+        }
     }
 }
 
@@ -416,11 +530,9 @@ fn hud(
                 let text = match m.phase {
                     MatchPhase::Countdown(t) => format!("{}", t.ceil() as u32),
                     MatchPhase::Playing if m.time < 0.8 => "GO!".into(),
-                    MatchPhase::Results(_) | MatchPhase::Over => match (m.kind, m.team_won, m.winner) {
-                        (ModeKind::Chained, Some(true), _) => "Everyone wins!".into(),
-                        (ModeKind::Chained, _, _) => "So close!".into(),
-                        (_, _, Some(w)) => format!("{} wins!", name_of(w)),
-                        _ => "Time's up!".into(),
+                    MatchPhase::Results(_) | MatchPhase::Over => match m.winner {
+                        Some(w) => format!("{} wins!", name_of(w)),
+                        None => "Time's up!".into(),
                     },
                     _ => String::new(),
                 };
@@ -435,13 +547,54 @@ fn hud(
     }
     for (which, mut text, _) in texts.iter_mut() {
         if let HudText::Scores = which {
-            text.0 = if m.kind == ModeKind::Koth {
-                let mut rows = m.scores.clone();
-                rows.sort_by(|a, b| b.1.total_cmp(&a.1));
-                rows.iter().map(|(s, sc)| format!("{}  {:>2} / {}", name_of(*s), sc.floor() as u32, KOTH_TARGET as u32)).collect::<Vec<_>>().join("\n")
-            } else {
-                String::new()
-            };
+            let mut rows = m.scores.clone();
+            rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+            text.0 = rows.iter().map(|(s, sc)| format!("{}  {:>2} / {}", name_of(*s), sc.floor() as u32, KOTH_TARGET as u32)).collect::<Vec<_>>().join("\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every lobby map plays as King of the Hill: at least one hill, no goal.
+    #[test]
+    fn every_map_is_koth_ready() {
+        let maps = builtin_maps();
+        assert!(maps.len() >= 20, "{} maps", maps.len());
+        for l in maps {
+            let id = l.id.clone();
+            let had_goal = l.goal.clone().filter(|_| l.hills.is_empty());
+            let p = prepare_map(l, PartyRule::Koth);
+            assert!(!p.hills.is_empty(), "{id}: no hill");
+            assert!(p.goal.is_none(), "{id}: goal left in");
+            if let Some(g) = had_goal {
+                // Converted hills cover the old finish zone.
+                let (glo, ghi) = g.bounds();
+                let (hlo, hhi) = p.hills[0].bounds();
+                assert!(hlo.x <= glo.x + 0.01 && hhi.x >= ghi.x - 0.01 && hhi.y >= ghi.y - 0.01, "{id}: hill misses the old goal");
+            }
+        }
+    }
+
+    /// A KOTH round on a converted race map scores whoever stands on the hill.
+    #[test]
+    fn converted_hill_scores() {
+        let level = crate::party_assets::party_level("simple-race").unwrap();
+        let level = prepare_map(level, PartyRule::Koth);
+        let hill = level.hills[0].clone();
+        let mut sim = bb_sim::Sim::new(level);
+        sim.add_player(0, "P1", 0xff5d73);
+        let mut m = Match::new(PartyRule::Koth.match_kind());
+        m.start(&mut sim);
+        let body = sim.players[0].ctl.body;
+        let c = hill.center();
+        for _ in 0..(5.0 / bb_sim::DT) as usize {
+            sim.world.respawn(body, c);
+            sim.step();
+            m.update(&mut sim, bb_sim::DT);
+        }
+        assert!(m.scores[0].1 > 0.5, "score {:?}", m.scores);
     }
 }

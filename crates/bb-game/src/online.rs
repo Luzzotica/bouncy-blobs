@@ -2,7 +2,7 @@
 //! streams its level and players; we own and stream our own blob.
 
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::flow::AppState;
 use crate::net::NetCommand;
@@ -17,7 +17,11 @@ pub struct OnlinePlugin;
 
 impl Plugin for OnlinePlugin {
     fn build(&self, app: &mut App) {
+        // egui needs the render app; skip it in headless (MinimalPlugins) runs.
         if app.is_plugin_added::<bevy::render::RenderPlugin>() {
+            if !app.is_plugin_added::<EguiPlugin>() {
+                app.add_plugins(EguiPlugin::default());
+            }
             app.add_systems(EguiPrimaryContextPass, dialog.run_if(resource_exists::<JoinDialog>));
         }
         app.add_systems(OnExit(AppState::Playing), leave_on_exit);

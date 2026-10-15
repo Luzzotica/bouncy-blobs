@@ -52,7 +52,6 @@ fn start(mut load: MessageWriter<LoadLevel>, mut dir: ResMut<crate::camera::Came
     match std::env::var("BB_START").as_deref() {
         Ok("story") => return next.set(AppState::Story),
         Ok("kids") => return next.set(AppState::Kids),
-        Ok("editor") => return next.set(AppState::Editor),
         Ok("party") => return next.set(AppState::Party),
         Ok("sandbox") => {}
         _ if std::env::var("BB_LEVEL").is_ok() => {}

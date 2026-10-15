@@ -141,7 +141,7 @@ pub fn follow(
     tf.translation.y = next.y;
     if let Projection::Orthographic(o) = proj.as_mut() {
         if dir.target.is_some() && dir.zoom.is_some() && dir.ease <= 0.0 {
-            // Direct control (editor): snap.
+            // Direct control (BB_CAM / BB_ZOOM pins): snap.
             o.scale = zoom;
         } else {
             o.scale += (zoom - o.scale) * (1.0 - (-dt * 2.5).exp());

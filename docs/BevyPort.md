@@ -14,9 +14,9 @@
 | Online | **partii** rooms by code on the shared partii engine (native and wasm): relay first, then TURN or direct WebRTC when faster, reconnects across network changes. |
 | Steam | Achievements only (lobbies optional later). |
 | Targets | macOS, Windows, Linux, iOS (Xcode project), Android, **Web** (wasm). Tests run headless everywhere. |
-| Editor | Rebuilt in-game with **bevy_egui**; imports legacy level JSON. |
+| Editor | **Dropped** in 3.0. Levels are authored in code (`LevelBuilder`, campaign) or imported from 2.x JSON. |
 | Cutscenes | **In-engine softbody puppetry**: scripted actors, camera moves, speech bubbles, squash & stretch. |
-| Modes | **Story campaign** (1–8 co-op) + **party modes** (race / KOTH / etc.) + **Kids Mode**. |
+| Modes | **Story campaign** (1–8 co-op) + **party** (King of the Hill now; build-then-run rounds à la Ultimate Chicken Horse planned) + **Kids Mode**. |
 | Look | Everything is a softbody — terrain, props, and the menu buttons you tap. |
 
 ## Crates
@@ -92,9 +92,8 @@ and crushes cascaded.
 | Story | ✅ Cutscene engine (softbody puppetry), 20 intro/outro scripts, 75 mid-level beats, progress saved. |
 | Menus | ✅ Softbody title, chapter select, settings, softbody pause menu. |
 | Kids Mode + audio | ✅ Ported (see kids/), sfx/music/voice clips, blub voices. |
-| Party | ✅ Jelly lobby, drop-in, 2 built-in + 27 imported maps, Race / KOTH / Chained (real ropes). |
+| Party | ✅ Jelly lobby, phone/pad drop-in, 2 built-in + 19 imported maps, all played as King of the Hill (race maps' finish zone becomes the hill). |
 | Net (`bb-net`) | ✅ partii rooms on the shared engine (native + web); controller page on partii (e2e test); eventual-consistency screen sync; Join a Friend. Live host/guest test: `BB_PARTII_API=… BB_PARTII_KEY=… cargo test -p bb-net --test partii_live`. |
-| Editor | ✅ egui editor + legacy importer. |
 | Platforms | ✅ macOS .app, iOS simulator + signed IPA export, web (WebGL2). ⏳ Android (needs SDK/NDK locally; CI builds it), Windows/Linux via CI. |
 | Achievements | ✅ Local everywhere; Steam with `--features steam` (app 4485010). |
 | TS app removal | ⏳ Not yet: the phone controller page is still served by the 2.x web deploy. |
@@ -103,7 +102,7 @@ and crushes cascaded.
 
 ```bash
 cargo run -p bb-game                      # the game (Title)
-BB_START=story|kids|party|editor cargo run -p bb-game
+BB_START=story|kids|party|sandbox cargo run -p bb-game
 BB_LEVEL=ch04 BB_CHECKPOINT=2 cargo run -p bb-game
 cargo test --workspace                    # 113 tests, headless
 cargo run --release -p bb-sim --example chbench
@@ -116,7 +115,7 @@ See [`Platforms.md`](Platforms.md) for building and shipping each target.
 
 The story bible is in [`Story.md`](Story.md).
 
-## Editor & legacy levels
+## Legacy levels
 
 * `bb_level::legacy::import_legacy` converts v1 (TS app) JSON: y-down → y-up,
   scaled 2/3 to the 32 px blob. Lossy cases come back as notes
@@ -125,11 +124,19 @@ The story bible is in [`Story.md`](Story.md).
   plates (`a|b` any, `a&b` all, `#toggle`, `#once`). bb-sim drives them.
 * The 27 legacy levels are converted into `crates/bb-game/assets/levels/party/`
   (`cargo run -p bb-level --example convert_legacy`; a test fails if stale).
-* In-game editor: `crates/bb-game/src/editor/` (`AppState::Editor`).
-  `BB_START=editor BB_EDIT_LEVEL=<party id|map id|path>` boots into it.
-  Maps live in `<data dir>/me.sterlinglong.bouncyblobs/maps-v3/` (web:
-  localStorage). Dev hooks for screenshots: `BB_EDIT_SELECT=kind:i`,
-  `BB_EDIT_TOOL=<name>`, `BB_EDIT_PLAY=<frame>`, `BB_EDIT_BACK=<frames>`.
+  They are embedded by `crates/bb-game/src/party_assets.rs`, which also
+  picks the lobby rotation (2.x test arenas stay out of it).
+* The level editor was removed (3.0 ships without one).
+
+## Party
+
+`crates/bb-game/src/party.rs`. Rounds are King of the Hill (`PartyRule::Koth`
+on top of `bb_sim::modes::Match`); `prepare_map` gives hill-less maps a hill
+from their old finish zone and drops the goal. The active hill glows gold,
+or in the king's colour while one blob holds it. A future build-then-run
+round (everyone places a trap, then everyone runs) adds a `PartyRule`
+variant, its own phases in `tick_match`, and its own map prep. `bb-sim`
+still has `ModeKind::Race` / `Chained`; nothing in the game uses them.
 
 ## Live tuning
 

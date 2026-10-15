@@ -110,6 +110,7 @@ pub enum Theme {
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     Story,
+    /// 2.x race maps (kept so imported maps load; party plays them as KOTH).
     Race,
     Koth,
     Kids,
