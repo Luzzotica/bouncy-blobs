@@ -142,6 +142,11 @@ pub(crate) fn solve_internal(b: &mut Body, h: f32) {
     // Home tethers. Compliance is per unit mass so a finer mesh (lighter
     // particles) keeps the same overall stiffness.
     if let Some(home) = &b.home {
+        let (centre, k) = if b.home_scales && (b.rest_scale - 1.0).abs() > 1e-4 {
+            (home.iter().copied().sum::<Vec2>() / home.len().max(1) as f32, b.rest_scale)
+        } else {
+            (Vec2::ZERO, 1.0)
+        };
         for i in 0..b.x.len() {
             let w = b.w[i];
             if w == 0.0 {
@@ -149,7 +154,8 @@ pub(crate) fn solve_internal(b: &mut Body, h: f32) {
             }
             let alpha = b.home_compliance * w * inv_h2;
             let xi = b.x[i];
-            b.x[i] = xi + (home[i] - xi) * (w / (w + alpha));
+            let target = if k == 1.0 { home[i] } else { centre + (home[i] - centre) * k };
+            b.x[i] = xi + (target - xi) * (w / (w + alpha));
         }
     }
 

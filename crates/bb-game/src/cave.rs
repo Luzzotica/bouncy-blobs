@@ -315,7 +315,7 @@ fn react_decor(
         if let Some(mut mesh) = meshes.get_mut(&d.mesh) {
             let mut buf = MeshBuf::default();
             let breathe = (t * 1.3 + d.phase).sin();
-            draw_mushroom_sq(&mut buf, d.scale, d.react, d.wob, d.sq, breathe, d.dark, d.col);
+            draw_mushroom_sq(&mut buf, d.scale, d.react, d.wob, d.sq, breathe, t + d.phase, d.dark, d.col);
             buf.write(&mut mesh);
         }
         if let Some(mut m) = mats.get_mut(&d.spill) {
@@ -327,12 +327,13 @@ fn react_decor(
 /// A glow mushroom in local space (base at the origin), `react` 0..1.5,
 /// `wob` a shear in radians-ish, `breathe` -1..1 idle pulse.
 pub fn draw_mushroom(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, breathe: f32, dark: bool, col: Color) {
-    draw_mushroom_sq(buf, s, react, wob, 0.0, breathe, dark, col);
+    draw_mushroom_sq(buf, s, react, wob, 0.0, breathe, 0.0, dark, col);
 }
 
-/// [`draw_mushroom`] with a vertical squash-and-stretch `sq` (-ve squashes).
+/// [`draw_mushroom`] with a vertical squash-and-stretch `sq` (-ve squashes)
+/// and `flow`, a clock (seconds) driving the light that runs up the stalk.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32, breathe: f32, dark: bool, col: Color) {
+pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32, breathe: f32, flow: f32, dark: bool, col: Color) {
     let g = react.clamp(0.0, 1.5);
     let squash = (1.0 - 0.08 * (g - 1.0).max(0.0) * 2.0) * (1.0 + sq);
     let widen = 1.0 - sq * 0.6;
@@ -348,6 +349,31 @@ pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32
     let stalk_pts: Vec<PVec2> = (0..=6).map(|i| sh(PVec2::new((i as f32 * 0.9).sin() * 1.5 * s, 42.0 * s * i as f32 / 6.0))).collect();
     buf.stroke(&stalk_pts, 9.0 * s, -0.002, lin(stalk));
     buf.stroke(&stalk_pts[..5], 4.0 * s, -0.0015, la(lighten(stalk, 0.25), 0.8));
+    // A vein of light up the stalk, root to cap: a faint seam at rest; when
+    // the mushroom is lit, bright beads flow up it into the cap.
+    if dark {
+        let m = stalk_pts.len();
+        let seam: Vec<[f32; 4]> = (0..m).map(|i| la(mix(stalk, col, 0.5), (0.18 + 0.25 * g.min(1.0)) * (i as f32 / 2.0).min(1.0))).collect();
+        buf.stroke_cols(&stalk_pts, 1.6 * s, -0.0012, &seam);
+        if g > 0.02 {
+            let gm = g.min(1.0);
+            let core: Vec<[f32; 4]> = (0..m)
+                .map(|i| {
+                    let y = i as f32 / (m - 1) as f32;
+                    // Two soft pulses travelling upward.
+                    let wave = (0..2).map(|w| {
+                        let head = (flow * 0.9 + w as f32 * 0.5).fract();
+                        let dd = (y - head).abs().min((y - head + 1.0).abs());
+                        (1.0 - dd / 0.22).max(0.0)
+                    }).fold(0.0, f32::max);
+                    la(lighten(col, 0.45), gm * (0.35 + 0.65 * wave) * (y * 3.0).min(1.0))
+                })
+                .collect();
+            buf.stroke_cols(&stalk_pts, 2.4 * s, -0.0011, &core);
+            let soft: Vec<[f32; 4]> = (0..m).map(|i| la(col, 0.12 * gm * (i as f32 / 2.0).min(1.0))).collect();
+            buf.stroke_cols(&stalk_pts, 10.0 * s, -0.0013, &soft);
+        }
+    }
     // Cap: a dome, deep at the gills, bright on top.
     let (cw, ch) = (32.0 * s, 22.0 * s);
     let n = 16;

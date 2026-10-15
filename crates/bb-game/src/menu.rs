@@ -373,6 +373,8 @@ pub fn jelly_tile(game: &mut Game, center: PVec2, size: PVec2, tag: BodyTag, wob
     let id = game.sim.add_body(d, tag);
     if let Some(b) = game.sim.world.body_mut(id) {
         b.anchor_home(wobble);
+        // Hover swell and click puff scale the tether too.
+        b.home_scales = true;
     }
     id
 }
@@ -766,7 +768,9 @@ fn interact(
     // Relax any puffed button.
     for btn in &menu.buttons {
         if let Some(b) = game.sim.world.body_mut(btn.body) {
-            b.rest_scale += (1.0 - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
+            // Hovered buttons swell a little (5%); everything relaxes back.
+            let want = if pointer.hovered() == Some(btn.body) { 1.05 } else { 1.0 };
+            b.rest_scale += (want - b.rest_scale) * (1.0 - (-dt * 8.0).exp());
         }
     }
 }

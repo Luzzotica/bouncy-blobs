@@ -795,6 +795,21 @@ fn draw_vein(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], lit: &[f32], fade: &[f
         return;
     }
     let cols: Vec<Color> = pts.iter().map(|p| d.hue(*p)).collect();
+    // Every vein tapers to nothing at both ends (a glow never stops flat,
+    // even where it runs right up a spike's tip).
+    let mut along = vec![0.0f32; n];
+    for i in 1..n {
+        along[i] = along[i - 1] + pts[i].distance(pts[i - 1]);
+    }
+    let total = along[n - 1].max(1e-3);
+    let taper_len = (34.0 * u).min(total * 0.4);
+    let fade: Vec<f32> = (0..n)
+        .map(|i| {
+            let e = (along[i].min(total - along[i]) / taper_len).clamp(0.0, 1.0);
+            fade[i] * e * e * (3.0 - 2.0 * e)
+        })
+        .collect();
+    let fade = &fade[..];
     // The seam: rock with a breath of the glow in it.
     let seam: Vec<[f32; 4]> = (0..n).map(|i| la(mix(d.rock, cols[i], 0.16), 0.55 * fade[i])).collect();
     buf.stroke_cols(pts, 2.2 * u, d.zz - 0.0001, &seam);
@@ -977,6 +992,17 @@ fn mushrooms(buf: &mut MeshBuf, d: &Dress, at: PVec2, nrm: PVec2, seed: i32, lit
         let body = mix(d.rock, lighten(col, 0.1), 0.07 + 0.3 * a.min(1.0));
         for j in 0..N {
             buf.stroke(&[pts[j], pts[j + 1]], wd * (1.0 - 0.35 * j as f32 / N as f32), d.zz, lin(body));
+        }
+        // A thread of light runs up the stalk: a faint seam at rest, lit
+        // point by point as the pulse climbs from the vein into the cap.
+        let climb: Vec<f32> = (0..=N).map(|j| d.layer.goop * lit((s * j as f32 / N as f32 + k as f32 * 8.0 * u) / u)).collect();
+        let seam: Vec<[f32; 4]> = (0..=N).map(|j| la(mix(body, col, 0.3), 0.35 * (j as f32 / N as f32 * 3.0).min(1.0))).collect();
+        buf.stroke_cols(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00005, &seam);
+        if climb.iter().any(|c| *c > 0.004) {
+            let core: Vec<[f32; 4]> = (0..=N).map(|j| la(lighten(col, 0.35), 0.9 * climb[j].min(1.0) * (j as f32 / N as f32 * 3.0).min(1.0))).collect();
+            let soft: Vec<[f32; 4]> = (0..=N).map(|j| la(col, 0.18 * climb[j].min(1.0))).collect();
+            buf.stroke_cols(&pts, wd * 0.9, d.zz + 0.00006, &soft);
+            buf.stroke_cols(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00007, &core);
         }
         let dir = (pts[N] - pts[N - 1]).normalize_or_zero();
         let side = PVec2::new(dir.y, -dir.x);
