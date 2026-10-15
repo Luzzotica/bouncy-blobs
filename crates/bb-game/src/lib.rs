@@ -8,6 +8,7 @@ pub mod assets;
 pub mod audio;
 pub mod backdrop;
 pub mod camera;
+pub mod capture;
 pub mod cave;
 pub mod crag;
 pub mod dance;
@@ -55,7 +56,9 @@ pub fn app() -> App {
     let mut app = App::new();
     app.add_plugins(platform::default_plugins());
     if platform::headless() {
-        app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 60.0)));
+        // A capture render runs on its own fixed clock: go as fast as it can.
+        let wait = if capture::config().is_some_and(|c| c.headless()) { 0.0 } else { 1.0 / 60.0 };
+        app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(wait)));
     }
     app
         .add_plugins(platform::PlatformPlugin)
@@ -96,6 +99,7 @@ impl Plugin for GamePlugin {
                 pause::PausePlugin,
                 achievements::AchievementsPlugin,
                 devtools::DevToolsPlugin,
+                capture::CapturePlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
                 net::NetPlugin,

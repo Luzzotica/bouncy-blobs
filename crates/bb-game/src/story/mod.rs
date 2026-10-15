@@ -121,7 +121,8 @@ impl Plugin for StoryPlugin {
                 (
                     cutscene::run.run_if(resource_exists::<Runner>.and_then(resource_exists::<Game>)),
                     advance.run_if(resource_exists::<StoryFlow>),
-                    level_lines.run_if(resource_exists::<Game>),
+                    // Capture mode: no tips or mid-level lines on screen.
+                    level_lines.run_if(resource_exists::<Game>.and_then(crate::capture::off)),
                     drop_in.run_if(in_state(AppState::Playing)),
                 )
                     .chain(),

@@ -60,9 +60,10 @@ pub fn default_plugins() -> PluginGroupBuilder {
     }
 }
 
-/// True for headless dev runs (`BB_SHOT` screenshots).
+/// True for headless dev runs (`BB_SHOT` screenshots, `BB_CAPTURE_OUT` videos).
 pub fn headless() -> bool {
-    !cfg!(any(target_arch = "wasm32", target_os = "ios", target_os = "android")) && std::env::var("BB_SHOT").is_ok()
+    !cfg!(any(target_arch = "wasm32", target_os = "ios", target_os = "android"))
+        && (std::env::var("BB_SHOT").is_ok() || crate::capture::config().is_some_and(|c| c.headless()))
 }
 
 /// The main window for the current target.

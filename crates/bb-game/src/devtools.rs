@@ -5,6 +5,9 @@
 //!   flipbook of n shots k frames apart.
 //! * `BB_AUTOPLAY=1` — slot 0 holds right and jumps every second.
 //! * `BB_START=kids` — boot straight into Kids Mode (skips the sandbox).
+//! * `BB_PRESS=...` — scripted keys (see [`PressItem`]). In capture mode
+//!   (`crate::capture`) the numbers are sim ticks (1/60 s of game time), so
+//!   a script means the same thing at any capture speed.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -16,7 +19,11 @@ pub struct DevToolsPlugin;
 impl Plugin for DevToolsPlugin {
     fn build(&self, app: &mut App) {
         if std::env::var("BB_SHOT").is_ok() {
-            app.add_systems(PostStartup, offscreen).add_systems(Update, shoot);
+            // A headless capture run sets up its own offscreen target.
+            if !crate::capture::config().is_some_and(|c| c.headless()) {
+                app.add_systems(PostStartup, offscreen);
+            }
+            app.add_systems(Update, shoot);
         }
         if std::env::var("BB_PRESS").is_ok() {
             app.add_systems(PreUpdate, press.after(bevy::input::InputSystems));
@@ -42,12 +49,17 @@ fn offscreen(
 ) {
     use bevy::camera::RenderTarget;
     use bevy::render::render_resource::TextureFormat;
-    let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
+    // Capture mode picks the size (and keeps the screen clean: no UI camera).
+    let size = crate::capture::config().map_or(UVec2::new(1920, 1080), |c| c.size);
+    let image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
     for cam in cams.iter() {
+        commands.entity(cam).insert(RenderTarget::Image(handle.clone().into()));
         // UI too: make this camera the UI's camera explicitly (otherwise
         // the UI looks for a window camera and the shots have no HUD).
-        commands.entity(cam).insert((RenderTarget::Image(handle.clone().into()), bevy::ui::IsDefaultUiCamera));
+        if !crate::capture::on() {
+            commands.entity(cam).insert(bevy::ui::IsDefaultUiCamera);
+        }
     }
     commands.insert_resource(ShotTarget(handle));
 }
@@ -103,20 +115,23 @@ fn dev_pop(game: Option<ResMut<crate::sim::Game>>, mut frame: Local<u32>) {
     }
 }
 
-/// `BB_PRESS=escape@60,enter@90` taps keys at given frames.
-fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
-    *frame += 1;
-    let spec = std::env::var("BB_PRESS").unwrap_or_default();
-    for item in spec.split(',') {
-        let Some((k, f)) = item.split_once('@') else { continue };
-        // `key@frame` taps; `key@from-to` holds.
-        let (f, until) = match f.split_once('-') {
-            Some((a, b)) => (a.parse::<u32>().unwrap_or(0), b.parse::<u32>().unwrap_or(0)),
-            None => {
-                let a = f.parse::<u32>().unwrap_or(0);
-                (a, a)
-            }
-        };
+/// One `BB_PRESS` item, `key@when`:
+/// * `key@f` taps on frame f; `key@a-b` holds from a to b; `key@a-` holds
+///   from a on;
+/// * `key@every:P:H[:from[:to]]` holds for H frames every P frames (from
+///   `from`, default 0, until `to`), e.g. `space@every:40:12:30` bounces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PressItem {
+    pub key: KeyCode,
+    pub from: u32,
+    pub to: u32,
+    /// (period, hold) for repeating presses.
+    pub every: Option<(u32, u32)>,
+}
+
+impl PressItem {
+    pub fn parse(item: &str) -> Option<PressItem> {
+        let (k, f) = item.trim().split_once('@')?;
         let key = match k {
             "escape" => KeyCode::Escape,
             "enter" => KeyCode::Enter,
@@ -125,12 +140,78 @@ fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>) {
             "right" => KeyCode::ArrowRight,
             "left" => KeyCode::ArrowLeft,
             "up" => KeyCode::ArrowUp,
-            _ => continue,
+            _ => return None,
         };
-        if *frame >= f && *frame <= until {
-            keys.press(key);
-        } else if *frame == until + 1 {
-            keys.release(key);
+        if let Some(rest) = f.strip_prefix("every:") {
+            let n: Vec<u32> = rest.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+            let (period, hold) = (*n.first()?, *n.get(1)?);
+            return Some(PressItem { key, from: n.get(2).copied().unwrap_or(0), to: n.get(3).copied().unwrap_or(u32::MAX), every: Some((period.max(1), hold)) });
         }
+        let (from, to) = match f.split_once('-') {
+            Some((a, "")) => (a.parse().ok()?, u32::MAX),
+            Some((a, b)) => (a.parse().ok()?, b.parse().ok()?),
+            None => {
+                let a = f.parse().ok()?;
+                (a, a)
+            }
+        };
+        Some(PressItem { key, from, to, every: None })
+    }
+
+    /// Is the key held on frame `f`?
+    pub fn held(&self, f: u32) -> bool {
+        if f < self.from || f > self.to {
+            return false;
+        }
+        match self.every {
+            Some((period, hold)) => (f - self.from) % period < hold,
+            None => true,
+        }
+    }
+}
+
+pub fn parse_press(spec: &str) -> Vec<PressItem> {
+    spec.split(',').filter_map(PressItem::parse).collect()
+}
+
+/// `BB_PRESS=escape@60,enter@90,right@30-,space@every:40:12` drives keys.
+fn press(mut keys: ResMut<ButtonInput<KeyCode>>, mut frame: Local<u32>, mut ours: Local<Vec<KeyCode>>, vtime: Res<Time<Virtual>>) {
+    *frame += 1;
+    // Capture mode: sim ticks, so scripts are speed-independent.
+    let f = if crate::capture::config().is_some_and(|c| c.headless()) { crate::capture::press_tick(&vtime) } else { *frame };
+    let items = parse_press(&std::env::var("BB_PRESS").unwrap_or_default());
+    let mut want: Vec<KeyCode> = items.iter().filter(|i| i.held(f)).map(|i| i.key).collect();
+    want.dedup();
+    for k in ours.iter() {
+        if !want.contains(k) {
+            keys.release(*k);
+        }
+    }
+    for k in &want {
+        keys.press(*k);
+    }
+    *ours = want;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn press_specs() {
+        let tap = PressItem::parse("enter@90").unwrap();
+        assert!(!tap.held(89) && tap.held(90) && !tap.held(91));
+        let hold = PressItem::parse("right@10-20").unwrap();
+        assert!(hold.held(10) && hold.held(20) && !hold.held(21));
+        let open = PressItem::parse("right@30-").unwrap();
+        assert!(!open.held(29) && open.held(100_000));
+        let bounce = PressItem::parse("space@every:40:12:30").unwrap();
+        assert_eq!(bounce.key, KeyCode::Space);
+        assert!(!bounce.held(29) && bounce.held(30) && bounce.held(41) && !bounce.held(42) && bounce.held(70));
+        let capped = PressItem::parse("space@every:40:12:0:100").unwrap();
+        assert!(capped.held(80) && !capped.held(120));
+        assert!(PressItem::parse("jump@3").is_none());
+        assert!(PressItem::parse("space@every:x").is_none());
+        assert_eq!(parse_press("right@1-,space@every:40:12,bogus").len(), 2);
     }
 }
