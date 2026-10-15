@@ -37,7 +37,7 @@ use bevy::prelude::*;
 use crate::crag::hash1;
 use crate::level_view::{LevelEntity, near_checkpoint};
 use crate::palette::{self, ThemeColors, glow_at, lighten, mix, pulse_env, screen_add};
-use crate::render::{MeshBuf, Shared, ccw, empty_mesh, la, z};
+use crate::render::{Ends, MeshBuf, Shared, ccw, empty_mesh, la, z};
 use crate::sim::{Game, SimMsg};
 
 pub struct AlivePlugin;
@@ -95,6 +95,9 @@ struct Hanger {
     phase: f32,
     col: Color,
     w: f32,
+    /// How far the strand runs on up into the rock above its root (hidden
+    /// behind it), so its top never shows as a flat cut.
+    lead: f32,
     cool: f32,
     t: f32,
     node: usize,
@@ -439,6 +442,10 @@ fn setup(mut commands: Commands, game: Res<Game>, shared: Res<Shared>, mut meshe
         }
     }
     hangers.sort_by(|a, b| a.root.x.total_cmp(&b.root.x));
+    for h in hangers.iter_mut() {
+        // Up into the rock, only as far as it stays solid (thin shelves).
+        h.lead = (1..=5).take_while(|k| solid_at(h.root + PVec2::new(0.0, *k as f32 * 8.0))).count() as f32 * 8.0;
+    }
     fronds.sort_by(|a, b| a.base.x.total_cmp(&b.base.x));
     veins.sort_by(|a, b| a.centre.x.total_cmp(&b.centre.x));
 
@@ -542,6 +549,7 @@ fn hanger(kind: HangKind, root: PVec2, len: f32, col: Color, h: f32) -> Hanger {
             HangKind::Thread => 1.2,
             HangKind::Drip => 7.0 + 3.0 * h,
         },
+        lead: 0.0,
         cool: 0.0,
         t: 0.0,
         node: 0,
@@ -904,6 +912,9 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
         pts.push(p);
     }
     let tip = pts[N];
+    // Every strand runs on up into the rock it hangs from (the drawn crag
+    // edge can sit above the root), so it never starts with a flat top.
+    let lead = [h.root + PVec2::new(0.0, h.lead.max(0.5)), h.root];
     match h.kind {
         HangKind::Root => {
             // Physical: a dim root always, one smooth tapered strand with a
@@ -913,6 +924,7 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
             let gs: Vec<f32> = (0..m).map(|i| { let f = i as f32 / (m - 1) as f32 * N as f32; let k = (f as usize).min(N - 1); g[k] + (g[k + 1] - g[k]) * (f - k as f32) }).collect();
             let ws: Vec<f32> = (0..m).map(|i| h.w * (1.0 - 0.62 * i as f32 / (m - 1) as f32)).collect();
             let cs: Vec<[f32; 4]> = gs.iter().map(|x| la(mix(Color::BLACK, mix(h.col, Color::WHITE, 0.1), 0.16 + 0.16 * x), 1.0)).collect();
+            buf.stroke(&lead, ws[0], 0.0, cs[0]);
             buf.taper(&sp, &ws, 0.0, &cs, false, true);
             // A curled rootlet near the tip so it ends in growth, not a cut.
             let d = (sp[m - 1] - sp[m - 4]).normalize_or(PVec2::new(0.0, -1.0));
@@ -924,7 +936,7 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
             if gmax > 0.004 {
                 // A glowing rim and nodes that wake as the front passes.
                 let rim: Vec<[f32; 4]> = gs.iter().map(|x| la(lighten(h.col, 0.2), 0.6 * x)).collect();
-                buf.stroke_cols(&sp[6..], 1.4, 0.0005, &rim[6..]);
+                buf.stroke_taper(&sp[6..], 1.4, 0.0005, &rim[6..], h.len * 0.2, Ends::Both);
                 for (k, q) in pts.iter().enumerate().skip(3).step_by(3) {
                     let a = 0.85 * g[k];
                     soft_dot(buf, *q, 7.0 + 8.0 * g[k], 0.001, la(h.col, 0.3 * a));
@@ -937,6 +949,7 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
         HangKind::Thread => {
             // Silk is always faintly there; light runs down it.
             let silk: Vec<[f32; 4]> = g.iter().map(|x| la(lighten(mix(Color::BLACK, h.col, 0.45 + 0.55 * x), 0.2 * x), 0.2 + 0.4 * x)).collect();
+            buf.stroke(&lead, 1.2, 0.0, silk[0]);
             buf.stroke_cols(&pts, 1.2, 0.0, &silk);
             for (k, q) in pts.iter().enumerate().skip(4).step_by(2) {
                 if g[k] > 0.004 {
@@ -953,6 +966,7 @@ fn draw_hanger(buf: &mut MeshBuf, h: &Hanger, hits: &[Hit], t: f32) {
         HangKind::Drip => {
             let n = pts.len();
             let ws: Vec<f32> = (0..n).map(|i| h.w * (1.0 - 0.55 * i as f32 / (n - 1) as f32)).collect();
+            buf.stroke(&lead, ws[0], 0.0, la(mix(Color::BLACK, h.col, 0.3 + 0.35 * g[0]), 0.95));
             for i in 0..n - 1 {
                 let jelly = mix(Color::BLACK, h.col, 0.3 + 0.35 * g[i]);
                 buf.stroke(&[pts[i], pts[i + 1]], ws[i], 0.0, la(jelly, 0.95));
@@ -1001,25 +1015,32 @@ fn draw_frond(buf: &mut MeshBuf, f: &Frond, hits: &[Hit], t: f32) {
 fn draw_vein(buf: &mut MeshBuf, v: &Vein, hits: &[Hit], theme: &ThemeColors, t: f32) {
     let n = v.pts.len();
     let cols: Vec<Color> = v.pts.iter().map(|p| glow_at(theme, p.x, p.y)).collect();
-    let end = |i: usize| ((i as f32 / 3.0).min((n - 1 - i) as f32 / 3.0)).min(1.0);
+    // Both ends taper into the stone (narrowing as they fade).
+    let total = v.s[n - 1] - v.s[0];
+    let tl = 30.0f32.min(total * 0.4).max(1.0);
+    let end = |i: usize| {
+        let e = ((v.s[i] - v.s[0]).min(v.s[n - 1] - v.s[i]) / tl).clamp(0.0, 1.0);
+        e * e * (3.0 - 2.0 * e)
+    };
     // The seam: always faintly there in the stone.
-    let seam: Vec<[f32; 4]> = (0..n).map(|i| la(mix(Color::BLACK, cols[i], 0.12), 0.8 * end(i))).collect();
-    buf.stroke_cols(&v.pts, 2.4, -0.0002, &seam);
+    let seam: Vec<[f32; 4]> = (0..n).map(|i| la(mix(Color::BLACK, cols[i], 0.12), 0.8)).collect();
+    buf.stroke_taper(&v.pts, 2.4, -0.0002, &seam, tl, Ends::Both);
     if hits.is_empty() {
         return;
     }
-    let g: Vec<f32> = (0..n).map(|i| light(hits, t, v.s[i]) * end(i).max(0.3)).collect();
+    let g: Vec<f32> = (0..n).map(|i| light(hits, t, v.s[i])).collect();
     if g.iter().all(|x| *x < 0.004) {
         return;
     }
     let soft: Vec<[f32; 4]> = (0..n).map(|i| la(cols[i], 0.16 * g[i])).collect();
-    buf.stroke_cols(&v.pts, 9.0, 0.0, &soft);
+    buf.stroke_taper(&v.pts, 9.0, 0.0, &soft, tl, Ends::Both);
     let core: Vec<[f32; 4]> = (0..n).map(|i| la(lighten(cols[i], 0.2 + 0.25 * g[i]), 0.85 * g[i])).collect();
-    buf.stroke_cols(&v.pts, 1.9, 0.0005, &core);
+    buf.stroke_taper(&v.pts, 1.9, 0.0005, &core, tl, Ends::Both);
     for i in (2..n).step_by(5) {
-        if g[i] > 0.02 {
-            soft_dot(buf, v.pts[i], 8.0 + 10.0 * g[i], 0.0003, la(cols[i], 0.25 * g[i]));
-            buf.ellipse(v.pts[i], PVec2::splat(1.3 + 1.0 * g[i]), 0.0, 0.0008, la(lighten(cols[i], 0.45), 0.85 * g[i]));
+        let gi = g[i] * end(i);
+        if gi > 0.02 {
+            soft_dot(buf, v.pts[i], 8.0 + 10.0 * gi, 0.0003, la(cols[i], 0.25 * gi));
+            buf.ellipse(v.pts[i], PVec2::splat(1.3 + 1.0 * gi), 0.0, 0.0008, la(lighten(cols[i], 0.45), 0.85 * gi));
         }
     }
 }
@@ -1052,7 +1073,8 @@ fn draw_link(buf: &mut MeshBuf, l: &Link, theme: &ThemeColors, t: f32) {
     }
     let cols: Vec<Color> = pts.iter().map(|p| glow_at(theme, p.x, p.y)).collect();
     let soft: Vec<[f32; 4]> = (0..=steps).map(|k| la(cols[k], 0.1 * g[k])).collect();
-    buf.stroke_cols(&pts, 8.0, -0.0003, &soft);
+    let tl = 24.0f32.min(len * 0.4);
+    buf.stroke_taper(&pts, 8.0, -0.0003, &soft, tl, Ends::Both);
     let core: Vec<[f32; 4]> = (0..=steps).map(|k| la(lighten(cols[k], 0.25), 0.55 * g[k])).collect();
-    buf.stroke_cols(&pts, 1.4, 0.0004, &core);
+    buf.stroke_taper(&pts, 1.4, 0.0004, &core, tl, Ends::Both);
 }

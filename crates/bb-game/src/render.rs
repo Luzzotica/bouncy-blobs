@@ -509,6 +509,111 @@ impl MeshBuf {
     }
 }
 
+/// Which ends of an open line fade away in [`MeshBuf::stroke_taper`]. A
+/// line that runs into something solid (a cap, the ground, a wall) tapers
+/// only at its free end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Ends {
+    Both,
+    Start,
+    End,
+}
+
+impl Ends {
+    fn start(self) -> bool {
+        self != Ends::End
+    }
+    fn end(self) -> bool {
+        self != Ends::Start
+    }
+}
+
+/// Smoothstep 0..1.
+fn smooth01(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+impl MeshBuf {
+    /// An open glowing line that never stops flat: over `taper_len` (capped
+    /// to a share of the line's length) at each tapered end its alpha eases
+    /// to nothing and its width narrows to a point. Segments inside a taper
+    /// are subdivided so even a two-point stroke fades smoothly. `cols` is
+    /// one colour per point, or a single colour for the whole line.
+    pub fn stroke_taper(&mut self, pts: &[PVec2], width: f32, z: f32, cols: &[[f32; 4]], taper_len: f32, ends: Ends) {
+        self.stroke_taper_w(pts, &[width], z, cols, taper_len, ends);
+    }
+
+    /// [`MeshBuf::stroke_taper`] with a width per point (or one width).
+    pub fn stroke_taper_w(&mut self, pts: &[PVec2], widths: &[f32], z: f32, cols: &[[f32; 4]], taper_len: f32, ends: Ends) {
+        let n = pts.len();
+        if n < 2 || cols.is_empty() || widths.is_empty() {
+            return;
+        }
+        let col = |i: usize| cols[if cols.len() == n { i } else { 0 }];
+        let wid = |i: usize| widths[if widths.len() == n { i } else { 0 }];
+        let mut s = vec![0.0f32; n];
+        for i in 1..n {
+            s[i] = s[i - 1] + pts[i].distance(pts[i - 1]);
+        }
+        let total = s[n - 1];
+        if total < 1e-4 {
+            return;
+        }
+        let share = if ends == Ends::Both { 0.45 } else { 0.9 };
+        let tl = taper_len.min(total * share).max(1e-3);
+        let (t0, t1) = (if ends.start() { tl } else { 0.0 }, if ends.end() { total - tl } else { total });
+        // Resample: finer steps inside the tapers, the line as-is between.
+        let step = tl / 6.0;
+        let mut rp: Vec<PVec2> = Vec::with_capacity(n + 16);
+        let mut rs: Vec<f32> = Vec::with_capacity(n + 16);
+        let mut rw: Vec<f32> = Vec::with_capacity(n + 16);
+        let mut rc: Vec<[f32; 4]> = Vec::with_capacity(n + 16);
+        for i in 0..n - 1 {
+            let len = s[i + 1] - s[i];
+            let in_taper = s[i] < t0 || s[i + 1] > t1;
+            let sub = if in_taper { ((len / step).ceil() as usize).clamp(1, 16) } else { 1 };
+            let (c0, c1) = (col(i), col(i + 1));
+            for k in 0..sub {
+                let f = k as f32 / sub as f32;
+                rp.push(pts[i].lerp(pts[i + 1], f));
+                rs.push(s[i] + len * f);
+                rw.push(wid(i) + (wid(i + 1) - wid(i)) * f);
+                rc.push([0, 1, 2, 3].map(|c| c0[c] + (c1[c] - c0[c]) * f));
+            }
+        }
+        rp.push(pts[n - 1]);
+        rs.push(total);
+        rw.push(wid(n - 1));
+        rc.push(col(n - 1));
+        let m = rp.len();
+        let start = self.pos.len() as u32;
+        for i in 0..m {
+            let mut e = 1.0f32;
+            if ends.start() {
+                e = e.min(rs[i] / tl);
+            }
+            if ends.end() {
+                e = e.min((total - rs[i]) / tl);
+            }
+            let a = smooth01(e);
+            // Width narrows to a point a touch slower than the light fades.
+            let wf = a.sqrt();
+            let d = rp[(i + 1).min(m - 1)] - rp[i.saturating_sub(1)];
+            let nr = PVec2::new(-d.y, d.x).normalize_or_zero() * rw[i] * wf * 0.5;
+            let mut c = rc[i];
+            c[3] *= a;
+            self.vert(rp[i] + nr, z, c);
+            self.vert(rp[i] - nr, z, c);
+        }
+        for i in 0..(m - 1) as u32 {
+            let (a, b, c, d) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
+            self.tri(a, b, d);
+            self.tri(a, d, c);
+        }
+    }
+}
+
 /// An open polyline as a smooth curve through its points (Catmull-Rom,
 /// `sub` samples per segment).
 pub fn smooth_open(p: &[PVec2], sub: usize) -> Vec<PVec2> {
@@ -565,7 +670,9 @@ pub fn draw_vine(buf: &mut MeshBuf, raw: &[PVec2], width: f32, col: Color, z: f3
     let wo: Vec<f32> = w.iter().map(|x| x + 2.5).collect();
     if glow > 0.0 {
         let wg: Vec<f32> = w.iter().map(|x| x * 4.0).collect();
-        buf.taper(&pts, &wg, z - 0.002, &vec![la(col, glow); n], true, true);
+        // The glow fades out at both ends (no round blob of light at the
+        // anchor, no flat edge).
+        buf.stroke_taper_w(&pts, &wg, z - 0.002, &[la(col, glow)], width * 6.0, Ends::Both);
     }
     buf.taper(&pts, &wo, z, &vec![lin(edge); n], true, true);
     buf.taper(&pts, &w, z + 0.0002, &vec![lin(body); n], true, true);
@@ -579,7 +686,7 @@ pub fn draw_vine(buf: &mut MeshBuf, raw: &[PVec2], width: f32, col: Color, z: f3
         })
         .collect();
     let wh: Vec<f32> = w.iter().map(|x| x * 0.28).collect();
-    buf.taper(&hl, &wh, z + 0.0004, &vec![la(lighten(col, 0.35), 0.75); n], true, true);
+    buf.stroke_taper_w(&hl, &wh, z + 0.0004, &[la(lighten(col, 0.35), 0.75)], width * 2.0, Ends::Both);
     // Leaves every ~34 px, alternating sides.
     let leaf_col = la(mix(col, Color::BLACK, 0.05), 1.0);
     let leaf_vein = la(mix(col, Color::BLACK, 0.45), 0.8);
@@ -1962,5 +2069,36 @@ fn cleanup_bodies(mut commands: Commands, mut map: ResMut<BodyEntities>, faces: 
     }
     for e in faces.iter() {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stroke_taper_fades_and_narrows_at_tapered_ends_only() {
+        let pts = [PVec2::new(0.0, 0.0), PVec2::new(100.0, 0.0)];
+        let col = [1.0, 1.0, 1.0, 1.0];
+        let half_w = |b: &MeshBuf, i: usize| (b.pos[2 * i][1] - b.pos[2 * i + 1][1]).abs() * 0.5;
+        // Both ends: zero alpha and width at each end, full in the middle.
+        let mut b = MeshBuf::default();
+        b.stroke_taper(&pts, 4.0, 0.0, &[col], 20.0, Ends::Both);
+        let m = b.pos.len() / 2;
+        assert!(m > 4, "the taper is subdivided");
+        assert_eq!(b.col[0][3], 0.0);
+        assert_eq!(b.col[2 * (m - 1)][3], 0.0);
+        assert!(half_w(&b, 0) < 1e-4 && half_w(&b, m - 1) < 1e-4);
+        let mid = (0..m).find(|i| (b.pos[2 * i][0] - 50.0).abs() < 1e-3);
+        if let Some(i) = mid {
+            assert!((b.col[2 * i][3] - 1.0).abs() < 1e-5 && (half_w(&b, i) - 2.0).abs() < 1e-4);
+        }
+        // One end: the start stays full (it runs into something solid).
+        let mut b = MeshBuf::default();
+        b.stroke_taper(&pts, 4.0, 0.0, &[col], 20.0, Ends::End);
+        let m = b.pos.len() / 2;
+        assert_eq!(b.col[0][3], 1.0);
+        assert!((half_w(&b, 0) - 2.0).abs() < 1e-4);
+        assert_eq!(b.col[2 * (m - 1)][3], 0.0);
     }
 }

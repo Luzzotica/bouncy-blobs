@@ -8,7 +8,7 @@ use bb_physics::{Vec2 as PVec2, geom};
 use bevy::prelude::*;
 
 use crate::palette::{darken, lighten, lin, mix};
-use crate::render::{MeshBuf, ccw, la};
+use crate::render::{Ends, MeshBuf, ccw, la};
 
 // ------------------------------------------------------------------ noise
 
@@ -294,12 +294,12 @@ pub fn rock_mesh(poly: &[PVec2], look: &RockLook, seed: u32, buf: &mut MeshBuf) 
                 seg.push(q);
                 segc.push(la(look.lit, (0.18 + 0.25 * (rn[k].y * 0.5 + 0.5)) * smoothstep(0.15, 0.4, z)));
             } else {
-                buf.stroke_cols(&seg, 1.3, 0.0006, &segc);
+                buf.stroke_taper(&seg, 1.3, 0.0006, &segc, 14.0, Ends::Both);
                 seg.clear();
                 segc.clear();
             }
         }
-        buf.stroke_cols(&seg, 1.3, 0.0006, &segc);
+        buf.stroke_taper(&seg, 1.3, 0.0006, &segc, 14.0, Ends::Both);
         // Rim light: up-facing facets catch the cave glow, down-facing ones
         // fall into shadow.
         let cols: Vec<[f32; 4]> = rn

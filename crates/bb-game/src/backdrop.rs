@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use crate::crag::hash1;
 use crate::level_view::LevelEntity;
 use crate::palette::{ThemeColors, glow_at, hex, lighten, lin, mix, pulse_env, screen_add};
-use crate::render::{MeshBuf, Shared, la, z};
+use crate::render::{Ends, MeshBuf, Shared, la, z};
 use crate::sim::Game;
 
 pub struct BackdropPlugin;
@@ -800,33 +800,33 @@ fn draw_vein(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], lit: &[f32], fade: &[f
         return;
     }
     let cols: Vec<Color> = pts.iter().map(|p| d.hue(*p)).collect();
-    // Every vein tapers to nothing at both ends (a glow never stops flat,
-    // even where it runs right up a spike's tip).
+    // Every vein tapers to nothing at both ends, narrowing as it fades (a
+    // glow never stops flat, even where it runs right up a spike's tip).
     let mut along = vec![0.0f32; n];
     for i in 1..n {
         along[i] = along[i - 1] + pts[i].distance(pts[i - 1]);
     }
     let total = along[n - 1].max(1e-3);
     let taper_len = (34.0 * u).min(total * 0.4);
-    let fade: Vec<f32> = (0..n)
+    let end: Vec<f32> = (0..n)
         .map(|i| {
             let e = (along[i].min(total - along[i]) / taper_len).clamp(0.0, 1.0);
-            fade[i] * e * e * (3.0 - 2.0 * e)
+            e * e * (3.0 - 2.0 * e)
         })
         .collect();
-    let fade = &fade[..];
     // The seam: rock with a breath of the glow in it.
     let seam: Vec<[f32; 4]> = (0..n).map(|i| la(mix(d.rock, cols[i], 0.16), 0.55 * fade[i])).collect();
-    buf.stroke_cols(pts, 2.2 * u, d.zz - 0.0001, &seam);
+    buf.stroke_taper(pts, 2.2 * u, d.zz - 0.0001, &seam, taper_len, Ends::Both);
     let peak = lit.iter().copied().fold(0.0, f32::max);
     if peak < 0.004 {
         return;
     }
-    let g: Vec<f32> = (0..n).map(|i| lit[i] * fade[i] * glow).collect();
-    let soft: Vec<[f32; 4]> = (0..n).map(|i| la(cols[i], 0.16 * g[i])).collect();
-    buf.stroke_cols(pts, 10.0 * u, d.zz, &soft);
-    let core: Vec<[f32; 4]> = (0..n).map(|i| la(lighten(cols[i], 0.2 + 0.25 * g[i]), 0.8 * g[i])).collect();
-    buf.stroke_cols(pts, 1.8 * u, d.zz + 0.0001, &core);
+    let g0: Vec<f32> = (0..n).map(|i| lit[i] * fade[i] * glow).collect();
+    let soft: Vec<[f32; 4]> = (0..n).map(|i| la(cols[i], 0.16 * g0[i])).collect();
+    buf.stroke_taper(pts, 10.0 * u, d.zz, &soft, taper_len, Ends::Both);
+    let core: Vec<[f32; 4]> = (0..n).map(|i| la(lighten(cols[i], 0.2 + 0.25 * g0[i]), 0.8 * g0[i])).collect();
+    buf.stroke_taper(pts, 1.8 * u, d.zz + 0.0001, &core, taper_len, Ends::Both);
+    let g: Vec<f32> = (0..n).map(|i| g0[i] * end[i]).collect();
     // Beads of light along it, swelling as the front passes.
     let off = (hash2(seed, 77) * 3.0) as usize;
     for i in (off..n).step_by(5) {
@@ -1001,13 +1001,16 @@ fn mushrooms(buf: &mut MeshBuf, d: &Dress, at: PVec2, nrm: PVec2, seed: i32, lit
         // A thread of light runs up the stalk: a faint seam at rest, lit
         // point by point as the pulse climbs from the vein into the cap.
         let climb: Vec<f32> = (0..=N).map(|j| d.layer.goop * lit((s * j as f32 / N as f32 + k as f32 * 8.0 * u) / u)).collect();
-        let seam: Vec<[f32; 4]> = (0..=N).map(|j| la(mix(body, col, 0.3), 0.35 * (j as f32 / N as f32 * 3.0).min(1.0))).collect();
-        buf.stroke_cols(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00005, &seam);
+        // It rises out of the rock (fading in at the root) and runs on into
+        // the cap, which hides its top end.
+        let rise = s * 0.35;
+        let seam: Vec<[f32; 4]> = (0..=N).map(|_| la(mix(body, col, 0.3), 0.35)).collect();
+        buf.stroke_taper(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00005, &seam, rise, Ends::Start);
         if climb.iter().any(|c| *c > 0.004) {
-            let core: Vec<[f32; 4]> = (0..=N).map(|j| la(lighten(col, 0.35), 0.9 * climb[j].min(1.0) * (j as f32 / N as f32 * 3.0).min(1.0))).collect();
+            let core: Vec<[f32; 4]> = (0..=N).map(|j| la(lighten(col, 0.35), 0.9 * climb[j].min(1.0))).collect();
             let soft: Vec<[f32; 4]> = (0..=N).map(|j| la(col, 0.18 * climb[j].min(1.0))).collect();
-            buf.stroke_cols(&pts, wd * 0.9, d.zz + 0.00006, &soft);
-            buf.stroke_cols(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00007, &core);
+            buf.stroke_taper(&pts, wd * 0.9, d.zz + 0.00006, &soft, rise, Ends::Start);
+            buf.stroke_taper(&pts, (wd * 0.22).max(0.9 * u), d.zz + 0.00007, &core, rise, Ends::Start);
         }
         let dir = (pts[N] - pts[N - 1]).normalize_or_zero();
         let side = PVec2::new(dir.y, -dir.x);
@@ -1023,8 +1026,8 @@ fn mushrooms(buf: &mut MeshBuf, d: &Dress, at: PVec2, nrm: PVec2, seed: i32, lit
             let g0 = top - side * cw * 0.9 - dir * 0.5 * u;
             let g1 = top + side * cw * 0.9 - dir * 0.5 * u;
             buf.halo(top - dir * 2.0 * u, PVec2::new(cw * 2.4, ch * 2.6), d.zz + 0.0001, la(col, 0.3 * a));
-            buf.stroke(&[g0, top - dir * 1.5 * u, g1], 2.6 * u, d.zz + 0.0001, la(lighten(col, 0.35), 0.95 * a.min(1.0)));
-            buf.stroke(&dome, 1.2 * u, d.zz + 0.0001, la(lighten(col, 0.25), 0.55 * a.min(1.0)));
+            buf.stroke_taper(&[g0, top - dir * 1.5 * u, g1], 2.6 * u, d.zz + 0.0001, &[la(lighten(col, 0.35), 0.95 * a.min(1.0))], cw * 0.5, Ends::Both);
+            buf.stroke_taper(&dome, 1.2 * u, d.zz + 0.0001, &[la(lighten(col, 0.25), 0.55 * a.min(1.0))], cw * 0.4, Ends::Both);
         }
     }
 }
@@ -1283,7 +1286,8 @@ fn rim_line(buf: &mut MeshBuf, pts: &[PVec2], widths: &[f32], rim: Color) {
         })
         .collect();
     let cols: Vec<[f32; 4]> = (0..n).map(|i| la(rim, 0.7 * (1.0 - i as f32 / n as f32 * 0.6))).collect();
-    buf.stroke_cols(&side, widths[0] * 0.12 + 1.0, 0.0003, &cols);
+    // The light thins away toward the tip rather than stopping short.
+    buf.stroke_taper(&side, widths[0] * 0.12 + 1.0, 0.0003, &cols, widths[0] * 2.5, Ends::Both);
 }
 
 /// A smooth tapered stroke (one strip, per-point widths, rounded tip).
