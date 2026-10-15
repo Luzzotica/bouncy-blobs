@@ -17,6 +17,13 @@ pub const CAM_LIFT: f32 = bb_level::metrics::CAM_LIFT;
 #[derive(Component)]
 pub struct MainCamera;
 
+/// Everything that places the main camera this frame ([`follow`], capture
+/// framing). Runs before Bevy recomputes the projection's area, so systems
+/// that size themselves to the view (the cave backdrop) can run after both
+/// and never see a half-updated camera.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CameraFraming;
+
 /// Overrides follow behaviour (cutscenes, menus, kids mode).
 #[derive(Resource, Default, Clone)]
 pub struct CameraDirector {
@@ -33,7 +40,11 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraDirector>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(PostUpdate, follow.before(bevy::transform::TransformSystems::Propagate));
+            .configure_sets(
+                PostUpdate,
+                CameraFraming.before(bevy::camera::CameraUpdateSystems).before(bevy::transform::TransformSystems::Propagate),
+            )
+            .add_systems(PostUpdate, follow.in_set(CameraFraming));
     }
 }
 

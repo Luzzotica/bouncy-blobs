@@ -248,7 +248,7 @@ impl Plugin for CapturePlugin {
             .add_systems(PostUpdate, place_pip.run_if(resource_added::<Game>))
             .add_systems(
                 PostUpdate,
-                frame_camera.after(crate::camera::follow).before(bevy::transform::TransformSystems::Propagate),
+                frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
             );
         if !cfg.keep_ui {
             app.add_systems(PostUpdate, hide_ui.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
