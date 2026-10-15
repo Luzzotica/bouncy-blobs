@@ -14,39 +14,29 @@ use super::*;
 /// a soft flat cap that launches you straight up (swell as you land on it
 /// to fly much higher).
 fn tramp(c: &mut Ch, x: f32, base_y: f32, cap_y: f32, power: f32) {
-    shroom(c, x, base_y, cap_y, power, MushroomShape::Flat);
+    c.shroom(x, base_y, cap_y, power, MushroomShape::Flat);
 }
 
-/// A bouncy mushroom of any shape with its cap top at (x, cap_y).
-fn shroom(c: &mut Ch, x: f32, base_y: f32, cap_y: f32, power: f32, shape: MushroomShape) {
-    let size = if shape == MushroomShape::Ball { 110.0 } else { 160.0 };
-    let height = cap_y - base_y - shape.cap_height(size);
-    if height < 130.0 {
-        // A rock pedestal so nobody gets stuck under a low cap.
-        c.poly(&[v(x - 70.0, base_y), v(x + 70.0, base_y), v(x + 40.0, base_y + height - 6.0), v(x - 40.0, base_y + height - 6.0)]);
-    }
-    c.bouncy_mushroom(v(x, base_y), height, shape, size, power);
-    c.decor("mushroom_spots", v(x, base_y + height), size / 120.0, 0.5);
-}
 
-pub fn build() -> Course {
+pub fn build() -> (Blueprint, Course) {
     let mut c = Ch::new(3, "Mushroom Bounce", Theme::Fungus, -1400.0);
+    c.about(&["Chapter 3 — **Mushroom Bounce** (Fungus Caverns).", "", "Pure joy. Pip discovers that bouncing is how you go *up*: trampoline", "mushrooms, spring pads, a momentum chain of caps over a spiky pit, an", "angled spring fling, a bouncy-floored cavern you climb cap by cap, and a", "finale that remixes drips and membranes from the Drip.", "", "Mechanics: bouncy mushrooms (flat, dome and ball caps — swell as you", "land to fly higher), spring pads, momentum chains, bouncy floors."]);
     c.spawn(v(0.0, 40.0));
 
-    // ------------------------------------------- first boings
+    c.section("first boings");
     c.entry_cave(-1300.0, -500.0, 0.0, 2200.0, Theme::Drip);
     c.floor(&[v(-500.0, 0.0), v(740.0, 0.0)]);
-    // The cast from the intro cutscene greets you at the start.
+    c.note("The cast from the intro cutscene greets you at the start.");
     for (k, x) in [-330.0, -240.0, -150.0].iter().enumerate() {
         c.npc(&format!("cap{}", k + 1), v(*x, 40.0), NpcRole::Huddle, "#ff6fa8", 26.0);
     }
     c.say(-80.0, 80.0, 0.0, "ch03_hello");
     c.say(150.0, 220.0, 0.0, "ch03_fungus");
-    // Secret: a spring behind the start up to a hidden shelf.
+    c.note("Secret: a spring behind the start up to a hidden shelf.");
     c.spring(v(-400.0, 0.0), 90.0, 1300.0);
     c.shelf(-500.0, -240.0, 470.0, 60.0);
     c.pickups(v(-460.0, 520.0), v(-280.0, 520.0), 4);
-    // A first trampoline: up to a ledge you can't jump to.
+    c.note("A first trampoline: up to a ledge you can't jump to.");
     tramp(&mut c, 600.0, 0.0, 115.0, 1150.0);
     c.say(380.0, 440.0, 0.0, "ch03_first_trampoline");
     c.ledge(740.0, 1500.0, 330.0);
@@ -54,7 +44,7 @@ pub fn build() -> Course {
     c.drops(950.0, 1400.0, 330.0, 3);
     c.wp(Move::Walk, 0.0, 0.0).wp(Move::Walk, 440.0, 0.0).wp(Move::Jump, 600.0, 115.0).wp(Move::Spring, 860.0, 330.0);
     c.wp(Move::Walk, 1450.0, 330.0);
-    // Down, then a spring pad up to the next tier.
+    c.note("Down, then a spring pad up to the next tier.");
     c.floor(&[v(1500.0, 0.0), v(2100.0, 0.0)]);
     c.spring(v(1950.0, 0.0), 90.0, 1500.0);
     c.say(1640.0, 1700.0, 0.0, "ch03_spring");
@@ -63,10 +53,9 @@ pub fn build() -> Course {
     c.wp(Move::Drop, 1650.0, 0.0).wp(Move::Walk, 1950.0, 0.0).wp(Move::Spring, 2200.0, 520.0);
     c.cp(2330.0, 520.0);
 
-    // ------------------------------------- the momentum chain
+    c.section("the momentum chain");
     c.say(2560.0, 2620.0, 520.0, "ch03_chain");
-    // The pit floor rises with the chain so its spikes stay in view
-    // (docs/LevelDesign.md rule 1: never deeper than MAX_HAZARD_DEPTH).
+    c.note("The pit floor rises with the chain so its spikes stay in view (docs/LevelDesign.md rule 1: never deeper than MAX_HAZARD_DEPTH).");
     let pit1 = |x: f32| 260.0 + (x - 2700.0) / 1300.0 * 240.0;
     c.floor(&[v(2700.0, pit1(2700.0)), v(4000.0, pit1(4000.0))]);
     c.spikes(v(2700.0, pit1(2700.0)), v(4000.0, pit1(4000.0)));
@@ -84,7 +73,7 @@ pub fn build() -> Course {
         .wp(Move::Spring, 4100.0, 760.0);
     c.cp(4250.0, 760.0);
 
-    // ---------------------------------- angled spring over the gap
+    c.section("angled spring over the gap");
     c.say(4380.0, 4420.0, 760.0, "ch03_angled");
     c.spring(v(4500.0, 760.0), 60.0, 1450.0);
     c.pickup_arc(v(4600.0, 900.0), v(5400.0, 820.0), 400.0, 5);
@@ -92,8 +81,8 @@ pub fn build() -> Course {
     c.spikes(v(4600.0, 520.0), v(5400.0, 520.0));
     c.wp(Move::Walk, 4500.0, 760.0).wp(Move::Spring, 5620.0, 760.0);
 
-    // ------------------------- the bouncy cavern (climb cap by cap)
-    c.b.ground_with(&[v(5400.0, 760.0), v(7100.0, 760.0)], 2160.0, Material::Bouncy, 0.7);
+    c.section("the bouncy cavern (climb cap by cap)");
+    c.ground_with(&[v(5400.0, 760.0), v(7100.0, 760.0)], 2160.0, Material::Bouncy, 0.7);
     c.say(6050.0, 6100.0, 760.0, "ch03_cavern");
     c.drops(5650.0, 6050.0, 760.0, 3);
     tramp(&mut c, 6350.0, 760.0, 875.0, 1250.0);
@@ -114,15 +103,15 @@ pub fn build() -> Course {
         .wp(Move::Spring, 6700.0, 2050.0);
     c.cp(7300.0, 2050.0);
 
-    // ------------------------------------------- finale remix
+    c.section("finale remix");
     c.drip_hazard(v(7550.0, 2760.0), 650.0, 30.0, 0.0);
     c.spring(v(7900.0, 2050.0), 90.0, 1350.0);
-    c.one_way(v(7800.0, 2430.0), v(8100.0, 2450.0));
+    c.one_way_top(7800.0, 8100.0, 2450.0, 20.0);
     c.pickups(v(7900.0, 2200.0), v(7900.0, 2400.0), 2);
     c.ledge(8250.0, 8700.0, 2560.0);
     c.wp(Move::Walk, 7900.0, 2050.0).wp(Move::Spring, 8000.0, 2450.0).wp(Move::Jump, 8330.0, 2560.0);
     c.cp(8500.0, 2560.0);
-    // A last chain of caps over the dark, then up to the glow.
+    c.note("A last chain of caps over the dark, then up to the glow.");
     let pit3 = |x: f32| 2290.0 + (x - 8700.0) / 850.0 * 110.0;
     c.floor(&[v(8700.0, pit3(8700.0)), v(9550.0, pit3(9550.0))]);
     c.spikes(v(8700.0, pit3(8700.0)), v(9550.0, pit3(9550.0)));
@@ -139,11 +128,11 @@ pub fn build() -> Course {
         .wp(Move::Walk, 11080.0, 2700.0);
     c.exit_cave(10600.0, 11400.0, 2700.0, 4300.0, Theme::Vines);
 
-    // ------------------------------------------------------------ roof
+    c.section("roof");
     c.roof(&[v(-1300.0, 760.0), v(800.0, 820.0), v(1500.0, 960.0), v(2100.0, 1180.0), v(2700.0, 1300.0), v(4000.0, 1380.0), v(5500.0, 1420.0), v(5900.0, 1400.0)]);
     c.roof(&[v(6200.0, 2650.0), v(7000.0, 2700.0), v(7700.0, 2820.0), v(8100.0, 3060.0), v(9000.0, 3200.0), v(10600.0, 3300.0)]);
 
-    // ----------------------------------------------------------- decor
+    c.section("decor");
     c.scatter("mushroom", -450.0, 400.0, 0.0, 140.0, -1.0);
     c.scatter("mushroom", 900.0, 1450.0, 330.0, 110.0, -1.0);
     c.scatter("mushroom", 2150.0, 2650.0, 520.0, 120.0, -1.0);

@@ -118,7 +118,7 @@ pub enum Mode {
 }
 
 /// Solid level geometry (rendered as candy-coated rock; never moves).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Terrain {
     pub shape: Shape,
     #[serde(default)]
@@ -130,7 +130,7 @@ pub struct Terrain {
 
 /// Soft ground: a mesh tethered to its rest pose. Dents when you land,
 /// jiggles when things hit it, stays where it was put.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Jelly {
     pub shape: Shape,
     #[serde(default)]
@@ -158,7 +158,7 @@ pub enum Pins {
 }
 
 /// A soft rectangular sheet: bridges, floating slabs, membranes.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SoftPlatform {
     #[serde(default)]
     pub id: String,
@@ -186,7 +186,7 @@ pub enum PropKind {
 }
 
 /// A free dynamic softbody: blocks, balls, toys.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Prop {
     #[serde(default)]
     pub id: String,
@@ -226,7 +226,7 @@ pub enum MoverMotion {
 }
 
 /// Kinematic (script-moved) geometry: elevators, pistons, crushers, fans.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Mover {
     #[serde(default)]
     pub id: String,
@@ -278,7 +278,7 @@ pub enum RopeStyle {
     Slinky,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RopeDef {
     #[serde(default)]
     pub id: String,
@@ -310,7 +310,7 @@ pub enum ZoneKind {
     Goo { drag: f32 },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Zone {
     #[serde(default)]
     pub id: String,
@@ -318,7 +318,7 @@ pub struct Zone {
     pub kind: ZoneKind,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpringPad {
     pub pos: Vec2,
     /// Launch direction (radians, 0 = right, π/2 = up).
@@ -358,7 +358,7 @@ impl MushroomShape {
 /// A bouncy mushroom: a soft, physical cap on a rock stalk that launches
 /// whatever lands on it. Swelling (holding the button) as you hit it launches
 /// you much higher. The stalk is plain terrain (the builder adds it).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BouncyMushroom {
     /// Top of the stalk (the cap sits on it).
     pub pos: Vec2,
@@ -430,7 +430,7 @@ pub enum GadgetKind {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Gadget {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub id: String,
@@ -438,7 +438,7 @@ pub struct Gadget {
     pub kind: GadgetKind,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spikes {
     /// Base line of the spike strip; teeth point to the left of a→b
     /// (so a→b left-to-right points them up).
@@ -446,7 +446,7 @@ pub struct Spikes {
     pub b: Vec2,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Checkpoint {
     pub pos: Vec2,
 }
@@ -468,7 +468,7 @@ pub enum NpcRole {
     Reg,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Npc {
     #[serde(default)]
     pub id: String,
@@ -483,7 +483,7 @@ pub struct Npc {
 }
 
 /// Fires a story script (speech bubble, mini-cutscene) when a player enters.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StoryTrigger {
     pub shape: Shape,
     pub script: String,
@@ -491,7 +491,7 @@ pub struct StoryTrigger {
     pub once: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Decor {
     /// Decor sprite / procedural kind, e.g. "mushroom", "crystal", "drip",
     /// "glowworm", "sock", "crayon", "lantern".
@@ -518,7 +518,7 @@ pub enum MouthKind {
 
 /// A cave mouth: a tunnel opening in the rock at the start or end of a
 /// level, glowing with the colour of the chapter it leads to.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CaveMouth {
     /// Floor point at the opening, on the wall face.
     pub pos: Vec2,
@@ -546,7 +546,7 @@ impl CaveMouth {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Level {
     #[serde(default = "format_version")]
     pub version: u32,

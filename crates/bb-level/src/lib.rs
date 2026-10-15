@@ -1,7 +1,9 @@
 //! Bouncy Blobs level format (v3), builder helpers, legacy importer, and the
 //! story campaign.
 
+pub mod blueprint;
 pub mod builder;
+pub mod pretty;
 pub mod legacy;
 pub mod campaign;
 pub mod types;
