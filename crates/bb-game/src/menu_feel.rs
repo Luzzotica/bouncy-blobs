@@ -20,8 +20,10 @@ const LEAN: Vec2 = Vec2::new(70.0, 28.0);
 const CLICK_SLOP: f32 = 12.0;
 /// Particles within this distance of the grab point follow the pointer.
 const GRAB_RADIUS: f32 = 48.0;
-/// The home tether is this many times looser while held.
-const LOOSEN: f32 = 80.0;
+/// While held, the home spring lets go entirely (it would otherwise yank the
+/// jelly back every physics step and make it teleport); on release it pulls
+/// the tile home with a wobble.
+const HELD_COMPLIANCE: f32 = 1.0;
 
 #[derive(Resource, Default)]
 pub struct MenuPointer {
@@ -158,7 +160,7 @@ fn drag(
             if !d.moved && s.distance(d.start_screen) > CLICK_SLOP {
                 d.moved = true;
                 if let Some(b) = game.sim.world.body_mut(d.body) {
-                    b.home_compliance = d.compliance * LOOSEN;
+                    b.home_compliance = HELD_COMPLIANCE;
                 }
             }
             if d.moved && held {

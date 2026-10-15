@@ -288,7 +288,7 @@ fn lobby_ui(
         for (i, (b, color)) in items.iter().enumerate() {
             // Left of centre so the phone join panel (top right) stays clear.
             let center = PVec2::new(140.0, 620.0 - i as f32 * 96.0);
-            let id = jelly_tile(&mut game, center, PVec2::new(520.0, 78.0), BodyTag::Ui, 2e-4);
+            let id = jelly_tile(&mut game, center, PVec2::new(520.0, 78.0), BodyTag::Ui, crate::menu::BUTTON_SPRING);
             overrides.0.insert(id, button_style(*color, false));
             let text = button_label(*b, &party);
             label_with(&mut commands, &assets, id, &text, 34.0, Color::WHITE, LobbyItem);
@@ -296,7 +296,7 @@ fn lobby_ui(
             party.drop.add(&mut game.sim.world, id, 0.12 + (items.len() - 1 - i) as f32 * 0.07);
         }
         // Title tile.
-        let id = jelly_tile(&mut game, PVec2::new(-480.0, 640.0), PVec2::new(420.0, 110.0), BodyTag::Ui, 6e-5);
+        let id = jelly_tile(&mut game, PVec2::new(-480.0, 640.0), PVec2::new(420.0, 110.0), BodyTag::Ui, crate::menu::LETTER_SPRING);
         overrides.0.insert(id, button_style(0xff8fab, false));
         label_with(&mut commands, &assets, id, "PARTY!", 72.0, Color::WHITE, LobbyItem);
         party.drop.add(&mut game.sim.world, id, 0.0);
