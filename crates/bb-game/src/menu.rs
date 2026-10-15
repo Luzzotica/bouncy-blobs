@@ -37,7 +37,6 @@ pub enum Action {
     Chapter(u8),
     Goto(Page),
     Kids,
-    Editor,
     Sandbox,
     PartyHost,
     JoinFriend,
@@ -433,7 +432,6 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
         Page::Party => vec![
             ("Host with Phones".into(), Action::PartyHost, 0x6bcb77),
             ("Join a Friend".into(), Action::JoinFriend, 0x5dd6ff),
-            ("Level Editor".into(), Action::Editor, 0xffc75f),
             ("Sandbox".into(), Action::Sandbox, 0xff9f43),
             ("Back".into(), Action::Goto(Page::Play), 0xd0c4e8),
         ],
@@ -649,7 +647,6 @@ fn interact(
                 }
                 Action::Goto(p) => menu.page = p,
                 Action::Kids => next.set(AppState::Kids),
-                Action::Editor => next.set(AppState::Editor),
                 Action::Sandbox => {
                     load.write(LoadLevel { level: crate::sandbox::sandbox_level(), players: vec![(0, "Pip".into(), progress.pip_color)] });
                     next.set(AppState::Playing);

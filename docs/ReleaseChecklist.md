@@ -35,7 +35,7 @@ Tracked in detail in `/Users/sterlinglong/.claude/plans/please-take-a-look-breez
 - [ ] **Steam Input** — currently using browser gamepad API. Steam Input adds free rebinding UI, native Steam Deck config, gyro/PS5/Switch Pro mappings. Strongly recommended for a party game.
 - [ ] **Steam Overlay test on Windows** — Tauri + overlay has known gotchas; must verify it draws over the webview window.
 - [ ] **Steam Rich Presence** — "In Lobby (3/4)", "Playing Classic on Blob Hill". Small touch, high perceived polish.
-- [ ] **Steam Deck verification** — submit for Verified/Playable after launch. Test at 1280×800, controller-only nav through every screen including editor.
+- [ ] **Steam Deck verification** — submit for Verified/Playable after launch. Test at 1280×800, controller-only nav through every screen.
 
 ## Single-Player Content & Campaign
 
@@ -49,14 +49,14 @@ Tracked in detail in `/Users/sterlinglong/.claude/plans/please-take-a-look-breez
 
 ## Audio
 
-- [ ] Music tracks — `public/sfx/` has 17 effects but **no music**. Need menu theme, gameplay loops, victory/defeat stingers, editor ambient. License-clean (no YT rips). Pixabay free or commission ~$200–500.
+- [ ] Music tracks — `public/sfx/` has 17 effects but **no music**. Need menu theme, gameplay loops, victory/defeat stingers. License-clean (no YT rips). Pixabay free or commission ~$200–500.
 - [ ] Achievement-unlock SFX
 - [ ] Level-complete fanfare
 - [ ] Menu nav clicks for new flows
 
 ## Visual Polish (the "match the menu" pass)
 
-- [ ] Pause menu, settings modal, game-over screen, lobby UI, editor chrome — unify with menu's hand-drawn / sticky-note aesthetic
+- [ ] Pause menu, settings modal, game-over screen, lobby UI — unify with menu's hand-drawn / sticky-note aesthetic
 - [ ] Particle/decal language consistent with menu illustration
 - [ ] Font choice consistent throughout
 - [ ] Empty-state art: Workshop browser with no items, lobby browser with no rooms, no-controller-detected screen
@@ -86,11 +86,11 @@ Tracked in detail in `/Users/sterlinglong/.claude/plans/please-take-a-look-breez
 ## Steam Store Page
 
 - [ ] Capsule art (5 sizes: small, header, main, library hero, library logo — exact Steam pixel specs)
-- [ ] Screenshots (5–10, 1920×1080, showing variety: chaos, editor, phone play, art style)
+- [ ] Screenshots (5–10, 1920×1080, showing variety: chaos, King of the Hill, phone play, art style)
 - [ ] Trailer (30–90s, hook in first 6s, gameplay-forward, no logo waste)
 - [ ] Short description (≤300 chars)
 - [ ] Long description (markdown + embedded gifs)
-- [ ] Tags (Local Co-op, Party Game, Physics, Level Editor, Workshop, etc.)
+- [ ] Tags (Local Co-op, Party Game, Physics, etc.)
 - [ ] System requirements (fill in honestly after perf pass)
 - [ ] Age rating via IARC questionnaire (free, ~15 min in Steamworks)
 - [ ] Privacy policy + EULA URLs
@@ -100,7 +100,7 @@ Tracked in detail in `/Users/sterlinglong/.claude/plans/please-take-a-look-breez
 - [ ] Decide: Early Access vs 1.0 (EA defensible given online stability is recent, but requires sustained update cadence)
 - [ ] Pricing — comparable physics/party games run $7.99–$14.99
 - [ ] Demo build for Steam Next Fest (biggest indie wishlist driver)
-- [ ] Define demo-quality cutoff (which maps, editor enabled/disabled, modes available)
+- [ ] Define demo-quality cutoff (which maps, modes available)
 - [ ] Devlog cadence (Twitter/Bsky/YouTube), small-streamer outreach 2–3 weeks pre-launch
 - [ ] Reddit posts (r/IndieDev, r/IndieGaming)
 
@@ -121,6 +121,5 @@ Tracked in detail in `/Users/sterlinglong/.claude/plans/please-take-a-look-breez
 - [x] Local maps storage (`~/.appdata/maps/`) with workshop_id linking
 - [x] WebRTC phone-as-controller party play (host PC + multiple phones)
 - [x] 11 hand-authored maps, 6 game modes, 12+ AI personalities
-- [x] Level editor with Workshop publish hooks
 - [x] Story.md creative brief for King Reg / Plopptopia
 - [x] Playwright e2e suite (13 specs)

@@ -11,7 +11,6 @@ pub mod crag;
 pub mod dance;
 pub mod devtools;
 pub mod dropin;
-pub mod editor;
 pub mod flow;
 pub mod fx;
 pub mod hud;
@@ -95,7 +94,6 @@ impl Plugin for GamePlugin {
                 devtools::DevToolsPlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
-                editor::EditorPlugin,
                 net::NetPlugin,
                 online::OnlinePlugin,
                 tuning::TuningPlugin,

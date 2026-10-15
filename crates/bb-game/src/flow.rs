@@ -11,14 +11,12 @@ pub enum AppState {
     Title,
     /// Story mode: cutscenes and campaign levels.
     Story,
-    /// Free play of a single level (sandbox, level select replays, editor test).
+    /// Free play of a single level (sandbox, `BB_LEVEL`, joining a friend).
     Playing,
     /// Kids Mode.
     Kids,
-    /// Party modes (race / KOTH) with phones.
+    /// Party mode (King of the Hill rounds) with phones and pads.
     Party,
-    /// Level editor.
-    Editor,
 }
 
 pub struct FlowPlugin;
