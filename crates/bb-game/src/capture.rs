@@ -29,6 +29,10 @@
 //! * `BB_CAPTURE_RESPAWN=s`, `BB_CAPTURE_RESPAWN_AT=x,y` — after a pop,
 //!   Pip's next life comes s seconds later at x,y (`x,y;x,y;...` cycles
 //!   through several; capture only, the level and checkpoints are unchanged).
+//! * `BB_CAPTURE_SHOW=ui` — transparent mode keeps the jelly UI tiles and
+//!   their lettering (the logo) instead of the blobs.
+//! * `BB_CAPTURE_HIDE=chars` — hide characters and floating effect words
+//!   (background plates).
 //! * `BB_CAPTURE_UI=1` — keep screen UI (title-menu text, HUD) anyway.
 //! * `BB_TAP=target@f[-g];...` — scripted touches (finger down on tick f,
 //!   up after g, default f+6). Targets: `x,y` (world), `chip:green` (a Kids
@@ -90,6 +94,10 @@ pub struct CaptureConfig {
     pub keep_ui: bool,
     /// Transparent stills: only blobs and their faces are drawn, over alpha 0.
     pub transparent: bool,
+    /// Transparent mode keeps UI tiles (logo) instead of blobs.
+    pub show_ui: bool,
+    /// Hide characters and effect words (background plates).
+    pub hide_chars: bool,
     /// Seconds from a pop to the next life (capture only; game default 1.1).
     pub respawn: Option<f32>,
     /// Where Pip comes back after each pop, cycling (capture only; not a
@@ -118,6 +126,8 @@ impl Default for CaptureConfig {
             crf: 16,
             keep_ui: false,
             transparent: false,
+            show_ui: false,
+            hide_chars: false,
             respawn: None,
             respawn_at: Vec::new(),
             no_pickups: false,
@@ -170,6 +180,8 @@ impl CaptureConfig {
         c.at = get("BB_CAPTURE_AT").and_then(|s| pair(&s, ',')).map(|(x, y)| Vec2::new(x, y));
         c.keep_ui = get("BB_CAPTURE_UI").is_some_and(|v| v == "1");
         c.transparent = get("BB_CAPTURE_TRANSPARENT").is_some_and(|v| v == "1");
+        c.show_ui = get("BB_CAPTURE_SHOW").is_some_and(|v| v == "ui");
+        c.hide_chars = get("BB_CAPTURE_HIDE").is_some_and(|v| v == "chars");
         c.respawn = num("BB_CAPTURE_RESPAWN").map(|s| s.max(0.0));
         c.respawn_at = get("BB_CAPTURE_RESPAWN_AT").map(|s| s.split(';').filter_map(|p| pair(p, ',')).map(|(x, y)| Vec2::new(x, y)).collect()).unwrap_or_default();
         c.no_pickups = get("BB_CAPTURE_NO_PICKUPS").is_some_and(|v| v == "1");
@@ -270,9 +282,12 @@ impl Plugin for CapturePlugin {
                 frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
             );
         if cfg.transparent {
-            app.add_systems(Startup, |mut c: ResMut<ClearColor>| c.0 = Color::NONE).add_systems(
+            app.add_systems(Startup, |mut c: ResMut<ClearColor>| c.0 = Color::NONE);
+        }
+        if cfg.transparent || cfg.hide_chars {
+            app.add_systems(
                 PostUpdate,
-                only_blobs.after(crate::backdrop::BackdropSystems).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+                filter_view.after(crate::backdrop::BackdropSystems).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
             );
         }
         if !cfg.keep_ui {
@@ -722,24 +737,50 @@ pub fn unpremultiply(rgba: &mut [u8]) {
     }
 }
 
-/// Transparent mode: hide everything but player/NPC blobs and their faces
-/// (no backdrop, terrain, water, decor, mouths, FX, UI chips). Glimmer is
-/// hidden too.
+/// What a capture frame keeps. Transparent mode (`BB_CAPTURE_TRANSPARENT`)
+/// hides everything except, by `BB_CAPTURE_SHOW`: `blobs` (default: player
+/// and NPC blobs and their faces) or `ui` (jelly UI tiles and their
+/// lettering, e.g. the logo). `BB_CAPTURE_HIDE=chars` (any mode) hides just
+/// the characters (players, NPCs, their faces) and floating effect words,
+/// for empty background plates. Glimmer is never kept.
 #[allow(clippy::type_complexity)]
-fn only_blobs(
+fn filter_view(
     game: Option<Res<Game>>,
-    mut q: Query<(&mut Visibility, Option<&crate::render::BodyVisual>, Option<&crate::render::Face>), Or<(With<Mesh2d>, With<Sprite>, With<Text2d>)>>,
+    mut q: Query<
+        (&mut Visibility, Option<&crate::render::BodyVisual>, Option<&crate::render::Face>, Option<&crate::softtext::SoftText>),
+        (Or<(With<Mesh2d>, With<Sprite>, With<Text2d>, With<crate::softtext::SoftText>)>, Without<crate::softtext::SoftGlyph>),
+    >,
 ) {
-    let keep = |id: bb_sim::BodyId| {
-        let Some(g) = game.as_ref() else { return false };
-        match g.sim.tag(id) {
-            Some(bb_sim::BodyTag::Player(_)) => true,
-            Some(bb_sim::BodyTag::Npc(i)) => g.sim.npc_role(i) != Some(&bb_level::NpcRole::Glimmer),
-            _ => false,
-        }
+    let Some(cfg) = config() else { return };
+    let tag = |id: bb_sim::BodyId| game.as_ref().and_then(|g| g.sim.tag(id));
+    let is_char = |id: bb_sim::BodyId| match tag(id) {
+        Some(bb_sim::BodyTag::Player(_) | bb_sim::BodyTag::Npc(_)) => true,
+        _ => false,
     };
-    for (mut v, body, face) in q.iter_mut() {
-        let show = body.map(|b| keep(b.id)).or(face.map(|f| keep(f.body))).unwrap_or(false);
+    let glimmer = |id: bb_sim::BodyId| match tag(id) {
+        Some(bb_sim::BodyTag::Npc(i)) => game.as_ref().is_some_and(|g| g.sim.npc_role(i) == Some(&bb_level::NpcRole::Glimmer)),
+        _ => false,
+    };
+    let is_ui = |id: bb_sim::BodyId| matches!(tag(id), Some(bb_sim::BodyTag::Ui));
+    for (mut v, body, face, text) in q.iter_mut() {
+        let id = body.map(|b| b.id).or(face.map(|f| f.body)).or(text.and_then(|t| t.body()));
+        let show = if cfg.transparent {
+            match (cfg.show_ui, id) {
+                (false, Some(id)) => is_char(id) && !glimmer(id) && text.is_none(),
+                (true, Some(id)) => is_ui(id),
+                (_, None) => false,
+            }
+        } else {
+            // Opaque plate: only characters and floating words go.
+            let hide = match id {
+                Some(id) => is_char(id),
+                None => text.is_some(),
+            };
+            if !hide {
+                continue;
+            }
+            false
+        };
         let want = if show { Visibility::Inherited } else { Visibility::Hidden };
         if *v != want {
             *v = want;
