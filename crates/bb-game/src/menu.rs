@@ -586,7 +586,7 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    (mut labels, label_bodies, beat): (Query<&mut SoftText>, Query<(Entity, &BodyLabel)>, Res<MusicBeat>),
+    (mut labels, label_bodies, beat, mut pointer): (Query<&mut SoftText>, Query<(Entity, &BodyLabel)>, Res<MusicBeat>, ResMut<crate::menu_feel::MenuPointer>),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     // Remove the previous page's tiles once they've fallen away.
@@ -693,19 +693,9 @@ fn interact(
     }
 
     // Pointer: click or tap a jelly.
-    let mut press_at: Option<Vec2> = None;
-    if let (Ok((camera, cam_tf)), Some(window)) = (cam.single(), windows_mut.iter().next()) {
-        let mut screen = None;
-        if mouse.just_pressed(MouseButton::Left) {
-            screen = window.cursor_position();
-        }
-        for t in touches.iter_just_pressed() {
-            screen = Some(t.position());
-        }
-        if let Some(s) = screen {
-            press_at = camera.viewport_to_world_2d(cam_tf, s).ok();
-        }
-    }
+    // A click is a press + release that didn't drag the tile (menu_feel).
+    let _ = (&mouse, &touches, &cam);
+    let press_at: Option<Vec2> = pointer.take_click();
     let mut chosen: Option<usize> = None;
     if let Some(p) = press_at {
         let p = PVec2::new(p.x, p.y);

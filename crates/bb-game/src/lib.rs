@@ -23,6 +23,7 @@ pub mod input;
 pub mod kids;
 pub mod level_view;
 pub mod menu;
+pub mod menu_feel;
 pub mod mouths;
 pub mod net;
 pub mod online;
@@ -98,6 +99,7 @@ impl Plugin for GamePlugin {
             .add_plugins((
                 story::StoryPlugin,
                 menu::MenuPlugin,
+                menu_feel::MenuFeelPlugin,
                 party::PartyPlugin,
                 pause::PausePlugin,
                 achievements::AchievementsPlugin,

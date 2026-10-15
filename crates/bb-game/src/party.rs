@@ -327,7 +327,7 @@ fn lobby_input(
     mut cam_dir: ResMut<CameraDirector>,
     inputs: Res<Inputs>,
     mut joinable: MessageWriter<crate::net::NetCommand>,
-    (time, mut labels): (Res<Time>, Query<&mut SoftText>),
+    (time, mut labels, mut pointer): (Res<Time>, Query<&mut SoftText>, ResMut<crate::menu_feel::MenuPointer>),
 ) {
     if party.phase == PartyPhase::Lobby {
         let dt = time.delta_secs().min(1.0 / 20.0);
@@ -359,19 +359,9 @@ fn lobby_input(
         next.set(AppState::Title);
         return;
     }
-    let mut press: Option<Vec2> = None;
-    if let (Ok((camera, tf)), Some(w)) = (cam.single(), windows.iter().next()) {
-        let mut s = None;
-        if mouse.just_pressed(MouseButton::Left) {
-            s = w.cursor_position();
-        }
-        for t in touches.iter_just_pressed() {
-            s = Some(t.position());
-        }
-        if let Some(s) = s {
-            press = camera.viewport_to_world_2d(tf, s).ok();
-        }
-    }
+    // A click is a press + release that didn't drag the tile (menu_feel).
+    let _ = (&mouse, &touches, &windows, &cam);
+    let press: Option<Vec2> = pointer.take_click();
     let hit = press.and_then(|p| game.sim.world.pick(PVec2::new(p.x, p.y), crate::load_layer::UI));
     let mut chosen = hit.and_then(|h| party.buttons.iter().find(|b| b.0 == h).map(|b| (b.0, b.1)));
     if keys.just_pressed(KeyCode::Enter) {
