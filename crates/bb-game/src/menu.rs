@@ -368,7 +368,7 @@ pub const BUTTON_FONT: f32 = 36.0;
 /// Home-spring compliance for logo letters and buttons. Soft enough that a
 /// tile can be pushed or dragged well away from its spot and wobble back
 /// (a spring, not an anchor); stiffer values snap them home in a frame.
-pub const LETTER_SPRING: f32 = 1.2e-3;
+pub const LETTER_SPRING: f32 = 2.5e-4;
 pub const BUTTON_SPRING: f32 = 7e-4;
 
 /// A jelly slab with a label. Tethered to where it was put, so it wobbles
@@ -632,7 +632,7 @@ fn interact(
                 let big = groove == Groove::Downbeat;
                 if let Some(b) = game.sim.world.body_mut(id) {
                     b.add_velocity(PVec2::new(0.0, if big { 420.0 } else { 250.0 }));
-                    b.add_spin(if i % 2 == 0 { 2.0 } else { -2.0 });
+                    b.add_spin(if i % 2 == 0 { 0.8 } else { -0.8 });
                 }
                 kick_label(&mut labels, id, if big { 0.6 } else { 0.35 });
             }
