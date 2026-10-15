@@ -462,7 +462,7 @@ fn setup_cues_ui(mut commands: Commands, assets: Res<GameAssets>) {
             for (big, size) in [(false, 30.0), (true, 92.0)] {
                 p.spawn((
                     Text::new(""),
-                    TextFont { font: assets.font.clone().into(), font_size: size.into(), weight: if big { FontWeight::BOLD } else { FontWeight::MEDIUM }, ..default() },
+                    TextFont { font: if big { assets.font.clone() } else { assets.font_medium.clone() }.into(), font_size: size.into(), weight: if big { FontWeight::BOLD } else { FontWeight::MEDIUM }, ..default() },
                     TextColor(if big { Color::WHITE } else { Color::srgb(1.0, 0.85, 0.5) }),
                     TextShadow { offset: Vec2::new(4.0, 5.0), color: Color::srgba(0.0, 0.0, 0.0, 0.6) },
                     TitleText(big),
@@ -477,7 +477,7 @@ fn setup_cues_ui(mut commands: Commands, assets: Res<GameAssets>) {
     ));
     commands.spawn((
         Text::new(""),
-        TextFont { font: assets.font.clone().into(), font_size: 22.0.into(), ..default() },
+        TextFont { font: assets.font_medium.clone().into(), font_size: 22.0.into(), ..default() },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
         Node { position_type: PositionType::Absolute, right: px(28.0 + crate::platform::SAFE_SIDE), bottom: px(18.0), ..default() },
         GlobalZIndex(65),
@@ -616,7 +616,7 @@ fn end_card(
     card.age += time.delta_secs();
     if !card.spawned {
         card.spawned = true;
-        let font = |size: f32, w: FontWeight| TextFont { font: assets.font.clone().into(), font_size: size.into(), weight: w, ..default() };
+        let font = |size: f32, w: FontWeight| TextFont { font: if w == FontWeight::BOLD { assets.font.clone() } else { assets.font_medium.clone() }.into(), font_size: size.into(), weight: w, ..default() };
         let shadow = TextShadow { offset: Vec2::new(4.0, 5.0), color: Color::srgba(0.0, 0.0, 0.0, 0.6) };
         commands
             .spawn((
