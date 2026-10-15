@@ -297,7 +297,7 @@ fn setup_stage(mut game: ResMut<Game>) {
     if stage_kind() == "trio" {
         use crate::kids::level::KidsShape;
         let seed = stage_seed();
-        let spread = 150.0 + (seed % 2) as f32 * 30.0;
+        let spread = 72.0 + (seed % 2) as f32 * 14.0;
         let trio = [(KidsShape::Star, 0xe8c54a, -spread), (KidsShape::Square, 0x5a8ae0, 0.0), (KidsShape::Triangle, 0xd06eb0, spread)];
         for (i, (shape, color, x)) in trio.into_iter().enumerate() {
             let body = game.sim.add_player(i as u8 + 1, "", color).ctl.body;
