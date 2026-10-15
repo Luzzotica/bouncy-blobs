@@ -377,7 +377,12 @@ impl Bot {
         }
 
         match tgt.how {
-            Move::Walk | Move::Push | Move::Squeeze | Move::Drop => {}
+            Move::Walk | Move::Push | Move::Drop => {}
+            Move::Squeeze => {
+                // Squish (stick down) to roll under the low ceiling.
+                stick.y = -1.0;
+                want_jump = false;
+            }
             Move::Prop => {
                 if at_prev || edge_ahead {
                     want_jump = true;
@@ -681,6 +686,44 @@ per_chapter! {
     8 => rest_ch08, bot_ch08;
     9 => rest_ch09, bot_ch09;
     10 => rest_ch10, bot_ch10;
+}
+
+/// Sterling: "I don't have to crouch down to squish through the squish and
+/// squeeze area". The ch01 crawlspace must *require* the squish: rolling
+/// (or crawling along the ceiling with up held, or hopping) gets stuck at
+/// the mouth; holding down gets through.
+#[test]
+fn ch01_crawlspace_needs_a_squish() {
+    let c = campaign::course(1);
+    let squeeze = c.path.iter().position(|w| w.how == Move::Squeeze).expect("ch01 has a squeeze");
+    let (from, to) = (c.path[squeeze - 1].at, c.path[squeeze].at);
+    let trigger = c.level.story.iter().find(|s| s.script == "ch01_squish").expect("ch01_squish trigger");
+    assert!(trigger.shape.bounds().1.x < from.x, "the squish lesson fires before the crawlspace");
+    // From the checkpoint before it, roll right for 10 s.
+    let cp = c.level.respawn_points().into_iter().filter(|p| p.x < from.x).last().unwrap();
+    let attempt = |stick_y: f32, hop: bool| -> (bool, f32) {
+        let mut sim = Sim::new(c.level.clone());
+        sim.add_player(0, "Pip", 0xff5d73);
+        let body = sim.players[0].ctl.body;
+        sim.world.respawn(body, cp);
+        let mut best = f32::MIN;
+        for f in 0..600 {
+            let x = sim.world.body(body).unwrap().centroid().x;
+            // Squish (or crawl / hop) once at the crawlspace mouth.
+            let near = x > from.x - 100.0;
+            sim.set_input(0, Input { stick: Vec2::new(1.0, if near { stick_y } else { 0.0 }), button: near && hop && f % 40 < 20 });
+            sim.step();
+            best = best.max(sim.world.body(body).unwrap().centroid().x);
+        }
+        (best >= to.x, best)
+    };
+    for (what, y, hop) in [("rolling", 0.0, false), ("crawling with up held", 1.0, false), ("hopping", 0.0, true)] {
+        let (through, best) = attempt(y, hop);
+        assert!(!through, "ch01 crawlspace: {what} got through without squishing (reached x={best:.0})");
+        println!("{what}: stuck at x={best:.0}");
+    }
+    let (through, best) = attempt(-1.0, false);
+    assert!(through, "ch01 crawlspace: a squished Pip can't get through (stuck at x={best:.0}, needs {})", to.x);
 }
 
 // ------------------------------------------------- bot mechanics test bed
