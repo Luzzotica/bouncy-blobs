@@ -2,6 +2,7 @@
 
 pub mod bubble;
 pub mod cutscene;
+pub mod glimmer;
 pub mod lulu;
 pub mod scripts;
 
@@ -97,9 +98,12 @@ pub struct StoryFlow {
     pub goal_timer: Option<f32>,
 }
 
-/// The campaign chapter (crates/bb-level/src/campaign).
+/// The campaign chapter (crates/bb-level/src/campaign), with Glimmer the
+/// companion along from chapter 2 on.
 pub fn chapter_level(n: u8) -> Level {
-    bb_level::campaign::chapter(n)
+    let mut level = bb_level::campaign::chapter(n);
+    glimmer::join(&mut level, n);
+    level
 }
 
 pub struct StoryPlugin;
@@ -113,6 +117,8 @@ impl Plugin for StoryPlugin {
             .init_resource::<Cues>()
             .init_resource::<LineQueue>()
             .init_resource::<lulu::LuluHead>()
+            .init_resource::<glimmer::CompanionHints>()
+            .init_resource::<glimmer::GlimmerAlert>()
             .add_systems(PostUpdate, (lulu::sync, lulu::draw).chain())
             .add_systems(OnEnter(AppState::Story), enter)
             .add_systems(OnExit(AppState::Story), exit)
@@ -129,6 +135,7 @@ impl Plugin for StoryPlugin {
             )
             .add_systems(Update, end_card.run_if(in_state(AppState::Story)))
             .add_systems(Update, (bubble::spawn_bubbles, bubble::update_bubbles, words, cues_ui).chain())
+            .add_systems(Update, glimmer::glow.after(bubble::update_bubbles))
             .add_systems(PreUpdate, merge_inputs_into_pip.after(crate::input::GatherInput).run_if(in_state(AppState::Story)))
             .add_systems(Startup, setup_cues_ui)
             .add_systems(Last, persist_progress);
@@ -274,13 +281,24 @@ fn advance(
 }
 
 /// Queue of mid-level lines, spoken one after another.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct LineQueue {
     pending: std::collections::VecDeque<(Speaker, Voice, String)>,
     wait: f32,
+    /// The line at the front has had Glimmer's lead-in (glow + chime).
+    alerted: bool,
+    /// Seconds since Glimmer last started a line.
+    since_glimmer: f32,
+}
+
+impl Default for LineQueue {
+    fn default() -> Self {
+        LineQueue { pending: Default::default(), wait: 0.0, alerted: false, since_glimmer: f32::INFINITY }
+    }
 }
 
 /// Mid-level story triggers → queued speech bubbles.
+#[allow(clippy::too_many_arguments)]
 fn level_lines(
     mut events: MessageReader<SimMsg>,
     game: Res<Game>,
@@ -289,6 +307,9 @@ fn level_lines(
     time: Res<Time>,
     mut say: MessageWriter<SayRequest>,
     device: Res<crate::input::LastDevice>,
+    hints: Res<glimmer::CompanionHints>,
+    mut alert: ResMut<glimmer::GlimmerAlert>,
+    mut sfx: MessageWriter<crate::audio::PlaySfx>,
 ) {
     for SimMsg(e) in events.read() {
         let SimEvent::Story { script, slot } = e else { continue };
@@ -317,7 +338,9 @@ fn level_lines(
             let (speaker, voice) = match who {
                 "pip" => (Speaker::Player(*slot), Voice::Pip),
                 "lulu" => (Speaker::Offscreen, Voice::Lulu),
-                "tip" => (Speaker::Tip, Voice::Glimmer),
+                // Hints: Glimmer's job when she's around (and not muted).
+                "tip" if !hints.0 => continue,
+                "tip" => (role_npc(bb_level::NpcRole::Glimmer).unwrap_or(Speaker::Tip), Voice::Glimmer),
                 "glimmer" => (role_npc(bb_level::NpcRole::Glimmer).unwrap_or(Speaker::Offscreen), Voice::Glimmer),
                 "granny" => (role_npc(bb_level::NpcRole::Granny).unwrap_or(Speaker::Offscreen), Voice::Granny),
                 "reg" => (role_npc(bb_level::NpcRole::Reg).unwrap_or(Speaker::Offscreen), Voice::Reg),
@@ -337,11 +360,26 @@ fn level_lines(
     if runner.is_some() {
         return;
     }
+    queue.since_glimmer += time.delta_secs();
     queue.wait -= time.delta_secs();
     if queue.wait > 0.0 {
         return;
     }
+    // Glimmer gets your attention first (a glow and a chime), unless she's
+    // been chatting in the last few seconds.
+    let glimmer_next = queue.pending.front().is_some_and(|(s, v, _)| *v == Voice::Glimmer && matches!(s, Speaker::Actor(_)));
+    if glimmer_next && !queue.alerted && queue.since_glimmer > 8.0 {
+        queue.alerted = true;
+        queue.wait = glimmer::ALERT_LEAD;
+        alert.0 = glimmer::ALERT_LEAD;
+        sfx.write(crate::audio::PlaySfx::new("powerup-sparkle", 0.3, 1.9));
+        return;
+    }
     if let Some((speaker, voice, text)) = queue.pending.pop_front() {
+        queue.alerted = false;
+        if glimmer_next {
+            queue.since_glimmer = 0.0;
+        }
         // Next line once this one has typed and had time to be read.
         // Pace by the words actually shown (tips fill in control names).
         let shown = crate::input::control_text(&text, *device);

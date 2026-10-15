@@ -32,6 +32,9 @@ pub struct Npc {
     timer: f32,
     target: Vec2,
     stuck_for: f32,
+    /// Companion: which way her player is heading, smoothed (-1..1); she
+    /// hovers on the other side.
+    side: f32,
     rng: u32,
 }
 
@@ -41,6 +44,28 @@ pub const FOLLOW_TIME: f32 = 25.0;
 pub const GLIMMER_DRIFT: f32 = 4.0;
 /// …then goes home and won't come over again for this long.
 const GLIMMER_REST: f32 = 9.0;
+
+/// Level id of Glimmer the companion (story mode's tutor). Unlike a plain
+/// Glimmer she has no light of her own: she waits where the level put her
+/// until a player comes within [`COMPANION_MEET`], then hovers along at
+/// that player's shoulder for the rest of the level. She is a ghost to the
+/// physics (no rock, no blobs, no props), never pops, and pops back beside
+/// the player after a respawn.
+pub const COMPANION: &str = "glimmer_companion";
+/// How close a player must come for the companion to tag along.
+pub const COMPANION_MEET: f32 = 320.0;
+/// Farther than this from her player (a respawn, a long fall) and she just
+/// reappears beside them instead of streaking across the level.
+const COMPANION_LEASH: f32 = 1300.0;
+/// Where she hovers relative to her player: behind (away from where they're
+/// rolling) and above, clear of the path ahead and of the bubble space.
+const COMPANION_BEHIND: f32 = 85.0;
+const COMPANION_ABOVE: f32 = 115.0;
+
+/// Is this NPC Glimmer the companion?
+pub fn is_companion(n: &Npc) -> bool {
+    n.role == NpcRole::Glimmer && n.id == COMPANION
+}
 
 /// Reg the sock's spin (rad/s) and speed (px/s) caps.
 const REG_MAX_SPIN: f32 = 5.0;
@@ -88,6 +113,10 @@ impl Npc {
             // (The controller would otherwise put gravity back every step,
             // and she sagged a body-length under wherever she meant to be.)
             ctl.weightless = true;
+            if def.id == COMPANION {
+                // A ghost: flies through rock so she can always keep up.
+                b.mask = 0;
+            }
         }
         if def.role == NpcRole::Trapped {
             b.anchor_home(5e-7);
@@ -112,6 +141,7 @@ impl Npc {
             timer: 1.0 + index as f32 * 0.37,
             target: def.pos,
             stuck_for: 0.0,
+            side: 1.0,
             rng: 0x9e37_79b9 ^ (index as u32 + 1).wrapping_mul(0x85eb_ca6b),
         }
     }
@@ -121,6 +151,49 @@ impl Npc {
         self.rng ^= self.rng >> 17;
         self.rng ^= self.rng << 5;
         (self.rng >> 8) as f32 / (1u32 << 24) as f32
+    }
+}
+
+/// Glimmer the companion: waits, meets, then follows her player around.
+fn companion(n: &mut Npc, players: &[(Vec2, Vec2)], c: Vec2, v: Vec2, time: f32, dt: f32, world: &mut World) {
+    n.ctl.input = Input::default();
+    let t = time + n.index as f32 * 1.7;
+    let bob = Vec2::new((t * 0.9).sin() * 10.0, (t * 2.3).sin() * 12.0);
+    let nearest = players.iter().copied().min_by(|a, b| a.0.distance(c).total_cmp(&b.0.distance(c)));
+    if !n.following && nearest.is_some_and(|(p, _)| p.distance(c) < COMPANION_MEET) {
+        n.following = true;
+        n.target = c;
+    }
+    let (anchor, carry) = match nearest {
+        Some((p, pv)) if n.following => {
+            // Which side is "behind": away from where the player is rolling
+            // (smoothed, so a wobble doesn't flip her from shoulder to
+            // shoulder).
+            if pv.x.abs() > 60.0 {
+                n.side = (n.side + (pv.x.signum() - n.side) * (1.0 - (-dt * 1.5).exp())).clamp(-1.0, 1.0);
+            }
+            let want = p + Vec2::new(-n.side * COMPANION_BEHIND, COMPANION_ABOVE);
+            if c.distance(p) > COMPANION_LEASH {
+                // Respawned far away: pop in beside them.
+                if let Some(b) = world.body_mut(n.ctl.body) {
+                    b.translate(want - c);
+                    b.add_velocity(pv - b.velocity());
+                }
+                n.target = want;
+                return;
+            }
+            // The anchor itself trails the player, so she lags a little
+            // (but keeps pace: she flies with the player's speed).
+            n.target += (want - n.target) * (1.0 - (-dt * 5.0).exp());
+            (n.target + bob, pv * 0.85)
+        }
+        // Her player popped: wait right here until they're back.
+        _ if n.following => (n.target + bob, Vec2::ZERO),
+        _ => (n.home + bob, Vec2::ZERO),
+    };
+    let want = carry + (anchor - c) * 4.0 - v;
+    if let Some(bm) = world.body_mut(n.ctl.body) {
+        bm.add_accel(want.clamp_length_max(2400.0) * 7.0);
     }
 }
 
@@ -177,12 +250,13 @@ fn sock_outline(at: Vec2, r: f32) -> Vec<Vec2> {
 }
 
 pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
-    let players: Vec<Vec2> = sim
+    let movers: Vec<(Vec2, Vec2)> = sim
         .players
         .iter()
         .filter(|p| p.dead.is_none())
-        .filter_map(|p| sim.world.body(p.ctl.body).map(|b| b.centroid()))
+        .filter_map(|p| sim.world.body(p.ctl.body).map(|b| (b.centroid(), b.velocity())))
         .collect();
+    let players: Vec<Vec2> = movers.iter().map(|m| m.0).collect();
     let mut freed = Vec::new();
     for n in sim.npcs.iter_mut() {
         if n.dead.is_some() {
@@ -209,11 +283,19 @@ pub(crate) fn think(sim: &mut Sim, _ropes: &[RopeState], dt: f32) {
         let c = b.centroid();
         let v = b.velocity();
         let nearest = players.iter().copied().min_by(|a, b| a.distance(c).total_cmp(&b.distance(c)));
+        if is_companion(n) && !n.scripted {
+            companion(n, &movers, c, v, sim.time, dt, &mut sim.world);
+            continue;
+        }
         if n.role == NpcRole::Glimmer {
             // Hover by her light (home), bobbing and drifting a little (also
             // in cutscenes). A player who comes close gets a brief visit,
             // then she goes back home.
             let near_home = nearest.filter(|p| p.distance(n.home) < 420.0 && !n.scripted);
+            if n.scripted && n.ctl.input.stick.x != 0.0 {
+                // A cutscene walking her somewhere: her light goes too.
+                n.home.x += n.ctl.input.stick.x * 260.0 * dt;
+            }
             n.follow_t = (n.follow_t - dt).max(0.0);
             n.rejoin = (n.rejoin - dt).max(0.0);
             if n.rejoin <= 0.0 && n.follow_t <= 0.0 && near_home.is_some() {

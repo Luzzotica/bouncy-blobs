@@ -13,37 +13,58 @@ rolls into the **exit cave** (glowing with the next chapter's colour); the
 goal is inside that tunnel, so outros start with Pip in the glow.
 
 Cast voices: Pip (high, squeaky), Granny Gloop (low, wobbly), Glimmer
-(chimes, fortune-cookie wisdom), Reg (pompous), Huddle blobs (soft murmurs),
-Lulu (only in ch10).
+(chimes, grumpy fortune-cookie wisdom), Reg (pompous), Huddle blobs (soft
+murmurs), Lulu (only in ch10).
+
+**Glimmer is Pip's tutor** (think Link's fairy). Pip meets her early in
+chapter 1; from then on she is the *companion* (level NPC id
+`glimmer_companion`, `bb_sim::npc::COMPANION`): a small weightless light
+hovering at Pip's shoulder, behind and above, lagging a little. She passes
+through everything, never pops, and pops back beside Pip after a respawn.
+Chapter 1 places her at the meeting spot (she waits until Pip rolls within
+320 px); from chapter 2 on, story mode adds her beside the spawn
+(`story::glimmer::join`). She is never in a cutscene unless its cast lists
+her.
+
+Hints: every `tip` line (the lessons, with `{jump}`/`{hold}`/`{move}`/
+`{down}`/`{updown}` filled in for the device in hand) is spoken by Glimmer
+as her own bubble when she's in the level; without her it falls back to the
+green tip bubble. Before she speaks after a quiet spell (8 s) she glows and
+chimes for a moment, then talks. The pause menu's **Glimmer's Hints: On/Off**
+(saved as `story.hints`) mutes the `tip` lines; her story lines still play.
+Hints sit only where the old tips were: she doesn't nag.
 
 ## Chapter 1 — Too Bouncy (Huddle Hollow)
 
 | id | what happens |
 |---|---|
 | `ch01_intro` | The Great Stillness: the Huddle squishes into one quiet blob-pile. Pip holds it… holds it… sneezes, *BOING*, cascade, the whole Huddle wobbles for an hour. Granny Gloop rolls Pip out of the Back Drip: "Go bounce somewhere else, little one." |
-| `ch01_goodbye` | Pip looks back at the Huddle (they're just behind the spawn). Granny, not turning round: "…and mind the pointy bits." A sad little *boing* from Pip. |
-| `ch01_first_hop` | Pip sniffles, then can't help it: a hop. Hint bubble: hold to puff up and **boing**; tap for a little hop. |
-| `ch01_pointy` | Pip peers into the first spike pit. Sweat drop. "Pointy." Hint: run and jump over. |
-| `ch01_squish` | The crawlspace: Pip squeezes flat to fit. "Squish… squish…" (a grin creeps back). |
-| `ch01_big_slope` | Top of the ridge, a huge jelly slope below. Pip: "Oooh." Sparkle eyes. Jump at the bottom! |
-| `ch01_look_up` | The cave opens into a tall shaft; far, far above, a pinprick of light. Pip looks UP for the first time. Camera tilts up the shaft. At its foot, a tunnel glowing teal. |
-| `ch01_outro` | Pip stares up at the light, bounces once, determined. Rolls into the teal tunnel to the Drip Tunnels. |
+| `ch01_goodbye` | Alone by the Bottom Puddle. Pip: "Hello? Anybody?" … "…just me, then." |
+| `ch01_meet_glimmer` | **Pip meets Glimmer**, dozing over the far end of the puddle (she waits at (1250, 200)). Glimmer: "EEK!" … "…Oh. Ugh. A blob." Pip: "Hi! I'm Pip! You glow!" Glimmer: "I'm Glimmer. And you look hopeless. Fine. Watch and learn." She tags along from here. |
+| `ch01_first_hop` | Glimmer (hint): "Lesson one: {jump} for a little hop." / "{Hold} to swell up big and jump higher!" |
+| `ch01_flower` | First checkpoint flower. Glimmer (hint): "Glowing flowers remember you. If you pop, you'll wobble back here." Then: "Not that I'd miss you." |
+| `ch01_pointy` | Pip peers into the first spike pit. "Pointy." Glimmer (hint): "Spikes pop blobs. Roll with {move}, then {jump} right over them!" |
+| `ch01_jelly_stones` | Wobbly jelly stepping stones over spikes. Glimmer (hint): "Wobbly jelly stones. Hop from one to the next, and don't stop!" |
+| `ch01_squish` | The crawlspace. Glimmer (hint): "Low ceiling. {Down} to squish flat and squeeze through." Pip: "Squish… squish… heh. SQUISH." Glimmer: "Ha! …I mean. Hmph." (the first crack in the grump) |
+| `ch01_big_slope` | Top of the ridge, a huge jelly slope below. Pip: "Ooooooh." Glimmer (hint): "Roll down fast, then {jump} off the bump at the bottom. Big one!" |
+| `ch01_not_bad` | After the kicker leap. Glimmer: "…Okay. That was actually pretty good." Pip: "You think I'm good?" Glimmer: "I think you're LOUD. …And a bit good." |
+| `ch01_look_up` | The tall shaft; far above, a pinprick of light. Pip: "That light again…" Glimmer: "The Glow. Everyone dreams about it. Nobody goes." Pip: "I'm going!" Glimmer: "…Of course you are." |
+| `ch01_outro` | Pip stares up at the light. Glimmer: "Yep. Very far. Very up." Pip: "Will you come with me?" Glimmer: "ME? Ha! No. Lesson's over, blob." She flits off: "And don't follow me!" Pip: "…bye, Glimmer." … "That's okay. I'm bouncy." |
 
 ## Chapter 2 — The Drip (Drip Tunnels)
 
 | id | what happens |
 |---|---|
-| `ch02_hello` | Glimmer, from the intro, greets you (grumpily). |
-| `ch02_intro` | Drippy tunnels; Pip, still a bit sad, rolls in. A drip plops on Pip's head. Pip laughs despite itself. |
+| `ch02_intro` | Pip finds Glimmer again, "hiding" by a glowworm. Pip: "Glimmer! There you are!" Glimmer: "Shh! I'm hiding. From YOU." Pip: "You glow. You're really easy to find." Glimmer: "…Ugh." |
+| `ch02_hello` | At the spawn, Glimmer right beside Pip (the companion again): "You AGAIN? Stop following my light." Pip: "I'm not following! I'm going UP!" Glimmer: "…Up is this way. Keep up." |
 | `ch02_drips` | Plip… plop. Hint: drips fall in a rhythm; time your roll. |
-| `ch02_meet_glimmer` | A glowworm uncurls from the ceiling: **Glimmer**. "Ooh! A bouncy one! A wobble is just a hug that hasn't found its person yet!" Glimmer decides to tag along. |
-| `ch02_first_light` | Glimmer touches the dim glow mushroom; it lights up (first checkpoint). "Mushrooms remember you. Pop all you like!" |
-| `ch02_bridge_wobble` | First soft bridge sags under Pip. Glimmer: "Wobbly isn't broken. Wobbly is just *thinking*." |
+| `ch02_first_light` | The first checkpoint flower. Glimmer: "Another glowing flower. You know the drill." |
+| `ch02_bridge_wobble` | First soft bridge sags under Pip. Pip: "Wobbly… but it holds!" Glimmer: "Wobbly isn't broken. Wobbly is just thinking." |
 | `ch02_membranes` | The membrane shaft. Glimmer: "Jelly doors only open one way… up!" Hint: jump up through membranes. |
 | `ch02_up_feeling` | At the top of the shaft. Glimmer: "Up is a direction AND a feeling!" Pip bounces higher than before. |
 | `ch02_push` | A trench far too wide to jump, spikes at the bottom, a huge jelly ball beside it. Pip: "Too wide to jump..." Hint: push the ball in, roll across on top. (First push puzzle.) |
-| `ch02_mushroom_glow` | Warm light ahead: the Fungus Caverns. Glimmer: "Smell that? Mushrooms. Bouncy ones." |
-| `ch02_outro` | Pip and Glimmer peer into the glowing Fungus Caverns; giant mushroom caps wobble like trampolines. |
+| `ch02_mushroom_glow` | Warm light ahead: the Fungus Caverns. Pip: "Maybe someone nice lives there?" Glimmer: "Doubt it." |
+| `ch02_outro` | Pip: "Nobody down here wants to share a light." Glimmer: "…I'm sharing mine. Technically." Pip: "Glimmer!" Glimmer: "Don't make it weird." Then the pink glow ahead. |
 
 ## Chapter 3 — Mushroom Bounce (Fungus Caverns)
 
@@ -58,7 +79,7 @@ Lulu (only in ch10).
 | `ch03_angled` | A tilted spring aimed across a big gap. Pip gulps, then grins. |
 | `ch03_cavern` | Bottom of a tall cavern ringed with caps. Glimmer: "Up, up, up!" |
 | `ch03_bouncing_up` | Top of the climb. Pip realises: bouncing is how you go *up*. Pure joy, little speed lines. Glimmer: "Told you." |
-| `ch03_outro` | Pip bounces in happy circles; beyond the fungus, the glow of hanging vines. |
+| `ch03_outro` | Pip: "They didn't want me…" Glimmer: "Their loss. …Don't tell anyone I said that." Pip bounces: bouncing is how you go UP. |
 
 ## Chapter 4 — Vine Gardens (Glowroot Grotto)
 
@@ -88,7 +109,7 @@ Lulu (only in ch10).
 | `ch05_rush` | A conveyor rushes toward three pistons. Glimmer: "Sometimes the floor decides for you. Bounce anyway." |
 | `ch05_whole_trick` | The low point turns. Pip, after yet another pop, reforms and *laughs*. Glimmer: "You popped. You came back. That's the whole trick." Pip bounces at full size again. |
 | `ch05_light` | Out of the works; damp air and the shimmer of water ahead. A distant, pompous voice echoes: "HALT! Who approaches the Royal Lake?!" |
-| `ch05_outro` | Pip and Glimmer peek out at a vast underground lake. On an island far away: a teacup, and in it, a sock. |
+| `ch05_outro` | Pip: "I popped so many times." Glimmer: "You popped. You came back. That's the whole trick." Pip: "…but I'm still me. Still looking." |
 
 ## Chapter 6 — Puddle Lake (Underground Lake)
 
@@ -119,7 +140,7 @@ Lulu (only in ch10).
 | `ch07_geysers` | Puffing geysers over a spiky floor. Glimmer: "Hop, float, hop, float. Like a cloud with places to be." |
 | `ch07_sticky` | A chimney lined with sticky moss. Hint: touch a sticky wall in the air to cling; press the button to wall-jump. |
 | `ch07_giggle` | At the top of the great updraft, everything goes quiet… then, echoing down the flue from impossibly far above, a little girl's **giggle**. Pip freezes, then bounces so hard it squeaks. Glimmer, softly: "The Glow is real." |
-| `ch07_outro` | Beyond the flues: mountains of strange, bright, fallen things. A wind-up car rolls past on its own. |
+| `ch07_outro` | Pip: "A giggle. A nice one. A squishy one." Glimmer, softly: "…The Glow is real." |
 
 ## Chapter 8 — The Toy Pile (Lost-Toy Midden)
 
@@ -159,7 +180,7 @@ Lulu (only in ch10).
 
 | id | what happens |
 |---|---|
-| `ch10_intro` | The bottom of the Old Well. A tiny circle of daylight, impossibly far up. The whole Huddle behind Pip. Granny: "Well? Go on. Bounce." |
+| `ch10_intro` | The bottom of the Old Well. A tiny circle of daylight, impossibly far up. Pip: "Okay, Pip. One more climb." Glimmer: "Go on. Bounce. I'll light the way." |
 | `ch10_well` | A sagging bridge over goo on the way in; the Huddle crosses it in a wobbly conga line, giggling. |
 | `ch10_huddle` | First glow mushroom in the well. The Huddle cheers (softly; old habits). Hint: the well has old one-way boards; jump up through them, and a slip only drops you to the boards below. |
 | `ch10_halfway` | Halfway up. Pip looks down: the whole Huddle bouncing up behind. Granny, puffing: "In my day we never went higher than a TOE." |

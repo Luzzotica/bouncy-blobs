@@ -2,8 +2,9 @@
 //!
 //! Pip rolls on, drippy and sniffly, into the Drip Tunnels: plopping jelly
 //! drips, sagging soft bridges over goo and nothing at all, and one-way
-//! jelly membranes you boing up through. Glimmer the glowworm turns up,
-//! lights the first mushroom, and the tunnels start to climb.
+//! jelly membranes you boing up through. Glimmer (who flitted off at the
+//! end of chapter 1) is found hiding at the start, grumbles, and tags along
+//! again; the tunnels start to climb.
 //!
 //! Mechanics: falling jelly drops, sagging soft bridges, one-way membranes,
 //! and a first push puzzle (a jelly ball into a spiky trench).
@@ -22,8 +23,8 @@ pub fn build() -> Course {
     // ------------------------------------------------ plip, plop, drip
     c.entry_cave(-1300.0, -500.0, 0.0, 1700.0, Theme::Hollow);
     c.floor(&[v(-500.0, 0.0), v(560.0, 0.0), v(700.0, -30.0), v(850.0, 0.0), v(2000.0, 0.0)]);
-    // The cast from the intro cutscene greets you at the start.
-    c.npc("glimmer_start", v(-200.0, 200.0), NpcRole::Glimmer, "", 12.0);
+    // Glimmer, from the intro, right by Pip: the companion again.
+    c.npc(super::ch01::GLIMMER, v(-110.0, 170.0), NpcRole::Glimmer, "", 12.0);
     c.say(-80.0, 80.0, 0.0, "ch02_hello");
     c.say(250.0, 320.0, 0.0, "ch02_drips");
     // Drips: first one well clear of the path to show the rhythm.
@@ -32,8 +33,6 @@ pub fn build() -> Course {
     c.drip_hazard(v(1250.0, 560.0), 520.0, 30.0, 0.7);
     c.drops(150.0, 450.0, 0.0, 3);
     c.drops(1080.0, 1170.0, 0.0, 2);
-    c.npc("glimmer", v(1500.0, 200.0), NpcRole::Glimmer, "", 12.0);
-    c.say(1380.0, 1440.0, 0.0, "ch02_meet_glimmer");
     c.decor("mushroom", v(1820.0, 0.0), 1.6, -1.0);
     c.cp(1850.0, 0.0);
     c.say(1800.0, 1900.0, 0.0, "ch02_first_light");
