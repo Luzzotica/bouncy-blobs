@@ -5,7 +5,7 @@
 //! Bot playtests are slow-ish; they run per chapter in parallel and print a
 //! report (`cargo test -p bb-level --test campaign -- --nocapture bot`).
 
-use bb_level::campaign::{self, CHAPTERS, Course, Move, Waypoint};
+use bb_level::campaign::{self, Blueprint, CHAPTERS, Course, Move, Waypoint};
 use bb_level::*;
 use bb_sim::{Input, Sim, Vec2, physics::geom};
 
@@ -48,6 +48,19 @@ fn chapters_round_trip_through_json() {
         assert_eq!(back.to_json(), json, "{} changes on a round trip", l.id);
     }
     assert_eq!(campaign::by_id("ch03").unwrap().id, "ch03");
+}
+
+/// The chapter files are the source of truth: each parses, survives a
+/// save → load unchanged, and expands the same way every time.
+#[test]
+fn blueprint_files_round_trip() {
+    for n in 1..=CHAPTERS {
+        let bp = campaign::blueprint(n);
+        let again = Blueprint::from_json(&bp.to_json()).unwrap_or_else(|e| panic!("ch{n:02}: {e}"));
+        assert_eq!(again, bp, "ch{n:02}: blueprint changes on a save/load");
+        assert_eq!(again.expand().level, bp.expand().level, "ch{n:02}: expansion isn't deterministic");
+        assert_eq!(campaign::source_path(n).file_name().unwrap().to_str().unwrap(), format!("ch{n:02}.json"));
+    }
 }
 
 #[test]
