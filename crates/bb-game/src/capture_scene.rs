@@ -7,6 +7,11 @@
 //!   sides and below, bounce off the logo and the block, and land on it.
 //!   `BB_CAPTURE_SCENE_SEED=n` varies the choreography (takes).
 //! * `logo` — the same without the block: logo and blobs in the title cave.
+//! * `spikeloop` — a small stage in The Drip's look: a flat floor of spikes,
+//!   Pip spawning at (0, 260) above them (the camera's job is the framing).
+//!   Pair with `BB_CAPTURE_RESPAWN` (short next-life delay),
+//!   `BB_CAPTURE_DROPLET_LIFE` (droplets melt before they cushion the
+//!   spikes) and optionally `BB_CAPTURE_RESPAWN_AT` for x variation.
 //! * `stage` — an empty posing stage for transparent stills
 //!   (`BB_CAPTURE_TRANSPARENT=1`): a flat floor (hidden in transparent mode)
 //!   and `BB_STAGE=solo` (Pip alone; place with `BB_CAPTURE_AT`, drive with
@@ -35,6 +40,10 @@ pub struct CaptureScenePlugin;
 
 impl Plugin for CaptureScenePlugin {
     fn build(&self, app: &mut App) {
+        if scene().as_deref() == Some("spikeloop") {
+            app.add_systems(Startup, start_spikeloop);
+            return;
+        }
         if scene().as_deref() == Some("stage") {
             app.add_systems(Startup, start_stage).add_systems(PostUpdate, setup_stage.run_if(resource_added::<Game>));
             return;
@@ -245,6 +254,15 @@ mod tests {
     }
 
     #[test]
+    fn spikeloop_is_spikes_under_pip() {
+        let l = spikeloop_level();
+        assert_eq!(l.spikes.len(), 2);
+        assert!(l.npcs.is_empty());
+        assert_eq!(l.theme, Theme::Drip);
+        assert!(l.spawn.y > 100.0);
+    }
+
+    #[test]
     fn both_takes_launch_pip() {
         for seed in [0, 1] {
             assert!(entrances(seed).iter().any(|e| e.blob == 0));
@@ -310,4 +328,28 @@ fn setup_stage(mut game: ResMut<Game>) {
             game.sim.world.respawn(body, PVec2::new(x, y));
         }
     }
+}
+
+// -------------------------------------------------------------- spikeloop
+
+/// Pip's spawn point above the spike strip in `spikeloop`.
+pub const SPIKELOOP_SPAWN: (f32, f32) = (0.0, 260.0);
+
+pub fn spikeloop_level() -> bb_level::Level {
+    let mut b = LevelBuilder::new("spikeloop", "Spike loop", Theme::Drip);
+    b.spawn(v(SPIKELOOP_SPAWN.0, SPIKELOOP_SPAWN.1)).kill_y(-3000.0);
+    // `BB_SPIKELOOP_SLOPE=k`: the strip is a gentle tent (rise k per unit
+    // x toward the middle) so pop droplets slide away off both sides and
+    // never cushion the spikes; 0 = flat.
+    let k = std::env::var("BB_SPIKELOOP_SLOPE").ok().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+    let (l, r) = (v(-3000.0, -3000.0 * k), v(3000.0, -3000.0 * k));
+    b.ground(&[l, v(0.0, 0.0), r], 600.0);
+    b.spikes(l, v(0.0, 0.0));
+    b.spikes(v(0.0, 0.0), r);
+    b.build()
+}
+
+fn start_spikeloop(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+    next.set(AppState::Playing);
+    load.write(LoadLevel { level: spikeloop_level(), players: vec![(0u8, "Pip".to_string(), 0xff5d73u32)] });
 }
