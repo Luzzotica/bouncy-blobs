@@ -622,7 +622,8 @@ fn interact(
     {
         let m = &mut *menu;
         m.drop.update(&mut game.sim.world, dt);
-        // The logo dances to the music: each letter on its own beat.
+        // The logo dances to the music: each letter bobs inside its jelly
+        // tile on its own beat (the tiles themselves stay put).
         if m.drop.done() {
             for (i, &id) in m.letters.iter().enumerate() {
                 let groove = Groove::of(i);
@@ -630,11 +631,7 @@ fn interact(
                     continue;
                 }
                 let big = groove == Groove::Downbeat;
-                if let Some(b) = game.sim.world.body_mut(id) {
-                    b.add_velocity(PVec2::new(0.0, if big { 420.0 } else { 250.0 }));
-                    b.add_spin(if i % 2 == 0 { 0.8 } else { -0.8 });
-                }
-                kick_label(&mut labels, id, if big { 0.6 } else { 0.35 });
+                kick_label(&mut labels, id, if big { 0.9 } else { 0.55 });
             }
         }
     }
