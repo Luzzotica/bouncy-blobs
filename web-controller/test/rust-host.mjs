@@ -43,7 +43,7 @@ const server = createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--mute-audio'] }); // never through the speakers
 const finish = async (result) => {
   console.log(JSON.stringify(result));
   host.kill();
