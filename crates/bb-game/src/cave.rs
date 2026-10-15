@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::level_view::LevelEntity;
 use crate::palette::{self, ThemeColors, darken, lighten, lin, mix};
-use crate::render::{MeshBuf, Shared, la, z};
+use crate::render::{Ends, MeshBuf, Shared, la, z};
 use crate::sim::Game;
 
 pub struct CavePlugin;
@@ -348,13 +348,17 @@ pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32
     let stalk = if dark { mix(Color::BLACK, lighten(col, 0.5), 0.35 + 0.2 * g) } else { lighten(col, 0.6) };
     let stalk_pts: Vec<PVec2> = (0..=6).map(|i| sh(PVec2::new((i as f32 * 0.9).sin() * 1.5 * s, 42.0 * s * i as f32 / 6.0))).collect();
     buf.stroke(&stalk_pts, 9.0 * s, -0.002, lin(stalk));
-    buf.stroke(&stalk_pts[..5], 4.0 * s, -0.0015, la(lighten(stalk, 0.25), 0.8));
+    // The stalk's sheen thins out short of the cap instead of stopping flat.
+    buf.stroke_taper(&stalk_pts[..5], 4.0 * s, -0.0015, &[la(lighten(stalk, 0.25), 0.8)], 10.0 * s, Ends::End);
     // A vein of light up the stalk, root to cap: a faint seam at rest; when
     // the mushroom is lit, bright beads flow up it into the cap.
     if dark {
         let m = stalk_pts.len();
-        let seam: Vec<[f32; 4]> = (0..m).map(|i| la(mix(stalk, col, 0.5), (0.18 + 0.25 * g.min(1.0)) * (i as f32 / 2.0).min(1.0))).collect();
-        buf.stroke_cols(&stalk_pts, 1.6 * s, -0.0012, &seam);
+        // It rises out of the ground, fading and thinning in at the root;
+        // the cap hides its top end.
+        let rise = 14.0 * s;
+        let seam: Vec<[f32; 4]> = (0..m).map(|_| la(mix(stalk, col, 0.5), 0.18 + 0.25 * g.min(1.0))).collect();
+        buf.stroke_taper(&stalk_pts, 1.6 * s, -0.0012, &seam, rise, Ends::Start);
         if g > 0.02 {
             let gm = g.min(1.0);
             let core: Vec<[f32; 4]> = (0..m)
@@ -366,12 +370,12 @@ pub fn draw_mushroom_sq(buf: &mut MeshBuf, s: f32, react: f32, wob: f32, sq: f32
                         let dd = (y - head).abs().min((y - head + 1.0).abs());
                         (1.0 - dd / 0.22).max(0.0)
                     }).fold(0.0, f32::max);
-                    la(lighten(col, 0.45), gm * (0.35 + 0.65 * wave) * (y * 3.0).min(1.0))
+                    la(lighten(col, 0.45), gm * (0.35 + 0.65 * wave))
                 })
                 .collect();
-            buf.stroke_cols(&stalk_pts, 2.4 * s, -0.0011, &core);
-            let soft: Vec<[f32; 4]> = (0..m).map(|i| la(col, 0.12 * gm * (i as f32 / 2.0).min(1.0))).collect();
-            buf.stroke_cols(&stalk_pts, 10.0 * s, -0.0013, &soft);
+            buf.stroke_taper(&stalk_pts, 2.4 * s, -0.0011, &core, rise, Ends::Start);
+            let soft: Vec<[f32; 4]> = (0..m).map(|_| la(col, 0.12 * gm)).collect();
+            buf.stroke_taper(&stalk_pts, 10.0 * s, -0.0013, &soft, rise, Ends::Start);
         }
     }
     // Cap: a dome, deep at the gills, bright on top.

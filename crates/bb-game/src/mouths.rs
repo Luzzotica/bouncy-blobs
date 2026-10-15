@@ -21,7 +21,7 @@ use bevy::prelude::*;
 
 use crate::level_view::{GoalVisual, LevelEntity};
 use crate::palette::{self, darken, hex, lighten, mix};
-use crate::render::{MeshBuf, Shared, empty_mesh, la, z};
+use crate::render::{Ends, MeshBuf, Shared, empty_mesh, la, z};
 use crate::sim::Game;
 
 pub struct MouthsPlugin;
@@ -172,7 +172,7 @@ pub fn draw_mouth(m: &CaveMouth, t: f32, back: &mut MeshBuf, on_rock: &mut MeshB
             // A thin lit rim on the side facing the level.
             let towards = if f < 0.0 { 0.0 } else { std::f32::consts::PI };
             let lit: Vec<PVec2> = (0..=8).map(|j| pt(towards - 1.1 + 2.2 * j as f32 / 8.0)).collect();
-            on_rock.stroke(&lit, 2.0, 0.002, la(lighten(lt.glow, 0.3), 0.45 * k));
+            on_rock.stroke_taper(&lit, 2.0, 0.002, &[la(lighten(lt.glow, 0.3), 0.45 * k)], r * 0.6, Ends::Both);
         }
         // Pinpricks of light between the stones.
         for (dx, dy) in [(d - 70.0, 70.0), (d - 40.0, 160.0), (d - 100.0, 140.0), (d - 30.0, 250.0)] {
