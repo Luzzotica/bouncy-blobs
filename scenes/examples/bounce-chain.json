@@ -1,0 +1,35 @@
+{
+  "_comment": "Bounce chain: Pip rolls right through Fungus Caverns and bounces five times. Every move is player input through the real game.",
+  "scene": "bb-bounce-chain",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1],
+  "stage": { "kind": "chapter", "id": "fungus-caverns" },
+  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [5450, 820] } ],
+  "pre_roll": 1.67,
+
+  "_inputs": "Times are video seconds from frame 1 (negative = during the pre-roll). hold/release a key; jump taps the one button (hold: seconds held, longer = higher).",
+  "inputs": [
+    { "t": -1.33, "who": "pip", "do": "hold", "key": "right" },
+    { "t": -0.33, "who": "pip", "do": "jump", "hold": 0.17 },
+    { "t": 1.83, "who": "pip", "do": "jump", "hold": 0.27 },
+    { "t": 2.83, "who": "pip", "do": "jump", "hold": 0.27 },
+    { "t": 3.83, "who": "pip", "do": "jump", "hold": 0.27 },
+    { "t": 4.83, "who": "pip", "do": "jump", "hold": 0.27 },
+    { "t": 5.83, "who": "pip", "do": "jump", "hold": 0.27 },
+    { "t": 7.0, "who": "pip", "do": "release", "key": "right" }
+  ],
+
+  "_camera": "Follow Pip with a short lag, a little look-ahead and a dead zone, at 14% of the frame width in every output.",
+  "camera": [
+    { "t": 0, "do": "follow", "who": "pip", "subject_width": 0.14, "lag": 0.2, "lead": [0.2, 0], "deadzone": [80, 80] }
+  ],
+  "length": { "seconds": 8 },
+  "capture_only": [],
+  "check": { "band_x": [0.2, 0.8], "objects": ["pip"] },
+  "outputs": [
+    { "kind": "video", "size": "1080x1920", "fps": 60 },
+    { "kind": "video", "size": "1920x1080", "fps": 60 },
+    { "kind": "still", "size": "1920x1080", "at": 4.0 }
+  ]
+}

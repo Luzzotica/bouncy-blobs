@@ -285,12 +285,12 @@ impl Plugin for CapturePlugin {
             .add_systems(FixedPostUpdate, (capture_respawn, droplet_life).run_if(resource_exists::<Game>))
             .add_systems(
                 PostUpdate,
-                frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
+                frame_camera.in_set(crate::camera::CameraFraming).in_set(CaptureCamera).after(crate::camera::follow),
             );
         if cfg.transparent {
             app.add_systems(Startup, |mut c: ResMut<ClearColor>| c.0 = Color::NONE);
         }
-        if cfg.transparent || cfg.hide_chars {
+        if cfg.transparent || cfg.hide_chars || crate::scene_run::scene().is_some() {
             app.add_systems(
                 PostUpdate,
                 filter_view.after(crate::backdrop::BackdropSystems).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
@@ -321,6 +321,10 @@ impl Plugin for CapturePlugin {
 }
 
 // ───────────────────────────────────────────────────────────── camera
+
+/// The capture camera's framing system (scene files run after it).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CaptureCamera;
 
 #[derive(Resource, Default)]
 struct CapCam {
@@ -628,6 +632,41 @@ fn spawn_ffmpeg(cfg: &CaptureConfig, out: &std::path::Path) -> std::io::Result<(
     Ok((child, stdin))
 }
 
+/// Recorded frame index (0-based) of the update that's running now: negative
+/// during the pre-roll, `i64::MIN` during the warm-up. Scene files use it as
+/// their clock.
+pub static NEXT_FRAME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
+/// Stop recording after this many frames (scene files' `length.until`).
+pub static FRAME_LIMIT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+fn frame_limit(cfg: &CaptureConfig) -> u32 {
+    cfg.frames.min(FRAME_LIMIT.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Game time for recorded frame `r`: the scene file's timescale windows
+/// when there is one, else the fixed `BB_CAPTURE_SPEED`.
+fn clip_frame_delta(r: u64, cfg: &CaptureConfig) -> Duration {
+    let Some(s) = crate::scene_run::scene() else { return frame_delta(r, cfg.speed, tick()) };
+    static CUM: OnceLock<Vec<u64>> = OnceLock::new();
+    let cum = CUM.get_or_init(|| {
+        let tn = tick().as_nanos() as f64;
+        let mut acc = 0.0f64;
+        let mut v = vec![0u64];
+        for f in 0..cfg.frames as u64 + 2 {
+            acc += s.rate_at_frame(f) as f64 * tn;
+            v.push((acc + 1e-3).floor() as u64);
+        }
+        v
+    });
+    let i = (r as usize).min(cum.len() - 2);
+    Duration::from_nanos(cum[i + 1] - cum[i])
+}
+
+fn still_frames() -> &'static [u32] {
+    static F: OnceLock<Vec<u32>> = OnceLock::new();
+    F.get_or_init(|| std::env::var("BB_SCENE_STILLS").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect())
+}
+
 fn record(
     mut commands: Commands,
     mut rec: ResMut<Recorder>,
@@ -653,10 +692,12 @@ fn record(
     }
     // Clock for the NEXT update.
     let next = rec.frame + 1;
-    *strategy = TimeUpdateStrategy::ManualDuration(if next >= rec.first { frame_delta(next - rec.first, cfg.speed, tick()) } else { tick() });
+    *strategy = TimeUpdateStrategy::ManualDuration(if next >= rec.first { clip_frame_delta(next - rec.first, cfg) } else { tick() });
+    NEXT_FRAME.store(next as i64 - rec.first as i64, std::sync::atomic::Ordering::Relaxed);
 
     // This update is a recorded frame: grab it.
-    if rec.frame >= rec.first && rec.requested < cfg.frames && !rec.failed {
+    let frames = frame_limit(cfg);
+    if rec.frame >= rec.first && rec.requested < frames && !rec.failed {
         if rec.ffmpeg.is_none() {
             match spawn_ffmpeg(cfg, &out) {
                 Ok(f) => rec.ffmpeg = Some(f),
@@ -692,6 +733,14 @@ fn record(
     loop {
         let next = rec.written;
         let Some(data) = rec.frames.lock().unwrap().remove(&next) else { break };
+        // `BB_SCENE_STILLS=f,f,...`: also keep these recorded frames as raw
+        // RGBA (`<out>.still-<frame>.rgba`, straight alpha) for PNG stills.
+        if still_frames().contains(&next) {
+            let p = format!("{}.still-{next}.rgba", out.display());
+            if let Err(e) = std::fs::write(&p, &data) {
+                error!("capture: can't write {p}: {e}");
+            }
+        }
         if let Some((_, stdin)) = rec.ffmpeg.as_mut() {
             if let Err(e) = stdin.write_all(&data) {
                 error!("capture: ffmpeg write failed: {e}");
@@ -700,8 +749,8 @@ fn record(
         }
         rec.written += 1;
     }
-    let done = rec.written >= cfg.frames;
-    let stuck = rec.first != u64::MAX && rec.frame > rec.first + cfg.frames as u64 + 600;
+    let done = rec.written >= frames;
+    let stuck = rec.first != u64::MAX && rec.frame > rec.first + frames as u64 + 600;
     if done || rec.failed || stuck {
         if stuck && !done {
             error!("capture: only {} of {} frames came back", rec.written, cfg.frames);
@@ -789,10 +838,12 @@ fn filter_view(
                 (_, None) => false,
             }
         } else {
-            // Opaque plate: only characters and floating words go.
+            // Opaque frame: characters and floating words go for plates;
+            // scene files keep Glimmer out unless they name her.
+            let hide_glimmer = crate::scene_run::scene().is_some() && !crate::scene_run::shows("glimmer");
             let hide = match id {
-                Some(id) => is_char(id),
-                None => text.is_some(),
+                Some(id) => (cfg.hide_chars && is_char(id)) || (hide_glimmer && glimmer(id)),
+                None => cfg.hide_chars && text.is_some(),
             };
             if !hide {
                 continue;

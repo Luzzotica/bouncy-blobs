@@ -1,0 +1,23 @@
+{
+  "_comment": "Chapter pan: a wide look at Puddle Lake's shore that eases into following Pip as he rolls toward the water.",
+  "scene": "bb-lake-pan",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1],
+  "stage": { "kind": "chapter", "id": "puddle-lake" },
+  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [300, 140] } ],
+  "pre_roll": 0.5,
+  "inputs": [ { "t": -0.4, "who": "pip", "do": "hold", "key": "right" } ],
+  "_camera": "Key 1: a wide view near the shore. Key 2: from 0.4 s, ease over 1.5 s into following Pip at 12% width.",
+  "camera": [
+    { "t": 0, "do": "frame", "at": [700, 330], "view": [800, 800] },
+    { "t": 0.4, "do": "follow", "who": "pip", "lag": 0.3, "offset": [0, 80], "subject_width": 0.12, "by": 1.5, "ease": "ease" }
+  ],
+  "length": { "seconds": 9 },
+  "capture_only": [],
+  "check": { "band_x": [0.1, 0.9], "objects": ["pip"] },
+  "outputs": [
+    { "kind": "video", "size": "1080x1920", "fps": 60 },
+    { "kind": "video", "size": "1920x1080", "fps": 60 }
+  ]
+}

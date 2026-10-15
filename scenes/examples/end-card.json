@@ -1,0 +1,19 @@
+{
+  "_comment": "End card: the title cave, the jelly logo and a Wishlist block; Pip and friends jump in and land on it. They are the stage's own actors, so there is no player and no subject check.",
+  "scene": "bb-end-card",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1],
+  "stage": { "kind": "builtin", "id": "endcard" },
+  "cast": [ { "from_stage": true } ],
+  "pre_roll": 0.75,
+  "camera": [ { "t": 0, "do": "frame", "at": [0, 600], "view": [688, 688] } ],
+  "length": { "seconds": 5 },
+  "capture_only": [ { "what": "stage", "value": null, "why": "capture-only end-card scene (title cave, logo, Wishlist block, blobs launched in)" } ],
+  "check": { "objects": [], "frame1_moving": false },
+  "outputs": [
+    { "kind": "video", "size": "1080x1920", "fps": 60 },
+    { "kind": "video", "size": "1920x1080", "fps": 60 },
+    { "kind": "still", "size": "1080x1920", "at": 4.5 }
+  ]
+}

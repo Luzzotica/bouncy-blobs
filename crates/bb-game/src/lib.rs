@@ -10,6 +10,14 @@ pub mod backdrop;
 pub mod camera;
 pub mod capture;
 pub mod capture_scene;
+pub mod scene;
+pub mod scene_run;
+
+/// Build facts baked in by build.rs.
+pub mod build_info {
+    /// Short git commit of this build (with -dirty if there were uncommitted changes).
+    pub const COMMIT: &str = env!("BB_GIT_COMMIT");
+}
 pub mod cave;
 pub mod crag;
 pub mod dance;
@@ -53,6 +61,11 @@ pub fn palette_cycle(i: usize) -> u32 {
 }
 
 pub fn run() {
+    // `BB_PRINT_BUILD=1`: print the baked-in commit and exit (bb-scene uses it).
+    if std::env::var_os("BB_PRINT_BUILD").is_some() {
+        println!("{}", build_info::COMMIT);
+        return;
+    }
     app().run();
 }
 
@@ -102,6 +115,7 @@ impl Plugin for GamePlugin {
                 softtext::SoftTextPlugin,
             ))
             .add_plugins(mouths::MouthsPlugin)
+            .add_plugins((capture_scene::CaptureScenePlugin, scene_run::SceneRunPlugin))
             .add_plugins(gadgets_view::GadgetsViewPlugin)
             .add_plugins((
                 story::StoryPlugin,
@@ -112,7 +126,6 @@ impl Plugin for GamePlugin {
                 achievements::AchievementsPlugin,
                 devtools::DevToolsPlugin,
                 capture::CapturePlugin,
-                capture_scene::CaptureScenePlugin,
                 audio::GameAudioPlugin,
                 kids::KidsPlugin,
                 net::NetPlugin,

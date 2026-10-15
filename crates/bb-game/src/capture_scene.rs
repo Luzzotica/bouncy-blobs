@@ -40,6 +40,10 @@ pub struct CaptureScenePlugin;
 
 impl Plugin for CaptureScenePlugin {
     fn build(&self, app: &mut App) {
+        if scene().as_deref() == Some("inline") {
+            app.add_systems(Startup, start_inline);
+            return;
+        }
         if scene().as_deref() == Some("spikeloop") {
             app.add_systems(Startup, start_spikeloop);
             return;
@@ -352,4 +356,21 @@ pub fn spikeloop_level() -> bb_level::Level {
 fn start_spikeloop(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
     next.set(AppState::Playing);
     load.write(LoadLevel { level: spikeloop_level(), players: vec![(0u8, "Pip".to_string(), 0xff5d73u32)] });
+}
+
+// ----------------------------------------------------------------- inline
+
+/// A scene file's inline level (`"stage": {"inline": {...}}`), with Pip.
+fn start_inline(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
+    let Some(v) = crate::scene_run::scene().and_then(|s| s.stage.level.as_ref()) else {
+        error!("capture: BB_CAPTURE_SCENE=inline needs a scene file with an inline stage");
+        return;
+    };
+    match bb_level::Level::from_json(&v.to_string()) {
+        Ok(level) => {
+            next.set(AppState::Playing);
+            load.write(LoadLevel { level, players: vec![(0u8, "Pip".to_string(), 0xff5d73u32)] });
+        }
+        Err(e) => error!("capture: inline level: {e}"),
+    }
 }

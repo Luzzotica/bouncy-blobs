@@ -1,0 +1,24 @@
+{
+  "_comment": "Transparent pose: Pip lands on the empty posing stage at quarter speed; the stills are RGBA PNGs with straight alpha (only Pip is drawn).",
+  "scene": "bb-pip-squish-pose",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1],
+  "stage": { "kind": "builtin", "id": "transparent" },
+  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [0, 300] } ],
+  "pre_roll": 0.36,
+  "_camera": "timescale is a capture-side time scale (the simulation stays exact): 0.25 = four video seconds per game second.",
+  "camera": [
+    { "t": 0, "do": "frame", "at": [0, 90], "view": [220, 220] },
+    { "t": 0, "do": "timescale", "rate": 0.25, "until": 2.0 }
+  ],
+  "length": { "seconds": 1.6 },
+  "capture_only": [ { "what": "stage", "value": null, "why": "the empty posing stage (hidden floor), capture-only" } ],
+  "check": { "band_x": [0.25, 0.75], "objects": ["pip"], "min_subject_width": 0.0 },
+  "outputs": [
+    { "kind": "still", "size": "2048x2048", "transparent": true, "at": 0.5 },
+    { "kind": "still", "size": "2048x2048", "transparent": true, "at": 0.7 },
+    { "kind": "still", "size": "2048x2048", "transparent": true, "at": 0.9 }
+  ],
+  "audio": { "music_stem": false, "sfx_families": [], "mix": false }
+}

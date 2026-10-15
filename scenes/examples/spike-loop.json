@@ -1,0 +1,34 @@
+{
+  "_comment": "Spike loop: Pip drops onto a strip of spikes and pops, again and again. Keys starting with _ are comments; the runner ignores them.",
+  "scene": "bb-spike-loop",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1],
+
+  "_stage": "A capture-only stage in The Drip's look (not the chapter 2 trench), so it is declared in capture_only.",
+  "stage": { "kind": "builtin", "id": "spikeloop" },
+  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [0, 260] } ],
+
+  "_pre_roll": "Seconds of game time before frame 1, so Pip is already falling on frame 1.",
+  "pre_roll": 0.33,
+
+  "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in EVERY output (9:16 and 16:9 each frame to their own width).",
+  "camera": [
+    { "t": 0, "do": "frame", "at": [0, 180], "subject_width": 0.175 }
+  ],
+  "length": { "seconds": 11 },
+
+  "capture_only": [
+    { "what": "stage", "value": null, "why": "spikeloop is a capture-only stage in The Drip's look, not a level from the game" },
+    { "what": "respawn_delay", "value": 0.65, "why": "next life after 0.65 s instead of 1.1 s, for a snappy rhythm" },
+    { "what": "spikeloop_slope", "value": 0.25, "why": "the spike strip is a gentle tent so droplets slide off the sides (they keep their real lifetime)" }
+  ],
+
+  "check": { "band_x": [0.05, 0.95], "objects": ["pip", "word:POP!"], "min_subject_width": 0.12, "frame1_moving": true },
+  "outputs": [
+    { "kind": "video", "size": "1080x1920", "fps": 60 },
+    { "kind": "video", "size": "1920x1080", "fps": 60 },
+    { "kind": "still", "size": "1080x1920", "at": "event:pop#3" }
+  ],
+  "audio": { "music_stem": true, "sfx_families": ["pop", "land", "splash", "ui"], "mix": true }
+}

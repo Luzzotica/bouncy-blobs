@@ -14,6 +14,11 @@ crate-type = ["lib"]
 name = "bouncy-blobs"
 path = "src/main.rs"
 
+# Scene file → video tool (docs/SceneFiles.md). Desktop only.
+[[bin]]
+name = "bb-scene"
+path = "src/bin/bb-scene.rs"
+
 [features]
 default = []
 # Desktop-only fast iteration: `cargo run -p bb-game --features dev`.

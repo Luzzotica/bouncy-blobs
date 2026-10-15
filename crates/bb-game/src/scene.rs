@@ -1,0 +1,838 @@
+//! Scene files (content's SCENE-SPEC v0/v0.1, Bouncy Blobs runner): one JSON
+//! file describes one shot; `bb-scene validate|preview|render` turns it into
+//! videos, stills, audio stems, an event log and NOTES through the real game
+//! in capture mode. See docs/SceneFiles.md.
+//!
+//! This module is the schema, plain-word validation, and the translation
+//! into the game's capture settings. No Bevy here; the in-game half (camera
+//! timeline, checks, event log) is `scene_run`.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Finished chapters (stage allowlist): (spec id, campaign id).
+pub const CHAPTERS: [(&str, &str); 4] = [("the-drip", "ch02"), ("fungus-caverns", "ch03"), ("puddle-lake", "ch06"), ("the-old-well", "ch10")];
+
+/// Built-in stages: (id, capture-only?).
+pub const BUILTINS: [(&str, bool); 9] = [
+    ("title-cave", false),
+    ("kids", false),
+    ("transparent", true),
+    ("spikeloop", true),
+    ("stage-pile", true),
+    ("stage-pile4", true),
+    ("stage-trio", true),
+    ("logo", true),
+    ("endcard", true),
+];
+
+/// Pip's shipped colours (bb_sim::PALETTE) by name.
+pub const COLORS: [(&str, u32); 12] = [
+    ("pink", 0xff5d73),
+    ("orange", 0xff9f43),
+    ("yellow", 0xffd93d),
+    ("green", 0x6bcb77),
+    ("blue", 0x4d96ff),
+    ("purple", 0x9b5de5),
+    ("magenta", 0xf15bb5),
+    ("teal", 0x00c2a8),
+    ("sky", 0x5dd6ff),
+    ("lime", 0xa0e426),
+    ("rose", 0xff7eb6),
+    ("lavender", 0xb8a1ff),
+];
+
+/// Behaviour changes a scene may make (each only via `capture_only`).
+pub const CAPTURE_ONLY: [(&str, &str); 6] = [
+    ("stage", "a capture-only stage (value: null)"),
+    ("respawn_delay", "seconds from a pop to the next life (game: 1.1)"),
+    ("respawn_point", "lives restart where `respawn` events say instead of the checkpoint (value: null)"),
+    ("droplet_life", "seconds pop droplets lie about (game: ~42)"),
+    ("spikeloop_slope", "spikeloop stage: tent slope so droplets slide off"),
+    ("can_die", "a cast member that can't pop (value: false)"),
+];
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Scene {
+    /// Id, used in output names.
+    pub scene: String,
+    pub game: String,
+    /// "current" (the head of game-polish) or a commit.
+    #[serde(default = "current")]
+    pub build: String,
+    pub allow_old_build: Option<String>,
+    #[serde(default = "seeds1")]
+    pub seeds: Vec<u32>,
+    pub stage: Stage,
+    #[serde(default)]
+    pub cast: Vec<Cast>,
+    #[serde(default)]
+    pub inputs: Vec<Input>,
+    pub replay: Option<String>,
+    #[serde(default)]
+    pub events: Vec<Event>,
+    /// Seconds of game time run before frame 1 (so frame 1 is already
+    /// moving). BB addition to the spec.
+    #[serde(default)]
+    pub pre_roll: f32,
+    pub camera: Vec<CamKey>,
+    pub length: Length,
+    #[serde(default)]
+    pub capture_only: Vec<CaptureOnly>,
+    #[serde(default)]
+    pub staged: bool,
+    #[serde(default)]
+    pub show: Vec<String>,
+    #[serde(default)]
+    pub check: Check,
+    pub outputs: Vec<Output>,
+    #[serde(default)]
+    pub audio: Audio,
+}
+
+fn current() -> String {
+    "current".into()
+}
+fn seeds1() -> Vec<u32> {
+    vec![1]
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Stage {
+    /// chapter | builtin | inline
+    pub kind: String,
+    #[serde(default)]
+    pub id: String,
+    /// World crop [x0, y0, x1, y1]: the default framing when no camera key
+    /// says otherwise.
+    pub region: Option<[f32; 4]>,
+    pub theme: Option<String>,
+    pub r#override: Option<String>,
+    /// kind "inline": a level in the game's level JSON format.
+    pub level: Option<Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Cast {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    pub color: Option<String>,
+    pub spawn: Option<[f32; 2]>,
+    pub can_die: Option<bool>,
+    /// The stage's own actors (menu blobs, Kids friends, end-card blobs).
+    pub from_stage: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Input {
+    pub t: f32,
+    #[serde(default = "pip")]
+    pub who: String,
+    /// hold | release | jump
+    pub r#do: String,
+    /// left | right | up | down | jump (for hold/release).
+    pub key: Option<String>,
+    /// jump: seconds the button stays down (longer = higher), default 1 frame.
+    pub hold: Option<f32>,
+}
+
+fn pip() -> String {
+    "pip".into()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Event {
+    pub t: f32,
+    /// respawn
+    pub r#do: String,
+    #[serde(default = "pip")]
+    pub who: String,
+    /// [x, y]: from this time on, Pip's next life starts here.
+    pub at: Option<[f32; 2]>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CamKey {
+    pub t: f32,
+    /// frame | follow | hold | pan | zoom | shake | timescale
+    pub r#do: String,
+    /// "pip" (or ["pip"]).
+    pub who: Option<Value>,
+    pub at: Option<[f32; 2]>,
+    /// World area to show at least [w, h] (BB addition).
+    pub view: Option<[f32; 2]>,
+    /// Subject width as a fraction of the frame width (per output aspect).
+    pub subject_width: Option<f32>,
+    /// follow: look ahead by velocity × this (s); a number or [x, y].
+    pub lead: Option<Value>,
+    /// follow: seconds to catch up (0 = locked).
+    pub lag: Option<f32>,
+    /// follow: dead zone [w, h] in world px.
+    pub deadzone: Option<[f32; 2]>,
+    /// follow/frame: offset [x, y] in world px.
+    pub offset: Option<[f32; 2]>,
+    /// pan/zoom/frame/follow: seconds the change takes (default: a cut).
+    pub by: Option<f32>,
+    /// linear | ease (default ease when `by` is set).
+    pub ease: Option<String>,
+    /// shake: amplitude in world px (decays over `by`, default 0.6 s).
+    pub amount: Option<f32>,
+    /// timescale: game time per video second, until `until`.
+    pub rate: Option<f32>,
+    pub until: Option<f32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Length {
+    pub seconds: Option<f32>,
+    /// "event:pop" etc.
+    pub until: Option<String>,
+    pub count: Option<u32>,
+    pub plus: Option<f32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureOnly {
+    pub what: String,
+    #[serde(default)]
+    pub value: Value,
+    pub why: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Check {
+    #[serde(default = "band")]
+    pub band_x: [f32; 2],
+    #[serde(default = "band_y")]
+    pub band_y: [f32; 2],
+    /// "pip", "word:POP!"
+    #[serde(default = "objects")]
+    pub objects: Vec<String>,
+    #[serde(default = "min_w")]
+    pub min_subject_width: f32,
+    #[serde(default = "yes")]
+    pub frame1_moving: bool,
+}
+
+fn band() -> [f32; 2] {
+    [0.25, 0.75]
+}
+fn band_y() -> [f32; 2] {
+    [0.0, 1.0]
+}
+fn objects() -> Vec<String> {
+    vec!["pip".into()]
+}
+fn min_w() -> f32 {
+    0.12
+}
+fn yes() -> bool {
+    true
+}
+
+impl Default for Check {
+    fn default() -> Self {
+        Check { band_x: band(), band_y: band_y(), objects: objects(), min_subject_width: min_w(), frame1_moving: true }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Output {
+    /// video | still
+    pub kind: String,
+    pub size: String,
+    #[serde(default = "sixty")]
+    pub fps: u32,
+    /// still: seconds, or "event:pop#3".
+    pub at: Option<Value>,
+    #[serde(default)]
+    pub transparent: bool,
+    /// This file's own safe band (BB addition; default: check.band_x).
+    pub band_x: Option<[f32; 2]>,
+}
+
+fn sixty() -> u32 {
+    60
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Audio {
+    #[serde(default = "yes")]
+    pub music_stem: bool,
+    #[serde(default = "fams")]
+    pub sfx_families: Vec<String>,
+    #[serde(default = "yes")]
+    pub mix: bool,
+}
+
+fn fams() -> Vec<String> {
+    ["pop", "land", "splash", "ui"].map(String::from).to_vec()
+}
+
+impl Default for Audio {
+    fn default() -> Self {
+        Audio { music_stem: true, sfx_families: fams(), mix: true }
+    }
+}
+
+impl Output {
+    pub fn dims(&self) -> Option<(u32, u32)> {
+        let (w, h) = self.size.to_lowercase().split_once('x').map(|(a, b)| (a.trim().parse().ok(), b.trim().parse().ok()))?;
+        Some((w?, h?))
+    }
+    pub fn band_x(&self, s: &Scene) -> [f32; 2] {
+        self.band_x.unwrap_or(s.check.band_x)
+    }
+}
+
+impl Scene {
+    /// Campaign id for a chapter stage ("the-drip" or "ch02").
+    pub fn chapter_id(&self) -> Option<String> {
+        let id = self.stage.id.as_str();
+        if let Some((_, c)) = CHAPTERS.iter().find(|(n, c)| *n == id || *c == id) {
+            return Some(c.to_string());
+        }
+        (1..=10).map(|n| format!("ch{n:02}")).find(|c| c == id)
+    }
+    pub fn capture(&self, what: &str) -> Option<&CaptureOnly> {
+        self.capture_only.iter().find(|c| c.what == what)
+    }
+    pub fn pip(&self) -> Option<&Cast> {
+        self.cast.iter().find(|c| c.id == "pip")
+    }
+    pub fn has_pip(&self) -> bool {
+        self.pip().is_some()
+    }
+    pub fn pip_color(&self) -> u32 {
+        self.pip().and_then(|c| c.color.as_deref()).and_then(color).unwrap_or(0xff5d73)
+    }
+    /// Timescale windows from the camera timeline: (from_s, to_s, rate).
+    pub fn timescales(&self) -> Vec<(f32, f32, f32)> {
+        self.camera.iter().filter(|k| k.r#do == "timescale").map(|k| (k.t, k.until.unwrap_or(f32::MAX), k.rate.unwrap_or(1.0))).collect()
+    }
+    /// Game-time rate for video frame `f`.
+    pub fn rate_at_frame(&self, f: u64) -> f32 {
+        let t = f as f32 / 60.0;
+        self.timescales().iter().rev().find(|(a, b, _)| t >= *a - 1e-6 && t < *b - 1e-6).map_or(1.0, |w| w.2)
+    }
+    /// Game seconds elapsed after `t` video seconds (from frame 1).
+    pub fn game_secs(&self, t: f32) -> f32 {
+        let frames = (t * 60.0).round().max(0.0) as u64;
+        (0..frames).map(|f| self.rate_at_frame(f)).sum::<f32>() / 60.0
+    }
+    /// Sim tick (60 Hz, counted from the start of the pre-roll) at video time t.
+    pub fn tick_at(&self, t: f32) -> i64 {
+        let pre = (self.pre_roll * 60.0).round() as i64;
+        if t < 0.0 { pre + (t * 60.0).round() as i64 } else { pre + (self.game_secs(t) * 60.0).round() as i64 }
+    }
+}
+
+pub fn color(name: &str) -> Option<u32> {
+    COLORS.iter().find(|(n, _)| *n == name).map(|c| c.1).or_else(|| bb_sim::parse_color(name).filter(|c| COLORS.iter().any(|(_, v)| v == c)))
+}
+
+/// Drop every key starting with `_` (comments) before typed parsing.
+fn strip_comments(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            m.retain(|k, _| !k.starts_with('_'));
+            for x in m.values_mut() {
+                strip_comments(x);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_comments),
+        _ => {}
+    }
+}
+
+/// Parse a scene file. Errors are plain sentences.
+pub fn parse(text: &str) -> Result<Scene, String> {
+    let mut v: Value = serde_json::from_str(text).map_err(|e| format!("The file isn't valid JSON: {e}."))?;
+    strip_comments(&mut v);
+    serde_json::from_value(v).map_err(|e| format!("The scene doesn't match the format: {e}. See docs/SceneFiles.md for every field."))
+}
+
+fn who_is_pip(v: &Option<Value>) -> bool {
+    match v {
+        None => true,
+        Some(Value::String(s)) => s == "pip",
+        Some(Value::Array(a)) => a.iter().all(|x| x == "pip"),
+        _ => false,
+    }
+}
+
+/// Validate; Ok(warnings) or Err(problems), all in plain words.
+pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
+    let mut err = Vec::new();
+    let mut warn = Vec::new();
+    let e = &mut err;
+    if s.game != "bouncy-blobs" {
+        e.push(format!("\"game\" is {:?}; this runner renders \"bouncy-blobs\".", s.game));
+    }
+    if s.scene.is_empty() || !s.scene.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        e.push(format!("\"scene\" must be letters, digits, - or _ (got {:?}).", s.scene));
+    }
+    if s.seeds.is_empty() {
+        e.push("\"seeds\" needs at least one seed (one take per seed).".into());
+    }
+    if s.build != "current" && s.allow_old_build.as_deref().is_none_or(|r| r.trim().is_empty()) {
+        // Whether it's actually old is checked against git at render time.
+    }
+    // Stage.
+    let cap_stage = || s.capture("stage").is_some();
+    match s.stage.kind.as_str() {
+        "chapter" => match s.chapter_id() {
+            None => e.push(format!("There is no chapter {:?}. Finished chapters: {}.", s.stage.id, CHAPTERS.map(|c| c.0).join(", "))),
+            Some(c) => {
+                if !CHAPTERS.iter().any(|(_, id)| *id == c.as_str()) && s.stage.r#override.as_deref().is_none_or(|r| r.trim().is_empty()) {
+                    e.push(format!("Chapter {} isn't finished (cleared: {}). Add \"override\": \"<reason, Sterling's ask>\" to the stage to use it anyway.", s.stage.id, CHAPTERS.map(|c| c.0).join(", ")));
+                }
+            }
+        },
+        "builtin" => match BUILTINS.iter().find(|(n, _)| *n == s.stage.id) {
+            None => e.push(format!("Unknown built-in stage {:?}. Choose one of: {}.", s.stage.id, BUILTINS.map(|b| b.0).join(", "))),
+            Some((_, true)) if !cap_stage() => e.push(format!(
+                "The built-in stage {:?} is capture-only (not a place in the shipped game), so declare it: add {{\"what\": \"stage\", \"value\": null, \"why\": \"...\"}} to \"capture_only\".",
+                s.stage.id
+            )),
+            _ => {}
+        },
+        "inline" => match &s.stage.level {
+            None => e.push("An inline stage needs \"level\": { ... } in the game's level format.".into()),
+            Some(v) => {
+                if let Err(x) = bb_level::Level::from_json(&v.to_string()) {
+                    e.push(format!("The inline level isn't in the game's level format: {x}."));
+                }
+                if !cap_stage() {
+                    e.push("An inline level is a capture-only stage; declare it in \"capture_only\" with \"what\": \"stage\".".into());
+                }
+            }
+        },
+        k => e.push(format!("Stage kind {k:?} isn't one of chapter, builtin, inline.")),
+    }
+    if s.stage.theme.is_some() {
+        e.push("\"stage.theme\" must be null for now (each stage uses its own shipped theme).".into());
+    }
+    // Cast.
+    for c in &s.cast {
+        if c.from_stage == Some(true) {
+            continue;
+        }
+        if c.id != "pip" {
+            e.push(format!("Cast member {:?}: only \"pip\" (plus {{\"from_stage\": true}}) is supported so far.", c.id));
+        }
+        if c.kind != "blob" {
+            e.push(format!("Cast member {:?}: \"kind\" must be \"blob\".", c.id));
+        }
+        if let Some(col) = &c.color {
+            if color(col).is_none() {
+                e.push(format!("Cast member {:?}: colour {col:?} isn't one of Pip's shipped colours ({}).", c.id, COLORS.map(|c| c.0).join(", ")));
+            }
+        }
+        if c.can_die == Some(false) && s.capture("can_die").is_none() {
+            e.push("Pip can't pop in this shot (can_die: false), which changes the game: declare it in \"capture_only\" with \"what\": \"can_die\".".into());
+        }
+    }
+    let pip_stage = matches!(s.stage.kind.as_str(), "chapter" | "inline") || matches!(s.stage.id.as_str(), "transparent" | "spikeloop" | "stage-pile");
+    if s.has_pip() && !pip_stage {
+        e.push(format!("The stage {:?} has no Pip; drop him from \"cast\" (use {{\"from_stage\": true}}) or pick another stage.", s.stage.id));
+    }
+    // Inputs (BB verbs: hold/release <key>, jump).
+    for (i, inp) in s.inputs.iter().enumerate() {
+        let n = i + 1;
+        if inp.who != "pip" {
+            e.push(format!("Input {n}: only \"pip\" can be driven so far (got {:?}).", inp.who));
+        }
+        match inp.r#do.as_str() {
+            "jump" => {}
+            "hold" | "release" => match inp.key.as_deref() {
+                Some("left" | "right" | "up" | "down" | "jump") => {}
+                k => e.push(format!("Input {n}: {} needs \"key\": left, right, up, down or jump (got {k:?}).", inp.r#do)),
+            },
+            d => e.push(format!("Input {n}: {d:?} isn't a Bouncy Blobs input; use hold, release or jump.")),
+        }
+    }
+    if s.replay.is_some() {
+        e.push("Replaying a recorded input file isn't supported yet (phase 2); leave \"replay\" null.".into());
+    }
+    if !s.has_pip() && !s.inputs.is_empty() {
+        e.push("There are inputs but no Pip in \"cast\".".into());
+    }
+    // Events.
+    for (i, ev) in s.events.iter().enumerate() {
+        match ev.r#do.as_str() {
+            "respawn" => {
+                if ev.at.is_none() {
+                    e.push(format!("Event {}: respawn needs \"at\": [x, y].", i + 1));
+                }
+                if s.capture("respawn_point").is_none() {
+                    e.push("\"respawn\" events move where Pip's lives restart, which changes the game: declare it in \"capture_only\" with \"what\": \"respawn_point\".".into());
+                }
+            }
+            d => e.push(format!("Event {}: {d:?} isn't supported (only \"respawn\"; slow motion is a camera \"timescale\").", i + 1)),
+        }
+    }
+    // Capture-only entries.
+    for c in &s.capture_only {
+        match CAPTURE_ONLY.iter().find(|(w, _)| *w == c.what) {
+            None => e.push(format!("capture_only {:?} isn't a change this runner knows; known: {}.", c.what, CAPTURE_ONLY.map(|c| c.0).join(", "))),
+            Some(_) => {
+                if c.why.trim().is_empty() {
+                    e.push(format!("capture_only {:?} needs a \"why\" (it goes into NOTES).", c.what));
+                }
+                let num = |ok: fn(f64) -> bool| c.value.as_f64().is_some_and(ok);
+                let bad = match c.what.as_str() {
+                    "respawn_delay" | "droplet_life" => !num(|v| v > 0.0 && v < 60.0),
+                    "spikeloop_slope" => !num(|v| (0.0..2.0).contains(&v)),
+                    _ => false,
+                };
+                if bad {
+                    e.push(format!("capture_only {:?}: \"value\" should be a number of the right size.", c.what));
+                }
+                if c.what == "spikeloop_slope" && s.stage.id != "spikeloop" {
+                    e.push("capture_only spikeloop_slope only applies to the spikeloop stage.".into());
+                }
+            }
+        }
+    }
+    // Camera.
+    if s.camera.is_empty() && s.stage.region.is_none() {
+        e.push("Add a camera key, e.g. {\"t\": 0, \"do\": \"frame\", \"who\": \"pip\", \"subject_width\": 0.18}, or a stage \"region\".".into());
+    }
+    let mut last = f32::MIN;
+    for (i, k) in s.camera.iter().enumerate() {
+        let n = i + 1;
+        if k.t < last {
+            e.push(format!("Camera key {n} (t={}) comes before the one above it; keep keys in time order.", k.t));
+        }
+        last = k.t;
+        if !who_is_pip(&k.who) {
+            e.push(format!("Camera key {n}: only \"pip\" can be framed or followed so far."));
+        }
+        let needs_pip = k.who.is_some() || matches!(k.r#do.as_str(), "follow");
+        if needs_pip && !s.has_pip() && k.at.is_none() {
+            e.push(format!("Camera key {n} frames Pip, but Pip isn't in \"cast\"."));
+        }
+        match k.r#do.as_str() {
+            "frame" | "pan" | "follow" | "zoom" | "hold" | "shake" | "timescale" => {}
+            d => e.push(format!("Camera key {n}: {d:?} isn't a camera move; use frame, follow, hold, pan, zoom, shake or timescale.")),
+        }
+        if k.r#do == "timescale" && !k.rate.is_some_and(|r| (0.01..=1.0).contains(&r)) {
+            e.push(format!("Camera key {n}: timescale needs \"rate\" between 0.01 and 1."));
+        }
+        if matches!(k.r#do.as_str(), "frame" | "pan" | "follow") && i == 0 && k.view.is_none() && k.subject_width.is_none() {
+            e.push(format!("Camera key {n}: say how much to show: \"subject_width\" (fraction of the frame width) or \"view\": [w, h]."));
+        }
+        if let Some(w) = k.subject_width {
+            if !(0.01..=0.95).contains(&w) {
+                e.push(format!("Camera key {n}: subject_width {w} should be a fraction like 0.18."));
+            }
+        }
+        if let Some(x) = &k.ease {
+            if !["linear", "ease", "cut"].contains(&x.as_str()) {
+                e.push(format!("Camera key {n}: ease is linear, ease or cut."));
+            }
+        }
+    }
+    if let Some(first) = s.camera.first() {
+        if first.t > 0.0 && s.stage.region.is_none() {
+            e.push("The first camera key should be at t 0 (or give the stage a \"region\").".into());
+        }
+    }
+    // Length.
+    match (&s.length.seconds, &s.length.until) {
+        (Some(x), None) if *x > 0.0 && *x <= 120.0 => {}
+        (None, Some(u)) => {
+            if !matches!(u.strip_prefix("event:"), Some("pop" | "land" | "splash" | "respawn" | "mushroom" | "spring")) {
+                e.push(format!("length.until {u:?}: use \"event:pop\" (or land, splash, respawn, mushroom, spring)."));
+            }
+        }
+        _ => e.push("\"length\" is {\"seconds\": n} (up to 120) or {\"until\": \"event:pop\", \"count\": n, \"plus\": s}.".into()),
+    }
+    // Check.
+    for o in &s.check.objects {
+        if o != "pip" && o != "word:POP!" {
+            e.push(format!("check.objects {o:?}: this runner checks \"pip\" and \"word:POP!\"."));
+        }
+        if o == "pip" && !s.has_pip() {
+            e.push("check.objects lists \"pip\" but Pip isn't in \"cast\"; remove it (or add him).".into());
+        }
+    }
+    for (n, b) in [("band_x", s.check.band_x), ("band_y", s.check.band_y)] {
+        if !(0.0..=1.0).contains(&b[0]) || !(0.0..=1.0).contains(&b[1]) || b[0] >= b[1] {
+            e.push(format!("check.{n} must be two fractions, low then high, like [0.25, 0.75]."));
+        }
+    }
+    // Outputs.
+    if !s.outputs.iter().any(|o| o.kind == "video") && !s.outputs.iter().any(|o| o.kind == "still") {
+        e.push("List at least one output, e.g. {\"kind\": \"video\", \"size\": \"1080x1920\", \"fps\": 60}.".into());
+    }
+    for o in &s.outputs {
+        match o.dims() {
+            Some((w, h)) if (16..=8192).contains(&w) && (16..=8192).contains(&h) && w % 2 == 0 && h % 2 == 0 => {}
+            _ => e.push(format!("Output size {:?} should be even numbers like \"1080x1920\".", o.size)),
+        }
+        if o.fps != 60 {
+            e.push(format!("Output {}: only 60 fps is supported (the game runs at 60 Hz).", o.size));
+        }
+        match o.kind.as_str() {
+            "video" => {
+                if o.transparent {
+                    e.push(format!("Output {}: a video can't be transparent (mp4 has no alpha); use a still.", o.size));
+                }
+            }
+            "still" => match &o.at {
+                Some(Value::Number(_)) => {}
+                Some(Value::String(a)) if a.starts_with("event:") && a.contains('#') => {}
+                _ => e.push(format!("Still {}: \"at\" is seconds (1.5) or \"event:pop#3\".", o.size)),
+            },
+            k => e.push(format!("Output kind {k:?}: use video or still (no GIFs or image sequences).")),
+        }
+        if o.transparent && !matches!(s.stage.id.as_str(), "transparent" | "logo" | "stage-pile" | "stage-pile4" | "stage-trio") {
+            e.push(format!("Output {}: transparent stills need a transparent-ready stage (builtin \"transparent\", \"logo\", or a posing stage).", o.size));
+        }
+        if let Some(b) = o.band_x {
+            if !(0.0..=1.0).contains(&b[0]) || !(0.0..=1.0).contains(&b[1]) || b[0] >= b[1] {
+                e.push(format!("Output {}: band_x must be two fractions, low then high.", o.size));
+            }
+        }
+    }
+    let vids: Vec<&String> = s.outputs.iter().filter(|o| o.kind == "video").map(|o| &o.size).collect();
+    for (i, a) in vids.iter().enumerate() {
+        if vids[..i].contains(a) {
+            e.push(format!("Two video outputs are both {a}."));
+        }
+    }
+    // Audio.
+    for f in &s.audio.sfx_families {
+        if !["pop", "land", "splash", "ui", "bounce", "other"].contains(&f.as_str()) {
+            e.push(format!("audio.sfx_families {f:?}: use pop, land, splash, ui, bounce or other."));
+        }
+    }
+    for n in &s.show {
+        if !["glimmer", "pickups"].contains(&n.as_str()) {
+            warn.push(format!("\"show\" lists {n:?}; this runner can show \"glimmer\" and \"pickups\"."));
+        }
+    }
+    if s.staged {
+        warn.push("\"staged\": true is set, but this runner has no staged moves yet; nothing is puppeted.".into());
+    }
+    if err.is_empty() { Ok(warn) } else { Err(err) }
+}
+
+/// A tiny deterministic RNG for seeded variation.
+pub fn seeded(seed: u32, i: u32) -> f32 {
+    let mut x = seed.wrapping_mul(0x9e37_79b9) ^ i.wrapping_mul(0x85eb_ca6b) ^ 0x27d4_eb2f;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2c1b_3c6d);
+    x ^= x >> 12;
+    x = x.wrapping_mul(0x297a_2d39);
+    x ^= x >> 15;
+    (x >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// `BB_PRESS` spec for the inputs (sim ticks from the start of the pre-roll).
+pub fn press_spec(s: &Scene) -> String {
+    let mut items = Vec::new();
+    let key = |k: &str| if k == "jump" { "space".to_string() } else { k.to_string() };
+    // hold ... release pairs per key.
+    let mut open: BTreeMap<String, i64> = BTreeMap::new();
+    let mut ins: Vec<&Input> = s.inputs.iter().collect();
+    ins.sort_by(|a, b| a.t.total_cmp(&b.t));
+    for inp in ins {
+        let tk = s.tick_at(inp.t).max(0);
+        match inp.r#do.as_str() {
+            "jump" => {
+                let held = inp.hold.map_or(1, |h| (s.tick_at(inp.t + h) - s.tick_at(inp.t)).max(1));
+                items.push(format!("space@{tk}-{}", tk + held - 1));
+            }
+            "hold" => {
+                let k = key(inp.key.as_deref().unwrap_or("right"));
+                open.entry(k).or_insert(tk);
+            }
+            "release" => {
+                let k = key(inp.key.as_deref().unwrap_or("right"));
+                if let Some(a) = open.remove(&k) {
+                    items.push(format!("{k}@{a}-{}", (tk - 1).max(a)));
+                }
+            }
+            _ => {}
+        }
+    }
+    for (k, a) in open {
+        items.push(format!("{k}@{a}-"));
+    }
+    items.join(",")
+}
+
+/// Environment for one game run of this scene with `seed` at `size`.
+pub fn env_for(s: &Scene, scene_path: &str, seed: u32, size: (u32, u32), transparent: bool, frames: u32, out_path: &str, check_path: &str) -> BTreeMap<String, String> {
+    let mut e = BTreeMap::new();
+    let mut set = |k: &str, v: String| {
+        e.insert(k.to_string(), v);
+    };
+    set("BB_MUTE", "1".into());
+    set("BB_CAPTURE", "1".into());
+    set("BB_CAPTURE_SIZE", format!("{}x{}", size.0, size.1));
+    set("BB_CAPTURE_OUT", out_path.into());
+    set("BB_CAPTURE_FRAMES", frames.max(1).to_string());
+    set("BB_CAPTURE_START", ((s.pre_roll * 60.0).round() as u32).to_string());
+    set("BB_SCENE_FILE", scene_path.into());
+    set("BB_SCENE_CHECK", check_path.into());
+    set("BB_SCENE_SEED", seed.to_string());
+    set("BB_CAPTURE_SCENE_SEED", seed.to_string());
+    match s.stage.kind.as_str() {
+        "chapter" => set("BB_LEVEL", s.chapter_id().unwrap_or_else(|| "ch02".into())),
+        "inline" => set("BB_CAPTURE_SCENE", "inline".into()),
+        _ => match s.stage.id.as_str() {
+            "title-cave" => {}
+            "kids" => set("BB_START", "kids".into()),
+            "transparent" => {
+                set("BB_CAPTURE_SCENE", "stage".into());
+                set("BB_STAGE", "solo".into());
+            }
+            "spikeloop" | "logo" | "endcard" => set("BB_CAPTURE_SCENE", s.stage.id.clone()),
+            other => {
+                set("BB_CAPTURE_SCENE", "stage".into());
+                set("BB_STAGE", other.trim_start_matches("stage-").into());
+            }
+        },
+    }
+    if let Some([x, y]) = s.pip().and_then(|p| p.spawn) {
+        set("BB_CAPTURE_AT", format!("{x},{y}"));
+    }
+    if !s.show.iter().any(|x| x == "pickups") {
+        set("BB_CAPTURE_NO_PICKUPS", "1".into());
+    }
+    if let Some(v) = s.capture("respawn_delay").and_then(|c| c.value.as_f64()) {
+        set("BB_CAPTURE_RESPAWN", v.to_string());
+    }
+    if let Some(v) = s.capture("droplet_life").and_then(|c| c.value.as_f64()) {
+        set("BB_CAPTURE_DROPLET_LIFE", v.to_string());
+    }
+    if let Some(v) = s.capture("spikeloop_slope").and_then(|c| c.value.as_f64()) {
+        set("BB_SPIKELOOP_SLOPE", v.to_string());
+    }
+    if transparent {
+        set("BB_CAPTURE_TRANSPARENT", "1".into());
+        if s.stage.id == "logo" {
+            set("BB_CAPTURE_SHOW", "ui".into());
+        }
+    }
+    let press = press_spec(s);
+    if !press.is_empty() {
+        set("BB_PRESS", press);
+    }
+    // The scene camera drives the view; capture's own camera stays out of it.
+    set("BB_CAPTURE_CAM", "static:0,0".into());
+    e
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SPIKE: &str = r#"{
+        "_comment": "comments are keys starting with _",
+        "scene": "bb-spike-loop", "game": "bouncy-blobs", "build": "current", "seeds": [1, 2],
+        "stage": {"kind": "builtin", "id": "spikeloop"},
+        "cast": [{"id": "pip", "kind": "blob", "color": "pink", "spawn": [0, 260]}],
+        "pre_roll": 0.33,
+        "camera": [{"t": 0, "do": "frame", "at": [0, 215], "view": [366, 500]}],
+        "length": {"seconds": 11},
+        "capture_only": [
+            {"what": "stage", "value": null, "why": "capture-only spike stage"},
+            {"what": "respawn_delay", "value": 0.65, "why": "snappy rhythm"},
+            {"what": "spikeloop_slope", "value": 0.25, "why": "droplets slide off"}],
+        "check": {"band_x": [0.05, 0.95], "objects": ["pip", "word:POP!"]},
+        "outputs": [{"kind": "video", "size": "1080x1920", "fps": 60}, {"kind": "still", "size": "1080x1920", "at": "event:pop#3"}]
+    }"#;
+
+    #[test]
+    fn every_shipped_example_is_valid() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenes/examples");
+        let mut n = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|x| x == "json") {
+                let s = parse(&std::fs::read_to_string(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                assert!(validate(&s).is_ok(), "{}: {:?}", p.display(), validate(&s));
+                n += 1;
+            }
+        }
+        assert!(n >= 5, "expected the five example shots, found {n}");
+    }
+
+    #[test]
+    fn parses_and_validates() {
+        let s = parse(SPIKE).unwrap();
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        assert_eq!(s.seeds, vec![1, 2]);
+        assert_eq!(s.pip_color(), 0xff5d73);
+    }
+
+    #[test]
+    fn undeclared_change_fails() {
+        let mut s = parse(SPIKE).unwrap();
+        s.capture_only.retain(|c| c.what != "stage");
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("capture-only")));
+        let mut s = parse(SPIKE).unwrap();
+        s.events.push(Event { t: 1.0, r#do: "respawn".into(), who: "pip".into(), at: Some([0.0, 300.0]) });
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("respawn_point")));
+    }
+
+    #[test]
+    fn chapter_allowlist_and_names() {
+        let mut s = parse(SPIKE).unwrap();
+        s.capture_only.clear();
+        s.stage = Stage { kind: "chapter".into(), id: "the-drip".into(), ..Default::default() };
+        assert_eq!(s.chapter_id().as_deref(), Some("ch02"));
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        s.stage.id = "ch05".into();
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("isn't finished")));
+        s.stage.r#override = Some("Sterling asked".into());
+        assert!(validate(&s).is_ok());
+    }
+
+    #[test]
+    fn plain_errors() {
+        assert!(parse("{ nope").unwrap_err().contains("isn't valid JSON"));
+        assert!(parse(&SPIKE.replace("\"length\"", "\"lenght\"")).unwrap_err().contains("lenght"));
+        let mut s = parse(SPIKE).unwrap();
+        s.outputs[0].size = "1080by1920".into();
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("1080by1920")));
+    }
+
+    #[test]
+    fn inputs_and_timescale_map_to_ticks() {
+        let mut s = parse(SPIKE).unwrap();
+        s.pre_roll = 1.0;
+        s.inputs = vec![
+            Input { t: 0.0, who: "pip".into(), r#do: "hold".into(), key: Some("right".into()), hold: None },
+            Input { t: 0.5, who: "pip".into(), r#do: "jump".into(), key: None, hold: Some(0.25) },
+            Input { t: 2.0, who: "pip".into(), r#do: "release".into(), key: Some("right".into()), hold: None },
+        ];
+        assert_eq!(press_spec(&s), "space@90-104,right@60-179");
+        // 4× slow motion from 1 s: 2 s of video = 1 s + 0.25 s of game.
+        s.camera.push(CamKey { t: 1.0, r#do: "timescale".into(), rate: Some(0.25), ..Default::default() });
+        assert!((s.game_secs(2.0) - 1.25).abs() < 1e-4);
+        assert_eq!(s.tick_at(2.0), 60 + 75);
+        assert_eq!(s.rate_at_frame(59), 1.0);
+        assert_eq!(s.rate_at_frame(60), 0.25);
+    }
+}
