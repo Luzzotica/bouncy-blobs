@@ -26,7 +26,8 @@ impl Plugin for HudPlugin {
 
 fn spawn(mut commands: Commands, assets: Res<GameAssets>, game: Res<Game>) {
     // Menus, lobbies and cutscene stages have no glow drops: no HUD.
-    if game.sim.level.pickups.is_empty() {
+    // Capture mode: a clean screen.
+    if game.sim.level.pickups.is_empty() || crate::capture::on() {
         return;
     }
     commands
