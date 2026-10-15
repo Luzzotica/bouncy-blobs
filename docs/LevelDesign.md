@@ -117,3 +117,25 @@ Slopes into jumps (ch01's kicker) are checked by tests, not hoped for.
 crusher's / falling rock's underside: touching its bottom face pops you, even
 while it hangs. ch05 has spiked pistons among plain ones; ch09's "jagged"
 rubble is spiked.
+
+## Gadgets
+
+JellyCar-style machines (`Level::gadgets`, run by `bb-sim/src/gadgets.rs`,
+drawn by `bb-game/src/gadgets_view.rs`). Each is one chapter's new toy, laid
+out intro → develop → twist (rule 2), with a checkpoint before the hard
+part. Path moves: flings and pods are `Move::Spring`, claw rides
+`Move::Ride`, balloon flights `Move::Wind`.
+
+| Gadget | Builder | How it plays | Chapter |
+|---|---|---|---|
+| Spinning launch plate (stone gear) | `launch_plate(centre, radius, speed, angle_deg, clockwise)` | Touch it: it grips you to its rim, spins up (~1 s) and lets go at the point where its rim moves along `angle`, at `speed` px/s (= the rim speed you rode at). Swelling within `bounce_window` of the release (or just after) adds `bounce_boost` (×1.4 speed, about twice the height). | ch05: up onto a ledge over safe floor → across a 950 px spike pit → the last gear only reaches the floating shelf with the swell boost |
+| Seed pod (launcher) | `seed_pod(base, height, angle_deg, sweep_deg, power)` | Roll/fly within 66 px of its mouth and it swallows you (held still). Its barrel nods `sweep` either side of `angle` (glowing seeds show the throw). Press to fire (after 0.3 s) or it fires itself after 2.5 s, at `power` px/s (world-gravity units, like springs). Pods catch you in flight too. | ch04: lob onto a branch → a nodding pod over a 1000 px bramble gulf (fire when it points high) → fire into a pod hanging mid-gulf, which nods too |
+| Balloon | `balloon(pos, duration)` | Touch it to tie it on. Lift = 0.62 g deflated (you sink, ≤ 300 px/s) to 1.34 g fully puffed (you rise, ≤ `rise` 380 px/s); sideways ≤ 540 px/s. Lasts `duration` s (blinks near the end), pops on spikes, blades, spiked movers and kill zones (then you fall), floats back 2 s later. A roof stops the balloon, so you can't crawl a ceiling with one. | ch07: float up onto a shelf over safe floor → drift across a 1000 px gulf (puff to climb, let go to sink) → a needle flue with spiked roof, spiked floor and a fang: fly high and it pops |
+| Claw crane | `crane(home, drop, travel)` | Stand under the claw (±64 px, up to 230 below): it reaches down, grabs, lifts, carries you to `drop` in `travel` s, pauses, opens, and goes home. | ch08: a ride over a spike gulf → a drop over an 80 px prize chute beside the toy-box lid: at rest size (64 px) you fall through; swollen (128 px) you wedge across and roll onto the lid |
+
+Design numbers: a gear centred 192 px above a floor hangs so a rolling blob
+touches its underside (its ride circle never dips into the floor). Gaps a
+gadget gates are 900+ px (unjumpable), and the roof over them is 700+ px up
+or spiked (`gadget_crossings_have_no_ceiling_shortcut`). Tests:
+`bb-sim/tests/gadgets.rs` (mechanics) and `bb-level/tests/gadgets.rs` (each
+set-piece played in its chapter, including the wrong way failing).

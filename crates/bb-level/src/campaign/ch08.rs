@@ -4,11 +4,12 @@
 //! crayons, socks, wind-up cars, slinkies. The crazy chapter. Push a huge
 //! bouncy ball into a pit to make a bridge (JellyCar-style), wobble over a
 //! see-saw, ride a wind-up car across a spiky track, swing up slinkies,
-//! climb a tower of toy blocks, and bounce up onto the toy box — where a
-//! crayon drawing says *LULU ♥ BOUNCY THINGS*.
+//! climb a tower of toy blocks, bounce up onto the toy box — where a
+//! crayon drawing says *LULU ♥ BOUNCY THINGS* — and ride a toy claw
+//! machine whose last drop only a swollen blob survives.
 //!
 //! Mechanics: pushable balls (one, then a pair), see-saws, wind-up cars
-//! (movers), slinky ropes, block towers.
+//! (movers), slinky ropes, block towers, claw cranes (swell to wedge).
 
 use super::*;
 
@@ -146,16 +147,40 @@ pub fn build() -> Course {
     c.ledge(10400.0, 11400.0, 2320.0);
     c.spikes(v(10400.0, 2320.0), v(11400.0, 2320.0));
     c.pickup_arc(v(10400.0, 2680.0), v(11400.0, 2680.0), 100.0, 5);
-    c.floor(&[v(11400.0, 2560.0), v(12200.0, 2560.0)]);
+    c.floor(&[v(11400.0, 2560.0), v(12000.0, 2560.0)]);
     c.wp(Move::Push, 9620.0, 2560.0).wp(Move::Prop, 10800.0, 2620.0).wp(Move::Prop, 11100.0, 2620.0).wp(Move::Prop, 11500.0, 2560.0);
+    c.cp(11560.0, 2560.0);
+
+    // ---------------------------------------------- the claw machine
+    // A toy claw crane on a rail under the roof. Sit on its pad and the
+    // claw grabs you and carries you over the toys. The first one just
+    // gives you a ride over a spiky gulf; the second lets go over a narrow
+    // prize chute beside the toy-box lid: drop in at normal size and you
+    // fall through, but swell as it opens and you're too fat for the slot,
+    // wedge across it, and roll onto the lid.
+    c.crane(v(11740.0, 2710.0), v(13060.0, 2710.0), 2.6);
+    c.ledge(12000.0, 12950.0, 2320.0);
+    c.spikes(v(12000.0, 2320.0), v(12950.0, 2320.0));
+    c.pickups(v(12150.0, 2730.0), v(12800.0, 2730.0), 4);
+    c.floor(&[v(12950.0, 2560.0), v(13500.0, 2560.0)]);
+    c.wp(Move::Walk, 11740.0, 2560.0).wp(Move::Ride, 13060.0, 2560.0);
+    c.crane(v(13260.0, 2710.0), v(14490.0, 2710.0), 2.6);
+    c.ledge(13500.0, 14530.0, 2320.0);
+    c.spikes(v(13500.0, 2320.0), v(14530.0, 2320.0));
+    c.pickups(v(13650.0, 2730.0), v(14300.0, 2730.0), 4);
+    // The prize chute: a thin lip, an 80 px slot, the lid.
+    c.wall(14420.0, 14450.0, 2320.0, 2560.0);
+    c.floor(&[v(14530.0, 2560.0), v(15200.0, 2560.0)]);
+    // (You wedge over the slot at 14490 and roll onto the lid.)
+    c.wp(Move::Walk, 13260.0, 2560.0).wp(Move::Ride, 14620.0, 2560.0);
     // Out through the tunnel; the rumble (and a dusty red glow) beyond.
-    c.exit_cave(12200.0, 13000.0, 2560.0, 4200.0, Theme::CaveIn);
-    c.wp(Move::Walk, 12680.0, 2560.0);
+    c.exit_cave(15200.0, 16000.0, 2560.0, 4200.0, Theme::CaveIn);
+    c.wp(Move::Walk, 15680.0, 2560.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 760.0), v(1400.0, 820.0), v(2300.0, 700.0), v(3000.0, 700.0), v(4600.0, 650.0), v(5800.0, 700.0), v(6060.0, 1060.0)]);
     c.roof(&[v(6140.0, 1060.0), v(6860.0, 1660.0)]);
-    c.roof(&[v(6940.0, 1660.0), v(7700.0, 2100.0), v(8450.0, 2600.0), v(9300.0, 3100.0), v(10300.0, 3300.0), v(12200.0, 3350.0)]);
+    c.roof(&[v(6940.0, 1660.0), v(7700.0, 2100.0), v(8450.0, 2600.0), v(9300.0, 3100.0), v(10300.0, 3300.0), v(12200.0, 3350.0), v(15200.0, 3400.0)]);
 
     // ----------------------------------------------------------- decor
     c.hang("glowworm", -400.0, 12100.0, 480.0);
@@ -165,6 +190,7 @@ pub fn build() -> Course {
     c.scatter("sock", 5850.0, 6250.0, -20.0, 200.0, -1.0);
     c.scatter("crayon", 7150.0, 7650.0, 1310.0, 200.0, -1.0);
     c.scatter("block_letters", 8500.0, 9100.0, 2000.0, 300.0, -1.0);
-    c.scatter("crayon", 11550.0, 12050.0, 2560.0, 250.0, -1.0);
+    c.scatter("crayon", 11450.0, 11700.0, 2560.0, 250.0, -1.0);
+    c.scatter("block_letters", 14700.0, 15100.0, 2560.0, 400.0, -1.0);
     c.finish()
 }

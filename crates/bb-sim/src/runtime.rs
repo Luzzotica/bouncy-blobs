@@ -248,6 +248,7 @@ pub(crate) fn pre_step(sim: &mut Sim, dt: f32) {
         s.cooldown = (s.cooldown - dt).max(0.0);
         s.squash = (s.squash - dt * 4.0).max(0.0);
     }
+    crate::gadgets::pre_step(sim, dt);
 }
 
 pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
@@ -470,6 +471,7 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
         }
     }
     sim.late_boosts = late;
+    crate::gadgets::post_step(sim, dt);
 
     // Hazards: spikes, kill zones, falling out.
     let mut to_pop: Vec<BodyId> = Vec::new();

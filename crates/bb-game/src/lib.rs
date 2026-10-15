@@ -14,6 +14,7 @@ pub mod dropin;
 pub mod editor;
 pub mod flow;
 pub mod fx;
+pub mod gadgets_view;
 pub mod hud;
 pub mod input;
 pub mod kids;
@@ -86,6 +87,7 @@ impl Plugin for GamePlugin {
                 softtext::SoftTextPlugin,
             ))
             .add_plugins(mouths::MouthsPlugin)
+            .add_plugins(gadgets_view::GadgetsViewPlugin)
             .add_plugins((
                 story::StoryPlugin,
                 menu::MenuPlugin,

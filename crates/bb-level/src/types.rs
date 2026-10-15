@@ -374,6 +374,69 @@ pub struct BouncyMushroom {
     pub angle: f32,
 }
 
+/// What a [`Gadget`] is. Gadgets are scripted machines a blob rides or
+/// carries (JellyCar's toys); `bb-sim/src/gadgets.rs` runs them.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GadgetKind {
+    /// A big spinning plate (a stone gear) centred on the gadget's `pos`.
+    /// Touch it and it grips you to its rim, spins up and flings you off
+    /// along `angle` (radians, the launch direction) at `speed` px/s.
+    /// Swelling as it lets go adds the spring/mushroom swell boost.
+    LaunchPlate {
+        radius: f32,
+        /// Launch speed at full spin (= the rim speed you ride at).
+        speed: f32,
+        /// Launch direction (radians, π/2 = up).
+        angle: f32,
+        #[serde(default)]
+        clockwise: bool,
+        /// Seconds from idle to full spin once someone's aboard.
+        #[serde(default = "spin_up")]
+        spin_up: f32,
+    },
+    /// A seed-pod cannon: roll (or fly) into its mouth at `pos` and it
+    /// swallows you, then fires you along its barrel (press to fire, or it
+    /// fires by itself after `hold` s). The barrel swings `sweep` radians
+    /// either side of `angle` over `period` seconds.
+    Launcher {
+        angle: f32,
+        #[serde(default)]
+        sweep: f32,
+        #[serde(default = "pod_period")]
+        period: f32,
+        /// Muzzle speed (px/s at world gravity, like springs).
+        power: f32,
+        #[serde(default = "pod_hold")]
+        hold: f32,
+    },
+    /// A balloon floating at `pos`: touch it to tie it on. While you have
+    /// it, swelling lifts you (more puff, more lift; at most `rise` px/s)
+    /// and letting go sinks you gently. Lasts `duration` s; pops on spikes,
+    /// blades and kill zones. Floats back after a moment.
+    Balloon {
+        #[serde(default = "balloon_time")]
+        duration: f32,
+        #[serde(default = "balloon_rise")]
+        rise: f32,
+    },
+    /// A toy claw crane. The claw hovers at `pos`; stand under it and it
+    /// grabs you, carries you to `pos + to` in `travel` s, and opens.
+    Crane {
+        to: Vec2,
+        #[serde(default = "crane_travel")]
+        travel: f32,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Gadget {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    pub pos: Vec2,
+    pub kind: GadgetKind,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Spikes {
     /// Base line of the spike strip; teeth point to the left of a→b
@@ -536,6 +599,9 @@ pub struct Level {
     /// Entry / exit cave mouths (story chapters).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mouths: Vec<CaveMouth>,
+    /// Launch plates, seed pods, balloons, claw cranes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gadgets: Vec<Gadget>,
     /// Cutscene played before the level starts (story mode).
     #[serde(default)]
     pub intro: String,
@@ -573,6 +639,7 @@ impl Level {
             story: Vec::new(),
             decor: Vec::new(),
             mouths: Vec::new(),
+            gadgets: Vec::new(),
             intro: String::new(),
             outro: String::new(),
         }
@@ -652,6 +719,24 @@ fn is_false(b: &bool) -> bool {
 }
 fn mouth_size() -> Vec2 {
     Vec2::new(560.0, 300.0)
+}
+fn spin_up() -> f32 {
+    1.0
+}
+fn pod_period() -> f32 {
+    2.4
+}
+fn pod_hold() -> f32 {
+    2.5
+}
+fn balloon_time() -> f32 {
+    7.0
+}
+fn balloon_rise() -> f32 {
+    380.0
+}
+fn crane_travel() -> f32 {
+    3.0
 }
 fn format_version() -> u32 {
     FORMAT_VERSION

@@ -423,6 +423,45 @@ impl LevelBuilder {
         self.zone(min, max, ZoneKind::Water { buoyancy: 2600.0, drag: 1.6, current })
     }
 
+    // ------------------------------------------------------------ gadgets
+
+    pub fn gadget(&mut self, pos: Vec2, kind: GadgetKind) -> &mut Self {
+        self.level.gadgets.push(Gadget { id: String::new(), pos, kind });
+        self
+    }
+
+    /// A spinning launch plate (stone gear) of `radius` centred at `center`
+    /// (its axle; supports are the caller's). Touch it and it grips you,
+    /// spins up and flings you along `angle_deg` at `speed` px/s (swell as
+    /// it lets go for more).
+    pub fn launch_plate(&mut self, center: Vec2, radius: f32, speed: f32, angle_deg: f32, clockwise: bool) -> &mut Self {
+        self.gadget(center, GadgetKind::LaunchPlate { radius, speed, angle: angle_deg.to_radians(), clockwise, spin_up: 1.0 })
+    }
+
+    /// A seed-pod cannon on a stalk: the stalk stands on `base`, the pod's
+    /// mouth (where you're held) sits `height` above it. It fires along
+    /// `angle_deg`, swinging `sweep_deg` either side, at `power` px/s.
+    pub fn seed_pod(&mut self, base: Vec2, height: f32, angle_deg: f32, sweep_deg: f32, power: f32) -> &mut Self {
+        if height > 70.0 {
+            self.block(base + v(-12.0, 0.0), base + v(12.0, height - 58.0));
+        }
+        self.gadget(
+            base + v(0.0, height),
+            GadgetKind::Launcher { angle: angle_deg.to_radians(), sweep: sweep_deg.to_radians(), period: 2.4, power, hold: 2.5 },
+        )
+    }
+
+    /// A balloon floating at `pos` (tie it on by touching it).
+    pub fn balloon(&mut self, pos: Vec2, duration: f32) -> &mut Self {
+        self.gadget(pos, GadgetKind::Balloon { duration, rise: 380.0 })
+    }
+
+    /// A claw crane hovering at `home` (the grip point: a blob's centre when
+    /// held) that carries you to `drop` in `travel` s and lets go.
+    pub fn crane(&mut self, home: Vec2, drop: Vec2, travel: f32) -> &mut Self {
+        self.gadget(home, GadgetKind::Crane { to: drop - home, travel })
+    }
+
     // ------------------------------------------------------------ hazards
 
     pub fn spring(&mut self, pos: Vec2, angle_deg: f32, power: f32) -> &mut Self {

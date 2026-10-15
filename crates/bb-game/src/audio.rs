@@ -405,6 +405,7 @@ fn sim_sounds(
                 out.write(PlaySfx::new("spring-boing", 0.03, 0.8 + rand(&mut seed) * 0.1));
             }
             SimEvent::SuperBounce { .. } => {}
+            SimEvent::Gadget { .. } => {} // gadgets_view.rs plays these
         }
     }
 }

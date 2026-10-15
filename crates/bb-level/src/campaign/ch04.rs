@@ -4,9 +4,11 @@
 //! air), swing (stick), climb (stick up/down) and let go (button) for a big
 //! fling: a safe first swing, a swing chain over spikes, a climbing vine up
 //! a cliff, floppy rope bridges and leaf slabs, a rising vine traverse, a
-//! vine well, and a trampoline-to-vine finale over drips and goo.
+//! vine well, a trampoline-to-vine remix over drips and goo, and seed pods
+//! that swallow you and fire you over the canopy.
 //!
-//! Mechanics: vines (grab, swing, climb, let go), rope bridges, swinging chains.
+//! Mechanics: vines (grab, swing, climb, let go), rope bridges, swinging
+//! chains, seed-pod launchers.
 //! "Friends are just ropes you choose."
 
 use super::*;
@@ -15,6 +17,13 @@ use super::*;
 fn vine(c: &mut Ch, x: f32, top: f32, len: f32) {
     c.poly(&[v(x - 34.0, top + 30.0), v(x + 34.0, top + 30.0), v(x + 14.0, top - 4.0), v(x - 14.0, top - 4.0)]);
     c.vine(v(x, top), len);
+}
+
+/// A puffball seed pod on the ground at `x` (floor `floor`): its mouth sits
+/// low enough that rolling into it gets you swallowed. Fires along `aim`
+/// (degrees), nodding `sweep` degrees either side, at `power`.
+fn pod(c: &mut Ch, x: f32, floor: f32, aim: f32, sweep: f32, power: f32) {
+    c.seed_pod(v(x, floor), 52.0, aim, sweep, power);
 }
 
 /// A floppy rope bridge (thin, very soft).
@@ -121,23 +130,55 @@ pub fn build() -> Course {
     vine(&mut c, 10800.0, 3120.0, 560.0);
     c.pickup_arc(v(10560.0, 2450.0), v(10800.0, 2700.0), 150.0, 2);
     c.pickup_arc(v(10800.0, 2650.0), v(11400.0, 2650.0), 200.0, 3);
-    c.floor(&[v(11250.0, 2600.0), v(12100.0, 2600.0)]);
+    c.floor(&[v(11250.0, 2600.0), v(12350.0, 2600.0)]);
     c.wp(Move::Jump, tx, cap).wp(Move::Rope, 11400.0, 2600.0);
     c.say(11450.0, 11500.0, 2600.0, "ch04_friends");
+
+    // ----------------------------------------- seed pods over the canopy
+    // Puffball seed pods: roll into one and it swallows you, then spits you
+    // out along its glowing barrel ({jump} to fire, or it fires itself).
+    // A first pod on the forest floor lobs you up onto a branch; the next
+    // one's barrel nods up and down over a bramble gulf, so fire when it
+    // points high; the last fires you into a pod hanging in mid-air, which
+    // catches you and nods too.
+    pod(&mut c, 12000.0, 2600.0, 50.0, 0.0, 1150.0);
+    c.pickup_arc(v(12000.0, 2700.0), v(12560.0, 2800.0), 220.0, 3);
+    c.ledge(12350.0, 12950.0, 2760.0);
+    c.wp(Move::Walk, 11980.0, 2600.0).wp(Move::Spring, 12560.0, 2760.0);
+    // The nodding pod over the first bramble gulf.
+    pod(&mut c, 12820.0, 2760.0, 30.0, 15.0, 1560.0);
+    c.ledge(12950.0, 13950.0, 2520.0);
+    c.spikes(v(12950.0, 2520.0), v(13950.0, 2520.0));
+    c.pickup_arc(v(12820.0, 2880.0), v(14100.0, 2840.0), 260.0, 5);
+    c.ledge(13950.0, 14700.0, 2760.0);
+    c.wp(Move::Walk, 12800.0, 2760.0).wp(Move::Spring, 14150.0, 2760.0);
+    c.cp(14250.0, 2760.0);
+    // A pod that fires you into a pod hanging over the second gulf.
+    pod(&mut c, 14560.0, 2760.0, 45.0, 0.0, 1050.0);
+    c.ledge(14700.0, 15700.0, 2520.0);
+    c.spikes(v(14700.0, 2520.0), v(15700.0, 2520.0));
+    let hung = v(15160.0, 2790.0);
+    c.gadget(hung, GadgetKind::Launcher { angle: 22f32.to_radians(), sweep: 14f32.to_radians(), period: 2.0, power: 1400.0, hold: 2.5 });
+    c.pickup_arc(v(15160.0, 2860.0), v(15900.0, 2840.0), 200.0, 3);
+    c.floor(&[v(15700.0, 2760.0), v(16500.0, 2760.0)]);
+    c.wp(Move::Walk, 14540.0, 2760.0).wp(Move::Spring, hung.x, hung.y - 32.0).wp(Move::Spring, 15950.0, 2760.0);
     // Out through the tunnel to the Stone Works (it glows amber).
-    c.exit_cave(12100.0, 12900.0, 2600.0, 4200.0, Theme::Stoneworks);
-    c.wp(Move::Walk, 11800.0, 2600.0).wp(Move::Walk, 12580.0, 2600.0);
+    c.exit_cave(16500.0, 17300.0, 2760.0, 4400.0, Theme::Stoneworks);
+    c.wp(Move::Walk, 16200.0, 2760.0).wp(Move::Walk, 16980.0, 2760.0);
 
     // ------------------------------------------------------------ roof
     c.roof(&[v(-1300.0, 820.0), v(600.0, 860.0), v(1500.0, 900.0), v(2600.0, 900.0), v(3080.0, 1060.0)]);
     c.roof(&[v(3300.0, 1300.0), v(4200.0, 1340.0), v(5600.0, 1400.0), v(6100.0, 1480.0), v(6380.0, 1680.0), v(6880.0, 1790.0), v(7360.0, 1890.0), v(7700.0, 1900.0), v(8200.0, 1900.0)]);
     c.wall(7900.0, 8250.0, 1900.0, 3500.0);
-    c.roof(&[v(8250.0, 2950.0), v(9600.0, 2950.0), v(10300.0, 3000.0), v(10800.0, 3150.0), v(12100.0, 3250.0)]);
+    c.roof(&[v(8250.0, 2950.0), v(9600.0, 2950.0), v(10300.0, 3000.0), v(10800.0, 3150.0), v(11800.0, 3250.0), v(12300.0, 3550.0), v(16500.0, 3600.0)]);
     // No crawling over the vines: wherever a vine crosses spikes, the roof
     // above has teeth too (the roots the vines hang from stay clear).
     c.roof_spikes(1500.0, 2550.0, &[], 0.0);
     c.roof_spikes(6100.0, 7700.0, &[6380.0, 6880.0, 7360.0], 80.0);
     c.roof_spikes(10700.0, 11250.0, &[10800.0], 80.0);
+    // ... and over the bramble gulfs the pods fire you across.
+    c.roof_spikes(12950.0, 13950.0, &[], 0.0);
+    c.roof_spikes(14700.0, 15700.0, &[hung.x], 60.0);
 
     // ----------------------------------------------------------- decor
     c.hang("glowworm", -400.0, 12000.0, 420.0);
@@ -147,6 +188,7 @@ pub fn build() -> Course {
     c.scatter("mushroom", 2600.0, 3050.0, 0.0, 150.0, -1.0);
     c.scatter("crystal", 3400.0, 4100.0, 650.0, 230.0, -1.0);
     c.scatter("mushroom", 7750.0, 8350.0, 1250.0, 150.0, -1.0);
-    c.scatter("crystal", 11300.0, 11900.0, 2600.0, 200.0, -1.0);
+    c.scatter("crystal", 11300.0, 11800.0, 2600.0, 200.0, -1.0);
+    c.scatter("mushroom", 15800.0, 16400.0, 2760.0, 150.0, -1.0);
     c.finish()
 }
