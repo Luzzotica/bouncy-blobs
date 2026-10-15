@@ -21,7 +21,13 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::sim::Game;
 
-static FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Fredoka.ttf");
+static FONT_BOLD: &[u8] = include_bytes!("../assets/fonts/Fredoka-Bold.ttf");
+static FONT_MEDIUM: &[u8] = include_bytes!("../assets/fonts/Fredoka-Medium.ttf");
+
+/// The font file for a weight (see `GameAssets::font_for`).
+fn font_bytes(weight: u16) -> &'static [u8] {
+    if weight >= 600 { FONT_BOLD } else { FONT_MEDIUM }
+}
 
 /// Horizontal advance of `ch` in em units at `weight` (Fredoka is variable).
 pub fn advance(ch: char, weight: u16) -> f32 {
@@ -40,7 +46,7 @@ pub fn advance(ch: char, weight: u16) -> f32 {
 /// Does the game font have a glyph for `ch`? (Anything else draws as an
 /// empty box, so every on-screen string must pass this; see the tests.)
 pub fn has_glyph(ch: char) -> bool {
-    ch.is_whitespace() || ttf_parser::Face::parse(FONT_BYTES, 0).ok().and_then(|f| f.glyph_index(ch)).is_some()
+    ch.is_whitespace() || ttf_parser::Face::parse(FONT_BOLD, 0).ok().and_then(|f| f.glyph_index(ch)).is_some()
 }
 
 /// The characters of `text` the font can't draw.
@@ -51,8 +57,7 @@ pub fn missing_glyphs(text: &str) -> Vec<char> {
 }
 
 fn measure(ch: char, weight: u16) -> Option<f32> {
-    let mut face = ttf_parser::Face::parse(FONT_BYTES, 0).ok()?;
-    let _ = face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), (weight as f32).clamp(300.0, 700.0));
+    let face = ttf_parser::Face::parse(font_bytes(weight), 0).ok()?;
     let gid = face.glyph_index(ch).or_else(|| face.glyph_index('?'))?;
     Some(face.glyph_hor_advance(gid)? as f32 / face.units_per_em() as f32)
 }
@@ -323,7 +328,7 @@ fn rebuild(mut commands: Commands, assets: Option<Res<GameAssets>>, mut q: Query
         }
         let lay = layout(&st.text, st.size, st.weight, st.wrap);
         st.layout_size = lay.size;
-        let font = TextFont { font: assets.font.clone().into(), font_size: st.size.into(), weight: FontWeight(st.weight), ..default() };
+        let font = TextFont { font: assets.font_for(st.weight).into(), font_size: st.size.into(), weight: FontWeight(st.weight), ..default() };
         let mut glyphs = Vec::with_capacity(lay.slots.len());
         for (order, slot) in lay.slots.iter().enumerate() {
             let ge = commands
