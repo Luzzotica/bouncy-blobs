@@ -33,6 +33,7 @@ It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 | `BB_CAPTURE_RESPAWN=s`, `BB_CAPTURE_RESPAWN_AT=x,y` | after a pop, Pip's next life comes s seconds later at x,y (capture only; level and checkpoints unchanged) |
 | `BB_CAPTURE_SHOW=ui` | transparent mode keeps the jelly UI tiles and their lettering (e.g. the logo in the `logo` scene) instead of the blobs |
 | `BB_CAPTURE_HIDE=chars` | hide characters (players, NPCs, faces) and floating effect words, for empty background plates; capture only |
+| `BB_CAPTURE_DROPLET_LIFE=s` | pop droplets melt after s seconds (game keeps them ~42 s); capture only, for long runs of pops on one spot |
 | `BB_CAPTURE_CRF=q` | x264 quality (default 16) |
 | `BB_PRESS=...` | scripted keys (existing): `key@f`, `key@a-b`, `key@a-` (hold from a on), `key@every:P:H[:from[:to]]` (hold H ticks every P). In a headless capture these are **sim ticks**, so a script is the same at any speed. |
 | `BB_TAP=target@f[-g];...` | scripted touches: `x,y` (world), `chip:green` (Kids colour chip), `blob:n` (player slot n). Finger up at g (default f+6). |

@@ -33,6 +33,8 @@
 //!   their lettering (the logo) instead of the blobs.
 //! * `BB_CAPTURE_HIDE=chars` — hide characters and floating effect words
 //!   (background plates).
+//! * `BB_CAPTURE_DROPLET_LIFE=s` — pop droplets melt after s seconds
+//!   (capture only; the game keeps them ~42 s).
 //! * `BB_CAPTURE_UI=1` — keep screen UI (title-menu text, HUD) anyway.
 //! * `BB_TAP=target@f[-g];...` — scripted touches (finger down on tick f,
 //!   up after g, default f+6). Targets: `x,y` (world), `chip:green` (a Kids
@@ -103,6 +105,8 @@ pub struct CaptureConfig {
     /// Where Pip comes back after each pop, cycling (capture only; not a
     /// level change).
     pub respawn_at: Vec<Vec2>,
+    /// Cap on how long pop droplets lie about (capture only; game: ~42 s).
+    pub droplet_life: Option<f32>,
     pub no_pickups: bool,
     /// World px the view centre sits above Pip (at zoom 1).
     pub lift: Option<f32>,
@@ -130,6 +134,7 @@ impl Default for CaptureConfig {
             hide_chars: false,
             respawn: None,
             respawn_at: Vec::new(),
+            droplet_life: None,
             no_pickups: false,
             lift: None,
             track: 1.0,
@@ -183,6 +188,7 @@ impl CaptureConfig {
         c.show_ui = get("BB_CAPTURE_SHOW").is_some_and(|v| v == "ui");
         c.hide_chars = get("BB_CAPTURE_HIDE").is_some_and(|v| v == "chars");
         c.respawn = num("BB_CAPTURE_RESPAWN").map(|s| s.max(0.0));
+        c.droplet_life = num("BB_CAPTURE_DROPLET_LIFE").map(|s| s.max(0.5));
         c.respawn_at = get("BB_CAPTURE_RESPAWN_AT").map(|s| s.split(';').filter_map(|p| pair(p, ',')).map(|(x, y)| Vec2::new(x, y)).collect()).unwrap_or_default();
         c.no_pickups = get("BB_CAPTURE_NO_PICKUPS").is_some_and(|v| v == "1");
         if let Some(m) = get("BB_CAPTURE_CAM") {
@@ -276,7 +282,7 @@ impl Plugin for CapturePlugin {
             .init_resource::<ShapeLerp>()
             .add_systems(PostStartup, setup_camera)
             .add_systems(PostUpdate, place_pip.run_if(resource_added::<Game>))
-            .add_systems(FixedPostUpdate, capture_respawn.run_if(resource_exists::<Game>))
+            .add_systems(FixedPostUpdate, (capture_respawn, droplet_life).run_if(resource_exists::<Game>))
             .add_systems(
                 PostUpdate,
                 frame_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow),
@@ -441,6 +447,18 @@ fn capture_respawn(mut game: ResMut<Game>, mut was_dead: Local<Vec<bool>>, mut l
         game.sim.world.respawn(b, bb_physics::Vec2::new(at.x, at.y));
     }
     *was_dead = dead;
+}
+
+/// `BB_CAPTURE_DROPLET_LIFE=s`: pop droplets melt after s seconds (the last
+/// 3 s of that is the game's own melt), so a run of pops on one spot keeps
+/// landing on spikes rather than on a cushion of old droplets.
+fn droplet_life(mut game: ResMut<Game>) {
+    let Some(life) = config().and_then(|c| c.droplet_life) else { return };
+    for d in game.sim.droplets.iter_mut() {
+        if d.1 > life {
+            d.1 = life;
+        }
+    }
 }
 
 /// Hide every root UI node (HUD, letterbox, skip hint, fades, toasts).
