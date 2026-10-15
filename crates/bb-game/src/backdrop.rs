@@ -35,7 +35,7 @@ pub struct BackdropPlugin;
 
 impl Plugin for BackdropPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, (update_backdrop, update_foreground).after(crate::camera::follow).before(bevy::transform::TransformSystems::Propagate).run_if(resource_exists::<Game>));
+        app.add_systems(PostUpdate, (update_backdrop, update_foreground).after(crate::camera::CameraFraming).after(bevy::camera::CameraUpdateSystems).before(bevy::transform::TransformSystems::Propagate).run_if(resource_exists::<Game>));
     }
 }
 
