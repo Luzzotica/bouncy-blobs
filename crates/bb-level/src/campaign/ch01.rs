@@ -7,8 +7,15 @@
 //! kicker leap, and finally the first look *up* a shaft towards the Glow.
 //!
 //! Mechanics: roll, jump (expand), squish under low ceilings, jelly ground.
+//!
+//! Just past the Bottom Puddle Pip meets **Glimmer**, a small grumpy light,
+//! who (grudgingly) becomes Pip's tutor: every lesson in this chapter is a
+//! line of hers, and she hovers along at Pip's shoulder from then on.
 
 use super::*;
+
+/// Level id of Glimmer the companion (`bb_sim::npc::COMPANION`).
+pub const GLIMMER: &str = "glimmer_companion";
 
 pub fn build() -> Course {
     let mut c = Ch::new(1, "Too Bouncy", Theme::Hollow, -1200.0);
@@ -20,6 +27,10 @@ pub fn build() -> Course {
     c.entry_cave(-1000.0, -650.0, 0.0, 1600.0, Theme::Hollow);
     c.floor(&[v(-650.0, 0.0), v(900.0, 0.0), v(1150.0, 45.0), v(1400.0, 0.0), v(1700.0, 30.0), v(2150.0, 0.0)]);
     c.say(520.0, 600.0, 0.0, "ch01_goodbye");
+    // Glimmer, dozing over the puddle's far end. She tags along once Pip
+    // rolls up to her (see `bb_sim::npc::COMPANION`).
+    c.npc(GLIMMER, v(1250.0, 200.0), NpcRole::Glimmer, "", 12.0);
+    c.say(1030.0, 1080.0, 0.0, "ch01_meet_glimmer");
     c.pickup_arc(v(1000.0, 60.0), v(1300.0, 60.0), 90.0, 3);
     c.pickup_arc(v(1550.0, 70.0), v(1850.0, 70.0), 80.0, 3);
     c.wp(Move::Walk, 250.0, 0.0).wp(Move::Walk, 2030.0, 0.0);
@@ -32,6 +43,7 @@ pub fn build() -> Course {
     c.ledge(2700.0, 3200.0, 230.0); // full jump (+150)
     c.wp(Move::Jump, 2800.0, 230.0);
     c.cp(3000.0, 230.0);
+    c.say(2930.0, 2980.0, 230.0, "ch01_flower");
     // A soft valley (safe), with a secret shelf above it.
     c.floor(&[v(3200.0, 230.0), v(3330.0, 110.0), v(3570.0, 110.0), v(3700.0, 230.0), v(4000.0, 230.0)]);
     c.drops(3360.0, 3540.0, 110.0, 3);
@@ -49,6 +61,7 @@ pub fn build() -> Course {
     c.pickup_arc(v(3980.0, 280.0), v(4280.0, 280.0), 110.0, 3);
     c.wp(Move::Jump, 4320.0, 230.0).wp(Move::Walk, 4560.0, 230.0);
     // Wobbly jelly stepping stones over a wider spiky pit.
+    c.say(4480.0, 4530.0, 230.0, "ch01_jelly_stones");
     c.ledge(4600.0, 5760.0, 30.0);
     c.spikes(v(4600.0, 30.0), v(5760.0, 30.0));
     c.jelly(v(4760.0, 180.0), v(4960.0, 260.0), 0.8);
@@ -91,6 +104,7 @@ pub fn build() -> Course {
     c.floor(&[v(11850.0, 0.0), v(14400.0, 0.0)]);
     c.wp(Move::Jump, 11860.0, 0.0);
     c.cp(12300.0, 0.0);
+    c.say(12100.0, 12150.0, 0.0, "ch01_not_bad");
 
     // ----------------------------------------------- the first look up
     // A tall shaft (the light is somewhere far above), and at its foot the

@@ -19,6 +19,8 @@ use crate::story::cutscene::Runner;
 enum PauseAction {
     Resume,
     Restart,
+    /// Story only: mute / unmute Glimmer's hints (stays open).
+    Hints,
     Quit,
 }
 
@@ -44,6 +46,8 @@ impl Plugin for PausePlugin {
     }
 }
 
+const HINTS_COLOR: u32 = 0x9ad0ff;
+
 const ITEMS: [(&str, PauseAction, u32); 3] =
     [("Keep Bouncing", PauseAction::Resume, 0x6bcb77), ("Back to Checkpoint", PauseAction::Restart, 0xffc75f), ("Title Screen", PauseAction::Quit, 0xff8fab)];
 
@@ -60,6 +64,7 @@ fn toggle(
     shared: Res<Shared>,
     assets: Res<GameAssets>,
     editor: Option<Res<crate::editor::Editor>>,
+    (state, hints): (Res<State<AppState>>, Res<crate::story::glimmer::CompanionHints>),
 ) {
     if editor.is_some_and(|e| e.playtesting) {
         return; // Esc returns to the editor during play-tests.
@@ -96,15 +101,19 @@ fn toggle(
         buf.write(&mut mesh);
         commands.spawn((Mesh2d(meshes.add(mesh)), MeshMaterial2d(shared.blend.clone()), Transform::from_xyz(0.0, 0.0, 250.0))).id()
     };
+    let mut list: Vec<(&str, PauseAction, u32)> = ITEMS.to_vec();
+    if *state.get() == AppState::Story {
+        list.insert(2, (hints.label(), PauseAction::Hints, HINTS_COLOR));
+    }
     let mut items = Vec::new();
-    for (i, (text, action, color)) in ITEMS.iter().enumerate() {
+    for (i, (text, action, color)) in list.iter().enumerate() {
         // The same jelly pill as the title-screen buttons.
         let c = origin + PVec2::new(0.0, 100.0 - i as f32 * 100.0);
         let size = PVec2::new(480.0, BUTTON_H);
         let id = world.add_body(tile_desc(c, size));
         world.body_mut(id).unwrap().anchor_home(4e-5);
         // Bottom first, so no button ever falls through another.
-        drop.add(&mut world, id, (ITEMS.len() - 1 - i) as f32 * 0.07);
+        drop.add(&mut world, id, (list.len() - 1 - i) as f32 * 0.07);
         let mesh = meshes.add(empty_mesh());
         let vis = commands.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, 300.0))).id();
         let label = commands.spawn(SoftText::new(*text, BUTTON_FONT).ride(Ride::Overlay(id)).color(Color::WHITE).z(301.0).stagger(0.025)).id();
@@ -144,6 +153,7 @@ fn run(
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut next: ResMut<NextState<AppState>>,
     mut unload: MessageWriter<UnloadLevel>,
+    mut hints: ResMut<crate::story::glimmer::CompanionHints>,
 ) {
     let dt = time.delta_secs().min(1.0 / 30.0);
     {
@@ -203,8 +213,19 @@ fn run(
     pause.prev_button = button;
     let Some(i) = chosen else { return };
     let action = pause.items[i].1;
+    if action == PauseAction::Hints {
+        // Flip it and stay in the menu, with the label redrawn.
+        hints.toggle();
+        let (body, old) = (pause.items[i].0, pause.items[i].5);
+        commands.entity(old).despawn();
+        pause.items[i].5 = commands.spawn(SoftText::new(hints.label(), BUTTON_FONT).ride(Ride::Overlay(body)).color(Color::WHITE).z(301.0)).id();
+        if let Some(b) = pause.world.body_mut(body) {
+            b.add_velocity(PVec2::new(0.0, 150.0));
+        }
+        return;
+    }
     match action {
-        PauseAction::Resume => {}
+        PauseAction::Resume | PauseAction::Hints => {}
         PauseAction::Restart => {
             let at = game.sim.respawn_point();
             let bodies: Vec<_> = game.sim.players.iter().map(|p| p.ctl.body).collect();
@@ -231,7 +252,8 @@ fn run(
 mod tests {
     #[test]
     fn pause_labels_have_glyphs() {
-        for (text, _, _) in super::ITEMS {
+        let hints = [crate::story::glimmer::CompanionHints(true).label(), crate::story::glimmer::CompanionHints(false).label()];
+        for text in super::ITEMS.iter().map(|i| i.0).chain(hints) {
             assert!(crate::softtext::missing_glyphs(text).is_empty(), "{text:?}");
         }
     }

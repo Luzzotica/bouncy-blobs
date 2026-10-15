@@ -152,16 +152,36 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
             ])
         }
         "ch01_outro" => {
-            let st = stage(id, Theme::Hollow, pip, &[a("pip", NpcRole::Huddle, -300.0)], &[("drip", 320.0, 760.0, 1.0), ("sun", 0.0, 2200.0, 0.8)]);
+            let st = stage(
+                id,
+                Theme::Hollow,
+                pip,
+                &[a("pip", NpcRole::Huddle, -300.0), a("glimmer", NpcRole::Glimmer, -380.0)],
+                &[("drip", 320.0, 760.0, 1.0), ("sun", 0.0, 2200.0, 0.8)],
+            );
             (st, vec![
                 fade_in(),
                 follow("pip", 0.7),
                 walk("pip", 0.0),
+                stroll("glimmer", 330.0),
                 gaze("pip", 0.0, 1.0),
                 slow_cam(0.0, 800.0, 1.4, 2.0),
                 wait(2.2),
                 follow("pip", 0.7),
                 say("pip", "It's still so far."),
+                say("glimmer", "Yep. Very far. Very up."),
+                ungaze("pip"),
+                gaze("pip", -1.0, 0.3),
+                say("pip", "Will you come with me?"),
+                say("glimmer", "ME? Ha! No. Lesson's over, blob."),
+                stroll("glimmer", 1300.0),
+                wait(0.8),
+                say("glimmer", "And don't follow me!"),
+                gaze("pip", 1.0, 0.3),
+                wait(1.2),
+                mood("pip", Mood::Squash),
+                say("pip", "...bye, Glimmer."),
+                unmood("pip"),
                 ungaze("pip"),
                 wait(0.4),
                 say("pip", "That's okay. I'm bouncy."),
@@ -179,32 +199,33 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
                 walk("pip", -60.0),
                 gaze("pip", 1.0, 0.4),
                 mood("pip", Mood::Puff),
-                say("pip", "A light! Hi! Hello! Hi!"),
+                say("pip", "Glimmer! There you are!"),
                 unmood("pip"),
                 slow_cam(200.0, 230.0, 0.8, 0.8),
-                say("glimmer", "Shoo. You're making shadows."),
+                say("glimmer", "Shh! I'm hiding. From YOU."),
                 follow("pip", 0.8),
-                say("pip", "Want to be friends?"),
+                say("pip", "You glow. You're really easy to find."),
                 slow_cam(200.0, 230.0, 0.8, 0.6),
-                say("glimmer", "No. This is MY light. Go glow somewhere else."),
-                follow("pip", 0.75),
-                mood("pip", Mood::Squash),
-                say("pip", "I can't glow."),
-                say("glimmer", "Then go NOT glow somewhere else."),
-                wait(0.6),
-                unmood("pip"),
+                wait(0.5),
+                say("glimmer", "...Ugh."),
+                follow("pip", 0.8),
                 ungaze("pip"),
-                say("pip", "...okay. Bye, light."),
-                walk("pip", 600.0),
+                walk("pip", 120.0),
                 fade_out(),
             ])
         }
         "ch02_outro" => {
-            let st = stage(id, Theme::Drip, pip, &[a("pip", NpcRole::Huddle, -100.0)], &[("mushroom", 500.0, 0.0, 2.0)]);
+            let st = stage(id, Theme::Drip, pip, &[a("pip", NpcRole::Huddle, -100.0), a("glimmer", NpcRole::Glimmer, -230.0)], &[("mushroom", 500.0, 0.0, 2.0)]);
             (st, vec![
                 fade_in(),
                 follow("pip", 0.8),
-                say("pip", "Nobody wants to share a light."),
+                say("pip", "Nobody down here wants to share a light."),
+                say("glimmer", "...I'm sharing mine. Technically."),
+                mood("pip", Mood::Puff),
+                hop("pip"),
+                say("pip", "Glimmer!"),
+                unmood("pip"),
+                say("glimmer", "Don't make it weird."),
                 wait(0.5),
                 gaze("pip", 1.0, 0.0),
                 say("pip", "...ooh. What's that pink glow?"),
@@ -242,11 +263,12 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
             ])
         }
         "ch03_outro" => {
-            let st = stage(id, Theme::Fungus, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[("mushroom", 300.0, 0.0, 1.5)]);
+            let st = stage(id, Theme::Fungus, pip, &[a("pip", NpcRole::Huddle, 0.0), a("glimmer", NpcRole::Glimmer, -130.0)], &[("mushroom", 300.0, 0.0, 1.5)]);
             (st, vec![
                 fade_in(),
                 follow("pip", 0.8),
                 say("pip", "They didn't want me..."),
+                say("glimmer", "Their loss. ...Don't tell anyone I said that."),
                 wait(0.4),
                 say("pip", "...but bouncing is how you go UP!"),
                 jump("pip"),
@@ -320,13 +342,14 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
             ])
         }
         "ch05_outro" => {
-            let st = stage(id, Theme::Stoneworks, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[]);
+            let st = stage(id, Theme::Stoneworks, pip, &[a("pip", NpcRole::Huddle, 0.0), a("glimmer", NpcRole::Glimmer, -130.0)], &[]);
             (st, vec![
                 fade_in(),
                 follow("pip", 0.65),
                 mood("pip", Mood::Squash),
                 puff("pip", 0.85, 1.6),
                 say("pip", "I popped so many times."),
+                say("glimmer", "You popped. You came back. That's the whole trick."),
                 wait(0.6),
                 unmood("pip"),
                 puff("pip", 1.25, 0.6),
@@ -410,12 +433,13 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
             ])
         }
         "ch07_outro" => {
-            let st = stage(id, Theme::Chimney, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[]);
+            let st = stage(id, Theme::Chimney, pip, &[a("pip", NpcRole::Huddle, 0.0), a("glimmer", NpcRole::Glimmer, -130.0)], &[]);
             (st, vec![
                 fade_in(),
                 follow("pip", 0.75),
                 gaze("pip", 0.0, 1.0),
                 say("pip", "A giggle. A nice one. A squishy one."),
+                say("glimmer", "...The Glow is real."),
                 ungaze("pip"),
                 fade_out(),
             ])
@@ -504,7 +528,7 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
         }
         // ---------------------------------------------------------- ch10
         "ch10_intro" => {
-            let st = stage(id, Theme::Well, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[("sun", 0.0, 1800.0, 2.2)]);
+            let st = stage(id, Theme::Well, pip, &[a("pip", NpcRole::Huddle, 0.0), a("glimmer", NpcRole::Glimmer, -130.0)], &[("sun", 0.0, 1800.0, 2.2)]);
             (st, vec![
                 fade_in(),
                 title(10, "The Light Well"),
@@ -515,6 +539,7 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
                 say("pip", "There it is. The light."),
                 wait(0.5),
                 say("pip", "Okay, Pip. One more climb."),
+                say("glimmer", "Go on. Bounce. I'll light the way."),
                 ungaze("pip"),
                 jump("pip"),
                 fade_out(),
@@ -562,10 +587,11 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
 
 /// Lines spoken during a level when a story trigger fires, in order.
 /// Speakers: "pip" (the player), "glimmer", "reg", "critter" (a nearby NPC),
-/// "lulu" (off-screen), "tip" (a gameplay hint bubble).
+/// "lulu" (off-screen), "tip" (a gameplay hint: Glimmer says it when she's
+/// around, else a plain tip bubble; muted by the "Glimmer's hints" setting).
 pub fn level_lines(id: &str) -> Vec<(&'static str, &'static str)> {
     let l: &[(&str, &str)] = match id {
-        "ch02_hello" => &[("glimmer", "You AGAIN? Stop following my light."), ("pip", "I'm not following! I'm going UP!")],
+        "ch02_hello" => &[("glimmer", "You AGAIN? Stop following my light."), ("pip", "I'm not following! I'm going UP!"), ("glimmer", "...Up is this way. Keep up.")],
         "ch03_hello" => &[("cap2", "Ooh, a blob! A wobbly one!"), ("cap1", "Bet it can't bounce like US!"), ("pip", "Watch me!")],
         "ch04_hello" => &[("tangle1", "Don't touch the vines."), ("tangle2", "Ever. EVER."), ("pip", "...noted!")],
         "ch05_hello" => &[("clonk", "CLONK."), ("pip", "Hi Clonk! Still a no-clonk?"), ("clonk", "...CLONK.")],
@@ -574,19 +600,32 @@ pub fn level_lines(id: &str) -> Vec<(&'static str, &'static str)> {
         "ch08_hello" => &[("button", "You again. Still looking for friends?"), ("pip", "Yep!"), ("button", "...Hmph. Good luck, kid.")],
         "ch09_hello" => &[("grumble", "Don't go in there. It's all rocks."), ("pip", "Is anybody stuck?"), ("grumble", "...maybe. Ugh. Fine. YES.")],
         "ch01_goodbye" => &[("pip", "Hello? Anybody?"), ("pip", "...just me, then.")],
-        "ch01_first_hop" => &[("tip", "{Jump} to hop. {Hold} to swell up big and jump higher!")],
-        "ch01_pointy" => &[("pip", "Pointy."), ("tip", "Roll with {move}, then {jump} to hop over the spikes!")],
-        "ch01_squish" => &[("tip", "{Down} to squish flat."), ("pip", "Squish... squish... heh. SQUISH.")],
-        "ch01_big_slope" => &[("pip", "Ooooooh."), ("tip", "Roll down fast and {jump} at the bottom!")],
-        "ch01_look_up" => &[("pip", "That light again. It's all the way up there.")],
+        "ch01_meet_glimmer" => &[
+            ("glimmer", "EEK!"),
+            ("glimmer", "...Oh. Ugh. A blob."),
+            ("pip", "Hi! I'm Pip! You glow!"),
+            ("glimmer", "I'm Glimmer. And you look hopeless. Fine. Watch and learn."),
+        ],
+        "ch01_first_hop" => &[("tip", "Lesson one: {jump} for a little hop."), ("tip", "{Hold} to swell up big and jump higher!")],
+        "ch01_flower" => &[("tip", "Glowing flowers remember you. If you pop, you'll wobble back here."), ("glimmer", "Not that I'd miss you.")],
+        "ch01_pointy" => &[("pip", "Pointy."), ("tip", "Spikes pop blobs. Roll with {move}, then {jump} right over them!")],
+        "ch01_jelly_stones" => &[("tip", "Wobbly jelly stones. Hop from one to the next, and don't stop!")],
+        "ch01_squish" => &[("tip", "Low ceiling. {Down} to squish flat and squeeze through."), ("pip", "Squish... squish... heh. SQUISH."), ("glimmer", "Ha! ...I mean. Hmph.")],
+        "ch01_big_slope" => &[("pip", "Ooooooh."), ("tip", "Roll down fast, then {jump} off the bump at the bottom. Big one!")],
+        "ch01_not_bad" => &[("glimmer", "...Okay. That was actually pretty good."), ("pip", "You think I'm good?"), ("glimmer", "I think you're LOUD. ...And a bit good.")],
+        "ch01_look_up" => &[
+            ("pip", "That light again. It's all the way up there."),
+            ("glimmer", "The Glow. Everyone dreams about it. Nobody goes."),
+            ("pip", "I'm going!"),
+            ("glimmer", "...Of course you are."),
+        ],
         "ch02_drips" => &[("pip", "Plip... plop..."), ("tip", "Drips fall in a rhythm. Time your roll!")],
-        "ch02_meet_glimmer" => &[("glimmer", "You again? Shoo."), ("pip", "I'm going, I'm going.")],
-        "ch02_first_light" => &[("tip", "Lantern flowers remember you. Pop and you'll reform here.")],
-        "ch02_bridge_wobble" => &[("pip", "Wobbly... but it holds!")],
+        "ch02_first_light" => &[("glimmer", "Another glowing flower. You know the drill.")],
+        "ch02_bridge_wobble" => &[("pip", "Wobbly... but it holds!"), ("glimmer", "Wobbly isn't broken. Wobbly is just thinking.")],
         "ch02_membranes" => &[("tip", "Jelly doors only open one way: jump UP through them.")],
         "ch02_up_feeling" => &[("pip", "Up up up!")],
-        "ch02_push" => &[("pip", "Too wide to jump..."), ("tip", "Push the jelly cube into the pit, then roll across on top of it!")],
-        "ch02_mushroom_glow" => &[("pip", "Ooh, pink light. Maybe someone nice lives there?")],
+        "ch02_push" => &[("pip", "Too wide to jump..."), ("tip", "So don't. Push the jelly ball into the pit, then roll across on top of it!")],
+        "ch02_mushroom_glow" => &[("pip", "Ooh, pink light. Maybe someone nice lives there?"), ("glimmer", "Doubt it.")],
         "ch03_fungus" => &[("critter", "Hee! A blob! Bounce it!")],
         "ch03_first_trampoline" => &[("tip", "Land on a mushroom cap to get launched. {Hold} as you land for an extra boost!")],
         "ch03_spring" => &[("tip", "Roll onto the spring and {hold} to swell!"), ("pip", "WHEEEEE!")],
@@ -672,5 +711,47 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "no script for: {missing:?}");
+    }
+
+    /// Chapter 1 is where Pip meets Glimmer, and she teaches every lesson.
+    #[test]
+    fn ch01_has_the_glimmer_meeting_and_her_lessons() {
+        let ch01 = bb_level::campaign::chapter(1);
+        let glimmer = ch01.npcs.iter().find(|n| n.id == bb_sim::npc::COMPANION).expect("no Glimmer companion in ch01");
+        assert_eq!(glimmer.role, NpcRole::Glimmer);
+        let at = |id: &str| ch01.story.iter().find(|t| t.script == id).unwrap_or_else(|| panic!("no {id} trigger in ch01"));
+        // She's met early, near where she waits, before the first lesson.
+        let meet = at("ch01_meet_glimmer");
+        let (min, max) = meet.shape.bounds();
+        assert!((glimmer.pos.x - (min.x + max.x) * 0.5).abs() < bb_sim::npc::COMPANION_MEET, "Glimmer waits too far from her meeting");
+        let meet_lines = level_lines("ch01_meet_glimmer");
+        assert_eq!(meet_lines[0].0, "glimmer");
+        assert!(meet_lines.iter().any(|l| l.1.contains("Watch and learn")));
+        let lessons = ["ch01_first_hop", "ch01_flower", "ch01_pointy", "ch01_jelly_stones", "ch01_squish", "ch01_big_slope"];
+        for id in lessons {
+            assert!(at(id).shape.bounds().0.x > max.x, "{id} comes before the meeting");
+            // Lessons are hints (Glimmer says them) with live control names.
+            assert!(level_lines(id).iter().any(|(who, _)| *who == "tip"), "{id} has no lesson");
+        }
+        let placeholders = lessons.iter().flat_map(|id| level_lines(id)).filter(|(_, t)| t.contains('{')).count();
+        assert!(placeholders >= 4, "lessons lost their control placeholders");
+        // No Glimmer in the intro (she hasn't been met yet); she leaves in the outro.
+        let intro = cutscene("ch01_intro", 0xff5d73).unwrap();
+        assert!(!intro.stage.npcs.iter().any(|n| n.role == NpcRole::Glimmer));
+        let outro = cutscene("ch01_outro", 0xff5d73).unwrap();
+        assert!(outro.stage.npcs.iter().any(|n| n.role == NpcRole::Glimmer));
+        // And chapter 2 opens with her found again.
+        assert!(bb_level::campaign::chapter(2).npcs.iter().any(|n| n.id == bb_sim::npc::COMPANION));
+        assert_eq!(level_lines("ch02_hello")[0], ("glimmer", "You AGAIN? Stop following my light."));
+    }
+
+    /// Later chapters get Glimmer added at the start (not in cutscenes).
+    #[test]
+    fn glimmer_joins_every_later_chapter_once() {
+        for n in 2..=super::super::CHAPTERS {
+            let level = super::super::chapter_level(n);
+            let count = level.npcs.iter().filter(|x| x.id == bb_sim::npc::COMPANION).count();
+            assert_eq!(count, 1, "chapter {n}");
+        }
     }
 }
