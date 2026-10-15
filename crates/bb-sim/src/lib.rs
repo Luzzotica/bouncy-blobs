@@ -126,8 +126,9 @@ pub enum SimEvent {
     Popped { who: Who, pos: Vec2, color: u32 },
     Respawned { who: Who, pos: Vec2 },
     Checkpoint { index: usize, pos: Vec2 },
-    /// Ate an amoeba: the eater turns its colour.
-    Pickup { index: usize, pos: Vec2, slot: u8, color: u32 },
+    /// Ate an amoeba: the eater turns its colour. `pos` is where the
+    /// amoeba was; `contact` the point on the eater's hull it went in at.
+    Pickup { index: usize, pos: Vec2, slot: u8, color: u32, contact: Vec2 },
     Goal { slot: u8 },
     Story { script: String, slot: u8 },
     Impact { body: BodyId, pos: Vec2, speed: f32 },
