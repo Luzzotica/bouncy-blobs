@@ -11,7 +11,8 @@
 //!   (`BB_CAPTURE_TRANSPARENT=1`): a flat floor (hidden in transparent mode)
 //!   and `BB_STAGE=solo` (Pip alone; place with `BB_CAPTURE_AT`, drive with
 //!   `BB_PRESS`), `pile` (Pip and four friends dropped into a narrow funnel;
-//!   `BB_CAPTURE_SCENE_SEED` varies the drop) or `trio` (three Kids Mode
+//!   `BB_CAPTURE_SCENE_SEED` varies the drop), `pile4` (the four friends
+//!   only: teal, yellow, green, purple; no Pip) or `trio` (three Kids Mode
 //!   shape friends: star, square, triangle).
 
 use bb_physics::Vec2 as PVec2;
@@ -269,7 +270,7 @@ pub const STAGE_COLORS: [u32; 4] = [0x4ac8c8, 0xffd54a, 0x8fe36b, 0xb98cff];
 pub fn stage_level(kind: &str, seed: u32) -> bb_level::Level {
     let mut b = LevelBuilder::new("stage", "Stage", Theme::Hollow);
     b.spawn(v(0.0, 40.0)).kill_y(-3000.0);
-    if kind == "pile" {
+    if kind == "pile" || kind == "pile4" {
         b.ground(&[v(-2000.0, 600.0), v(-170.0, 600.0), v(-110.0, 0.0), v(110.0, 0.0), v(170.0, 600.0), v(2000.0, 600.0)], 400.0);
         // Friends drop in one by one from above the funnel.
         for (i, c) in STAGE_COLORS.iter().enumerate() {
@@ -286,7 +287,7 @@ pub fn stage_level(kind: &str, seed: u32) -> bb_level::Level {
 fn start_stage(mut load: MessageWriter<LoadLevel>, mut next: ResMut<NextState<AppState>>) {
     next.set(AppState::Playing);
     let kind = stage_kind();
-    let players = if kind == "trio" { Vec::new() } else { vec![(0u8, "Pip".to_string(), 0xff5d73u32)] };
+    let players = if kind == "trio" || kind == "pile4" { Vec::new() } else { vec![(0u8, "Pip".to_string(), 0xff5d73u32)] };
     load.write(LoadLevel { level: stage_level(&kind, stage_seed()), players });
 }
 
