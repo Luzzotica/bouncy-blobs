@@ -661,27 +661,45 @@ fn drive(
 // ------------------------------------------------------------------ camera
 
 /// Static full-view framing: always fit `VIEW_MIN..VIEW_MAX` on screen.
+///
+/// Sized from what the camera actually draws into (its viewport), not the
+/// window: an offscreen target has no window, and without a fit the camera
+/// fell back to following the wandering friends (the room drifted, the
+/// cards and PUFF went off the edges). Every frame it also takes back the
+/// whole director, so nothing another screen left behind (a cutscene's
+/// keep box or letterbox, a shake) can move the room.
 fn fit_camera(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut director: ResMut<CameraDirector>,
-    mut cam: Query<&mut Projection, With<MainCamera>>,
+    mut cam: Query<(&Camera, &mut Projection), With<MainCamera>>,
 ) {
-    let Ok(w) = windows.single() else { return };
-    let aspect = (w.width() / w.height().max(1.0)).max(0.1);
+    let Ok((camera, mut proj)) = cam.single_mut() else { return };
+    let window = windows.single().ok().map(|w| Vec2::new(w.width(), w.height()));
+    let Some(aspect) = view_aspect(camera.logical_viewport_size(), window) else { return };
+    let (centre, zoom) = fit_view(aspect);
+    *director = CameraDirector { target: Some(centre), zoom: Some(zoom), ..default() };
+    if let Projection::Orthographic(o) = proj.as_mut() {
+        o.scaling_mode = ScalingMode::AutoMin { min_width: crate::camera::VIEW_W, min_height: crate::camera::VIEW_H };
+        o.scale = zoom;
+    }
+}
+
+/// Width / height of the view: the camera's own viewport when it has been
+/// laid out, else the window's.
+fn view_aspect(viewport: Option<Vec2>, window: Option<Vec2>) -> Option<f32> {
+    let s = viewport.filter(|s| s.x >= 1.0 && s.y >= 1.0).or(window.filter(|s| s.x >= 1.0 && s.y >= 1.0))?;
+    Some((s.x / s.y).max(0.1))
+}
+
+/// Camera centre and zoom that fit the room (`VIEW_MIN..VIEW_MAX`) exactly
+/// on one axis, centred, at this aspect (`ScalingMode::AutoMin` view).
+fn fit_view(aspect: f32) -> (Vec2, f32) {
     let (vw, vh) = (crate::camera::VIEW_W, crate::camera::VIEW_H);
     let (sw, sh) = if aspect > vw / vh { (vh * aspect, vh) } else { (vw, vw / aspect) };
     let size = level::VIEW_MAX - level::VIEW_MIN;
     let zoom = (size.x / sw).max(size.y / sh);
     let c = (level::VIEW_MIN + level::VIEW_MAX) * 0.5;
-    director.target = Some(Vec2::new(c.x, c.y));
-    director.zoom = Some(zoom);
-    director.ease = 0.0;
-    if let Ok(mut p) = cam.single_mut() {
-        if let Projection::Orthographic(o) = p.as_mut() {
-            o.scaling_mode = ScalingMode::AutoMin { min_width: vw, min_height: vh };
-            o.scale = zoom;
-        }
-    }
+    (Vec2::new(c.x, c.y), zoom)
 }
 
 // --------------------------------------------------------- portrait / blur
@@ -822,6 +840,29 @@ mod tests {
     /// survive that unload (it used to vanish a frame later: no friends, no
     /// chips, no frame, HOME dead), and the old world's teardown and the new
     /// one's arrival land on different frames.
+    /// The room fits the view exactly (one axis edge to edge, the other
+    /// inside), centred, at every shape of screen: and with no window at all
+    /// (offscreen shots) the camera's own viewport still drives the fit.
+    #[test]
+    fn camera_fits_the_room_at_any_aspect_and_without_a_window() {
+        let (vw, vh) = (crate::camera::VIEW_W, crate::camera::VIEW_H);
+        let room = level::VIEW_MAX - level::VIEW_MIN;
+        let mid = (level::VIEW_MIN + level::VIEW_MAX) * 0.5;
+        for aspect in [16.0 / 9.0, 2000.0 / 1364.0, 4.0 / 3.0, 21.0 / 9.0, 1.0] {
+            let (c, zoom) = fit_view(aspect);
+            assert_eq!(c, Vec2::new(mid.x, mid.y));
+            // What AutoMin shows at this aspect and zoom.
+            let (sw, sh) = if aspect > vw / vh { (vh * aspect, vh) } else { (vw, vw / aspect) };
+            let seen = Vec2::new(sw, sh) * zoom;
+            assert!(seen.x >= room.x - 0.01 && seen.y >= room.y - 0.01, "{aspect}: room cut off ({seen} < {room:?})");
+            assert!((seen.x - room.x).abs() < 0.01 || (seen.y - room.y).abs() < 0.01, "{aspect}: room not fitted ({seen})");
+        }
+        assert_eq!(view_aspect(Some(Vec2::new(2000.0, 1364.0)), None), Some(2000.0 / 1364.0));
+        assert_eq!(view_aspect(Some(Vec2::new(2000.0, 1000.0)), Some(Vec2::new(1600.0, 900.0))), Some(2.0));
+        assert_eq!(view_aspect(None, Some(Vec2::new(1600.0, 900.0))), Some(1600.0 / 900.0));
+        assert_eq!(view_aspect(Some(Vec2::ZERO), None), None);
+    }
+
     #[test]
     fn kids_world_survives_the_title_unloading() {
         let mut app = App::new();
