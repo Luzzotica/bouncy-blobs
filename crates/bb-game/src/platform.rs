@@ -11,13 +11,19 @@ use bevy::window::{ScreenEdge, WindowMode};
 /// True on iOS and Android.
 pub const IS_MOBILE: bool = cfg!(any(target_os = "ios", target_os = "android"));
 
+/// A phone's notch / Dynamic Island and rounded corners: within ~60 px of
+/// the edge they sit on (the sides in landscape, the top in portrait).
+pub const PHONE_NOTCH: f32 = 60.0;
+/// The iPhone / iPad home indicator's strip along the bottom.
+pub const PHONE_HOME: f32 = 20.0;
+
 /// Conservative landscape safe-area inset (logical px) for screen-edge UI.
 /// Bevy 0.19 doesn't expose real insets; phones' notch / Dynamic Island and
 /// rounded corners sit within ~60 px of the side edges in landscape.
-pub const SAFE_SIDE: f32 = if IS_MOBILE { 60.0 } else { 0.0 };
+pub const SAFE_SIDE: f32 = if IS_MOBILE { PHONE_NOTCH } else { 0.0 };
 
 /// Landscape bottom inset (logical px): the iPhone / iPad home indicator.
-pub const SAFE_BOTTOM: f32 = if IS_MOBILE { 20.0 } else { 0.0 };
+pub const SAFE_BOTTOM: f32 = if IS_MOBILE { PHONE_HOME } else { 0.0 };
 
 /// `DefaultPlugins` configured for the current target.
 pub fn default_plugins() -> PluginGroupBuilder {
