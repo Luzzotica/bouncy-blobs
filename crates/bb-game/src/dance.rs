@@ -33,6 +33,9 @@ fn dance(mut game: ResMut<Game>, beat: Res<MusicBeat>) {
         if beat.crossed(groove) {
             if let Some(b) = g.sim.world.body_mut(n.ctl.body) {
                 let up = if groove == Groove::Downbeat { 260.0 } else { 170.0 };
+                if crate::sim::trace() {
+                    eprintln!("BB_SIM_TRACE dance npc {} at tick {} beat {:.3}", n.index, g.tick, beat.beat);
+                }
                 b.add_velocity(PVec2::new(0.0, up));
             }
         }
@@ -42,6 +45,9 @@ fn dance(mut game: ResMut<Game>, beat: Res<MusicBeat>) {
         let Some(id) = id else { continue };
         if beat.crossed(Groove::of(i + 2)) {
             if let Some(b) = g.sim.world.body_mut(*id) {
+                if crate::sim::trace() {
+                    eprintln!("BB_SIM_TRACE dance amoeba {i} at tick {} beat {:.3}", g.tick, beat.beat);
+                }
                 b.add_velocity(PVec2::new(0.0, 70.0));
             }
         }
