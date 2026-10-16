@@ -352,10 +352,14 @@ pub(crate) fn menu_join_panel(
     menu: Option<Res<crate::menu::Menu>>,
     session: Option<Res<NetSession>>,
     panels: Query<Entity, With<MenuJoinPanel>>,
+    own: Option<Res<crate::ownership::Ownership>>,
 ) {
     let want = state.is_some_and(|s| *s.get() == crate::flow::AppState::Title)
         && menu.is_some_and(|m| m.page == crate::menu::Page::Party)
-        && session.is_some_and(|s| s.home);
+        && session.is_some_and(|s| s.home)
+        // The demo can't host: never invite phones (keep_home doesn't open
+        // a room then either).
+        && crate::ownership::allowed(own.as_deref(), crate::ownership::Feature::Host);
     match (want, panels.iter().next()) {
         (true, None) => {
             let e = spawn_join_panel(&mut commands);

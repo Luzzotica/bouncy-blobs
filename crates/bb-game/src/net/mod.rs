@@ -279,23 +279,69 @@ fn dev_autostart(mut commands: Commands, mut cmds: MessageWriter<NetCommand>) {
     }
 }
 
-/// Make the home room when none is open (at launch, after leaving a
-/// friend's room, or a while after the edge closed ours).
-fn keep_home(mut commands: Commands, mut home: ResMut<HomeRoom>, session: Option<Res<NetSession>>, time: Res<Time<Real>>) {
-    if !home.enabled || session.is_some() {
+/// What [`keep_home`] should do about the home room this frame.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HomeStep {
+    Wait,
+    Open,
+    /// The player can't host (the demo): no room, no phones invited.
+    Close,
+}
+
+/// The home room's rule: only for a player who may host (the full game).
+/// While ownership is still Unknown, wait for the answer rather than open
+/// a room and close it again. No `Ownership` resource (bare test apps)
+/// means hosting is allowed.
+pub(crate) fn home_step(enabled: bool, own: Option<&crate::ownership::Ownership>, home_open: bool, now: f64, retry_at: f64) -> HomeStep {
+    use crate::ownership::{Feature, Owned, allowed};
+    // Disabled (tests, headless runs, BB_OFFLINE…): hands off entirely.
+    if !enabled {
+        return HomeStep::Wait;
+    }
+    let may_host = allowed(own, Feature::Host);
+    let unknown = own.is_some_and(|o| o.owned == Owned::Unknown);
+    match (home_open, may_host) {
+        (true, false) if !unknown => HomeStep::Close,
+        (false, true) if now >= retry_at => HomeStep::Open,
+        _ => HomeStep::Wait,
+    }
+}
+
+/// Make the home room when none is open (at launch once ownership says we
+/// may host, after leaving a friend's room, a while after partii closed
+/// ours), and close it if the player can't host.
+fn keep_home(
+    mut commands: Commands,
+    mut home: ResMut<HomeRoom>,
+    session: Option<Res<NetSession>>,
+    time: Res<Time<Real>>,
+    own: Option<Res<crate::ownership::Ownership>>,
+) {
+    // Only the home room is ours to manage; a friend's room or a dev
+    // BB_HOST room is left alone.
+    if session.as_deref().is_some_and(|s| !s.home) {
         return;
     }
-    let now = time.elapsed_secs_f64();
-    if now < home.retry_at {
-        return;
+    let home_open = session.is_some();
+    match home_step(home.enabled, own.as_deref(), home_open, time.elapsed_secs_f64(), home.retry_at) {
+        HomeStep::Wait => {}
+        HomeStep::Close => {
+            info!("net: closing the home room: hosting needs the full game");
+            if let Some(h) = session.as_deref().and_then(|s| s.host.as_ref()) {
+                h.end();
+            }
+            commands.remove_resource::<NetSession>();
+        }
+        HomeStep::Open => {
+            home.last_failure = None;
+            commands.insert_resource(NetSession {
+                host: Some(HostSession::start(NetConfig::from_env(), home_options())),
+                home: true,
+                seating: home.hosting,
+                ..NetSession::new(NetRole::Host, "host")
+            });
+        }
     }
-    home.last_failure = None;
-    commands.insert_resource(NetSession {
-        host: Some(HostSession::start(NetConfig::from_env(), home_options())),
-        home: true,
-        seating: home.hosting,
-        ..NetSession::new(NetRole::Host, "host")
-    });
 }
 
 fn handle_commands(
