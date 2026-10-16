@@ -193,7 +193,8 @@ pub(crate) fn apply_restitution(world: &mut World, _h: f32) {
     let contacts: Vec<Contact> = world.contacts().to_vec();
     let statics: Vec<f32> =
         world.static_list().iter().map(|s| s.as_ref().map_or(0.0, |s| s.material.restitution)).collect();
-    let mut per_body: std::collections::HashMap<BodyId, (Vec2, f32, Vec2, u32)> = std::collections::HashMap::new();
+    // Ordered, so bodies are bounced in the same order every run.
+    let mut per_body: std::collections::BTreeMap<BodyId, (Vec2, f32, Vec2, u32)> = std::collections::BTreeMap::new();
     for c in &contacts {
         let (surface_e, surface_v) = match c.other {
             Collider::Static(sid) => (statics[sid.0 as usize], Vec2::ZERO),
