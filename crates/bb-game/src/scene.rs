@@ -44,6 +44,26 @@ pub const COLORS: [(&str, u32); 12] = [
     ("lavender", 0xb8a1ff),
 ];
 
+/// Kids Mode shape friends (cast `shape`) and their colour names.
+pub const SHAPES: [&str; 3] = ["star", "square", "triangle"];
+pub const KIDS_COLORS: [(&str, u32); 9] = [
+    ("red", 0xe06070),
+    ("orange", 0xe88a5a),
+    ("yellow", 0xe8c54a),
+    ("green", 0x6ecf6e),
+    ("teal", 0x4ac8c8),
+    ("blue", 0x5a8ae0),
+    ("purple", 0x8a6ae0),
+    ("pink", 0xd06eb0),
+    ("white", 0xf0f0f0),
+];
+
+/// Names this game has (SCENE-SPEC v0.2 #4: validate rejects anything else).
+pub const EVENT_NAMES: [&str; 6] = ["pop", "death", "land", "jump", "respawn", "spawn"];
+pub const SCENE_EVENTS: [&str; 1] = ["respawn"];
+pub const SFX_FAMILIES: [&str; 3] = ["pop", "land", "ui"];
+pub const WORD_SELECTOR: &str = "word:POP!";
+
 /// Behaviour changes a scene may make (each only via `capture_only`).
 pub const CAPTURE_ONLY: [(&str, &str); 6] = [
     ("stage", "a capture-only stage (value: null)"),
@@ -88,6 +108,9 @@ pub struct Scene {
     pub show: Vec<String>,
     #[serde(default)]
     pub check: Check,
+    /// Seeded variation between takes (none = every seed is the same take).
+    #[serde(default)]
+    pub vary: Vary,
     pub outputs: Vec<Output>,
     #[serde(default)]
     pub audio: Audio,
@@ -98,6 +121,15 @@ fn current() -> String {
 }
 fn seeds1() -> Vec<u32> {
     vec![1]
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Vary {
+    /// Max ± world units added to x where each new life starts.
+    pub respawn_x: Option<f32>,
+    /// Max ± seconds added to each input's time.
+    pub input_jitter: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -126,6 +158,8 @@ pub struct Cast {
     pub color: Option<String>,
     pub spawn: Option<[f32; 2]>,
     pub can_die: Option<bool>,
+    /// Kids Mode shape: star, square or triangle (a shape friend).
+    pub shape: Option<String>,
     /// The stage's own actors (menu blobs, Kids friends, end-card blobs).
     pub from_stage: Option<bool>,
 }
@@ -136,11 +170,12 @@ pub struct Input {
     pub t: f32,
     #[serde(default = "pip")]
     pub who: String,
-    /// hold | release | jump
+    /// hold | release | jump | squish
     pub r#do: String,
     /// left | right | up | down | jump (for hold/release).
     pub key: Option<String>,
-    /// jump: seconds the button stays down (longer = higher), default 1 frame.
+    /// jump/squish: seconds held (jump: longer = higher, default 1 frame;
+    /// squish: default 0.3 s).
     pub hold: Option<f32>,
 }
 
@@ -261,8 +296,10 @@ pub struct Output {
     pub at: Option<Value>,
     #[serde(default)]
     pub transparent: bool,
-    /// This file's own safe band (BB addition; default: check.band_x).
+    /// This file's own safe band (default: check.band_x).
     pub band_x: Option<[f32; 2]>,
+    /// Minimum world view [w, h] for this output only (0 = unconstrained).
+    pub view: Option<[f32; 2]>,
 }
 
 fn sixty() -> u32 {
@@ -281,7 +318,7 @@ pub struct Audio {
 }
 
 fn fams() -> Vec<String> {
-    ["pop", "land", "splash", "ui"].map(String::from).to_vec()
+    SFX_FAMILIES.map(String::from).to_vec()
 }
 
 impl Default for Audio {
@@ -311,6 +348,30 @@ impl Scene {
     }
     pub fn capture(&self, what: &str) -> Option<&CaptureOnly> {
         self.capture_only.iter().find(|c| c.what == what)
+    }
+    /// Cast members the runner spawns and drives (not the stage's own).
+    pub fn members(&self) -> Vec<&Cast> {
+        self.cast.iter().filter(|c| c.from_stage != Some(true)).collect()
+    }
+    /// Player slot of a cast member (Pip is 0, the rest follow in order).
+    pub fn slot_of(&self, id: &str) -> Option<u8> {
+        let m = self.members();
+        if m.iter().any(|c| c.id == "pip") && id == "pip" {
+            return Some(0);
+        }
+        let others: Vec<&&Cast> = m.iter().filter(|c| c.id != "pip").collect();
+        others.iter().position(|c| c.id == id).map(|i| i as u8 + 1)
+    }
+    pub fn id_of_slot(&self, slot: u8) -> Option<&str> {
+        self.members().into_iter().map(|c| c.id.as_str()).find(|id| self.slot_of(id) == Some(slot))
+    }
+    pub fn color_of(&self, c: &Cast) -> u32 {
+        let name = c.color.as_deref().unwrap_or(if c.shape.is_some() { "blue" } else { "pink" });
+        if c.shape.is_some() { kids_color(name).or_else(|| color(name)) } else { color(name).or_else(|| kids_color(name)) }.unwrap_or(0xff5d73)
+    }
+    /// Valid selectors: cast ids and the POP! word.
+    pub fn is_selector(&self, s: &str) -> bool {
+        s == WORD_SELECTOR || self.members().iter().any(|c| c.id == s)
     }
     pub fn pip(&self) -> Option<&Cast> {
         self.cast.iter().find(|c| c.id == "pip")
@@ -342,6 +403,10 @@ impl Scene {
     }
 }
 
+pub fn kids_color(name: &str) -> Option<u32> {
+    KIDS_COLORS.iter().find(|(n, _)| *n == name).map(|c| c.1)
+}
+
 pub fn color(name: &str) -> Option<u32> {
     COLORS.iter().find(|(n, _)| *n == name).map(|c| c.1).or_else(|| bb_sim::parse_color(name).filter(|c| COLORS.iter().any(|(_, v)| v == c)))
 }
@@ -367,13 +432,17 @@ pub fn parse(text: &str) -> Result<Scene, String> {
     serde_json::from_value(v).map_err(|e| format!("The scene doesn't match the format: {e}. See docs/SceneFiles.md for every field."))
 }
 
-fn who_is_pip(v: &Option<Value>) -> bool {
+fn who_list(v: &Option<Value>) -> Vec<String> {
     match v {
-        None => true,
-        Some(Value::String(s)) => s == "pip",
-        Some(Value::Array(a)) => a.iter().all(|x| x == "pip"),
-        _ => false,
+        None => Vec::new(),
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        _ => vec!["?".into()],
     }
+}
+
+fn event_ref_ok(r: &str) -> bool {
+    r.strip_prefix("event:").map(|k| k.split('#').next().unwrap_or("")).is_some_and(|k| EVENT_NAMES.contains(&k))
 }
 
 /// Validate; Ok(warnings) or Err(problems), all in plain words.
@@ -390,8 +459,13 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
     if s.seeds.is_empty() {
         e.push("\"seeds\" needs at least one seed (one take per seed).".into());
     }
-    if s.build != "current" && s.allow_old_build.as_deref().is_none_or(|r| r.trim().is_empty()) {
-        // Whether it's actually old is checked against git at render time.
+    if s.seeds.len() > 1 && s.vary == Vary::default() {
+        warn.push("Several seeds but no \"vary\" block: every seed will be the same performance.".into());
+    }
+    for (n, v) in [("respawn_x", s.vary.respawn_x), ("input_jitter", s.vary.input_jitter)] {
+        if v.is_some_and(|v| !(0.0..=1000.0).contains(&v)) {
+            e.push(format!("vary.{n} must be a positive amount."));
+        }
     }
     // Stage.
     let cap_stage = || s.capture("stage").is_some();
@@ -425,66 +499,86 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         },
         k => e.push(format!("Stage kind {k:?} isn't one of chapter, builtin, inline.")),
     }
+    if s.stage.level.is_some() && s.stage.kind != "inline" {
+        e.push("\"stage.level\" is only for \"kind\": \"inline\".".into());
+    }
     if s.stage.theme.is_some() {
         e.push("\"stage.theme\" must be null for now (each stage uses its own shipped theme).".into());
     }
     // Cast.
-    for c in &s.cast {
-        if c.from_stage == Some(true) {
-            continue;
+    let members = s.members();
+    let can_cast = matches!(s.stage.kind.as_str(), "chapter" | "inline") || matches!(s.stage.id.as_str(), "transparent" | "spikeloop");
+    if !members.is_empty() && !can_cast {
+        e.push(format!("The stage {:?} brings its own actors; use \"cast\": [{{\"from_stage\": true}}] (cast members can go in chapters, inline levels, spikeloop and transparent).", s.stage.id));
+    }
+    if members.len() > 8 {
+        e.push("At most 8 cast members.".into());
+    }
+    for (i, c) in members.iter().enumerate() {
+        let who = if c.id.is_empty() { format!("#{}", i + 1) } else { format!("{:?}", c.id) };
+        if c.id.is_empty() || !c.id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') || c.id.starts_with("word:") {
+            e.push(format!("Cast member {who} needs an \"id\" (letters, digits, - or _)."));
         }
-        if c.id != "pip" {
-            e.push(format!("Cast member {:?}: only \"pip\" (plus {{\"from_stage\": true}}) is supported so far.", c.id));
+        if members[..i].iter().any(|o| o.id == c.id) {
+            e.push(format!("Two cast members are both {who}."));
         }
         if c.kind != "blob" {
-            e.push(format!("Cast member {:?}: \"kind\" must be \"blob\".", c.id));
+            e.push(format!("Cast member {who}: \"kind\" must be \"blob\" (named characters aren't castable yet)."));
         }
-        if let Some(col) = &c.color {
+        if let Some(sh) = &c.shape {
+            if !SHAPES.contains(&sh.as_str()) {
+                e.push(format!("Cast member {who}: shape {sh:?} isn't a Kids Mode shape ({}).", SHAPES.join(", ")));
+            }
+            if let Some(col) = &c.color {
+                if kids_color(col).is_none() {
+                    e.push(format!("Cast member {who}: {col:?} isn't a Kids Mode colour ({}).", KIDS_COLORS.map(|c| c.0).join(", ")));
+                }
+            }
+        } else if let Some(col) = &c.color {
             if color(col).is_none() {
-                e.push(format!("Cast member {:?}: colour {col:?} isn't one of Pip's shipped colours ({}).", c.id, COLORS.map(|c| c.0).join(", ")));
+                e.push(format!("Cast member {who}: colour {col:?} isn't a shipped blob colour ({}).", COLORS.map(|c| c.0).join(", ")));
             }
         }
+        if c.spawn.is_none() && c.id != "pip" {
+            e.push(format!("Cast member {who} needs \"spawn\": [x, y]."));
+        }
         if c.can_die == Some(false) && s.capture("can_die").is_none() {
-            e.push("Pip can't pop in this shot (can_die: false), which changes the game: declare it in \"capture_only\" with \"what\": \"can_die\".".into());
+            e.push(format!("Cast member {who} can't pop (can_die: false), which changes the game: declare it in \"capture_only\" with \"what\": \"can_die\"."));
         }
     }
-    let pip_stage = matches!(s.stage.kind.as_str(), "chapter" | "inline") || matches!(s.stage.id.as_str(), "transparent" | "spikeloop" | "stage-pile");
-    if s.has_pip() && !pip_stage {
-        e.push(format!("The stage {:?} has no Pip; drop him from \"cast\" (use {{\"from_stage\": true}}) or pick another stage.", s.stage.id));
-    }
-    // Inputs (BB verbs: hold/release <key>, jump).
+    // Inputs.
     for (i, inp) in s.inputs.iter().enumerate() {
         let n = i + 1;
-        if inp.who != "pip" {
-            e.push(format!("Input {n}: only \"pip\" can be driven so far (got {:?}).", inp.who));
+        if s.slot_of(&inp.who).is_none() {
+            e.push(format!("Input {n}: {:?} isn't in \"cast\".", inp.who));
         }
         match inp.r#do.as_str() {
-            "jump" => {}
+            "jump" | "squish" => {}
             "hold" | "release" => match inp.key.as_deref() {
                 Some("left" | "right" | "up" | "down" | "jump") => {}
                 k => e.push(format!("Input {n}: {} needs \"key\": left, right, up, down or jump (got {k:?}).", inp.r#do)),
             },
-            d => e.push(format!("Input {n}: {d:?} isn't a Bouncy Blobs input; use hold, release or jump.")),
+            d => e.push(format!("Input {n}: {d:?} isn't a Bouncy Blobs input; use hold, release, jump or squish.")),
         }
     }
     if s.replay.is_some() {
-        e.push("Replaying a recorded input file isn't supported yet (phase 2); leave \"replay\" null.".into());
+        e.push("Replaying a recorded input file isn't supported yet; leave \"replay\" null.".into());
     }
-    if !s.has_pip() && !s.inputs.is_empty() {
-        e.push("There are inputs but no Pip in \"cast\".".into());
-    }
-    // Events.
+    // Scene events.
     for (i, ev) in s.events.iter().enumerate() {
-        match ev.r#do.as_str() {
-            "respawn" => {
-                if ev.at.is_none() {
-                    e.push(format!("Event {}: respawn needs \"at\": [x, y].", i + 1));
-                }
-                if s.capture("respawn_point").is_none() {
-                    e.push("\"respawn\" events move where Pip's lives restart, which changes the game: declare it in \"capture_only\" with \"what\": \"respawn_point\".".into());
-                }
+        if !SCENE_EVENTS.contains(&ev.r#do.as_str()) {
+            e.push(format!("Event {}: {:?} isn't a scene event here (have: {}; slow motion is a camera \"timescale\").", i + 1, ev.r#do, SCENE_EVENTS.join(", ")));
+        }
+        if s.slot_of(&ev.who).is_none() {
+            e.push(format!("Event {}: {:?} isn't in \"cast\".", i + 1, ev.who));
+        }
+        if ev.r#do == "respawn" {
+            if ev.at.is_none() {
+                e.push(format!("Event {}: respawn needs \"at\": [x, y].", i + 1));
             }
-            d => e.push(format!("Event {}: {d:?} isn't supported (only \"respawn\"; slow motion is a camera \"timescale\").", i + 1)),
+            if s.capture("respawn_point").is_none() {
+                e.push("\"respawn\" events move where lives restart, which changes the game: declare it in \"capture_only\" with \"what\": \"respawn_point\".".into());
+            }
         }
     }
     // Capture-only entries.
@@ -521,12 +615,13 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
             e.push(format!("Camera key {n} (t={}) comes before the one above it; keep keys in time order.", k.t));
         }
         last = k.t;
-        if !who_is_pip(&k.who) {
-            e.push(format!("Camera key {n}: only \"pip\" can be framed or followed so far."));
+        for w in who_list(&k.who) {
+            if s.slot_of(&w).is_none() {
+                e.push(format!("Camera key {n}: {w:?} isn't in \"cast\"."));
+            }
         }
-        let needs_pip = k.who.is_some() || matches!(k.r#do.as_str(), "follow");
-        if needs_pip && !s.has_pip() && k.at.is_none() {
-            e.push(format!("Camera key {n} frames Pip, but Pip isn't in \"cast\"."));
+        if k.r#do == "follow" && k.who.is_none() {
+            e.push(format!("Camera key {n}: follow needs \"who\"."));
         }
         match k.r#do.as_str() {
             "frame" | "pan" | "follow" | "zoom" | "hold" | "shake" | "timescale" => {}
@@ -537,6 +632,9 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         }
         if matches!(k.r#do.as_str(), "frame" | "pan" | "follow") && i == 0 && k.view.is_none() && k.subject_width.is_none() {
             e.push(format!("Camera key {n}: say how much to show: \"subject_width\" (fraction of the frame width) or \"view\": [w, h]."));
+        }
+        if k.subject_width.is_some() && k.view.is_some() {
+            e.push(format!("Camera key {n} has both subject_width and view. Each output frames itself to subject_width; put a minimum view on the output instead (outputs[].view)."));
         }
         if let Some(w) = k.subject_width {
             if !(0.01..=0.95).contains(&w) {
@@ -558,19 +656,16 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
     match (&s.length.seconds, &s.length.until) {
         (Some(x), None) if *x > 0.0 && *x <= 120.0 => {}
         (None, Some(u)) => {
-            if !matches!(u.strip_prefix("event:"), Some("pop" | "land" | "splash" | "respawn" | "mushroom" | "spring")) {
-                e.push(format!("length.until {u:?}: use \"event:pop\" (or land, splash, respawn, mushroom, spring)."));
+            if !event_ref_ok(u) {
+                e.push(format!("length.until {u:?}: use \"event:<name>\" with one of {}.", EVENT_NAMES.join(", ")));
             }
         }
         _ => e.push("\"length\" is {\"seconds\": n} (up to 120) or {\"until\": \"event:pop\", \"count\": n, \"plus\": s}.".into()),
     }
     // Check.
     for o in &s.check.objects {
-        if o != "pip" && o != "word:POP!" {
-            e.push(format!("check.objects {o:?}: this runner checks \"pip\" and \"word:POP!\"."));
-        }
-        if o == "pip" && !s.has_pip() {
-            e.push("check.objects lists \"pip\" but Pip isn't in \"cast\"; remove it (or add him).".into());
+        if !s.is_selector(o) {
+            e.push(format!("check.objects {o:?} isn't a selector here: use a cast id ({}) or {WORD_SELECTOR:?}.", s.members().iter().map(|c| c.id.as_str()).collect::<Vec<_>>().join(", ")));
         }
     }
     for (n, b) in [("band_x", s.check.band_x), ("band_y", s.check.band_y)] {
@@ -579,7 +674,7 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         }
     }
     // Outputs.
-    if !s.outputs.iter().any(|o| o.kind == "video") && !s.outputs.iter().any(|o| o.kind == "still") {
+    if s.outputs.is_empty() {
         e.push("List at least one output, e.g. {\"kind\": \"video\", \"size\": \"1080x1920\", \"fps\": 60}.".into());
     }
     for o in &s.outputs {
@@ -598,8 +693,8 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
             }
             "still" => match &o.at {
                 Some(Value::Number(_)) => {}
-                Some(Value::String(a)) if a.starts_with("event:") && a.contains('#') => {}
-                _ => e.push(format!("Still {}: \"at\" is seconds (1.5) or \"event:pop#3\".", o.size)),
+                Some(Value::String(a)) if a.contains('#') && event_ref_ok(a) => {}
+                _ => e.push(format!("Still {}: \"at\" is seconds (1.5) or \"event:<name>#n\" ({}).", o.size, EVENT_NAMES.join(", "))),
             },
             k => e.push(format!("Output kind {k:?}: use video or still (no GIFs or image sequences).")),
         }
@@ -611,6 +706,11 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
                 e.push(format!("Output {}: band_x must be two fractions, low then high.", o.size));
             }
         }
+        if let Some(v) = o.view {
+            if v[0] < 0.0 || v[1] < 0.0 {
+                e.push(format!("Output {}: view must be [w, h] with 0 for unconstrained.", o.size));
+            }
+        }
     }
     let vids: Vec<&String> = s.outputs.iter().filter(|o| o.kind == "video").map(|o| &o.size).collect();
     for (i, a) in vids.iter().enumerate() {
@@ -620,13 +720,13 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
     }
     // Audio.
     for f in &s.audio.sfx_families {
-        if !["pop", "land", "splash", "ui", "bounce", "other"].contains(&f.as_str()) {
-            e.push(format!("audio.sfx_families {f:?}: use pop, land, splash, ui, bounce or other."));
+        if !SFX_FAMILIES.contains(&f.as_str()) {
+            e.push(format!("audio.sfx_families {f:?}: this game has {}.", SFX_FAMILIES.join(", ")));
         }
     }
     for n in &s.show {
         if !["glimmer", "pickups"].contains(&n.as_str()) {
-            warn.push(format!("\"show\" lists {n:?}; this runner can show \"glimmer\" and \"pickups\"."));
+            e.push(format!("\"show\" lists {n:?}; this runner can show \"glimmer\" and \"pickups\"."));
         }
     }
     if s.staged {
@@ -646,42 +746,96 @@ pub fn seeded(seed: u32, i: u32) -> f32 {
     (x >> 8) as f32 / (1u32 << 24) as f32
 }
 
-/// `BB_PRESS` spec for the inputs (sim ticks from the start of the pre-roll).
-pub fn press_spec(s: &Scene) -> String {
-    let mut items = Vec::new();
-    let key = |k: &str| if k == "jump" { "space".to_string() } else { k.to_string() };
-    // hold ... release pairs per key.
-    let mut open: BTreeMap<String, i64> = BTreeMap::new();
-    let mut ins: Vec<&Input> = s.inputs.iter().collect();
-    ins.sort_by(|a, b| a.t.total_cmp(&b.t));
-    for inp in ins {
-        let tk = s.tick_at(inp.t).max(0);
+/// One key held by one cast member over sim ticks [from, to).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub slot: u8,
+    /// left, right, up, down or button.
+    pub key: &'static str,
+    pub from: i64,
+    pub to: i64,
+}
+
+fn key_name(k: &str) -> &'static str {
+    match k {
+        "left" => "left",
+        "right" => "right",
+        "up" => "up",
+        "down" => "down",
+        _ => "button",
+    }
+}
+
+/// Each input's time shift for this seed (vary.input_jitter), in seconds.
+pub fn input_shifts(s: &Scene, seed: u32) -> Vec<f32> {
+    let j = s.vary.input_jitter.unwrap_or(0.0);
+    (0..s.inputs.len()).map(|i| if j > 0.0 { (seeded(seed, 1000 + i as u32) * 2.0 - 1.0) * j } else { 0.0 }).collect()
+}
+
+/// The respawn x offset for `slot`'s `life`-th new life (vary.respawn_x).
+pub fn respawn_shift(s: &Scene, seed: u32, slot: u8, life: u32) -> f32 {
+    let r = s.vary.respawn_x.unwrap_or(0.0);
+    if r > 0.0 { (seeded(seed, 7000 + slot as u32 * 1000 + life) * 2.0 - 1.0) * r } else { 0.0 }
+}
+
+/// The inputs as held keys in sim ticks (from the start of the pre-roll),
+/// with this seed's jitter. These go into the game's per-player input slots,
+/// the same path a keyboard, pad or phone uses.
+pub fn input_plan(s: &Scene, seed: u32) -> Vec<Held> {
+    let shifts = input_shifts(s, seed);
+    let mut ins: Vec<(f32, &Input)> = s.inputs.iter().zip(&shifts).map(|(i, d)| (i.t + d, i)).collect();
+    ins.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut open: Vec<(u8, &'static str, i64)> = Vec::new();
+    for (t, inp) in ins {
+        let Some(slot) = s.slot_of(&inp.who) else { continue };
+        let tk = s.tick_at(t).max(0);
+        let span = |h: f32| (s.tick_at(t + h) - s.tick_at(t)).max(1);
         match inp.r#do.as_str() {
-            "jump" => {
-                let held = inp.hold.map_or(1, |h| (s.tick_at(inp.t + h) - s.tick_at(inp.t)).max(1));
-                items.push(format!("space@{tk}-{}", tk + held - 1));
-            }
+            "jump" => out.push(Held { slot, key: "button", from: tk, to: tk + inp.hold.map_or(1, span) }),
+            "squish" => out.push(Held { slot, key: "down", from: tk, to: tk + span(inp.hold.unwrap_or(0.3)) }),
             "hold" => {
-                let k = key(inp.key.as_deref().unwrap_or("right"));
-                open.entry(k).or_insert(tk);
+                let k = key_name(inp.key.as_deref().unwrap_or("right"));
+                if !open.iter().any(|o| o.0 == slot && o.1 == k) {
+                    open.push((slot, k, tk));
+                }
             }
             "release" => {
-                let k = key(inp.key.as_deref().unwrap_or("right"));
-                if let Some(a) = open.remove(&k) {
-                    items.push(format!("{k}@{a}-{}", (tk - 1).max(a)));
+                let k = key_name(inp.key.as_deref().unwrap_or("right"));
+                if let Some(i) = open.iter().position(|o| o.0 == slot && o.1 == k) {
+                    let (sl, key, from) = open.remove(i);
+                    out.push(Held { slot: sl, key, from, to: tk.max(from + 1) });
                 }
             }
             _ => {}
         }
     }
-    for (k, a) in open {
-        items.push(format!("{k}@{a}-"));
+    for (slot, key, from) in open {
+        out.push(Held { slot, key, from, to: i64::MAX });
     }
-    items.join(",")
+    out
+}
+
+/// The input a cast member gives at sim tick `tick`.
+pub fn input_at(plan: &[Held], slot: u8, tick: i64) -> bb_sim::Input {
+    let mut i = bb_sim::Input::default();
+    for h in plan.iter().filter(|h| h.slot == slot && tick >= h.from && tick < h.to) {
+        match h.key {
+            "left" => i.stick.x -= 1.0,
+            "right" => i.stick.x += 1.0,
+            "up" => i.stick.y += 1.0,
+            "down" => i.stick.y -= 1.0,
+            _ => i.button = true,
+        }
+    }
+    i.stick.x = i.stick.x.clamp(-1.0, 1.0);
+    i.stick.y = i.stick.y.clamp(-1.0, 1.0);
+    i
 }
 
 /// Environment for one game run of this scene with `seed` at `size`.
-pub fn env_for(s: &Scene, scene_path: &str, seed: u32, size: (u32, u32), transparent: bool, frames: u32, out_path: &str, check_path: &str) -> BTreeMap<String, String> {
+#[allow(clippy::too_many_arguments)]
+pub fn env_for(s: &Scene, scene_path: &str, seed: u32, size: (u32, u32), transparent: bool, view_floor: Option<[f32; 2]>, frames: u32, out_path: &str, check_path: &str) -> BTreeMap<String, String> {
     let mut e = BTreeMap::new();
     let mut set = |k: &str, v: String| {
         e.insert(k.to_string(), v);
@@ -734,9 +888,8 @@ pub fn env_for(s: &Scene, scene_path: &str, seed: u32, size: (u32, u32), transpa
             set("BB_CAPTURE_SHOW", "ui".into());
         }
     }
-    let press = press_spec(s);
-    if !press.is_empty() {
-        set("BB_PRESS", press);
+    if let Some([w, h]) = view_floor {
+        set("BB_SCENE_VIEW_FLOOR", format!("{w},{h}"));
     }
     // The scene camera drives the view; capture's own camera stays out of it.
     set("BB_CAPTURE_CAM", "static:0,0".into());
@@ -760,6 +913,7 @@ mod tests {
             {"what": "respawn_delay", "value": 0.65, "why": "snappy rhythm"},
             {"what": "spikeloop_slope", "value": 0.25, "why": "droplets slide off"}],
         "check": {"band_x": [0.05, 0.95], "objects": ["pip", "word:POP!"]},
+        "audio": {"sfx_families": ["pop", "land", "ui"]},
         "outputs": [{"kind": "video", "size": "1080x1920", "fps": 60}, {"kind": "still", "size": "1080x1920", "at": "event:pop#3"}]
     }"#;
 
@@ -825,14 +979,52 @@ mod tests {
         s.inputs = vec![
             Input { t: 0.0, who: "pip".into(), r#do: "hold".into(), key: Some("right".into()), hold: None },
             Input { t: 0.5, who: "pip".into(), r#do: "jump".into(), key: None, hold: Some(0.25) },
+            Input { t: 1.0, who: "pip".into(), r#do: "squish".into(), key: None, hold: None },
             Input { t: 2.0, who: "pip".into(), r#do: "release".into(), key: Some("right".into()), hold: None },
         ];
-        assert_eq!(press_spec(&s), "space@90-104,right@60-179");
+        let p = input_plan(&s, 1);
+        assert!(p.contains(&Held { slot: 0, key: "button", from: 90, to: 105 }), "{p:?}");
+        assert!(p.contains(&Held { slot: 0, key: "down", from: 120, to: 138 }));
+        assert!(p.contains(&Held { slot: 0, key: "right", from: 60, to: 180 }));
+        assert!(input_at(&p, 0, 95).button && input_at(&p, 0, 95).stick.x == 1.0);
+        assert!(!input_at(&p, 0, 200).button && input_at(&p, 0, 200).stick.x == 0.0);
         // 4× slow motion from 1 s: 2 s of video = 1 s + 0.25 s of game.
         s.camera.push(CamKey { t: 1.0, r#do: "timescale".into(), rate: Some(0.25), ..Default::default() });
         assert!((s.game_secs(2.0) - 1.25).abs() < 1e-4);
         assert_eq!(s.tick_at(2.0), 60 + 75);
         assert_eq!(s.rate_at_frame(59), 1.0);
         assert_eq!(s.rate_at_frame(60), 0.25);
+    }
+
+    #[test]
+    fn vary_is_seeded_and_off_by_default() {
+        let mut s = parse(SPIKE).unwrap();
+        s.inputs = vec![Input { t: 1.0, who: "pip".into(), r#do: "jump".into(), key: None, hold: None }];
+        assert_eq!(input_shifts(&s, 1), input_shifts(&s, 2));
+        assert_eq!(respawn_shift(&s, 1, 0, 1), 0.0);
+        s.vary = Vary { respawn_x: Some(35.0), input_jitter: Some(0.03) };
+        let (a, b) = (input_shifts(&s, 1), input_shifts(&s, 2));
+        assert_ne!(a, b);
+        assert!(a[0].abs() <= 0.03 && b[0].abs() <= 0.03);
+        assert_eq!(a, input_shifts(&s, 1));
+        let r = respawn_shift(&s, 1, 0, 3);
+        assert!(r.abs() <= 35.0 && r != 0.0);
+    }
+
+    #[test]
+    fn cast_slots_selectors_and_names() {
+        let mut s = parse(SPIKE).unwrap();
+        s.cast.push(Cast { id: "star1".into(), kind: "blob".into(), color: Some("yellow".into()), spawn: Some([50.0, 200.0]), shape: Some("star".into()), ..Default::default() });
+        assert_eq!(s.slot_of("pip"), Some(0));
+        assert_eq!(s.slot_of("star1"), Some(1));
+        assert_eq!(s.id_of_slot(1), Some("star1"));
+        assert_eq!(s.color_of(&s.cast[1]), 0xe8c54a);
+        assert!(s.is_selector("star1") && s.is_selector("word:POP!") && !s.is_selector("glimmer"));
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        s.audio.sfx_families = vec!["splash".into()];
+        s.check.objects.push("enemy".into());
+        s.length = Length { until: Some("event:kill".into()), ..Default::default() };
+        let e = validate(&s).unwrap_err();
+        assert!(e.iter().any(|m| m.contains("splash")) && e.iter().any(|m| m.contains("enemy")) && e.iter().any(|m| m.contains("event:kill")), "{e:?}");
     }
 }

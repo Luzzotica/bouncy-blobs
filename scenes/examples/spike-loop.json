@@ -7,20 +7,23 @@
 
   "_stage": "A capture-only stage in The Drip's look (not the chapter 2 trench), so it is declared in capture_only.",
   "stage": { "kind": "builtin", "id": "spikeloop" },
-  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [0, 260] } ],
+  "cast": [ { "id": "pip", "kind": "blob", "color": "pink", "spawn": [0, 150] } ],
+  "_events": "Every life drops from 150 px above the spikes (the stage's own spawn is 260), so the drop fits the short 16:9 frame too.",
+  "events": [ { "t": 0, "do": "respawn", "who": "pip", "at": [0, 150] } ],
 
   "_pre_roll": "Seconds of game time before frame 1, so Pip is already falling on frame 1.",
   "pre_roll": 0.33,
 
-  "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in every output; view [0, 420] adds a height floor so the wide 16:9 frame still shows the whole drop (there Pip comes out smaller).",
+  "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in every output; each output size frames itself (a minimum view would go on an output as outputs[].view).",
   "camera": [
-    { "t": 0, "do": "frame", "at": [0, 190], "subject_width": 0.175, "view": [0, 420] }
+    { "t": 0, "do": "frame", "at": [0, 88], "subject_width": 0.175 }
   ],
   "length": { "seconds": 11 },
 
   "capture_only": [
     { "what": "stage", "value": null, "why": "spikeloop is a capture-only stage in The Drip's look, not a level from the game" },
     { "what": "respawn_delay", "value": 0.65, "why": "next life after 0.65 s instead of 1.1 s, for a snappy rhythm" },
+    { "what": "respawn_point", "value": null, "why": "lives start 150 px above the spikes instead of the stage's 260, so the drop fits a 16:9 frame" },
     { "what": "spikeloop_slope", "value": 0.25, "why": "the spike strip is a gentle tent so droplets slide off the sides (they keep their real lifetime)" }
   ],
 
@@ -30,5 +33,5 @@
     { "kind": "video", "size": "1920x1080", "fps": 60 },
     { "kind": "still", "size": "1080x1920", "at": "event:pop#3" }
   ],
-  "audio": { "music_stem": true, "sfx_families": ["pop", "land", "splash", "ui"], "mix": true }
+  "audio": { "music_stem": true, "sfx_families": ["pop", "land", "ui"], "mix": true }
 }

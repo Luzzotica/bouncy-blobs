@@ -1,9 +1,11 @@
-//! The in-game half of scene files (`BB_SCENE_FILE`): the camera timeline,
-//! cast setup, respawn events, the per-frame checks (Pip and the POP! word
-//! against the frame), `length.until`, and the event log (pops, landings,
-//! splashes, with frame numbers). Results go to `BB_SCENE_CHECK` as JSON
-//! for `bb-scene` to read.
+//! The in-game half of scene files (`BB_SCENE_FILE`): cast setup, player
+//! inputs per cast member (written into the game's input slots, the same
+//! path a keyboard, pad or phone uses), respawn events and seeded variation,
+//! the camera timeline, the per-frame checks (cast members and the POP!
+//! word against the frame), `length.until`, and the event log. Results go
+//! to `BB_SCENE_CHECK` as JSON for `bb-scene`.
 
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 
@@ -13,8 +15,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::camera::MainCamera;
-use crate::scene::{CamKey, Scene};
-use crate::sim::{Game, SimMsg};
+use crate::scene::{CamKey, Held, Scene};
+use crate::sim::{Game, Inputs, SimMsg};
 
 pub fn scene() -> Option<&'static Scene> {
     static S: OnceLock<Option<Scene>> = OnceLock::new();
@@ -30,6 +32,15 @@ pub fn shows(what: &str) -> bool {
     scene().is_some_and(|s| s.show.iter().any(|x| x == what))
 }
 
+fn seed() -> u32 {
+    std::env::var("BB_SCENE_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+fn plan() -> &'static [Held] {
+    static P: OnceLock<Vec<Held>> = OnceLock::new();
+    P.get_or_init(|| scene().map_or_else(Vec::new, |s| crate::scene::input_plan(s, seed())))
+}
+
 pub struct SceneRunPlugin;
 
 impl Plugin for SceneRunPlugin {
@@ -39,7 +50,8 @@ impl Plugin for SceneRunPlugin {
         }
         app.init_resource::<SceneState>()
             .add_systems(PostUpdate, setup_cast.run_if(resource_added::<Game>))
-            .add_systems(FixedPostUpdate, respawn_events.run_if(resource_exists::<Game>))
+            .add_systems(PreUpdate, drive_cast.after(crate::input::GatherInput))
+            .add_systems(FixedPostUpdate, lives.run_if(resource_exists::<Game>))
             .add_systems(
                 PostUpdate,
                 scene_camera.in_set(crate::camera::CameraFraming).after(crate::camera::follow).after(crate::capture::CaptureCamera),
@@ -61,26 +73,25 @@ pub fn frame_now() -> Option<i64> {
 #[derive(Resource, Default)]
 struct SceneState {
     follower: Option<Vec2>,
-    /// Camera at the moment the active key took over: (key index, pos, view).
     entered: Option<(usize, Vec2, Vec2)>,
-    /// Where the camera is now (pos, view).
     now: Option<(Vec2, Vec2)>,
-    /// `frame` keys freeze Pip's position when they take over.
     frozen: Option<(usize, Vec2)>,
     frames: Vec<FrameCheck>,
     events: Vec<EventRow>,
     written: bool,
-    was_dead: bool,
+    dead: HashMap<u8, bool>,
+    lives: HashMap<u8, u32>,
     until_hits: u32,
+    /// Seeded variation actually used, for NOTES.
+    vary_log: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
 pub struct FrameCheck {
     pub frame: u32,
-    /// Pip's box in frame fractions [x0, y0, x1, y1] (y down); None when
-    /// he isn't alive.
-    pub subject: Option<[f32; 4]>,
-    pub subject_speed: f32,
+    /// Cast members' boxes in frame fractions [x0, y0, x1, y1] (y down).
+    pub boxes: BTreeMap<String, [f32; 4]>,
+    pub speeds: BTreeMap<String, f32>,
     /// POP! word boxes (frame fractions).
     pub words: Vec<[f32; 4]>,
 }
@@ -101,49 +112,103 @@ struct CheckFile<'a> {
     build: &'static str,
     seed: u32,
     size: [u32; 2],
+    vary: &'a [String],
     frames: &'a [FrameCheck],
     events: &'a [EventRow],
 }
 
-fn pip_body(game: &Game) -> Option<(Vec2, Vec2, f32)> {
-    let p = game.sim.players.first().filter(|p| p.dead.is_none())?;
-    let b = game.sim.world.body(p.ctl.body)?;
-    let (c, v) = (b.centroid(), b.velocity());
-    Some((Vec2::new(c.x, c.y), Vec2::new(v.x, v.y), p.ctl.radius * 2.0))
-}
-
-/// Cast setup once the stage is loaded: colour, can_die.
+/// Spawn the cast: Pip is slot 0 (the stage's own player when it has one),
+/// the rest are extra players in slots 1.. with their colour, shape and spawn.
 fn setup_cast(mut game: ResMut<Game>, mut st: ResMut<SceneState>) {
     let Some(s) = scene() else { return };
     st.follower = None;
     st.entered = None;
     st.now = None;
-    if let Some(p) = game.sim.player_mut(0) {
-        if s.has_pip() {
-            p.color = s.pip_color();
-        }
-    }
     if s.pip().and_then(|c| c.can_die) == Some(false) {
         game.sim.rules.players_pop = false;
     }
     if let Some(d) = s.capture("respawn_delay").and_then(|c| c.value.as_f64()) {
         game.sim.rules.respawn_delay = d as f32;
     }
+    // The stage brought its own Pip but this cast has none: take him out.
+    if s.pip().is_none() && !s.cast.iter().any(|c| c.from_stage == Some(true)) {
+        game.sim.remove_player(0);
+    }
+    for c in s.members() {
+        let Some(slot) = s.slot_of(&c.id) else { continue };
+        let color = s.color_of(c);
+        if game.sim.player(slot).is_none() {
+            game.sim.add_player(slot, &c.id, color);
+        }
+        let Some(p) = game.sim.player_mut(slot) else { continue };
+        p.color = color;
+        p.name = c.id.clone();
+        let body = p.ctl.body;
+        if let Some(sh) = c.shape.as_deref() {
+            let shape = match sh {
+                "star" => crate::kids::level::KidsShape::Star,
+                "square" => crate::kids::level::KidsShape::Square,
+                _ => crate::kids::level::KidsShape::Triangle,
+            };
+            if let Some(b) = game.sim.world.body_mut(body) {
+                b.set_rest_shape(&shape.outline());
+            }
+        }
+        if c.can_die == Some(false) {
+            if let Some(b) = game.sim.world.body_mut(body) {
+                b.params.limits.poppable = false;
+            }
+        }
+        if let Some([x, y]) = c.spawn {
+            game.sim.world.respawn(body, bb_physics::Vec2::new(x, y));
+        }
+        st.events.push(EventRow { kind: "spawn", frame: None, t: -s.pre_roll, x: c.spawn.map_or(0.0, |p| p[0]), y: c.spawn.map_or(0.0, |p| p[1]), who: c.id.clone() });
+    }
 }
 
-/// `respawn` events: a life that begins after the event starts at its `at`.
-fn respawn_events(mut game: ResMut<Game>, mut st: ResMut<SceneState>) {
+/// Write each cast member's input for this sim tick into its input slot.
+fn drive_cast(mut inputs: ResMut<Inputs>, vtime: Res<Time<Virtual>>, game: Option<Res<Game>>) {
     let Some(s) = scene() else { return };
-    let dead = game.sim.players.first().is_some_and(|p| p.dead.is_some());
-    let began = st.was_dead && !dead;
-    st.was_dead = dead;
-    if !began {
+    if game.is_none() {
         return;
     }
+    let tick = crate::capture::press_tick(&vtime) as i64;
+    for c in s.members() {
+        let Some(slot) = s.slot_of(&c.id) else { continue };
+        let i = slot as usize;
+        inputs.slots[i] = crate::scene::input_at(plan(), slot, tick);
+        inputs.active[i] = true;
+    }
+}
+
+/// New lives: respawn events and seeded respawn_x.
+fn lives(mut game: ResMut<Game>, mut st: ResMut<SceneState>) {
+    let Some(s) = scene() else { return };
     let t = frame_now().unwrap_or(0) as f32 / 60.0;
-    let Some([x, y]) = s.events.iter().filter(|e| e.r#do == "respawn" && e.t <= t).filter_map(|e| e.at).last() else { return };
-    if let Some(b) = game.sim.players.first().map(|p| p.ctl.body) {
-        game.sim.world.respawn(b, bb_physics::Vec2::new(x, y));
+    let slots: Vec<(u8, bool, bb_sim::BodyId)> = game.sim.players.iter().map(|p| (p.slot, p.dead.is_some(), p.ctl.body)).collect();
+    for (slot, dead, body) in slots {
+        let was = st.dead.insert(slot, dead).unwrap_or(false);
+        if !(was && !dead) {
+            continue;
+        }
+        let life = {
+            let l = st.lives.entry(slot).or_insert(0);
+            *l += 1;
+            *l
+        };
+        let who = s.id_of_slot(slot).unwrap_or("").to_string();
+        let at = s.events.iter().filter(|e| e.r#do == "respawn" && e.who == who && e.t <= t).filter_map(|e| e.at).last();
+        let dx = crate::scene::respawn_shift(s, seed(), slot, life);
+        if at.is_none() && dx == 0.0 {
+            continue;
+        }
+        let Some(b) = game.sim.world.body(body) else { continue };
+        let c = b.centroid();
+        let [x, y] = at.unwrap_or([c.x, c.y]);
+        game.sim.world.respawn(body, bb_physics::Vec2::new(x + dx, y));
+        if dx != 0.0 {
+            st.vary_log.push(format!("{who} life {life}: respawn x {:+.1}", dx));
+        }
     }
 }
 
@@ -164,44 +229,70 @@ fn lead_of(v: &Option<Value>) -> Vec2 {
     }
 }
 
-/// The view (AutoMin min_width, min_height) a key asks for, if any. A
-/// subject width sets only the width, so every aspect shows Pip at that
-/// fraction of its own frame width.
-/// With both, `subject_width` sets the width and `view[1]` is a height
-/// floor (so a wide frame still shows enough height for a drop).
-fn key_view(k: &CamKey, pip_d: f32) -> Option<Vec2> {
-    match (k.subject_width, k.view) {
-        (Some(f), v) => Some(Vec2::new(pip_d / f, v.map_or(1.0, |v| v[1].max(1.0)))),
-        (None, Some([w, h])) => Some(Vec2::new(w.max(1.0), h.max(1.0))),
-        (None, None) => None,
+fn who_list(v: &Option<Value>) -> Vec<String> {
+    match v {
+        None => Vec::new(),
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        _ => Vec::new(),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Centre, velocity and width (world) of a group of cast members.
+fn group(game: &Game, s: &Scene, who: &[String]) -> Option<(Vec2, Vec2, f32)> {
+    let mut lo = Vec2::splat(f32::MAX);
+    let mut hi = Vec2::splat(f32::MIN);
+    let mut vel = Vec2::ZERO;
+    let mut n = 0.0;
+    for w in who {
+        let Some(slot) = s.slot_of(w) else { continue };
+        let Some(p) = game.sim.player(slot).filter(|p| p.dead.is_none()) else { continue };
+        let Some(b) = game.sim.world.body(p.ctl.body) else { continue };
+        for x in &b.x {
+            lo = lo.min(Vec2::new(x.x, x.y));
+            hi = hi.max(Vec2::new(x.x, x.y));
+        }
+        let v = b.velocity();
+        vel += Vec2::new(v.x, v.y);
+        n += 1.0;
+    }
+    (n > 0.0).then(|| ((lo + hi) * 0.5, vel / n, (hi.x - lo.x).max(2.0 * bb_sim::control::tune::RADIUS)))
+}
+
 fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneState>, mut cam: Query<(&mut Transform, &mut Projection), With<MainCamera>>) {
     let Some(s) = scene() else { return };
     let Ok((mut tf, mut proj)) = cam.single_mut() else { return };
     let t = frame_now().unwrap_or(0).max(0) as f32 / 60.0;
-    let pip = game.as_ref().and_then(|g| pip_body(g));
-    let pip_d = pip.map_or(64.0, |p| p.2);
-    // Moves (everything but timescale/shake) in time order.
+    let floor = std::env::var("BB_SCENE_VIEW_FLOOR").ok().and_then(|v| {
+        let (a, b) = v.split_once(',')?;
+        Some(Vec2::new(a.parse().ok()?, b.parse().ok()?))
+    });
     let moves: Vec<(usize, &CamKey)> = s.camera.iter().enumerate().filter(|(_, k)| !matches!(k.r#do.as_str(), "timescale" | "shake")).collect();
     let region = s.stage.region.map(|[x0, y0, x1, y1]| (Vec2::new((x0 + x1) * 0.5, (y0 + y1) * 0.5), Vec2::new((x1 - x0).abs(), (y1 - y0).abs())));
+    let apply = |tf: &mut Transform, proj: &mut Projection, p: Vec2, v: Vec2| {
+        tf.translation.x = p.x;
+        tf.translation.y = p.y;
+        let v = floor.map_or(v, |f| v.max(f));
+        if let Projection::Orthographic(o) = proj {
+            o.scaling_mode = ScalingMode::AutoMin { min_width: v.x.max(1.0), min_height: v.y.max(1.0) };
+            o.scale = 1.0;
+        }
+    };
     let active = moves.iter().rev().find(|(_, k)| k.t <= t + 1e-6).or(moves.first()).copied();
     let Some((ki, key)) = active else {
         if let Some((p, v)) = region {
-            tf.translation.x = p.x;
-            tf.translation.y = p.y;
-            if let Projection::Orthographic(o) = proj.as_mut() {
-                o.scaling_mode = ScalingMode::AutoMin { min_width: v.x, min_height: v.y };
-                o.scale = 1.0;
-            }
+            apply(&mut tf, &mut proj, p, v);
         }
         return;
     };
-    // Follower (always tracked so a follow key starts from a settled spot).
-    if let Some((p, v, _)) = pip {
-        let fk = if key.r#do == "follow" { Some(key) } else { None };
+    let who = {
+        let w = who_list(&key.who);
+        if w.is_empty() { s.members().first().map(|c| vec![c.id.clone()]).unwrap_or_default() } else { w }
+    };
+    let subject = game.as_ref().and_then(|g| group(g, s, &who));
+    let subj_w = subject.map_or(2.0 * bb_sim::control::tune::RADIUS, |g| g.2);
+    if let Some((p, v, _)) = subject {
+        let fk = (key.r#do == "follow").then_some(key);
         let lead = fk.map_or(Vec2::ZERO, |k| lead_of(&k.lead));
         let off = fk.and_then(|k| k.offset).map_or(Vec2::ZERO, |[x, y]| Vec2::new(x, y));
         let target = p + v * lead + off;
@@ -220,17 +311,16 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
         let a = if lag <= 0.0 || dt <= 0.0 { 1.0 } else { 1.0 - (-dt / lag).exp() };
         st.follower = Some(if fk.is_some() { cur + (want - cur) * a } else { target });
     }
-    let (cur_pos, cur_view) = st.now.unwrap_or_else(|| region.unwrap_or((pip.map_or(Vec2::ZERO, |p| p.0), Vec2::new(860.0, 860.0))));
+    let (cur_pos, cur_view) = st.now.unwrap_or_else(|| region.unwrap_or((subject.map_or(Vec2::ZERO, |p| p.0), Vec2::new(860.0, 860.0))));
     if st.entered.is_none_or(|e| e.0 != ki) {
         st.entered = Some((ki, cur_pos, cur_view));
         if key.r#do == "frame" {
-            if let Some((p, _, _)) = pip {
+            if let Some((p, _, _)) = subject {
                 st.frozen = Some((ki, p));
             }
         }
     }
     let (_, pos0, view0) = st.entered.unwrap();
-    // Target of this key.
     let off = key.offset.map_or(Vec2::ZERO, |[x, y]| Vec2::new(x, y));
     let target_pos = match key.r#do.as_str() {
         "hold" | "zoom" => pos0,
@@ -240,17 +330,20 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
             None => st.frozen.filter(|f| f.0 == ki).map_or(pos0, |f| f.1) + off,
         },
     };
-    let target_view = key_view(key, pip_d).unwrap_or(view0);
+    // Each output frames itself: subject_width sets only the width.
+    let target_view = match (key.subject_width, key.view) {
+        (Some(f), _) => Vec2::new(subj_w / f, 1.0),
+        (None, Some([w, h])) => Vec2::new(w.max(1.0), h.max(1.0)),
+        (None, None) => view0,
+    };
     let u = match key.by {
         Some(by) if by > 0.0 => eased(key.ease.as_deref(), (t - key.t) / by),
         _ => 1.0,
     };
-    // The very first key snaps (nothing to come from).
     let u = if ki == moves[0].0 && st.now.is_none() { 1.0 } else { u };
     let pos = pos0.lerp(target_pos, u);
     let view = view0.lerp(target_view, u);
     st.now = Some((pos, view));
-    // Shake.
     let mut shake = Vec2::ZERO;
     for (i, k) in s.camera.iter().enumerate().filter(|(_, k)| k.r#do == "shake") {
         let d = k.by.unwrap_or(0.6).max(0.01);
@@ -260,12 +353,7 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
             shake += Vec2::new((w * 1.3).sin(), (w * 1.7).cos()) * k.amount.unwrap_or(8.0) * (1.0 - uu);
         }
     }
-    tf.translation.x = pos.x + shake.x;
-    tf.translation.y = pos.y + shake.y;
-    if let Projection::Orthographic(o) = proj.as_mut() {
-        o.scaling_mode = ScalingMode::AutoMin { min_width: view.x.max(1.0), min_height: view.y.max(1.0) };
-        o.scale = 1.0;
-    }
+    apply(&mut tf, &mut proj, pos + shake, view);
 }
 
 fn log_events(game: Option<Res<Game>>, mut reader: MessageReader<SimMsg>, mut st: ResMut<SceneState>) {
@@ -276,47 +364,68 @@ fn log_events(game: Option<Res<Game>>, mut reader: MessageReader<SimMsg>, mut st
     };
     let t = f as f32 / 60.0;
     let frame = (f >= 0).then_some(f as u32);
-    let who_body = |b: bb_sim::BodyId| -> String {
-        game.as_ref().and_then(|g| g.sim.tag(b)).map_or("other".into(), |tag| match tag {
-            bb_sim::BodyTag::Player(i) => format!("player{i}"),
-            bb_sim::BodyTag::Npc(i) => format!("npc{i}"),
-            _ => "other".into(),
-        })
+    let id = |slot: u8| s.id_of_slot(slot).map_or_else(|| format!("player{slot}"), String::from);
+    let who_body = |b: bb_sim::BodyId| -> Option<String> {
+        match game.as_ref()?.sim.tag(b)? {
+            bb_sim::BodyTag::Player(i) => Some(id(i)),
+            _ => None,
+        }
+    };
+    let who_of = |w: &bb_sim::Who| match w {
+        bb_sim::Who::Player(i) => Some(id(*i)),
+        bb_sim::Who::Npc(_) => None,
+    };
+    let body_pos = |w: &bb_sim::Who| -> Vec2 {
+        let g = game.as_ref();
+        match w {
+            bb_sim::Who::Player(i) => g.and_then(|g| g.sim.player(*i)).and_then(|p| g.and_then(|g| g.sim.world.body(p.ctl.body))).map_or(Vec2::ZERO, |b| {
+                let c = b.centroid();
+                Vec2::new(c.x, c.y)
+            }),
+            _ => Vec2::ZERO,
+        }
     };
     for SimMsg(e) in reader.read() {
         use bb_sim::SimEvent as E;
-        let row = |kind: &'static str, x: f32, y: f32, who: String| EventRow { kind, frame, t, x, y, who };
-        let r = match e {
-            E::Popped { who, pos, .. } => Some(row("pop", pos.x, pos.y, format!("{who:?}"))),
-            E::Respawned { who, pos } => Some(row("respawn", pos.x, pos.y, format!("{who:?}"))),
-            E::Impact { body, pos, speed } if *speed >= 220.0 => {
-                let w = who_body(*body);
-                (w != "other").then(|| {
-                    let wet = game.as_ref().is_some_and(|g| {
-                        g.sim.players.iter().any(|p| p.ctl.body == *body && p.ctl.in_water > 0.05) || g.sim.npcs.iter().any(|n| n.ctl.body == *body && n.ctl.in_water > 0.05)
-                    });
-                    row(if wet { "splash" } else { "land" }, pos.x, pos.y, w)
-                })
-            }
-            E::Mushroom { pos, .. } => Some(row("mushroom", pos.x, pos.y, String::new())),
-            E::SuperBounce { body, pos } => Some(row("bounce", pos.x, pos.y, who_body(*body))),
-            E::Spring { .. } => Some(row("spring", 0.0, 0.0, String::new())),
-            E::Checkpoint { pos, .. } => Some(row("checkpoint", pos.x, pos.y, String::new())),
-            E::Pickup { pos, .. } => Some(row("pickup", pos.x, pos.y, String::new())),
-            _ => None,
-        };
-        let Some(r) = r else { continue };
-        // length.until: stop `plus` seconds after the count-th such event.
-        if let (Some(u), Some(fr)) = (s.length.until.as_deref(), r.frame) {
-            if u.strip_prefix("event:") == Some(r.kind) {
-                st.until_hits += 1;
-                if st.until_hits == s.length.count.unwrap_or(1) {
-                    let end = fr + (s.length.plus.unwrap_or(0.0) * 60.0).round() as u32 + 1;
-                    crate::capture::FRAME_LIMIT.store(end, Ordering::Relaxed);
+        let mut rows: Vec<EventRow> = Vec::new();
+        let mut row = |kind: &'static str, x: f32, y: f32, who: String| rows.push(EventRow { kind, frame, t, x, y, who });
+        match e {
+            E::Popped { who, pos, .. } => {
+                if let Some(w) = who_of(who) {
+                    row("pop", pos.x, pos.y, w.clone());
+                    row("death", pos.x, pos.y, w);
                 }
             }
+            E::Respawned { who, pos } => {
+                if let Some(w) = who_of(who) {
+                    row("respawn", pos.x, pos.y, w);
+                }
+            }
+            E::Impact { body, pos, speed } if *speed >= 220.0 => {
+                if let Some(w) = who_body(*body) {
+                    row("land", pos.x, pos.y, w);
+                }
+            }
+            E::Action { who, action: bb_sim::control::Action::Jump | bb_sim::control::Action::WallJump } => {
+                if let Some(w) = who_of(who) {
+                    let p = body_pos(who);
+                    row("jump", p.x, p.y, w);
+                }
+            }
+            _ => {}
         }
-        st.events.push(r);
+        for r in rows {
+            if let (Some(u), Some(fr)) = (s.length.until.as_deref(), r.frame) {
+                if u.strip_prefix("event:") == Some(r.kind) {
+                    st.until_hits += 1;
+                    if st.until_hits == s.length.count.unwrap_or(1) {
+                        let end = fr + (s.length.plus.unwrap_or(0.0) * 60.0).round() as u32 + 1;
+                        crate::capture::FRAME_LIMIT.store(end, Ordering::Relaxed);
+                    }
+                }
+            }
+            st.events.push(r);
+        }
     }
 }
 
@@ -346,19 +455,22 @@ fn check_frame(
         let (a, b) = fr.iter().fold((first, first), |(a, b), p| (a.min(*p), b.max(*p)));
         Some([a.x, a.y, b.x, b.y])
     };
-    let mut subject = None;
-    let mut speed = 0.0;
+    let mut boxes = BTreeMap::new();
+    let mut speeds = BTreeMap::new();
     if let Some(g) = game.as_ref() {
-        if let Some(p) = g.sim.players.first().filter(|p| p.dead.is_none()) {
-            if let Some(b) = g.sim.world.body(p.ctl.body) {
-                let r = b.params.radius;
-                let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
-                for x in &b.x {
-                    lo = lo.min(Vec2::new(x.x - r, x.y - r));
-                    hi = hi.max(Vec2::new(x.x + r, x.y + r));
-                }
-                subject = boxify(&[lo, hi, Vec2::new(lo.x, hi.y), Vec2::new(hi.x, lo.y)]);
-                speed = b.velocity().length();
+        for c in s.members() {
+            let Some(slot) = s.slot_of(&c.id) else { continue };
+            let Some(p) = g.sim.player(slot).filter(|p| p.dead.is_none()) else { continue };
+            let Some(b) = g.sim.world.body(p.ctl.body) else { continue };
+            let r = b.params.radius;
+            let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+            for x in &b.x {
+                lo = lo.min(Vec2::new(x.x - r, x.y - r));
+                hi = hi.max(Vec2::new(x.x + r, x.y + r));
+            }
+            if let Some(bx) = boxify(&[lo, hi, Vec2::new(lo.x, hi.y), Vec2::new(hi.x, lo.y)]) {
+                boxes.insert(c.id.clone(), bx);
+                speeds.insert(c.id.clone(), b.velocity().length());
             }
         }
     }
@@ -384,12 +496,17 @@ fn check_frame(
             word_boxes.push(b);
         }
     }
-    st.frames.push(FrameCheck { frame, subject, subject_speed: speed, words: word_boxes });
+    st.frames.push(FrameCheck { frame, boxes, speeds, words: word_boxes });
     if frame + 1 >= limit && !st.written {
         st.written = true;
         if let Ok(path) = std::env::var("BB_SCENE_CHECK") {
-            let seed = std::env::var("BB_SCENE_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-            let file = CheckFile { build: crate::build_info::COMMIT, seed, size: [size.x, size.y], frames: &st.frames, events: &st.events };
+            let mut vary = st.vary_log.clone();
+            for (i, d) in crate::scene::input_shifts(s, seed()).iter().enumerate() {
+                if *d != 0.0 {
+                    vary.push(format!("input {} ({} {} at {} s): {:+.3} s", i + 1, s.inputs[i].who, s.inputs[i].r#do, s.inputs[i].t, d));
+                }
+            }
+            let file = CheckFile { build: crate::build_info::COMMIT, seed: seed(), size: [size.x, size.y], vary: &vary, frames: &st.frames, events: &st.events };
             match serde_json::to_string(&file) {
                 Ok(j) => {
                     if let Err(e) = std::fs::write(&path, j) {
@@ -400,5 +517,4 @@ fn check_frame(
             }
         }
     }
-    let _ = s;
 }

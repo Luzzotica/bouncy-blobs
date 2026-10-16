@@ -230,9 +230,9 @@ fn build_commit(commit: &str, short: &str, cache: &Path) -> Result<(), String> {
 // ───────────────────────────────────────────────────────────── running
 
 #[allow(clippy::too_many_arguments)]
-fn run_game(s: &Scene, scene_path: &Path, bin: &Path, seed: u32, size: (u32, u32), transparent: bool, frames: u32, mp4: &Path, check: &Path, stills: &[u32]) -> Result<(), String> {
+fn run_game(s: &Scene, scene_path: &Path, bin: &Path, seed: u32, size: (u32, u32), transparent: bool, floor: Option<[f32; 2]>, frames: u32, mp4: &Path, check: &Path, stills: &[u32]) -> Result<(), String> {
     let abs = std::fs::canonicalize(scene_path).map_err(|e| format!("{}: {e}", scene_path.display()))?;
-    let env = scene::env_for(s, &abs.to_string_lossy(), seed, size, transparent, frames, &mp4.to_string_lossy(), &check.to_string_lossy());
+    let env = scene::env_for(s, &abs.to_string_lossy(), seed, size, transparent, floor, frames, &mp4.to_string_lossy(), &check.to_string_lossy());
     let home = std::env::temp_dir().join(format!("bb-scene-home-{}-{seed}-{}x{}-{}", std::process::id(), size.0, size.1, transparent as u8));
     let _ = std::fs::create_dir_all(&home);
     let mut cmd = Command::new(bin);
@@ -278,46 +278,50 @@ fn judge(s: &Scene, o: &Output, chk: &Value) -> Verdict {
     let mut v = Verdict::default();
     let frames = chk["frames"].as_array().cloned().unwrap_or_default();
     let events = chk["events"].as_array().cloned().unwrap_or_default();
-    let subj = |f: &Value| f4(&f["subject"]);
     let inside = |b: [f32; 4], x: [f32; 2], y: [f32; 2]| b[0] >= x[0] - 1e-4 && b[2] <= x[1] + 1e-4 && b[1] >= y[0] - 1e-4 && b[3] <= y[1] + 1e-4;
-    let checks_pip = s.check.objects.iter().any(|x| x == "pip");
-    let checks_word = s.check.objects.iter().any(|x| x == "word:POP!");
+    let members: Vec<String> = s.check.objects.iter().filter(|x| x.as_str() != scene::WORD_SELECTOR).cloned().collect();
+    let checks_word = s.check.objects.iter().any(|x| x == scene::WORD_SELECTOR);
     let tag = format!("{} seed {}", o.size, chk["seed"]);
-    if checks_pip {
-        match frames.first() {
-            Some(f) => match subj(f) {
+    let boxof = |f: &Value, id: &str| f4(&f["boxes"][id]);
+    // Frame 1: every checked cast member fully in frame; the first one moving.
+    if let Some(f) = frames.first() {
+        for (i, id) in members.iter().enumerate() {
+            match boxof(f, id) {
                 Some(b) if inside(b, [0.0, 1.0], [0.0, 1.0]) => {
-                    let sp = f["subject_speed"].as_f64().unwrap_or(0.0);
-                    if s.check.frame1_moving && sp < 20.0 {
-                        v.errors.push(format!("{tag}: on frame 1 Pip is standing still (speed {sp:.0}); add a pre_roll or start an input before t 0."));
+                    let sp = f["speeds"][id].as_f64().unwrap_or(0.0);
+                    if i == 0 && s.check.frame1_moving && sp < 20.0 {
+                        v.errors.push(format!("{tag}: on frame 1 {id} is standing still (speed {sp:.0}); add a pre_roll or start an input before t 0."));
                     }
                 }
-                Some(b) => v.errors.push(format!("{tag}: on frame 1 Pip isn't fully in frame ({}).", pct(b))),
-                None => v.errors.push(format!("{tag}: on frame 1 Pip isn't there (popped, or not spawned yet).")),
-            },
-            None => v.errors.push(format!("{tag}: the run recorded no frames.")),
+                Some(b) => v.errors.push(format!("{tag}: on frame 1 {id} isn't fully in frame ({}).", pct(b))),
+                None => v.errors.push(format!("{tag}: on frame 1 {id} isn't there (popped, or not spawned yet).")),
+            }
         }
+    } else {
+        v.errors.push(format!("{tag}: the run recorded no frames."));
+    }
+    for id in &members {
         let mut bad = 0;
         for f in &frames {
-            if let Some(b) = subj(f) {
+            if let Some(b) = boxof(f, id) {
                 if !inside(b, bx, by) {
                     if bad < 4 {
-                        v.errors.push(format!("{tag}: frame {} ({:.2} s): Pip at {} leaves the safe band (x {:.0}–{:.0}%, y {:.0}–{:.0}%).", f["frame"], f["frame"].as_f64().unwrap_or(0.0) / 60.0, pct(b), bx[0] * 100.0, bx[1] * 100.0, by[0] * 100.0, by[1] * 100.0));
+                        v.errors.push(format!("{tag}: frame {} ({:.2} s): {id} at {} leaves the safe band (x {:.0}–{:.0}%, y {:.0}–{:.0}%).", f["frame"], f["frame"].as_f64().unwrap_or(0.0) / 60.0, pct(b), bx[0] * 100.0, bx[1] * 100.0, by[0] * 100.0, by[1] * 100.0));
                     }
                     bad += 1;
                 }
             }
         }
         if bad > 4 {
-            v.errors.push(format!("{tag}: …and {} more frames with Pip outside the band.", bad - 4));
+            v.errors.push(format!("{tag}: …and {} more frames with {id} outside the band.", bad - 4));
         }
-        if h > w {
-            let mut ws: Vec<f32> = frames.iter().filter_map(|f| subj(f).map(|b| b[2] - b[0])).collect();
-            ws.sort_by(f32::total_cmp);
-            if let Some(med) = ws.get(ws.len() / 2) {
-                if *med < s.check.min_subject_width {
-                    v.warnings.push(format!("{tag}: Pip is only {:.0}% of the frame width (typical); the floor is {:.0}%.", med * 100.0, s.check.min_subject_width * 100.0));
-                }
+    }
+    if let (Some(id), true) = (members.first(), h > w) {
+        let mut ws: Vec<f32> = frames.iter().filter_map(|f| boxof(f, id).map(|b| b[2] - b[0])).collect();
+        ws.sort_by(f32::total_cmp);
+        if let Some(med) = ws.get(ws.len() / 2) {
+            if *med < s.check.min_subject_width {
+                v.warnings.push(format!("{tag}: {id} is only {:.0}% of the frame width (typical); the floor is {:.0}%.", med * 100.0, s.check.min_subject_width * 100.0));
             }
         }
     }
@@ -339,8 +343,9 @@ fn judge(s: &Scene, o: &Output, chk: &Value) -> Verdict {
     }
     for (i, e) in events.iter().filter(|e| e["kind"] == "pop" && !e["frame"].is_null()).enumerate() {
         let fp = e["frame"].as_i64().unwrap_or(0);
+        let who = e["who"].as_str().unwrap_or("");
         let at = |k: i64| frames.iter().find(|f| f["frame"].as_i64() == Some(k));
-        let pb = (2..8).filter_map(|d| at(fp - d).and_then(subj)).next();
+        let pb = (2..8).filter_map(|d| at(fp - d).and_then(|f| boxof(f, who))).next();
         let mut wb: Option<[f32; 4]> = None;
         for k in fp..fp + 60 {
             for b in at(k).and_then(|f| f["words"].as_array().cloned()).into_iter().flatten().filter_map(|b| f4(&b)) {
@@ -348,7 +353,7 @@ fn judge(s: &Scene, o: &Output, chk: &Value) -> Verdict {
             }
         }
         let show = |b: Option<[f32; 4]>| b.map_or("—".into(), |b| format!("{:.0}–{:.0}%", b[0] * 100.0, b[2] * 100.0));
-        v.pops.push(format!("pop {:2} at {:5.2} s (frame {fp}): Pip x {}, POP! x {}", i + 1, fp as f32 / 60.0, show(pb), show(wb)));
+        v.pops.push(format!("pop {:2} at {:5.2} s (frame {fp}): {who} x {}, POP! x {}", i + 1, fp as f32 / 60.0, show(pb), show(wb)));
     }
     v
 }
@@ -358,6 +363,8 @@ fn ff(args: &[&str]) -> Result<(), String> {
     if o.status.success() { Ok(()) } else { Err(format!("ffmpeg failed: {}", String::from_utf8_lossy(&o.stderr))) }
 }
 
+/// SFX family of a sound file (SCENE-SPEC families: pop, land, ui; the
+/// rest only goes into the mix).
 fn family(path: &str) -> &'static str {
     if path.starts_with("music/") {
         "music"
@@ -365,12 +372,8 @@ fn family(path: &str) -> &'static str {
         "pop"
     } else if path.contains("land-squelch") {
         "land"
-    } else if path.contains("splash") {
-        "splash"
     } else if path.contains("/ui-") {
         "ui"
-    } else if path.contains("spring") || path.contains("puff") || path.contains("boing") {
-        "bounce"
     } else {
         "other"
     }
@@ -454,12 +457,13 @@ fn contact(mp4: &Path, jpg: &Path, frames: u32) -> Result<(), String> {
 struct Pass {
     size: (u32, u32),
     transparent: bool,
+    floor: Option<[f32; 2]>,
 }
 
 fn passes(s: &Scene) -> Vec<(Pass, Vec<&Output>)> {
     let mut v: Vec<(Pass, Vec<&Output>)> = Vec::new();
     for o in &s.outputs {
-        let p = Pass { size: o.dims().unwrap(), transparent: o.transparent };
+        let p = Pass { size: o.dims().unwrap(), transparent: o.transparent, floor: o.view };
         match v.iter_mut().find(|(q, _)| *q == p) {
             Some(e) => e.1.push(o),
             None => v.push((p, vec![o])),
@@ -500,7 +504,7 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
                         let stem = format!("{base}-{w}x{h}{}.preview", if p.transparent { "-rgba" } else { "" });
                         let mp4 = tmp.join(format!("{stem}.mp4"));
                         let check = tmp.join(format!("{stem}.check.json"));
-                        run_game(s, path, &build.bin, seed, small, p.transparent, cap_frames, &mp4, &check, &[])?;
+                        run_game(s, path, &build.bin, seed, small, p.transparent, p.floor, cap_frames, &mp4, &check, &[])?;
                         let chk = load(&check)?;
                         let v = judge(s, outs[0], &chk);
                         if preview {
@@ -573,7 +577,7 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
             let t = Instant::now();
             println!("Seed {seed}: rendering {tag}…");
             let sf: Vec<u32> = stills.iter().map(|s| s.0).collect();
-            run_game(s, path, &build.bin, seed, p.size, p.transparent, frames, &mp4, &check, &sf)?;
+            run_game(s, path, &build.bin, seed, p.size, p.transparent, p.floor, frames, &mp4, &check, &sf)?;
             println!("  done in {:.0} s", t.elapsed().as_secs_f32());
             let chk = load(&check)?;
             let v = judge(s, outs[0], &chk);
@@ -609,7 +613,7 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
                     None => std::fs::rename(&mp4, &final_mp4).map_err(|e| e.to_string())?,
                 }
                 let count = |k: &str| chk["events"].as_array().into_iter().flatten().filter(|e| e["kind"] == k && !e["frame"].is_null()).count();
-                summary.push(format!("| {} | video {w}x{h} 60 fps | {:.2} s | {} pops, {} landings, {} splashes |", final_mp4.file_name().unwrap().to_string_lossy(), frames as f32 / 60.0, count("pop"), count("land"), count("splash")));
+                summary.push(format!("| {} | video {w}x{h} 60 fps | {:.2} s | {} pops, {} landings, {} jumps |", final_mp4.file_name().unwrap().to_string_lossy(), frames as f32 / 60.0, count("pop"), count("land"), count("jump")));
                 for x in v.pops {
                     summary.push(format!("| | {x} | | |"));
                 }
@@ -631,6 +635,12 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
             for c in &s.capture_only {
                 notes += &format!("  - {} = {}: {}\n", c.what, c.value, c.why);
             }
+        }
+        let vary: Vec<String> = chk0["vary"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+        if s.vary == scene::Vary::default() {
+            notes += "- **vary:** none — every seed of this file is the same performance.\n";
+        } else {
+            notes += &format!("- **vary:** respawn_x ±{}, input_jitter ±{} s; this seed's values: {}\n", s.vary.respawn_x.unwrap_or(0.0), s.vary.input_jitter.unwrap_or(0.0), if vary.is_empty() { "none used".into() } else { vary.join("; ") });
         }
         notes += &format!("- **staged:** {}\n", if s.staged { "yes" } else { "no — every move is player input through the real simulation" });
         if !s.show.iter().any(|x| x == "pickups") {

@@ -20,16 +20,16 @@
     { "t": 7.0, "who": "pip", "do": "release", "key": "right" }
   ],
 
-  "_camera": "Follow Pip with a short lag, a little look-ahead and a dead zone, at 14% of the frame width; view [0, 760] keeps at least 760 world px of height so the wide 16:9 frame still holds a full bounce.",
+  "_camera": "Follow Pip with a short lag, a little look-ahead and a dead zone, at 14% of the frame width in each output. The 16:9 output opts into a 760 px height floor (outputs[].view) so it still holds a full bounce.",
   "camera": [
-    { "t": 0, "do": "follow", "who": "pip", "subject_width": 0.14, "view": [0, 760], "lag": 0.2, "lead": [0.2, 0], "deadzone": [80, 80] }
+    { "t": 0, "do": "follow", "who": "pip", "subject_width": 0.14, "lag": 0.2, "lead": [0.2, 0], "deadzone": [80, 80] }
   ],
   "length": { "seconds": 8 },
   "capture_only": [],
   "check": { "band_x": [0.2, 0.8], "objects": ["pip"] },
   "outputs": [
     { "kind": "video", "size": "1080x1920", "fps": 60 },
-    { "kind": "video", "size": "1920x1080", "fps": 60 },
-    { "kind": "still", "size": "1920x1080", "at": 4.0 }
+    { "kind": "video", "size": "1920x1080", "fps": 60, "view": [0, 760] },
+    { "kind": "still", "size": "1920x1080", "at": 4.0, "view": [0, 760] }
   ]
 }
