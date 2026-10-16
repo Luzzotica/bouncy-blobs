@@ -32,7 +32,18 @@ pub struct CameraDirector {
     /// Seconds to ease in (0 = snap).
     pub ease: f32,
     pub shake: f32,
+    /// A world box that must stay on screen whatever the shot (cutscenes:
+    /// Pip, padded and stretched ahead of where Pip is going). The camera
+    /// zooms out to fit it, and only pans toward it once fully zoomed out.
+    pub keep: Option<Rect>,
+    /// Fraction of the screen's height covered at the top and at the
+    /// bottom (the cutscene letterbox); `keep` stays clear of it.
+    pub cover: f32,
 }
+
+/// The furthest the camera zooms out to keep [`CameraDirector::keep`] in
+/// view (as far as gameplay ever zooms out).
+pub const KEEP_MAX_ZOOM: f32 = 2.2;
 
 pub struct CameraPlugin;
 
@@ -80,6 +91,33 @@ pub fn exit_framing(level: &bb_level::Level, p: Vec2, completed: bool) -> Option
     let focus = Vec2::new(m.pos.x + f * (m.size.x * 0.25), mid_y + 40.0);
     let blob = Vec2::new(p.x, p.y + CAM_LIFT);
     Some(blob.lerp(focus, 0.55 * w))
+}
+
+/// Half the visible world at zoom 1 for a projection (its real aspect;
+/// the design minimum before the first frame has been laid out).
+pub fn view_half(o: &OrthographicProjection) -> Vec2 {
+    let s = o.area.half_size() / o.scale.max(1e-4);
+    if s.x > 1.0 && s.y > 1.0 { s } else { Vec2::new(VIEW_W, VIEW_H) * 0.5 }
+}
+
+/// The zoom at which a view centred on `at` (half extents `half` at zoom
+/// 1) shows all of `keep`.
+pub fn zoom_to_fit(at: Vec2, keep: Rect, half: Vec2) -> f32 {
+    ((keep.max - at).max(at - keep.min) / half).max_element()
+}
+
+/// Frame a shot (`target`, `zoom`) so `keep` is in it: zoom out as far as
+/// `max_zoom`, then slide the shot toward the box (the box wins over the
+/// shot's centre). Returns the new centre and zoom.
+pub fn fit_shot(target: Vec2, zoom: f32, keep: Rect, half: Vec2, max_zoom: f32) -> (Vec2, f32) {
+    let z = zoom.max(zoom_to_fit(target, keep, half));
+    if z <= max_zoom {
+        return (target, z);
+    }
+    let h = half * max_zoom.max(zoom);
+    let clamp = |v: f32, lo: f32, hi: f32| if lo > hi { (lo + hi) * 0.5 } else { v.clamp(lo, hi) };
+    let t = Vec2::new(clamp(target.x, keep.max.x - h.x, keep.min.x + h.x), clamp(target.y, keep.max.y - h.y, keep.min.y + h.y));
+    (t, max_zoom.max(zoom).max(zoom_to_fit(t, keep, half)))
 }
 
 pub fn follow(
@@ -138,7 +176,15 @@ pub fn follow(
             }
         }
     }
-    let Some(target) = target else { return };
+    let Some(mut target) = target else { return };
+    // The usable view at zoom 1: the window's real aspect, less the bars.
+    let half = match proj.as_ref() {
+        Projection::Orthographic(o) => view_half(o),
+        _ => Vec2::new(VIEW_W, VIEW_H) * 0.5,
+    } * Vec2::new(1.0, 1.0 - 2.0 * dir.cover.clamp(0.0, 0.45));
+    if let Some(keep) = dir.keep {
+        (target, zoom) = fit_shot(target, zoom, keep, half, KEEP_MAX_ZOOM.max(zoom));
+    }
     let k = if dir.ease <= 0.0 { 1.0 } else { 1.0 - (-dt * 4.0 / dir.ease.max(0.05)).exp() };
     let k = if dir.target.is_none() { 1.0 - (-dt * 5.0).exp() } else { k };
     let cur = tf.translation.truncate();
@@ -155,14 +201,42 @@ pub fn follow(
             // Direct control (BB_CAM / BB_ZOOM pins): snap.
             o.scale = zoom;
         } else {
-            o.scale += (zoom - o.scale) * (1.0 - (-dt * 2.5).exp());
+            // Zooming out to keep the box in view is quicker than settling in.
+            let rate = if dir.keep.is_some() && zoom > o.scale { 6.0 } else { 2.5 };
+            o.scale += (zoom - o.scale) * (1.0 - (-dt * rate).exp());
+        }
+        // Wherever the eased camera actually is this frame, the box (without
+        // its lead) is never cut off.
+        if let Some(keep) = dir.keep {
+            let core = Rect::from_center_half_size(keep.center(), (keep.half_size() - Vec2::splat(KEEP_SLACK)).max(Vec2::ZERO));
+            o.scale = o.scale.max(zoom_to_fit(next, core, half).min(KEEP_MAX_ZOOM.max(zoom)));
         }
     }
 }
 
+/// How much of [`CameraDirector::keep`]'s padding the eased camera may eat
+/// into before it's forced out (the rest is a safe margin).
+pub const KEEP_SLACK: f32 = 40.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shot_zooms_out_to_keep_the_box() {
+        let half = Vec2::new(VIEW_W, VIEW_H) * 0.5;
+        let pip = Rect::from_center_half_size(Vec2::new(0.0, 60.0), Vec2::splat(100.0));
+        // Already in frame: the shot is untouched.
+        assert_eq!(fit_shot(Vec2::new(0.0, 100.0), 0.6, pip, half, KEEP_MAX_ZOOM), (Vec2::new(0.0, 100.0), 0.6));
+        // Looking up at the sky: zoom out until Pip is in.
+        let (t, z) = fit_shot(Vec2::new(0.0, 500.0), 1.0, pip, half, KEEP_MAX_ZOOM);
+        assert_eq!(t, Vec2::new(0.0, 500.0));
+        assert!(z > 1.0 && z <= KEEP_MAX_ZOOM && zoom_to_fit(t, pip, half) <= z + 1e-4);
+        // Too far even fully out: the shot slides toward Pip.
+        let (t, z) = fit_shot(Vec2::new(0.0, 3000.0), 1.8, pip, half, KEEP_MAX_ZOOM);
+        assert!((z - KEEP_MAX_ZOOM).abs() < 1e-4 && t.y < 3000.0);
+        assert!(zoom_to_fit(t, pip, half) <= z + 1e-4, "Pip still out of frame");
+    }
 
     /// The blob stays on screen all the way into every exit cave.
     #[test]

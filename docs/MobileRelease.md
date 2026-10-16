@@ -123,7 +123,7 @@ scripts/ios-build.sh --build 3.0.0.N    # nightly: pass the next build number
 
 The demo gate (`crates/bb-game/src/ownership.rs`) is the same on every
 platform. Join is always free. Hosting, Party and Sandbox need the full game.
-Kids Mode and Story chapter 1 are the free part. On desktop, Buy opens partii
+Kids Mode and Story chapters 1 and 2 are the free part. On desktop, Buy opens partii
 checkout in the browser. Apple requires StoreKit for unlocking inside an
 iPhone app, so on iOS Buy goes through the App Store instead:
 

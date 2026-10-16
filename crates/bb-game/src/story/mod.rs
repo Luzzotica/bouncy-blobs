@@ -542,7 +542,7 @@ fn cues_ui(
 ) {
     let dt = time.delta_secs();
     let active = runner.is_some();
-    let target = if active && cues.letterbox { 9.0 } else { 0.0 };
+    let target = if active && cues.letterbox { cutscene::LETTERBOX * 100.0 } else { 0.0 };
     for (_, mut n) in bars.iter_mut() {
         let cur = if let Val::Percent(p) = n.height { p } else { 0.0 };
         n.height = percent(cur + (target - cur) * (1.0 - (-dt * 6.0).exp()));

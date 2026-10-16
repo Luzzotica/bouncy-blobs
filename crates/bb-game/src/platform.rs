@@ -188,3 +188,74 @@ fn disable_msaa(mut commands: Commands, cams: Query<Entity, Added<Camera>>) {
         commands.entity(e).insert(Msaa::Off);
     }
 }
+
+/// iOS: `[UIApplication.sharedApplication openURL:options:completionHandler:]`
+/// on the main thread (UIKit only works there), straight through the
+/// Objective-C runtime so no bridge is needed.
+#[cfg(target_os = "ios")]
+pub fn open_url_ios(url: &str) -> std::io::Result<()> {
+    use std::ffi::{CStr, CString, c_char, c_void};
+    type Id = *mut c_void;
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn sel_registerName(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    #[link(name = "UIKit", kind = "framework")]
+    unsafe extern "C" {}
+    unsafe extern "C" {
+        static _dispatch_main_q: u8;
+        fn dispatch_async_f(queue: *const u8, context: *mut c_void, work: extern "C" fn(*mut c_void));
+    }
+    extern "C" fn on_main(ctx: *mut c_void) {
+        // SAFETY: `ctx` is the CString leaked below; the objc calls use the
+        // documented signatures of each selector.
+        unsafe {
+            let url = CString::from_raw(ctx.cast());
+            let send: unsafe extern "C" fn() = objc_msgSend;
+            let send0: unsafe extern "C" fn(Id, Id) -> Id = std::mem::transmute(send);
+            let send1: unsafe extern "C" fn(Id, Id, *const c_void) -> Id = std::mem::transmute(send);
+            let send3: unsafe extern "C" fn(Id, Id, Id, Id, Id) = std::mem::transmute(send);
+            let class = |n: &CStr| objc_getClass(n.as_ptr());
+            let sel = |n: &CStr| sel_registerName(n.as_ptr());
+            let s = send1(class(c"NSString"), sel(c"stringWithUTF8String:"), url.as_ptr().cast());
+            let u = send1(class(c"NSURL"), sel(c"URLWithString:"), s);
+            if u.is_null() {
+                return;
+            }
+            let app = send0(class(c"UIApplication"), sel(c"sharedApplication"));
+            let opts = send0(class(c"NSDictionary"), sel(c"dictionary"));
+            send3(app, sel(c"openURL:options:completionHandler:"), u, opts, std::ptr::null_mut());
+        }
+    }
+    let ctx = CString::new(url).map_err(std::io::Error::other)?.into_raw();
+    // SAFETY: the main queue is a static; `on_main` takes the CString back.
+    unsafe { dispatch_async_f(&raw const _dispatch_main_q, ctx.cast(), on_main) };
+    Ok(())
+}
+
+/// Android: start an `ACTION_VIEW` intent for the URL from the activity.
+#[cfg(target_os = "android")]
+pub fn open_url_android(url: &str) -> std::io::Result<()> {
+    use jni::objects::{JObject, JValue};
+    let err = |e: jni::errors::Error| std::io::Error::other(e.to_string());
+    let ctx = ndk_context::android_context();
+    // SAFETY: android-activity put the live VM and activity in ndk-context.
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(err)?;
+    let mut env = vm.attach_current_thread().map_err(err)?;
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let jurl = env.new_string(url).map_err(err)?;
+    let uri = env
+        .call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&jurl)])
+        .and_then(|v| v.l())
+        .map_err(err)?;
+    let action = env.new_string("android.intent.action.VIEW").map_err(err)?;
+    let intent = env
+        .new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action), JValue::Object(&uri)])
+        .map_err(err)?;
+    // FLAG_ACTIVITY_NEW_TASK: the browser opens as its own task.
+    env.call_method(&intent, "addFlags", "(I)Landroid/content/Intent;", &[JValue::Int(0x1000_0000)]).map_err(err)?;
+    env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)]).map_err(err)?;
+    Ok(())
+}

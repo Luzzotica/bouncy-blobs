@@ -108,7 +108,9 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
         "ch01_intro" => {
             let st = stage(id, Theme::Hollow, pip, &[a("pip", NpcRole::Huddle, 0.0)], &[("drip", 40.0, 520.0, 1.0), ("crystal", -700.0, 0.0, 1.1), ("crystal", 760.0, 0.0, 0.8), ("sun", 0.0, 2600.0, 0.5)]);
             (st, vec![
-                eyes("pip", EyeState::Closed),
+                // Pip starts with no eyes at all; they draw themselves in
+                // (a pen tracing each outline), then open.
+                eyes("pip", EyeState::None),
                 Beat::Fade { to: 0.0, secs: 3.0 },
                 slow_cam(0.0, 70.0, 0.45, 0.2),
                 wait(2.2),
@@ -117,6 +119,8 @@ pub fn cutscene(id: &str, pip: u32) -> Option<Cutscene> {
                 wait(1.2),
                 puff("pip", 1.08, 0.6),
                 wait(0.8),
+                eyes("pip", EyeState::Draw),
+                wait(super::cutscene::EYE_DRAW_SECS + 0.6),
                 eyes("pip", EyeState::Roll),
                 wait(1.6),
                 eyes("pip", EyeState::Open),

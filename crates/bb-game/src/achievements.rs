@@ -63,6 +63,19 @@ impl Achievements {
         crate::save::get(&format!("ach.{}", a.api_name())).is_some()
     }
 
+    /// Steam builds running under Steam: show `app`'s store page in the
+    /// overlay. False when there's no Steam client or its overlay is off
+    /// (the caller falls back to the browser).
+    pub fn open_store_overlay(&self, app: u32) -> bool {
+        #[cfg(feature = "steam")]
+        if let Some(c) = self.client.as_ref().filter(|c| c.utils().is_overlay_enabled()) {
+            c.friends().activate_game_overlay_to_store(steamworks::AppId(app), steamworks::OverlayToStoreFlag::None);
+            return true;
+        }
+        let _ = app;
+        false
+    }
+
     /// Unlock once; returns true the first time.
     pub fn unlock(&mut self, a: Ach) -> bool {
         if self.has(a) {
@@ -95,7 +108,7 @@ fn init(mut commands: Commands) {
     #[cfg(feature = "steam")]
     {
         // Non-fatal: the game runs fine outside Steam.
-        a.client = steamworks::Client::init_app(4485010).ok();
+        a.client = steamworks::Client::init_app(crate::ownership::STEAM_APP).ok();
     }
     commands.insert_resource(a);
 }

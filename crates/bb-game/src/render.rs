@@ -135,7 +135,19 @@ pub struct FaceCue {
     /// Forced gaze, -1..1 each axis.
     pub look: Option<Vec2>,
     pub mood: Option<Mood>,
+    /// Eyes drawing themselves in (Pip's very first moments): `Some(p)`
+    /// with p 0..1 how much of the eye outlines a pen has traced; 0 is no
+    /// eyes at all. `None`: eyes as usual.
+    pub sketch: Option<f32>,
+    /// Seconds a full trace takes (0 holds the sketch where it is).
+    pub sketch_secs: f32,
+    /// Freshly drawn eyes opening: 0..1 (whites and pupils swelling in
+    /// from a line inside the drawn outlines). `None` once open.
+    pub opening: Option<f32>,
 }
+
+/// How long freshly drawn eyes take to open.
+pub const EYE_OPEN_SECS: f32 = 0.55;
 
 #[derive(Resource, Default)]
 pub struct FaceCues(pub HashMap<BodyId, FaceCue>);
@@ -1842,6 +1854,20 @@ fn update_faces(
             target = l;
         }
         face.look = face.look.lerp(target, (dt * 8.0).min(1.0));
+        // Eyes drawing themselves in, then opening.
+        if let Some(c) = cues.0.get_mut(&face.body) {
+            let secs = c.sketch_secs;
+            if let Some(p) = c.sketch.as_mut().filter(|_| secs > 0.0) {
+                *p = (*p + dt / secs).min(1.0);
+            }
+            if let Some(o) = c.opening.as_mut() {
+                *o += dt / EYE_OPEN_SECS;
+                if *o >= 1.0 {
+                    c.opening = None;
+                }
+            }
+        }
+        let cue = cues.0.get(&face.body).copied();
         // Waking up: pupils roll round in shrinking circles, then settle.
         if let Some(c) = cues.0.get_mut(&face.body).filter(|c| c.roll > 0.0) {
             c.roll = (c.roll - dt).max(0.0);
@@ -1875,7 +1901,8 @@ fn update_faces(
         let off = interp.offset(&game, face.body);
         tf.translation.x = off.x;
         tf.translation.y = off.y;
-        let blinking = face.blink < 0.0 || cue.is_some_and(|c| c.closed);
+        // (No blinking while freshly drawn eyes open.)
+        let blinking = (face.blink < 0.0 && cue.is_none_or(|c| c.opening.is_none())) || cue.is_some_and(|c| c.closed);
         draw_face(&mut buf, &FaceParams {
             c,
             r,
@@ -1887,6 +1914,8 @@ fn update_faces(
             open: face.open,
             fill: style.fill,
             time: t,
+            sketch: cue.and_then(|c| c.sketch),
+            eyes_open: cue.and_then(|c| c.opening).map_or(1.0, |o| o.clamp(0.0, 1.0)),
         });
         buf.write(&mut mesh);
     }
@@ -1904,6 +1933,11 @@ pub struct FaceParams {
     pub open: f32,
     pub fill: Color,
     pub time: f32,
+    /// Eye outlines being traced (see [`FaceCue::sketch`]); no whites or
+    /// pupils yet.
+    pub sketch: Option<f32>,
+    /// 0..1 how open freshly drawn eyes are (1 = as usual).
+    pub eyes_open: f32,
 }
 
 /// A cartoon face in world space (y up), in the spirit of the 2.x
@@ -1927,6 +1961,13 @@ pub fn draw_face(buf: &mut MeshBuf, f: &FaceParams) {
             let k = if f.blinking { 0.25 } else { 1.0 };
             buf.halo(ec, PVec2::splat(0.32 * r), 0.0, la(hex(0xfff3b0), 0.55));
             buf.ellipse(ec, PVec2::new(0.1, 0.12 * k) * r, 0.0, 0.0, la(hex(0xfffdf0), 1.0));
+            continue;
+        }
+        if let Some(p) = f.sketch {
+            // A pen traces the left eye's outline, then the right's.
+            let k = if side < 0.0 { p * 2.0 } else { p * 2.0 - 1.0 };
+            let (ew, eh) = (0.19 * r * sx.sqrt(), 0.23 * r * sy.sqrt());
+            eye_trace(buf, ec, PVec2::new(ew + lw * 0.2, eh + lw * 0.2), k.clamp(0.0, 1.0), lw * 0.85, ink);
             continue;
         }
         if f.mood == Mood::Squash && f.kind != FaceKind::Granny {
@@ -1964,6 +2005,16 @@ pub fn draw_face(buf: &mut MeshBuf, f: &FaceParams) {
         let (ew, eh, pr) = (ew * r * sx.sqrt(), eh * r * sy.sqrt(), pr * r);
         // A thin dark ring makes the whites read on pale blobs too.
         buf.ellipse(ec, PVec2::new(ew + lw * 0.35, eh + lw * 0.35), 0.0, 0.0, la(hex(0x1b1224), 0.35));
+        // Freshly drawn eyes open inside their pen outline, which fades to
+        // the usual thin ring as they do.
+        let o = f.eyes_open;
+        let (eh, pr) = if o < 1.0 {
+            let ease = o * o * (3.0 - 2.0 * o);
+            eye_trace(buf, ec, PVec2::new(ew + lw * 0.2, eh + lw * 0.2), 1.0, lw * 0.85, la(hex(0x1b1224), 1.0 - ease));
+            (eh * (0.04 + 0.96 * ease), pr * ease)
+        } else {
+            (eh, pr)
+        };
         buf.ellipse(ec, PVec2::new(ew, eh), 0.0, 0.0, white);
         let mut po = f.look * PVec2::new(ew - pr, eh - pr) * 0.8;
         if f.mood == Mood::Worried {
@@ -2058,6 +2109,27 @@ pub fn draw_face(buf: &mut MeshBuf, f: &FaceParams) {
             buf.ellipse(u(side * 0.36, -0.04), PVec2::splat(0.055 * r), 0.0, 0.0, brown);
         }
     }
+}
+
+/// A pen stroke around an eye's outline, `k` 0..1 of the way round (from the
+/// top, anticlockwise like a hand drawing it), with the pen's round tip at
+/// its head.
+fn eye_trace(buf: &mut MeshBuf, c: PVec2, r: PVec2, k: f32, width: f32, col: [f32; 4]) {
+    if k <= 0.0 || col[3] <= 0.0 {
+        return;
+    }
+    let a0 = std::f32::consts::FRAC_PI_2 + 0.35;
+    let n = ((32.0 * k).ceil() as usize).max(1);
+    let pts: Vec<PVec2> = (0..=n)
+        .map(|i| {
+            let a = a0 + std::f32::consts::TAU * k * i as f32 / n as f32;
+            c + PVec2::new(a.cos() * r.x, a.sin() * r.y)
+        })
+        .collect();
+    buf.stroke(&pts, width, 0.0, col);
+    buf.ellipse(pts[0], PVec2::splat(width * 0.5), 0.0, 0.0, col);
+    let tip = if k < 1.0 { width * 0.62 } else { width * 0.5 };
+    buf.ellipse(pts[n], PVec2::splat(tip), 0.0, 0.0, col);
 }
 
 /// Body ids belong to one world: when a level unloads, every override is

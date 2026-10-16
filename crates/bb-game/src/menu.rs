@@ -19,7 +19,7 @@ use crate::palette::{darken, hex, lighten};
 use crate::render::{Style, StyleOverrides, z};
 use crate::dropin::{DropIn, DropStyle};
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
-use crate::ownership::{BuyRequest, Feature, Ownership, RestoreRequest};
+use crate::ownership::{BuyRequest, Feature, Ownership, RestoreRequest, WishlistRequest};
 use crate::softtext::{Ride, SoftText};
 use crate::story::{CHAPTERS, StoryProgress};
 
@@ -84,6 +84,8 @@ pub enum Action {
     Locked(Lock),
     Buy,
     Restore,
+    /// The demo's "Wishlist Now": the game's Steam page.
+    Wishlist,
 }
 
 /// Lock `action` if this player can't do it yet (the demo gate).
@@ -114,7 +116,11 @@ fn muted(c: u32) -> u32 {
 pub fn page_hint(page: Page, own: &Ownership) -> Option<String> {
     match page {
         Page::Party if !own.allows(Feature::Host) => Some(crate::menu::Lock::Host.reason()),
-        Page::Chapters if !own.full() => Some(format!("Chapter 1 is free. Own it for all {CHAPTERS}.")),
+        Page::Chapters if !own.full() => Some(match own.scope.story_chapters.max(1) {
+            1 => format!("Chapter 1 is free. Own it for all {CHAPTERS}."),
+            2 => format!("Chapters 1 and 2 are free. Own it for all {CHAPTERS}."),
+            n => format!("Chapters 1 to {n} are free. Own it for all {CHAPTERS}."),
+        }),
         Page::Unlock(l) => Some(l.reason()),
         _ => None,
     }
@@ -514,12 +520,17 @@ fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(S
 
 fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
     match page {
-        Page::Main => vec![
-            ("Play".into(), Action::Goto(Page::Play), 0xff8fab),
-            ("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff),
+        Page::Main => {
+            let mut v = vec![("Play".into(), Action::Goto(Page::Play), 0xff8fab)];
+            // The demo invites a wishlist (the Steam page) right on the title.
+            if !own.full() {
+                v.push(("Wishlist Now".into(), Action::Wishlist, WISHLIST_COLOR));
+            }
+            v.push(("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff));
             #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
-            ("Quit".into(), Action::Quit, 0xff5d73),
-        ],
+            v.push(("Quit".into(), Action::Quit, 0xff5d73));
+            v
+        }
         Page::Play => {
             let story = if progress.unlocked > 1 { format!("Story  ·  Ch {}", progress.current) } else { "Story".into() };
             let mut v = vec![(story, Action::Continue, 0xff8fab)];
@@ -563,6 +574,9 @@ fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(Str
         }
     }
 }
+
+/// The "Wishlist Now" tile: Steam's blue.
+pub const WISHLIST_COLOR: u32 = 0x66c0f4;
 
 /// Streamer mode hides room codes and QR codes (net/ui.rs).
 fn streamer_label() -> String {
@@ -757,7 +771,7 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores): (
+    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores, mut wishes): (
         Query<&mut SoftText>,
         Query<(Entity, &BodyLabel)>,
         Res<MusicBeat>,
@@ -765,6 +779,7 @@ fn interact(
         Res<Ownership>,
         MessageWriter<BuyRequest>,
         MessageWriter<RestoreRequest>,
+        MessageWriter<WishlistRequest>,
     ),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
@@ -890,6 +905,9 @@ fn interact(
                 }
                 Action::Restore => {
                     restores.write(RestoreRequest);
+                }
+                Action::Wishlist => {
+                    wishes.write(WishlistRequest);
                 }
             }
         }
@@ -1111,29 +1129,43 @@ mod tests {
     }
 
     #[test]
-    fn demo_story_is_chapter_one_and_kids_is_free() {
+    fn demo_story_is_two_chapters_and_kids_is_free() {
         let fresh = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
         let play = actions(Page::Play, &fresh, Owned::Demo);
         assert!(play.contains(&Action::Continue) && play.contains(&Action::Kids));
-        // Chapter 1 done: the Story tile would start chapter 2, so it's locked.
-        let done = StoryProgress { unlocked: 2, current: 2, pip_color: 0 };
+        // Chapter 1 done: chapter 2 is still free.
+        let one = StoryProgress { unlocked: 2, current: 2, pip_color: 0 };
+        assert!(actions(Page::Play, &one, Owned::Demo).contains(&Action::Continue));
+        // Chapter 2 done: the Story tile would start chapter 3, so it's locked.
+        let done = StoryProgress { unlocked: 3, current: 3, pip_color: 0 };
         let play = actions(Page::Play, &done, Owned::Demo);
-        assert!(play.contains(&Action::Locked(Lock::Story(2))));
+        assert!(play.contains(&Action::Locked(Lock::Story(3))));
         assert!(play.contains(&Action::Goto(Page::Chapters)));
         assert!(actions(Page::Play, &done, Owned::Full).contains(&Action::Continue));
     }
 
     #[test]
     fn demo_chapters_page_shows_the_rest_locked() {
-        let done = StoryProgress { unlocked: 2, current: 2, pip_color: 0 };
+        let done = StoryProgress { unlocked: 3, current: 3, pip_color: 0 };
         let ch = actions(Page::Chapters, &done, Owned::Demo);
-        assert_eq!(ch[0], Action::Chapter(1));
-        for c in 2..=CHAPTERS {
+        assert_eq!(&ch[..2], &[Action::Chapter(1), Action::Chapter(2)]);
+        for c in 3..=CHAPTERS {
             assert!(ch.contains(&Action::Locked(Lock::Chapter(c))), "{c}");
         }
+        assert!(page_hint(Page::Chapters, &own(Owned::Demo)).is_some_and(|h| h.starts_with("Chapters 1 and 2 are free")));
         // Owners see what they've reached, all open.
         let full = actions(Page::Chapters, &done, Owned::Full);
-        assert_eq!(full, vec![Action::Chapter(1), Action::Chapter(2), Action::Goto(Page::Play)]);
+        assert_eq!(full, vec![Action::Chapter(1), Action::Chapter(2), Action::Chapter(3), Action::Goto(Page::Play)]);
+    }
+
+    #[test]
+    fn demo_title_offers_wishlist_and_owners_dont_see_it() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        for o in [Owned::Demo, Owned::Unknown] {
+            let main = page_buttons(Page::Main, &p, &own(o));
+            assert_eq!(main[1], ("Wishlist Now".to_string(), Action::Wishlist, WISHLIST_COLOR));
+        }
+        assert!(!actions(Page::Main, &p, Owned::Full).contains(&Action::Wishlist));
     }
 
     #[test]

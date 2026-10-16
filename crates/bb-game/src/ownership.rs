@@ -6,7 +6,8 @@
 //! - **Host is paid.** Hosting a room, Party with local pads, and Sandbox
 //!   need the full game.
 //! - **The free part** (the listing's `demo`): Kids Mode, and the first
-//!   `story_chapters` of the story (chapter 1). Locks apply at menus and
+//!   `story_chapters` of the story (chapters 1 and 2; each chapter is
+//!   one level, `chNN`). Locks apply at menus and
 //!   chapter boundaries, never mid-level.
 //!
 //! [`Ownership`] is the one answer the rest of the game reads. It comes from
@@ -24,6 +25,11 @@
 //! with `refresh()` when the window gets focus back; on iOS, StoreKit 2
 //! through [`crate::store`], with the receipt sent to partii and the
 //! transaction finished only once partii accepted it.
+//!
+//! Wishlisting: [`WishlistRequest`] ("Wishlist Now" on the demo's title and
+//! end card) opens the game's Steam store page: in the Steam overlay when
+//! running under Steam, else in the browser (iOS and Android hand the URL to
+//! the system).
 
 use bevy::prelude::*;
 
@@ -51,7 +57,7 @@ pub struct DemoScope {
 
 impl Default for DemoScope {
     fn default() -> Self {
-        DemoScope { story_chapters: 1, kids_mode: true }
+        DemoScope { story_chapters: 2, kids_mode: true }
     }
 }
 
@@ -185,6 +191,15 @@ pub fn allowed(own: Option<&Ownership>, f: Feature) -> bool {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct BuyRequest;
 
+/// Open the game's Steam store page (the demo's "Wishlist Now").
+#[derive(Message, Clone, Copy, Debug)]
+pub struct WishlistRequest;
+
+/// The game's Steam app (achievements use it too).
+pub const STEAM_APP: u32 = 4485010;
+/// Its store page, where wishlisting happens.
+pub const STEAM_STORE_URL: &str = "https://store.steampowered.com/app/4485010/";
+
 /// iOS: find this Apple ID's purchase again ("Restore Purchases").
 #[derive(Message, Clone, Copy, Debug)]
 pub struct RestoreRequest;
@@ -199,9 +214,10 @@ impl Plugin for OwnershipPlugin {
         app.init_resource::<Ownership>()
             .add_message::<BuyRequest>()
             .add_message::<RestoreRequest>()
+            .add_message::<WishlistRequest>()
             .add_systems(Startup, crate::store::start)
             .add_systems(PreUpdate, track)
-            .add_systems(Update, buy);
+            .add_systems(Update, (buy, wishlist));
         #[cfg(not(target_arch = "wasm32"))]
         app.add_systems(Update, checkout.after(buy));
     }
@@ -290,6 +306,22 @@ fn buy(mut own: ResMut<Ownership>, mut buys: MessageReader<BuyRequest>, mut rest
         return;
     }
     own.buy = BuyStatus::Failed(if cfg!(target_os = "android") { "Get the full game at partii.games".into() } else { "Can't reach the store right now. Try again in a bit.".into() });
+}
+
+/// "Wishlist Now": the Steam overlay's store page for this app when Steam is
+/// running the game, else the store page in the browser.
+fn wishlist(mut wishes: MessageReader<WishlistRequest>, ach: Option<Res<crate::achievements::Achievements>>) {
+    if wishes.read().count() == 0 {
+        return;
+    }
+    if crate::platform::headless() {
+        info!("wishlist: {STEAM_STORE_URL} (headless: not opened)");
+        return;
+    }
+    if ach.is_some_and(|a| a.open_store_overlay(STEAM_APP)) {
+        return;
+    }
+    open_url(STEAM_STORE_URL);
 }
 
 /// Seconds between `refresh()` calls while the checkout is in the browser
@@ -393,24 +425,30 @@ fn checkout(
     }
 }
 
-/// Open a checkout page in the default browser. Headless runs only log it
-/// (they never open anything on screen).
-#[cfg(not(target_arch = "wasm32"))]
+/// Open a web page (a checkout, the Steam store page) in the default
+/// browser; iOS and Android hand it to the system, the web build opens a new
+/// tab. Headless runs only log it (they never open anything on screen).
 pub fn open_url(url: &str) {
     if crate::platform::headless() {
-        info!("checkout: {url} (headless: not opened)");
+        info!("open: {url} (headless: not opened)");
         return;
     }
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(url).spawn();
+    let r = std::process::Command::new("open").arg(url).spawn().map(drop);
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
+    let r = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn().map(drop);
     #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
-    let r = std::process::Command::new("xdg-open").arg(url).spawn();
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    let r: std::io::Result<()> = Err(std::io::Error::other("no browser hand-off on mobile"));
+    let r = std::process::Command::new("xdg-open").arg(url).spawn().map(drop);
+    #[cfg(target_os = "ios")]
+    let r = crate::platform::open_url_ios(url);
+    #[cfg(target_os = "android")]
+    let r = crate::platform::open_url_android(url);
+    #[cfg(target_arch = "wasm32")]
+    let r = web_sys::window()
+        .ok_or_else(|| std::io::Error::other("no window"))
+        .and_then(|w| w.open_with_url_and_target(url, "_blank").map(drop).map_err(|e| std::io::Error::other(format!("{e:?}"))));
     if let Err(e) = r {
-        warn!("checkout: couldn't open {url}: {e}");
+        warn!("open: couldn't open {url}: {e}");
     }
 }
 
@@ -429,13 +467,14 @@ mod tests {
     }
 
     #[test]
-    fn the_demo_is_join_kids_and_chapter_one() {
+    fn the_demo_is_join_kids_and_two_chapters() {
         for owned in [Owned::Demo, Owned::Unknown] {
             let s = DemoScope::default();
             assert!(allows(owned, s, Feature::Join));
             assert!(allows(owned, s, Feature::Kids));
             assert!(allows(owned, s, Feature::Chapter(1)));
-            assert!(!allows(owned, s, Feature::Chapter(2)));
+            assert!(allows(owned, s, Feature::Chapter(2)));
+            assert!(!allows(owned, s, Feature::Chapter(3)));
             assert!(!allows(owned, s, Feature::Chapter(10)));
             assert!(!allows(owned, s, Feature::Host));
             assert!(!allows(owned, s, Feature::Sandbox));
@@ -455,12 +494,15 @@ mod tests {
 
     #[test]
     fn listing_demo_parses_with_defaults() {
-        let v = json!({"ok": true, "game": {"demo": {"join_free": true, "free": ["Kids Mode", "Story chapter 1"], "kids_mode": true, "story_chapters": 1}}});
+        let v = json!({"ok": true, "game": {"demo": {"join_free": true, "free": ["Kids Mode", "Story chapters 1-2"], "kids_mode": true, "story_chapters": 2}}});
+        assert_eq!(DemoScope::from_listing(&v), Some(DemoScope { story_chapters: 2, kids_mode: true }));
+        // An older listing that still says 1 is followed (the listing wins).
+        let v = json!({"game": {"demo": {"story_chapters": 1}}});
         assert_eq!(DemoScope::from_listing(&v), Some(DemoScope { story_chapters: 1, kids_mode: true }));
         let v = json!({"game": {"demo": {"story_chapters": 99}}});
         assert_eq!(DemoScope::from_listing(&v), Some(DemoScope { story_chapters: crate::story::CHAPTERS, kids_mode: true }));
         assert_eq!(DemoScope::from_listing(&json!({"game": {"demo": null}})), None);
-        assert_eq!(DemoScope::from_listing(&json!({"demo": {"kids_mode": false}})), Some(DemoScope { story_chapters: 1, kids_mode: false }));
+        assert_eq!(DemoScope::from_listing(&json!({"demo": {"kids_mode": false}})), Some(DemoScope { story_chapters: 2, kids_mode: false }));
     }
 
     #[test]

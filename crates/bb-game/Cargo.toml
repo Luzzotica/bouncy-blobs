@@ -50,6 +50,11 @@ serde_json = { workspace = true }
 partii-account = { path = "../../../partii/platform/crates/partii-account" }
 dirs = "6"
 
+# Android: open web pages (the Steam store page) with an ACTION_VIEW intent.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+
 # Web: browser time source + getrandom's wasm_js backend (no RUSTFLAGS needed
 # with getrandom >= 0.3.4).
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -180,11 +180,61 @@ pub fn voice_for_line(r: &SayRequest) -> Option<Blub> {
     Some(Blub { voice: r.voice, syllables: (r.text.chars().count() / 3).clamp(2, 16) as u8 })
 }
 
-/// The visible world rectangle (centre, half extents) of the main camera.
-fn view_rect(cam: &Query<(&Transform, &Projection), With<MainCamera>>) -> (Vec2, Vec2) {
-    let Ok((t, p)) = cam.single() else { return (Vec2::ZERO, Vec2::new(VIEW_W, VIEW_H) * 0.5) };
-    let scale = if let Projection::Orthographic(o) = p { o.scale } else { 1.0 };
-    (t.translation.truncate(), Vec2::new(VIEW_W, VIEW_H) * 0.5 * scale)
+/// Where a bubble may sit: the visible world (centre, half extents) less
+/// safe margins: a little air at every edge, phones' notch / home
+/// indicator, and the cutscene letterbox bars when they're up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SafeView {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+
+impl SafeView {
+    /// `centre` / `half`: the camera's visible world; `letterbox`: the
+    /// fraction of the height each bar covers (0 when none).
+    pub fn new(centre: Vec2, half: Vec2, letterbox: f32, mobile: bool) -> SafeView {
+        let size = half * 2.0;
+        let portrait = size.y > size.x;
+        // Air at every edge, more where a phone's notch or rounded corners
+        // are (the long sides' ends in landscape, the top in portrait).
+        let side = size.x * if mobile && !portrait { 0.075 } else { 0.025 };
+        let top = size.y * (letterbox + if mobile && portrait { 0.07 } else { 0.03 });
+        let bottom = size.y * (letterbox + if mobile { 0.05 } else { 0.03 });
+        SafeView { min: centre - half + Vec2::new(side, bottom), max: centre + half - Vec2::new(side, top) }
+    }
+
+    pub fn width(&self) -> f32 {
+        (self.max.x - self.min.x).max(0.0)
+    }
+
+    pub fn center(&self) -> Vec2 {
+        (self.min + self.max) * 0.5
+    }
+
+    /// Bottom-centre for a bubble of `size` that wants to sit at `want`,
+    /// pulled in so all of it is inside (centred when it can't fit).
+    pub fn place(&self, want: Vec2, size: Vec2) -> Vec2 {
+        let clamp = |v: f32, lo: f32, hi: f32| if lo > hi { (lo + hi) * 0.5 } else { v.clamp(lo, hi) };
+        Vec2::new(clamp(want.x, self.min.x + size.x * 0.5, self.max.x - size.x * 0.5), clamp(want.y, self.min.y, self.max.y - size.y))
+    }
+}
+
+/// The main camera's [`SafeView`] (its real visible area at this window's
+/// aspect, so 16:9, 16:10, 4:3 and phones in either orientation all fit).
+fn view_rect(cam: &Query<(&Transform, &Projection), With<MainCamera>>, letterbox: f32) -> SafeView {
+    let mobile = crate::platform::IS_MOBILE;
+    let Ok((t, p)) = cam.single() else { return SafeView::new(Vec2::ZERO, Vec2::new(VIEW_W, VIEW_H) * 0.5, letterbox, mobile) };
+    let half = match p {
+        Projection::Orthographic(o) => crate::camera::view_half(o) * o.scale,
+        _ => Vec2::new(VIEW_W, VIEW_H) * 0.5,
+    };
+    SafeView::new(t.translation.truncate(), half, letterbox, mobile)
+}
+
+/// How much of the screen the cutscene letterbox covers at each of top and
+/// bottom right now (bubbles stay clear of it).
+fn letterbox(runner: Option<&super::Runner>) -> f32 {
+    if runner.is_some() { super::cutscene::LETTERBOX } else { 0.0 }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -202,8 +252,9 @@ pub fn spawn_bubbles(
     lulu: Res<LuluHead>,
     mut blub: MessageWriter<Blub>,
     mut queue: Local<SpeechQueue>,
+    runner: Option<Res<super::Runner>>,
 ) {
-    let view = view_rect(&cam);
+    let view = view_rect(&cam, letterbox(runner.as_deref()));
     let device = device.map_or_else(LastDevice::default, |d| *d);
     let mut ready = queue.tick(time.delta_secs());
     for r in reqs.read() {
@@ -233,7 +284,10 @@ pub fn spawn_bubbles(
         }
         // Tips name the controls of whatever the player is holding.
         let text = crate::input::control_text(&r.text, device);
-        let size = layout(&text, FONT, 500, Some(WRAP)).size.max(Vec2::new(40.0, 30.0)) + PAD;
+        // Narrow views (zoomed right in, phones) wrap sooner, so the bubble
+        // is never wider than the screen.
+        let wrap = WRAP.min(view.width() - PAD.x - 8.0).max(160.0);
+        let size = layout(&text, FONT, 500, Some(wrap)).size.max(Vec2::new(40.0, 30.0)) + PAD;
         // No speaker to speak from: no bubble, and no voice either.
         let Some((anchor, _)) = speaker_anchor(game, &r.speaker, view, size, lulu.0) else { continue };
         let a = PVec2::new(anchor.x, anchor.y);
@@ -282,7 +336,7 @@ pub fn spawn_bubbles(
                 .ride(Ride::Game(body))
                 .weight(500)
                 .color(INK)
-                .wrap(WRAP)
+                .wrap(wrap)
                 .z(BUBBLE_Z + 0.1)
                 .typewriter(),
         ));
@@ -299,20 +353,14 @@ fn despawn_bubble(commands: &mut Commands, sim: &mut bb_sim::Sim, overrides: &mu
 /// Where the bubble's bottom-centre wants to be, kept on screen (a speaker
 /// just out of view still gets a readable bubble at the edge). The flag is
 /// true when it had to be pulled in (the tail is hidden then).
-fn speaker_anchor(game: &Game, s: &Speaker, view: (Vec2, Vec2), size: Vec2, lulu: Option<(Vec2, f32)>) -> Option<(Vec2, bool)> {
+fn speaker_anchor(game: &Game, s: &Speaker, view: SafeView, size: Vec2, lulu: Option<(Vec2, f32)>) -> Option<(Vec2, bool)> {
     let (head, r) = match (s, lulu) {
         // Lulu on stage speaks for herself.
         (Speaker::Offscreen, Some(h)) => h,
-        _ => speaker_head(game, s, view.0)?,
+        _ => speaker_head(game, s, view.center())?,
     };
     let want = head + Vec2::new(0.0, r + LIFT);
-    let (c, h) = view;
-    let margin = 24.0;
-    let clamp = |v: f32, lo: f32, hi: f32| if lo > hi { (lo + hi) * 0.5 } else { v.clamp(lo, hi) };
-    let at = Vec2::new(
-        clamp(want.x, c.x - h.x + size.x * 0.5 + margin, c.x + h.x - size.x * 0.5 - margin),
-        clamp(want.y, c.y - h.y + margin, c.y + h.y - size.y - margin),
-    );
+    let at = view.place(want, size);
     Some((at, at.distance(want) > 40.0))
 }
 
@@ -347,9 +395,10 @@ pub fn update_bubbles(
     keys: Res<ButtonInput<KeyCode>>,
     lulu: Res<LuluHead>,
     mut prev_button: Local<bool>,
+    runner: Option<Res<super::Runner>>,
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
-    let view = view_rect(&cam);
+    let view = view_rect(&cam, letterbox(runner.as_deref()));
     // A tap while a line is typing shows the rest of it at once.
     let button = inputs.slots.iter().any(|i| i.button) || keys.any_pressed([KeyCode::Enter, KeyCode::Space]);
     let tapped = button && !*prev_button;
@@ -457,6 +506,33 @@ mod tests {
             order.extend(q.tick(1.0 / 60.0).into_iter().map(|r| r.text));
         }
         assert_eq!(order, vec!["HALT!".to_string(), "Me?".to_string()]);
+    }
+
+    /// Bubbles fit inside the screen, clear of the letterbox, at every
+    /// aspect (the visible world grows on one axis with the window).
+    #[test]
+    fn bubbles_stay_on_screen_at_every_aspect() {
+        let size = Vec2::new(590.0, 150.0);
+        for aspect in [16.0 / 9.0, 16.0 / 10.0, 4.0 / 3.0, 19.5 / 9.0, 9.0 / 19.5, 3.0 / 4.0] {
+            // AutoMin: at least VIEW_W x VIEW_H, the window's aspect adds to one axis.
+            let half = Vec2::new(VIEW_W.max(VIEW_H * aspect), VIEW_H.max(VIEW_W / aspect)) * 0.5;
+            for mobile in [false, true] {
+                for (zoom, bars) in [(1.0, 0.0), (0.8, super::super::cutscene::LETTERBOX), (0.6, super::super::cutscene::LETTERBOX)] {
+                    let c = Vec2::new(100.0, 300.0);
+                    let h = half * zoom;
+                    let v = SafeView::new(c, h, bars, mobile);
+                    // A speaker high above the view, and one off to the side.
+                    for want in [c + Vec2::new(0.0, h.y * 3.0), c + Vec2::new(h.x * 2.0, 0.0), c - h * 2.0] {
+                        let at = v.place(want, size);
+                        let (lo, hi) = (at - Vec2::new(size.x * 0.5, 0.0), at + Vec2::new(size.x * 0.5, size.y));
+                        let top_bar = c.y + h.y - 2.0 * h.y * bars;
+                        assert!(hi.y <= top_bar - 1.0, "{aspect} {zoom}: top cut off ({} > {top_bar})", hi.y);
+                        assert!(lo.y >= c.y - h.y + 2.0 * h.y * bars + 1.0, "{aspect} {zoom}: bottom cut off");
+                        assert!(lo.x >= c.x - h.x + 1.0 && hi.x <= c.x + h.x - 1.0, "{aspect} {zoom} {mobile}: side cut off");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

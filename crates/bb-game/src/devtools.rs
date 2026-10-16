@@ -2,7 +2,9 @@
 //!
 //! * `BB_SHOT=/path.png` — save a screenshot after `BB_SHOT_FRAME` frames
 //!   (default 150) and exit. `BB_SHOT_COUNT=n BB_SHOT_EVERY=k` saves a
-//!   flipbook of n shots k frames apart.
+//!   flipbook of n shots k frames apart. `BB_SHOT_SIZE=WxH` sets the shot's
+//!   size (default 1920x1080), e.g. `1440x1080` (4:3) or `1170x2532` (a
+//!   phone in portrait), to check layouts at other aspects.
 //! * `BB_AUTOPLAY=1` — slot 0 holds right and jumps every second.
 //! * `BB_AMOEBA=frame:deg,…` — feed player 1 an amoeba from a side (ink.rs).
 //! * `BB_START=kids` — boot straight into Kids Mode (skips the sandbox).
@@ -54,7 +56,11 @@ fn offscreen(
     use bevy::camera::RenderTarget;
     use bevy::render::render_resource::TextureFormat;
     // Capture mode picks the size (and keeps the screen clean: no UI camera).
-    let size = crate::capture::config().map_or(UVec2::new(1920, 1080), |c| c.size);
+    let asked = std::env::var("BB_SHOT_SIZE").ok().and_then(|s| {
+        let (w, h) = s.split_once('x')?;
+        Some(UVec2::new(w.trim().parse().ok()?, h.trim().parse().ok()?))
+    });
+    let size = crate::capture::config().map(|c| c.size).or(asked).unwrap_or(UVec2::new(1920, 1080));
     let image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
     for cam in cams.iter() {

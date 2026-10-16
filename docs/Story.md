@@ -59,7 +59,7 @@ toy and remixes earlier ones.
 
 | # | Chapter | Place | New mechanics | Story beat |
 |---|---|---|---|---|
-| 1 | **Awake** | the Bottom Puddle | roll, expand-jump, crouch, jelly ground | Pip wakes up — eyes rolling into place — alone. "Hello?" Only echoes. A pinprick of light, impossibly far up. "Maybe somebody's up there." |
+| 1 | **Awake** | the Bottom Puddle | roll, expand-jump, crouch, jelly ground | Pip wakes up with no eyes; they draw themselves in like pen strokes, open and roll into place. Alone. "Hello?" Only echoes. A pinprick of light, impossibly far up. "Maybe somebody's up there." |
 | 2 | **The Drip** | Drip Tunnels | falling drips, sagging bridges, membranes | Glimmer won't share her light. "Go glow somewhere else." Pip: "I can't glow." "Then go *not glow* somewhere else." |
 | 3 | **Mushroom Bounce** | the Puff Patch | trampoline caps, springs, momentum | The Puffcaps bounce Pip out of their patch, giggling. He discovers bouncing is how you go UP. |
 | 4 | **Vine Gardens** | Glowroot Grotto | vines: grab, swing, climb | The Tangles hog the vines. Pip finds his own. |
@@ -75,7 +75,11 @@ toy and remixes earlier ones.
 * **Cinematic, in-engine softbody puppetry.** Slow fades, letterbox, push-ins
   and reveals; actors are real softbodies (roll, hop, puff, squash, wobble).
 * **One voice at a time.** A new line closes any bubble still on screen.
-* **Faces act:** eyes roll into place on first waking, gaze, moods.
+* **Faces act:** eyes draw themselves in and roll into place on first waking, gaze, moods.
+* **Pip stays in frame.** The cutscene camera always fits Pip (plus a margin
+  and the letterbox): looking up at something far away or jumping, it zooms
+  out rather than lose Pip. Only a deliberate close-up (`closeup`) leaves Pip out.
+* **Every bubble is fully on screen** (inside the letterbox, at any aspect).
 * Speech bubbles are jelly, tethered to the speaker; gibberish "blub" voices.
 * Every cutscene is skippable (hold) and under ~60 s.
 

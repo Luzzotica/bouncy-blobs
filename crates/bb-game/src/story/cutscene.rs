@@ -40,7 +40,13 @@ pub enum Beat {
     Scatter { prefix: String, from: String, speed: f32 },
     Pop { who: String },
     Wait(f32),
+    /// Point the camera. Pip always stays in frame: the shot zooms out (and
+    /// at most slides) to fit Pip, so a shot of the sky far above shows Pip
+    /// looking up at it.
     Cam { at: PVec2, zoom: f32, ease: f32 },
+    /// A deliberate close-up on something else: the one camera beat that
+    /// may leave Pip out of frame (until the next `Cam` / `Follow`).
+    CloseUp { at: PVec2, zoom: f32, ease: f32 },
     Follow { who: String, zoom: f32 },
     Shake(f32),
     /// Onomatopoeia above an actor.
@@ -51,11 +57,19 @@ pub enum Beat {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EyeState {
+    /// No eyes at all (Pip before the very first awakening).
+    None,
+    /// The eye outlines draw themselves in like pen strokes, over
+    /// [`EYE_DRAW_SECS`] (from no eyes); `Open` / `Roll` then open them.
+    Draw,
     Closed,
     Open,
     /// Pop open with pupils rolling round before they settle.
     Roll,
 }
+
+/// How long the pen takes to trace both eyes ([`EyeState::Draw`]).
+pub const EYE_DRAW_SECS: f32 = 2.4;
 
 pub struct Cutscene {
     pub id: String,
@@ -82,6 +96,8 @@ pub struct Runner {
     /// speaker waits for the old bubble to close).
     pub last_speaker: Option<String>,
     pub say_gap: f32,
+    /// A [`Beat::CloseUp`] is on: Pip may be out of frame.
+    pub closeup: bool,
 }
 
 impl Runner {
@@ -100,8 +116,28 @@ impl Runner {
             strolls: Vec::new(),
             last_speaker: None,
             say_gap: 0.0,
+            closeup: false,
         }
     }
+}
+
+/// Height of each letterbox bar, as a fraction of the screen.
+pub const LETTERBOX: f32 = 0.09;
+
+/// Room kept around Pip in every cutscene shot (world px), and how far
+/// ahead of a moving Pip (seconds of travel, at most `LEAD_MAX` px) the
+/// shot already makes room.
+const PIP_MARGIN: f32 = 70.0;
+const LEAD_SECS: f32 = 0.22;
+const LEAD_MAX: f32 = 280.0;
+
+/// The box the cutscene camera keeps on screen: Pip, padded, stretched
+/// toward where Pip is heading (a jump makes room above before Pip gets
+/// there).
+pub fn pip_box(min: Vec2, max: Vec2, vel: Vec2) -> Rect {
+    let lead = (vel * LEAD_SECS).clamp(Vec2::splat(-LEAD_MAX), Vec2::splat(LEAD_MAX));
+    let (min, max) = (min - Vec2::splat(PIP_MARGIN), max + Vec2::splat(PIP_MARGIN));
+    Rect::from_corners(min + lead.min(Vec2::ZERO), max + lead.max(Vec2::ZERO))
 }
 
 /// Visual cues the UI layer draws (letterbox, cards, fades, speed lines).
@@ -218,6 +254,16 @@ pub fn run(
     }
     runner.strolls.retain(|s| !arrived.contains(&s.0));
 
+    // Pip stays in every shot (bar a deliberate close-up).
+    cam.cover = LETTERBOX;
+    cam.keep = if runner.closeup {
+        None
+    } else {
+        game.sim.npc_by_id("pip").and_then(|n| game.sim.world.body(n.ctl.body)).map(|b| {
+            let (v, bb) = (b.velocity(), b.aabb);
+            pip_box(Vec2::new(bb.min.x, bb.min.y), Vec2::new(bb.max.x, bb.max.y), Vec2::new(v.x, v.y))
+        })
+    };
     if let Some((who, zoom)) = runner.follow.clone() {
         if let Some(p) = actor_pos(&game, &who) {
             cam.target = Some(Vec2::new(p.x, p.y + 90.0));
@@ -285,13 +331,17 @@ pub fn run(
                         game.sim.pop(body);
                     }
                 }
-                Beat::Cam { at, zoom, ease } => {
+                Beat::Cam { at, zoom, ease } | Beat::CloseUp { at, zoom, ease } => {
                     runner.follow = None;
+                    runner.closeup = matches!(beat, Beat::CloseUp { .. });
                     cam.target = Some(Vec2::new(at.x, at.y));
                     cam.zoom = Some(*zoom);
                     cam.ease = *ease;
                 }
-                Beat::Follow { who, zoom } => runner.follow = Some((who.clone(), *zoom)),
+                Beat::Follow { who, zoom } => {
+                    runner.closeup = false;
+                    runner.follow = Some((who.clone(), *zoom));
+                }
                 Beat::Shake(s) => cam.shake = cam.shake.max(*s),
                 Beat::Word { who, text } => {
                     if let Some(p) = actor_pos(&game, who) {
@@ -308,6 +358,19 @@ pub fn run(
                         let c = faces.0.entry(body).or_default();
                         c.closed = *state == EyeState::Closed;
                         c.roll = if *state == EyeState::Roll { 1.4 } else { 0.0 };
+                        match state {
+                            EyeState::None => {
+                                c.sketch = Some(0.0);
+                                c.sketch_secs = 0.0;
+                            }
+                            EyeState::Draw => {
+                                c.sketch = Some(c.sketch.unwrap_or(0.0));
+                                c.sketch_secs = EYE_DRAW_SECS;
+                            }
+                            // Drawn eyes open inside their outlines.
+                            EyeState::Open | EyeState::Roll if c.sketch.take().is_some() => c.opening = Some(0.0),
+                            _ => {}
+                        }
                     }
                 }
                 Beat::Gaze { who, dir } => {
@@ -348,7 +411,42 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::super::bubble::{CHARS_PER_SEC, linger_secs, type_secs};
-    use super::say_wait;
+    use super::*;
+
+    /// The box makes room where Pip is going, and never less than the margin.
+    #[test]
+    fn pip_box_leads_a_jump() {
+        let (min, max) = (Vec2::new(-30.0, 30.0), Vec2::new(30.0, 90.0));
+        let still = pip_box(min, max, Vec2::ZERO);
+        assert_eq!(still, Rect::from_corners(min - PIP_MARGIN, max + PIP_MARGIN));
+        let jumping = pip_box(min, max, Vec2::new(0.0, 1400.0));
+        assert_eq!(jumping.min, still.min);
+        assert!((jumping.max.y - still.max.y - LEAD_MAX).abs() < 1e-3, "a fast jump gets the full lead");
+        let hop = pip_box(min, max, Vec2::new(0.0, 500.0));
+        assert!((hop.max.y - still.max.y - 500.0 * LEAD_SECS).abs() < 1e-3);
+    }
+
+    /// Every scripted shot (stage NPC positions at rest) keeps Pip in frame
+    /// at the cutscene camera's widest zoom, at 16:9 with the letterbox up.
+    #[test]
+    fn every_scripted_shot_can_frame_pip() {
+        use crate::camera::{KEEP_MAX_ZOOM, VIEW_H, VIEW_W, fit_shot, zoom_to_fit};
+        let half = Vec2::new(VIEW_W, VIEW_H) * 0.5 * Vec2::new(1.0, 1.0 - 2.0 * LETTERBOX);
+        for n in 1..=super::super::CHAPTERS {
+            for id in [format!("ch{n:02}_intro"), format!("ch{n:02}_outro")] {
+                let Some(cs) = super::super::scripts::cutscene(&id, 0xff5d73) else { continue };
+                let pip = cs.stage.npcs.iter().find(|n| n.id == "pip").expect("every cutscene has Pip");
+                let r = pip.radius;
+                let keep = pip_box(Vec2::new(pip.pos.x - r, pip.pos.y - r), Vec2::new(pip.pos.x + r, pip.pos.y + r), Vec2::ZERO);
+                for beat in &cs.beats {
+                    if let Beat::Cam { at, zoom, .. } = beat {
+                        let (t, z) = fit_shot(Vec2::new(at.x, at.y), *zoom, keep, half, KEEP_MAX_ZOOM.max(*zoom));
+                        assert!(zoom_to_fit(t, keep, half) <= z + 1e-3, "{id}: Pip out of the shot at {at:?}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn text_pacing_is_readable_and_in_sync() {

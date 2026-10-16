@@ -1,7 +1,9 @@
-//! The end of the demo: after the last free chapter (chapter 1, The Drip),
-//! the story stops on a friendly card instead of the next chapter: "Get the
-//! Full Game" (Buy) or "Back to Title". If the purchase lands while the card
-//! is up, the button turns into "Play Chapter 2" and the story carries on.
+//! The end of the demo: after the last free chapter (by default chapter 2,
+//! The Drip; see [`crate::ownership::DemoScope`]), the story stops on a
+//! friendly card instead of the next chapter: "Get the Full Game" (Buy),
+//! "Wishlist Now" (the Steam page) or "Back to Title". If the purchase lands
+//! while the card is up, the first button turns into "Play Chapter 3" and the
+//! story carries on.
 //!
 //! It only ever appears at a chapter boundary, never mid-level.
 
@@ -10,7 +12,7 @@ use bevy::prelude::*;
 use super::{Cues, EndCardUi, PendingStart, Phase, StoryFlow};
 use crate::assets::GameAssets;
 use crate::flow::AppState;
-use crate::ownership::{BuyRequest, Ownership};
+use crate::ownership::{BuyRequest, Ownership, WishlistRequest};
 use crate::sim::Inputs;
 
 /// The demo's end card is up. `chapter` is the locked chapter it stopped before.
@@ -42,16 +44,31 @@ struct DemoButton(usize);
 #[derive(Component)]
 struct DemoButtonLabel(usize);
 
+/// The card's buttons, left to right: Buy (or "Play Chapter n" once owned),
+/// Wishlist (the Steam page; demo only) and Back to Title.
+const PRIMARY: usize = 0;
+const WISHLIST: usize = 1;
+const BACK: usize = 2;
+
+/// The buttons on show (owners don't get the wishlist nudge).
+fn shown(owned: bool) -> &'static [usize] {
+    if owned { &[PRIMARY, BACK] } else { &[PRIMARY, WISHLIST, BACK] }
+}
+
 /// The card's words for owned / not owned (also checked for glyphs).
-pub fn lines(chapter: u8, owned: bool) -> (String, String, [String; 2]) {
+pub fn lines(chapter: u8, owned: bool) -> (String, String, [String; 3]) {
     if owned {
-        ("Unlocked!".into(), format!("Thanks! Chapter {chapter} is waiting for Pip."), [format!("Play Chapter {chapter}"), "Back to Title".into()])
+        (
+            "Unlocked!".into(),
+            format!("Thanks! Chapter {chapter} is waiting for Pip."),
+            [format!("Play Chapter {chapter}"), "Wishlist Now".into(), "Back to Title".into()],
+        )
     } else {
         let more = super::CHAPTERS.saturating_sub(chapter) + 1;
         (
             "That's the demo!".into(),
             format!("Pip's story keeps going: {more} more chapters, Party with phones, and Sandbox. Friends can always join you."),
-            ["Get the Full Game".into(), "Back to Title".into()],
+            ["Get the Full Game".into(), "Wishlist Now".into(), "Back to Title".into()],
         )
     }
 }
@@ -79,10 +96,17 @@ fn demo_end(
         Query<&mut Text, With<DemoStatus>>,
         Query<(&mut Text, &DemoButtonLabel)>,
     )>,
-    mut buttons: Query<(&Interaction, &DemoButton, &mut BackgroundColor, &mut BorderColor)>,
+    mut buttons: Query<(&Interaction, &DemoButton, &mut BackgroundColor, &mut BorderColor, &mut Node)>,
     mut bg: Query<&mut BackgroundColor, (With<EndCardUi>, Without<DemoButton>)>,
     cards: Query<Entity, With<EndCardUi>>,
-    (mut prev, mut buys, mut flow, mut next, mut cues): (Local<(bool, f32)>, MessageWriter<BuyRequest>, ResMut<StoryFlow>, ResMut<NextState<AppState>>, ResMut<Cues>),
+    (mut prev, mut buys, mut wishes, mut flow, mut next, mut cues): (
+        Local<(bool, f32)>,
+        MessageWriter<BuyRequest>,
+        MessageWriter<WishlistRequest>,
+        ResMut<StoryFlow>,
+        ResMut<NextState<AppState>>,
+        ResMut<Cues>,
+    ),
 ) {
     let Some(mut card) = card else { return };
     card.age += time.delta_secs();
@@ -126,7 +150,18 @@ fn demo_end(
                     DemoBody,
                 ));
                 p.spawn((Node { height: px(26.0), ..default() },));
-                p.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(28.0), ..default() },)).with_children(|row| {
+                // Wraps on narrow (portrait) screens instead of running off.
+                p.spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        column_gap: px(28.0),
+                        row_gap: px(18.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|row| {
                     for (i, text) in labels.into_iter().enumerate() {
                         row.spawn((
                             Button,
@@ -178,22 +213,44 @@ fn demo_end(
 
     // Focus: arrows / stick / phone; activate: Enter, Space, pad A, phone
     // button, or a click/tap on a button.
+    let order = shown(owned);
+    if !order.contains(&card.focus) {
+        card.focus = PRIMARY;
+    }
+    let at = order.iter().position(|b| *b == card.focus).unwrap_or(0);
     let stick = inputs.slots.iter().fold(0.0, |a, i| a + i.stick.x);
     prev.1 = (prev.1 - time.delta_secs()).max(0.0);
-    if keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::ArrowRight, KeyCode::ArrowUp, KeyCode::ArrowDown, KeyCode::Tab]) || (stick.abs() > 0.5 && prev.1 <= 0.0) {
-        card.focus = 1 - card.focus;
+    let back = keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::ArrowUp]) || (keys.just_pressed(KeyCode::Tab) && keys.pressed(KeyCode::ShiftLeft));
+    let fwd = keys.any_just_pressed([KeyCode::ArrowRight, KeyCode::ArrowDown]) || (keys.just_pressed(KeyCode::Tab) && !keys.pressed(KeyCode::ShiftLeft));
+    let step = if back || (stick < -0.5 && prev.1 <= 0.0) {
+        order.len() - 1
+    } else if fwd || (stick > 0.5 && prev.1 <= 0.0) {
+        1
+    } else {
+        0
+    };
+    if step != 0 {
+        card.focus = order[(at + step) % order.len()];
         prev.1 = 0.25;
     }
     let mut chosen = None;
-    for (i, b, mut fill, mut rim) in buttons.iter_mut() {
+    for (i, b, mut fill, mut rim, mut node) in buttons.iter_mut() {
+        let display = if order.contains(&b.0) { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
         if matches!(i, Interaction::Hovered | Interaction::Pressed) {
             card.focus = b.0;
         }
         if *i == Interaction::Pressed && card.age >= ARM {
             chosen = Some(b.0);
         }
-        let primary = b.0 == 0;
-        let c = if primary { Color::srgb(1.0, 0.78, 0.37) } else { Color::srgb(0.82, 0.77, 0.91) };
+        let c = match b.0 {
+            PRIMARY => Color::srgb(1.0, 0.78, 0.37),
+            // Steam's blue, like the title screen's tile.
+            WISHLIST => Color::srgb(0.40, 0.75, 0.96),
+            _ => Color::srgb(0.82, 0.77, 0.91),
+        };
         let focused = card.focus == b.0;
         fill.0 = if focused { c.lighter(0.08) } else { c.darker(0.12) };
         *rim = BorderColor::all(if focused { Color::WHITE } else { c.darker(0.4) });
@@ -205,10 +262,10 @@ fn demo_end(
         chosen = Some(card.focus);
     }
     if card.age >= ARM && keys.just_pressed(KeyCode::Escape) {
-        chosen = Some(1);
+        chosen = Some(BACK);
     }
     match chosen {
-        Some(0) if owned => {
+        Some(PRIMARY) if owned => {
             // Carry on into the chapter, as if the demo had never stopped.
             let ch = card.chapter;
             commands.remove_resource::<DemoEnd>();
@@ -220,8 +277,11 @@ fn demo_end(
             flow.phase = Phase::Intro;
             commands.insert_resource(PendingStart);
         }
-        Some(0) => {
+        Some(PRIMARY) => {
             buys.write(BuyRequest);
+        }
+        Some(WISHLIST) => {
+            wishes.write(WishlistRequest);
         }
         Some(_) => next.set(AppState::Title),
         None => {}
@@ -235,12 +295,20 @@ mod tests {
     #[test]
     fn card_words_have_glyphs() {
         for owned in [false, true] {
-            let (t, b, l) = lines(2, owned);
-            for s in [t, b, l[0].clone(), l[1].clone()] {
+            let (t, b, l) = lines(3, owned);
+            for s in [t, b].into_iter().chain(l) {
                 assert!(crate::softtext::missing_glyphs(&s).is_empty(), "{s:?}");
             }
         }
-        assert!(lines(2, false).1.contains("9 more chapters"));
-        assert_eq!(lines(2, true).2[0], "Play Chapter 2");
+        // The default demo stops before chapter 3.
+        assert!(lines(3, false).1.contains("8 more chapters"));
+        assert_eq!(lines(3, true).2[PRIMARY], "Play Chapter 3");
+        assert_eq!(lines(3, false).2[WISHLIST], "Wishlist Now");
+    }
+
+    #[test]
+    fn wishlist_is_offered_in_the_demo_only() {
+        assert_eq!(shown(false), &[PRIMARY, WISHLIST, BACK]);
+        assert_eq!(shown(true), &[PRIMARY, BACK]);
     }
 }
