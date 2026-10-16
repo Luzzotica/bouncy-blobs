@@ -52,6 +52,7 @@ pub mod softtext;
 pub mod store;
 pub mod story;
 pub mod story_iface;
+pub mod touch_pad;
 pub mod tuning;
 
 use bevy::prelude::*;

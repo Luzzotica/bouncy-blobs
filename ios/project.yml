@@ -4,7 +4,7 @@ name: BouncyBlobs
 options:
   bundleIdPrefix: me.sterlinglong
   deploymentTarget:
-    iOS: "14.0"
+    iOS: "15.0"  # StoreKit 2 + Swift concurrency
   createIntermediateGroups: true
 configs:
   Debug: debug
@@ -43,6 +43,9 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        # Hosting a party: phones join as controllers over WebRTC, which may
+        # connect straight across the Wi-Fi (iOS 14+ asks first).
+        NSLocalNetworkUsageDescription: Bouncy Blobs connects to phones on your Wi-Fi so friends can join your game as controllers.
     entitlements:
       path: BouncyBlobs/BouncyBlobs.entitlements
     settings:

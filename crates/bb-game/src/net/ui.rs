@@ -256,7 +256,7 @@ pub(crate) fn update_join_panels(
                 };
                 let who = if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") };
                 let verb = if what == "phone" { "connected" } else { "joined" };
-                format!("Scan to play on your phone\nor enter the code at {}\n{who} {verb}", join_page(&r.controller_url))
+                format!("Scan to play on your phone\nor enter the code at\n{}\n{who} {verb}", join_page(&r.controller_url))
             }
             (Some(NetStatus::Ready), None) => "Connected".into(),
             (Some(NetStatus::Error(e)), _) => format!("Online play unavailable:\n{e}"),

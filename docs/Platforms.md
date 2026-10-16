@@ -137,19 +137,22 @@ Prerequisites: Xcode 16 or later, the `aarch64-apple-ios` and
   so host build scripts link against macOS, not the iOS SDK.
 * Resources: `crates/bb-game/assets` as a folder reference, `AppIcon` and
   `LaunchLogo` (from the Tauri project), and `LaunchScreen.storyboard`.
-* Info.plist keeps the Tauri settings: iOS 14 minimum, arm64 and Metal
-  required, status bar hidden, `UIRequiresFullScreen`, iPhone portrait and
-  landscape, iPad landscape only, and `ITSAppUsesNonExemptEncryption = NO`.
-  `MARKETING_VERSION = 3.0.0`, `CURRENT_PROJECT_VERSION = 3.0.0.1`.
+* Info.plist: iOS 15 minimum (StoreKit 2), arm64 and Metal required, status bar hidden,
+  `UIRequiresFullScreen`, landscape only on iPhone and iPad,
+  `ITSAppUsesNonExemptEncryption = NO`, and `NSLocalNetworkUsageDescription`
+  (hosting a party: phones connect over Wi-Fi). `MARKETING_VERSION = 3.0.0`,
+  `CURRENT_PROJECT_VERSION = 3.0.0.1`. `TARGETED_DEVICE_FAMILY = 1,2`
+  (iPhone + iPad).
 
-Run on the simulator:
+Run on the simulator (headless, muted, with screenshots): see
+`docs/MobileRelease.md` › iOS. In short:
 
 ```sh
 xcodebuild -project ios/BouncyBlobs.xcodeproj -scheme BouncyBlobs -sdk iphonesimulator \
   -configuration Debug -derivedDataPath target/xcode build
 xcrun simctl boot "iPhone 17 Pro"
 xcrun simctl install booted "target/xcode/Build/Products/Debug-iphonesimulator/Bouncy Blobs.app"
-xcrun simctl launch --console-pty booted me.sterlinglong.bouncyblobs
+SIMCTL_CHILD_BB_MUTE=1 xcrun simctl launch booted me.sterlinglong.bouncyblobs
 ```
 
 On a device, open `ios/BouncyBlobs.xcodeproj` in Xcode, pick the device, and
@@ -168,9 +171,10 @@ Bump `--build` (CFBundleVersion) for every upload, or edit
 Apple Distribution, and `manageAppVersionAndBuildNumber = false`.
 
 **Safe areas:** Bevy 0.19 has no safe-area API. The game view is full-bleed,
-and the camera's `AutoMin` scaling keeps the play area visible. HUD and UI
-must stay clear of the notch and home indicator by hand (pad about 50 pt) until
-we add a safe-area query.
+and the camera's `AutoMin` scaling keeps the play area visible. Screen-edge UI
+pads itself with `platform::SAFE_SIDE` (60 pt, notch / Dynamic Island and
+rounded corners) and `platform::SAFE_BOTTOM` (20 pt, home indicator). The HUD,
+the touch pad, the party join panel and the join hint use them.
 
 ## Android
 
@@ -255,5 +259,4 @@ build.
   for an unallocated key` is logged at startup on every platform. It comes from
   the game's mesh updates, not platform code. On web it goes to `console.log`,
   so it doesn't count as a console error.
-* Safe areas: see the iOS section. The HUD coin counter sits at top-left,
-  beside the Dynamic Island.
+* Safe areas: see the iOS section.
