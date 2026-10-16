@@ -549,6 +549,8 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
             e.push(format!("Cast member {who} can't pop (can_die: false), which changes the game: declare it in \"capture_only\" with \"what\": \"can_die\"."));
         }
     }
+    // Spawns: never inside each other or inside rock/jelly.
+    e.extend(spawn_problems(s));
     // Inputs.
     for (i, inp) in s.inputs.iter().enumerate() {
         let n = i + 1;
@@ -758,6 +760,46 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         warn.push("\"staged\": true is set, but this runner has no staged moves yet; nothing is puppeted.".into());
     }
     if err.is_empty() { Ok(warn) } else { Err(err) }
+}
+
+/// The stage's level as this build builds it (None for stages without one).
+pub fn stage_level(s: &Scene) -> Option<bb_level::Level> {
+    match s.stage.kind.as_str() {
+        "chapter" => s.chapter_id().and_then(|c| bb_level::campaign::by_id(&c)),
+        "inline" => s.stage.level.as_ref().and_then(|v| bb_level::Level::from_json(&v.to_string()).ok()),
+        _ => match s.stage.id.as_str() {
+            "spikeloop" => Some(crate::capture_scene::spikeloop_level()),
+            "transparent" => Some(crate::capture_scene::stage_level("solo", 0)),
+            _ => None,
+        },
+    }
+}
+
+/// Cast spawns that overlap each other or start inside rock or jelly.
+pub fn spawn_problems(s: &Scene) -> Vec<String> {
+    let r = bb_sim::control::tune::RADIUS;
+    let mut out = Vec::new();
+    let spawns: Vec<(&str, [f32; 2])> = s.members().iter().filter_map(|c| c.spawn.map(|p| (c.id.as_str(), p))).collect();
+    for (i, (a, pa)) in spawns.iter().enumerate() {
+        for (b, pb) in &spawns[..i] {
+            let d = ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2)).sqrt();
+            if d < 2.0 * r {
+                out.push(format!(
+                    "Cast members {b:?} at [{}, {}] and {a:?} at [{}, {}] start inside each other ({d:.0} px apart; blobs are {:.0} px across). Move one at least {:.0} px away.",
+                    pb[0], pb[1], pa[0], pa[1], 2.0 * r, 2.0 * r - d + 1.0
+                ));
+            }
+        }
+    }
+    if let Some(level) = stage_level(s) {
+        let solids = bb_level::lint::solids(&level);
+        for (id, p) in &spawns {
+            if bb_level::lint::embedded(&solids, bb_physics::Vec2::new(p[0], p[1]), r) {
+                out.push(format!("Cast member {id:?} at [{}, {}] starts inside (or within {r:.0} px of) rock or jelly; move it into open air.", p[0], p[1]));
+            }
+        }
+    }
+    out
 }
 
 /// A tiny deterministic RNG for seeded variation.
@@ -1022,6 +1064,19 @@ mod tests {
         assert_eq!(s.tick_at(2.0), 60 + 75);
         assert_eq!(s.rate_at_frame(59), 1.0);
         assert_eq!(s.rate_at_frame(60), 0.25);
+    }
+
+    #[test]
+    fn overlapping_or_buried_spawns_fail() {
+        let mut s = parse(SPIKE).unwrap();
+        s.cast.push(Cast { id: "bluey".into(), kind: "blob".into(), color: Some("blue".into()), spawn: Some([20.0, 250.0]), ..Default::default() });
+        let e = validate(&s).unwrap_err();
+        assert!(e.iter().any(|m| m.contains("\"pip\"") && m.contains("\"bluey\"") && m.contains("inside each other")), "{e:?}");
+        s.cast[1].spawn = Some([200.0, 160.0]);
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        // Into the spike strip's ground.
+        s.cast[1].spawn = Some([200.0, -40.0]);
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("\"bluey\"") && m.contains("rock or jelly")));
     }
 
     #[test]

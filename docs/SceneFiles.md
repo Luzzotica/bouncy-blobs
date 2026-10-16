@@ -110,6 +110,12 @@ How much a key shows:
 - If the level was built differently when it was recorded (the level hash differs), the render is refused with a plain message. Re-record on the current build, or set `"allow_old_stage": "<reason>"`; NOTES then print the reason.
 - The example `replay.json` uses `recordings/bounce-chain-ch03.json`. It stops working, correctly, once Fungus Caverns changes; re-record it then.
 
+## Spawn check
+
+`validate` fails, naming the ids and positions, when:
+- two cast spawns are closer than a blob's width (64 px), so they would start inside each other;
+- a spawn is inside rock or jelly, or within a blob radius (32 px) of it, in the stage as this build builds it (chapters, inline levels, `spikeloop`, `transparent`).
+
 ## Names this game has (validate rejects anything else)
 
 | list | names |
