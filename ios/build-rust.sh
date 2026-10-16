@@ -12,7 +12,8 @@ export PATH="$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/us
 # SDKROOT points at the iOS SDK; host build scripts/proc-macros must link
 # against macOS, and the cc crate picks the right SDK per target itself.
 unset SDKROOT
-export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-14.0}"
+# iOS 15: StoreKit 2 + Swift concurrency (the storekit feature below).
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Share the workspace target dir so Xcode builds reuse `cargo` caches.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
@@ -36,7 +37,7 @@ for arch in $ARCHS; do
     iphoneos:arm64)         TARGET=aarch64-apple-ios ;;
     *) echo "error: unsupported $PLATFORM_NAME/$arch" >&2; exit 2 ;;
   esac
-  (cd "$REPO_ROOT" && cargo build $RELFLAG --target "$TARGET" -p bb-mobile --bin bb-mobile)
+  (cd "$REPO_ROOT" && cargo build $RELFLAG --target "$TARGET" -p bb-mobile --bin bb-mobile --features storekit)
   EXECUTABLES+=("$CARGO_TARGET_DIR/$TARGET/$PROFILE/bb-mobile")
 done
 

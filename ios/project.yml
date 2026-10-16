@@ -4,7 +4,7 @@ name: BouncyBlobs
 options:
   bundleIdPrefix: me.sterlinglong
   deploymentTarget:
-    iOS: "14.0"
+    iOS: "15.0"  # StoreKit 2 + Swift concurrency
   createIntermediateGroups: true
 configs:
   Debug: debug

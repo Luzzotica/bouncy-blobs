@@ -93,9 +93,10 @@ Touch matches the phone controller (`web-controller/src/lib/joystickInput.ts`):
 
 ### Hosting a party from an iPad
 
-Play → Party (or `BB_START=party`) hosts a partii room and shows the join
+Play → Party (or `BB_START=party`; the demo gate makes Party paid, so
+debug runs add `BB_OWNED=1`) hosts a partii room and shows the join
 panel: a QR code plus a five-letter code for
-`bouncy-blobs-controller.vercel.app/join`. Phones join as controllers over
+the controller join page (partii-hosted since game-polish 920a0b9). Phones join as controllers over
 WebRTC. Info.plist has `NSLocalNetworkUsageDescription` because direct
 Wi-Fi paths to the phones trigger iOS's local-network prompt. No extra
 entitlement is needed: outgoing connections are allowed by default, and we
@@ -137,8 +138,8 @@ iPhone app, so on iOS Buy goes through the App Store instead:
 **TODO to turn it on:**
 
 - [ ] **App Store Connect (blocker, Sterling):** create a non-consumable in-app purchase with Product ID `me.sterlinglong.bouncyblobs.full` (price tier matching the $5 partii listing), with a review screenshot, and attach it to the next app version. Also give partii what it needs to verify App Store receipts for bundle `me.sterlinglong.bouncyblobs`; ask partii-backend which App Store Server API key or issuer setup it uses for `playersReceipt`.
-- [ ] **iOS 15:** StoreKit 2 and Swift concurrency need iOS 15. Raise `deploymentTarget.iOS` in `ios/project.yml` and `IPHONEOS_DEPLOYMENT_TARGET` in `ios/build-rust.sh` from 14.0 to 15.0.
-- [ ] **Build flag:** in `ios/build-rust.sh`, build with `cargo build ... -p bb-mobile --bin bb-mobile --features storekit`.
+- [x] **iOS 15:** StoreKit 2 and Swift concurrency need iOS 15. Done: `deploymentTarget.iOS` in `ios/project.yml`, `IPHONEOS_DEPLOYMENT_TARGET` in `ios/build-rust.sh`, and both configs in the committed `project.pbxproj` (Xcode exports that value to the build script, overriding its default).
+- [x] **Build flag:** `ios/build-rust.sh` builds with `-p bb-mobile --bin bb-mobile --features storekit`.
 - [ ] Optional, for local testing: add a StoreKit configuration file (`BouncyBlobs.storekit`, with the same product id) to the Xcode scheme, to buy in the simulator without App Store Connect.
 - [ ] Test on TestFlight with a sandbox Apple ID: buy, kill the app before partii answers (the purchase should come back on relaunch), Restore on a second device, and Ask to Buy (shows "Waiting for approval").
 
@@ -181,6 +182,7 @@ iOS/iPadOS 26.
 | Title menu fits, clear of the Dynamic Island | ✅ | ✅ |
 | Level (`BB_START=sandbox`): square + band pad bottom-left, glowing EXPAND button bottom-right, HUD counter | ✅ | ✅ |
 | Party host (`BB_START=party`): room created, join panel shows the QR and a 5-letter code, lobby buttons clear of the panel | ✅ | ✅ |
+| After merging game-polish: built with `--features storekit` (iOS 15 target). `bb_sk_*`, StoreKit.framework and the Swift runtime are linked; StoreKit queries transactions at launch; nothing crashes | ✅ | ✅ |
 
 Fixed on the way:
 

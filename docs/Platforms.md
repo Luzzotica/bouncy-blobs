@@ -137,7 +137,7 @@ Prerequisites: Xcode 16 or later, the `aarch64-apple-ios` and
   so host build scripts link against macOS, not the iOS SDK.
 * Resources: `crates/bb-game/assets` as a folder reference, `AppIcon` and
   `LaunchLogo` (from the Tauri project), and `LaunchScreen.storyboard`.
-* Info.plist: iOS 14 minimum, arm64 and Metal required, status bar hidden,
+* Info.plist: iOS 15 minimum (StoreKit 2), arm64 and Metal required, status bar hidden,
   `UIRequiresFullScreen`, landscape only on iPhone and iPad,
   `ITSAppUsesNonExemptEncryption = NO`, and `NSLocalNetworkUsageDescription`
   (hosting a party: phones connect over Wi-Fi). `MARKETING_VERSION = 3.0.0`,
