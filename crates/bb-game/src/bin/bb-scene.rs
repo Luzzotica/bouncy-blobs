@@ -43,7 +43,14 @@ fn main() -> ExitCode {
     if let Some(seed) = flag("--seed").and_then(|v| v.parse().ok()) {
         s.seeds = vec![seed];
     }
-    match scene::validate(&s) {
+    // A relative replay path is relative to the scene file (the game reads it the same way).
+    let mut check_s = s.clone();
+    if let Some(r) = &s.replay {
+        if !Path::new(r).is_absolute() {
+            check_s.replay = Some(Path::new(file).parent().unwrap_or(Path::new(".")).join(r).to_string_lossy().into_owned());
+        }
+    }
+    match scene::validate(&check_s) {
         Ok(warnings) => {
             println!("✓ {file} is a valid scene.");
             for w in warnings {
@@ -200,7 +207,11 @@ fn build_commit(commit: &str, short: &str, cache: &Path) -> Result<(), String> {
     if !st.success() {
         return Err("Couldn't export the commit with git archive.".into());
     }
-    let target = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| repo().join("target"));
+    // Never make a new target dir (disk): reuse the shared build cache.
+    let Some(target) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from) else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err("Building the game needs CARGO_TARGET_DIR set to the shared build cache (so no new target dir fills the disk). Set it, or pass --bin with a binary of this exact commit.".into());
+    };
     let mut cmd = Command::new("cargo");
     cmd.current_dir(&dir).args(["build", "-p", "bb-game", "--bin", "bouncy-blobs"]);
     for p in ["bb-game", "bb-level", "bb-sim", "bb-physics", "bb-net"] {

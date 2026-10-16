@@ -36,6 +36,19 @@ fn seed() -> u32 {
     std::env::var("BB_SCENE_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
+fn recording() -> Option<&'static crate::replay::Recording> {
+    static R: OnceLock<Option<crate::replay::Recording>> = OnceLock::new();
+    R.get_or_init(|| {
+        let s = scene()?;
+        let p = s.replay.as_ref()?;
+        // Relative to the scene file.
+        let base = std::path::Path::new(&std::env::var("BB_SCENE_FILE").ok()?).parent()?.to_path_buf();
+        let path = if std::path::Path::new(p).is_absolute() { std::path::PathBuf::from(p) } else { base.join(p) };
+        crate::replay::load(&path.to_string_lossy()).map_err(|e| error!("scene: {e}")).ok()
+    })
+    .as_ref()
+}
+
 fn plan() -> &'static [Held] {
     static P: OnceLock<Vec<Held>> = OnceLock::new();
     P.get_or_init(|| scene().map_or_else(Vec::new, |s| crate::scene::input_plan(s, seed())))
@@ -130,6 +143,22 @@ fn setup_cast(mut game: ResMut<Game>, mut st: ResMut<SceneState>) {
     if let Some(d) = s.capture("respawn_delay").and_then(|c| c.value.as_f64()) {
         game.sim.rules.respawn_delay = d as f32;
     }
+    // A replay rebuilds the stage it was played on: refuse a different one.
+    if let Some(r) = recording() {
+        let now = crate::replay::level_hash(&game.sim.level);
+        if now != r.level_hash {
+            match s.allow_old_stage.as_deref().filter(|x| !x.trim().is_empty()) {
+                Some(why) => st.vary_log.push(format!("replay recorded on a different version of {} (build {}); allowed: {why}", r.level, r.build)),
+                None => {
+                    error!(
+                        "scene: the replay was recorded on build {} where {} looked different (level hash {} vs {now} now). Re-record it on this build, or set \"allow_old_stage\": \"<reason>\".",
+                        r.build, r.level, r.level_hash
+                    );
+                    std::process::exit(3);
+                }
+            }
+        }
+    }
     // The stage brought its own Pip but this cast has none: take him out.
     if s.pip().is_none() && !s.cast.iter().any(|c| c.from_stage == Some(true)) {
         game.sim.remove_player(0);
@@ -159,7 +188,8 @@ fn setup_cast(mut game: ResMut<Game>, mut st: ResMut<SceneState>) {
                 b.params.limits.poppable = false;
             }
         }
-        if let Some([x, y]) = c.spawn {
+        let replay_start = (slot == 0).then(recording).flatten().map(|r| r.start);
+        if let Some([x, y]) = c.spawn.or(replay_start) {
             game.sim.world.respawn(body, bb_physics::Vec2::new(x, y));
         }
         st.events.push(EventRow { kind: "spawn", frame: None, t: -s.pre_roll, x: c.spawn.map_or(0.0, |p| p[0]), y: c.spawn.map_or(0.0, |p| p[1]), who: c.id.clone() });
@@ -176,7 +206,11 @@ fn drive_cast(mut inputs: ResMut<Inputs>, vtime: Res<Time<Virtual>>, game: Optio
     for c in s.members() {
         let Some(slot) = s.slot_of(&c.id) else { continue };
         let i = slot as usize;
-        inputs.slots[i] = crate::scene::input_at(plan(), slot, tick);
+        inputs.slots[i] = match (slot, recording()) {
+            // Replayed on the sim's own tick count, so it lines up step for step.
+            (0, Some(r)) => r.input_at(game.as_ref().map_or(0, |g| g.tick)),
+            _ => crate::scene::input_at(plan(), slot, tick),
+        };
         inputs.active[i] = true;
     }
 }

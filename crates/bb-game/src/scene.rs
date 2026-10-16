@@ -91,7 +91,10 @@ pub struct Scene {
     pub cast: Vec<Cast>,
     #[serde(default)]
     pub inputs: Vec<Input>,
+    /// A recorded human input file (BB_RECORD_INPUT) that drives Pip.
     pub replay: Option<String>,
+    /// Reason to replay a recording whose stage differs from this build's.
+    pub allow_old_stage: Option<String>,
     #[serde(default)]
     pub events: Vec<Event>,
     /// Seconds of game time run before frame 1 (so frame 1 is already
@@ -561,8 +564,30 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
             d => e.push(format!("Input {n}: {d:?} isn't a Bouncy Blobs input; use hold, release, jump or squish.")),
         }
     }
-    if s.replay.is_some() {
-        e.push("Replaying a recorded input file isn't supported yet; leave \"replay\" null.".into());
+    if let Some(path) = &s.replay {
+        match crate::replay::load(path) {
+            Err(x) => e.push(format!("\"replay\": {x}.")),
+            Ok(r) => {
+                if s.pip().is_none() {
+                    e.push("A replay drives Pip, so \"cast\" needs {\"id\": \"pip\"}.".into());
+                }
+                if s.inputs.iter().any(|i| i.who == "pip") {
+                    e.push("Pip is driven by the replay; remove Pip's entries from \"inputs\".".into());
+                }
+                let stage_level = match s.stage.kind.as_str() {
+                    "chapter" => s.chapter_id(),
+                    "inline" => s.stage.level.as_ref().and_then(|v| v.get("id")).and_then(|v| v.as_str()).map(String::from),
+                    _ => None,
+                };
+                if stage_level.as_deref() != Some(r.level.as_str()) {
+                    e.push(format!("The replay was recorded on {:?}, but this scene's stage is {:?}; replays rebuild the stage they were played on.", r.level, stage_level.unwrap_or_else(|| s.stage.id.clone())));
+                }
+                let frames_needed = (s.pre_roll * 60.0) as u64 + s.length.seconds.map_or(0, |x| (x * 60.0) as u64);
+                if s.length.seconds.is_some() && frames_needed > r.ticks {
+                    warn.push(format!("The replay is {:.1} s long; after that Pip gets no input (the scene runs {:.1} s including the pre-roll).", r.ticks as f32 / 60.0, frames_needed as f32 / 60.0));
+                }
+            }
+        }
     }
     // Scene events.
     for (i, ev) in s.events.iter().enumerate() {

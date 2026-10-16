@@ -42,6 +42,7 @@ pub mod party_assets;
 pub mod pause;
 pub mod platform;
 pub mod render;
+pub mod replay;
 pub mod sandbox;
 pub mod save;
 pub mod sim;
@@ -115,7 +116,7 @@ impl Plugin for GamePlugin {
                 softtext::SoftTextPlugin,
             ))
             .add_plugins(mouths::MouthsPlugin)
-            .add_plugins((capture_scene::CaptureScenePlugin, scene_run::SceneRunPlugin))
+            .add_plugins((capture_scene::CaptureScenePlugin, scene_run::SceneRunPlugin, replay::ReplayPlugin))
             .add_plugins(gadgets_view::GadgetsViewPlugin)
             .add_plugins((
                 story::StoryPlugin,
