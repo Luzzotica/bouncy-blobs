@@ -223,11 +223,8 @@ fn run(
     match action {
         PauseAction::Resume | PauseAction::Hints => {}
         PauseAction::Restart => {
-            let at = game.sim.respawn_point();
-            let bodies: Vec<_> = game.sim.players.iter().map(|p| p.ctl.body).collect();
-            for (k, b) in bodies.into_iter().enumerate() {
-                game.sim.world.respawn(b, at + PVec2::new(k as f32 * 20.0, 40.0));
-            }
+            let at = game.sim.respawn_point() + PVec2::new(0.0, 40.0);
+            game.sim.place_players(at);
             for p in game.sim.players.iter_mut() {
                 p.dead = None;
                 p.ctl.reset();

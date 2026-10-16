@@ -31,6 +31,8 @@ pub const DROPLET_LIFE: f32 = 42.0;
 pub const DROPLET_MELT: f32 = 3.0;
 /// At most this many droplets at once (the oldest melt first).
 pub const MAX_DROPLETS: usize = 60;
+/// Space left between blobs that (re)spawn next to each other.
+const SPAWN_GAP: f32 = 6.0;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BodyTag {
@@ -251,10 +253,58 @@ impl Sim {
         pts[self.checkpoint.min(pts.len() - 1)]
     }
 
+    /// A spot near `want` where a blob of `radius` fits without overlapping
+    /// another blob or prop, or the level's rock and jelly; `want` itself
+    /// when that's free. Spots with ground under them come first: a few
+    /// blob widths either side of `want`, then stacked above it (never far
+    /// off, where a spring or hazard could be waiting).
+    ///
+    /// Soft blobs placed inside each other never come apart cleanly: their
+    /// rings tangle into a permanent knot, the de-penetration flings them
+    /// off at ~1000 px/s, and whoever is squeezed in the middle pops
+    /// ("crushed") the moment its spawn immunity runs out.
+    pub fn free_spot(&self, want: Vec2, radius: f32, skip: Option<BodyId>) -> Vec2 {
+        let others: Vec<(Vec2, f32)> = self
+            .world
+            .bodies()
+            .filter(|(id, b)| b.enabled && Some(*id) != skip)
+            .filter(|(id, _)| matches!(self.tags.get(id), Some(BodyTag::Player(_) | BodyTag::Npc(_) | BodyTag::Prop)))
+            .map(|(_, b)| ((b.aabb.min + b.aabb.max) * 0.5, (b.aabb.max - b.aabb.min).max_element() * 0.5))
+            .collect();
+        let clear = |p: Vec2| others.iter().all(|(c, r)| c.distance(p) >= radius + r + SPAWN_GAP);
+        if clear(want) {
+            return want;
+        }
+        let solids = bb_level::lint::solids(&self.level);
+        let ground: Vec<Vec<Vec2>> = self.level.terrain.iter().map(|t| t.shape.outline()).chain(solids.iter().cloned()).collect();
+        let grounded = |p: Vec2| (1..=30).any(|k| ground.iter().any(|g| bb_level::lint::point_in_polygon(p - Vec2::new(0.0, radius + 10.0 * k as f32), g)));
+        // Wide enough to clear a neighbour's collision skin too.
+        let step = 2.0 * (radius + SPAWN_GAP);
+        let beside = (1..=3).flat_map(|k| [Vec2::new(k as f32 * step, 0.0), Vec2::new(-k as f32 * step, 0.0)]);
+        let above = (1..=4).map(|k| Vec2::new(0.0, k as f32 * step));
+        let spots: Vec<Vec2> = beside.chain(above).map(|d| want + d).filter(|p| clear(*p) && !bb_level::lint::embedded(&solids, *p, radius)).collect();
+        spots.iter().copied().find(|p| grounded(*p)).or(spots.first().copied()).unwrap_or(want)
+    }
+
+    /// Put every player back at `at` (restart, start at a checkpoint), side
+    /// by side rather than inside each other.
+    pub fn place_players(&mut self, at: Vec2) {
+        let bodies: Vec<(BodyId, f32)> = self.players.iter().map(|p| (p.ctl.body, p.ctl.radius)).collect();
+        for (b, _) in &bodies {
+            if let Some(b) = self.world.body_mut(*b) {
+                b.enabled = false;
+            }
+        }
+        for (b, r) in bodies {
+            let to = self.free_spot(at, r, Some(b));
+            self.world.respawn(b, to);
+        }
+    }
+
     pub fn add_player(&mut self, slot: u8, name: &str, color: u32) -> &mut Player {
         self.remove_player(slot);
-        let n = self.players.len() as f32;
-        let at = self.respawn_point() + Vec2::new((n - 1.5) * 18.0, 40.0 + n * 10.0);
+        // Joiners line up beside whoever is already standing there.
+        let at = self.free_spot(self.respawn_point() + Vec2::new(-27.0, 40.0), control::tune::RADIUS, None);
         let ctl = Controller::spawn(&mut self.world, at, control::tune::RADIUS, load::layer::PLAYER);
         self.tags.insert(ctl.body, BodyTag::Player(slot));
         if !self.rules.players_pop {
@@ -314,7 +364,8 @@ impl Sim {
         if let Some(BodyTag::Player(_)) = self.tags.get(&body) {
             if !self.rules.players_pop {
                 // Kids mode: no popping, just bounce home.
-                let at = self.respawn_point();
+                let r = self.players.iter().find(|p| p.ctl.body == body).map_or(control::tune::RADIUS, |p| p.ctl.radius);
+                let at = self.free_spot(self.respawn_point(), r, Some(body));
                 self.world.respawn(body, at);
                 return;
             }

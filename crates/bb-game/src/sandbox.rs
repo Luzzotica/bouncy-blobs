@@ -90,10 +90,7 @@ fn start_at_checkpoint(mut game: ResMut<crate::sim::Game>, mut done: Local<bool>
     let sim = &mut game.sim;
     let pts = sim.level.respawn_points();
     sim.checkpoint = k.min(pts.len() - 1);
-    let at = sim.respawn_point();
-    let bodies: Vec<_> = sim.players.iter().map(|p| p.ctl.body).collect();
-    for (i, b) in bodies.into_iter().enumerate() {
-        sim.world.respawn(b, at + bb_sim::Vec2::new(i as f32 * 20.0, 30.0));
-    }
+    let at = sim.respawn_point() + bb_sim::Vec2::new(0.0, 30.0);
+    sim.place_players(at);
 }
 

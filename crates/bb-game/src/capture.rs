@@ -327,7 +327,7 @@ impl Plugin for CapturePlugin {
 pub struct CaptureCamera;
 
 #[derive(Resource, Default)]
-struct CapCam {
+pub(crate) struct CapCam {
     centre: Option<Vec2>,
     /// Pip popped during the shot: keep holding the framing (even after
     /// the respawn), so the pop and its droplets stay the subject.
@@ -416,7 +416,12 @@ fn frame_camera(
 
 /// `BB_CAPTURE_AT=x,y`: put Pip there once the level is loaded.
 /// `BB_CAPTURE_NO_PICKUPS=1`: clear the glow drops.
-fn place_pip(mut game: ResMut<Game>, mut state: ResMut<CapCam>) {
+///
+/// Only Pip (slot 0): the scene runner places the rest of its cast itself,
+/// and moving every player here stacked them all inside Pip — they tangled,
+/// burst apart and the one in the middle popped as its spawn immunity ran
+/// out (bb-mushroom-party).
+pub(crate) fn place_pip(mut game: ResMut<Game>, mut state: ResMut<CapCam>) {
     state.centre = None;
     state.lost = false;
     let Some(cfg) = config() else { return };
@@ -434,10 +439,8 @@ fn place_pip(mut game: ResMut<Game>, mut state: ResMut<CapCam>) {
         game.sim.rules.respawn_delay = d;
     }
     let Some(at) = cfg.at else { return };
-    let bodies: Vec<_> = game.sim.players.iter().map(|p| p.ctl.body).collect();
-    for b in bodies {
-        game.sim.world.respawn(b, bb_physics::Vec2::new(at.x, at.y));
-    }
+    let Some(b) = game.sim.player(0).map(|p| p.ctl.body) else { return };
+    game.sim.world.respawn(b, bb_physics::Vec2::new(at.x, at.y));
 }
 
 /// `BB_CAPTURE_RESPAWN_AT`: a life that just began starts there instead.

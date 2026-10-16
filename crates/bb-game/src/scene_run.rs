@@ -62,7 +62,8 @@ impl Plugin for SceneRunPlugin {
             return;
         }
         app.init_resource::<SceneState>()
-            .add_systems(PostUpdate, setup_cast.run_if(resource_added::<Game>))
+            // After capture's Pip placement, so the cast's own spawns win.
+            .add_systems(PostUpdate, setup_cast.after(crate::capture::place_pip).run_if(resource_added::<Game>))
             .add_systems(PreUpdate, drive_cast.after(crate::input::GatherInput))
             .add_systems(FixedPostUpdate, lives.run_if(resource_exists::<Game>))
             .add_systems(

@@ -537,7 +537,7 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             if *t <= 0.0 {
                 p.dead = None;
                 let at = base + Vec2::new((k as f32 - 1.0) * 20.0, 30.0 + k as f32 * 12.0);
-                respawned.push((p.ctl.body, at, Who::Player(p.slot)));
+                respawned.push((p.ctl.body, p.ctl.radius, at, Who::Player(p.slot)));
                 p.ctl.reset();
             }
         }
@@ -548,12 +548,16 @@ pub(crate) fn post_step(sim: &mut Sim, dt: f32) {
             if *t <= 0.0 {
                 n.dead = None;
                 let at = if n.following { base + Vec2::new(-60.0, 60.0) } else { n.home };
-                respawned.push((n.ctl.body, at, Who::Npc(n.index)));
+                respawned.push((n.ctl.body, n.ctl.radius, at, Who::Npc(n.index)));
                 n.ctl.reset();
             }
         }
     }
-    for (body, at, who) in respawned {
+    // One at a time, each clear of the blobs already there (two players
+    // popped on the same spikes come back side by side, not inside each
+    // other or inside whoever is waiting at the checkpoint).
+    for (body, radius, at, who) in respawned {
+        let at = sim.free_spot(at, radius, Some(body));
         sim.world.respawn(body, at);
         sim.events.push(SimEvent::Respawned { who, pos: at });
     }
