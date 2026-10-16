@@ -9,6 +9,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/join" element={<JoinLobby />} />
+        {/* /c/CODE is the QR link (partii hosting); /p/CODE the same page;
+            /controller/CODE is the old link, for QR codes already printed. */}
+        <Route path="/c/:sessionId" element={<Controller />} />
+        <Route path="/p/:sessionId" element={<Controller />} />
         <Route path="/controller/:sessionId" element={<Controller />} />
         <Route path="*" element={<Navigate to="/join" replace />} />
       </Routes>
