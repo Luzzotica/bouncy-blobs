@@ -414,6 +414,26 @@ impl Blueprint {
     pub fn level(&self) -> Level {
         self.expand().level
     }
+
+    /// Build the level, noting which terrain / jelly each piece made
+    /// (for validation messages that point at the piece to edit).
+    pub fn expand_traced(&self) -> (Course, Vec<PieceSpan>) {
+        let mut e = Expander::new(self);
+        let mut spans = Vec::with_capacity(self.pieces.len());
+        for p in &self.pieces {
+            let (t0, j0) = (e.b.level.terrain.len(), e.b.level.jelly.len());
+            e.apply(p);
+            spans.push(PieceSpan { terrain: t0..e.b.level.terrain.len(), jelly: j0..e.b.level.jelly.len() });
+        }
+        (e.finish(), spans)
+    }
+}
+
+/// What one piece added to the level (index ranges).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PieceSpan {
+    pub terrain: std::ops::Range<usize>,
+    pub jelly: std::ops::Range<usize>,
 }
 
 /// Replays pieces onto a [`LevelBuilder`].
@@ -424,13 +444,15 @@ pub struct Expander {
     pub bottom: f32,
     /// Roof undersides so far (for `hang` and `roof_spikes`).
     roofs: Vec<Vec<Vec2>>,
+    /// Floor tops so far (pedestals stand on them).
+    floors: Vec<Vec<Vec2>>,
 }
 
 impl Expander {
     pub fn new(bp: &Blueprint) -> Expander {
         let mut b = LevelBuilder::new(&bp.id, &bp.name, bp.theme);
         b.intro(&bp.intro).outro(&bp.outro).kill_y(bp.kill_y).spawn(bp.spawn);
-        Expander { b, path: Vec::new(), bottom: bp.bottom, roofs: Vec::new() }
+        Expander { b, path: Vec::new(), bottom: bp.bottom, roofs: Vec::new(), floors: Vec::new() }
     }
 
     pub fn finish(self) -> Course {
@@ -438,6 +460,30 @@ impl Expander {
     }
 
     pub fn apply(&mut self, p: &Piece) {
+        match p {
+            Piece::Floor(top) | Piece::Ground { top, .. } => self.floors.push(top.clone()),
+            Piece::Ledge { x0, x1, y } | Piece::Shelf { x0, x1, y, .. } => self.floors.push(vec![v(*x0, *y), v(*x1, *y)]),
+            _ => {}
+        }
+        let pedestal = |e: &Expander, x: f32, base: f32, height: f32| {
+            // A rock pedestal so nobody gets stuck under a low cap. Its foot
+            // follows the floor it stands on (no corner poking into the skin
+            // on a slope).
+            let (l, r) = (e.surface_at(x - 70.0, base).unwrap_or(base), e.surface_at(x + 70.0, base).unwrap_or(base));
+            vec![v(x - 70.0, l), v(x + 70.0, r), v(x + 40.0, base + height - 6.0), v(x - 40.0, base + height - 6.0)]
+        };
+        let ped = match p {
+            Piece::Shroom { x, base, cap, shape, .. } => {
+                let size = if *shape == MushroomShape::Ball { 110.0 } else { 160.0 };
+                let height = cap - base - shape.cap_height(size);
+                (height < 130.0).then(|| pedestal(self, *x, *base, height))
+            }
+            Piece::Tramp { x, base, cap, .. } => {
+                let height = cap - base - 160.0 * 0.28;
+                (height < 130.0).then(|| pedestal(self, *x, *base, height))
+            }
+            _ => None,
+        };
         let b = &mut self.b;
         match p {
             Piece::Section(_) | Piece::Note(_) => {}
@@ -576,9 +622,8 @@ impl Expander {
                 let (x, base_y, cap_y, power, shape) = (*x, *base, *cap, *power, *shape);
                 let size = if shape == MushroomShape::Ball { 110.0 } else { 160.0 };
                 let height = cap_y - base_y - shape.cap_height(size);
-                if height < 130.0 {
-                    // A rock pedestal so nobody gets stuck under a low cap.
-                    b.poly(&[v(x - 70.0, base_y), v(x + 70.0, base_y), v(x + 40.0, base_y + height - 6.0), v(x - 40.0, base_y + height - 6.0)]);
+                if let Some(ped) = &ped {
+                    b.poly(ped);
                 }
                 b.bouncy_mushroom(v(x, base_y), height, shape, size, power);
                 b.decor("mushroom_spots", v(x, base_y + height), size / 120.0, 0.5);
@@ -586,8 +631,8 @@ impl Expander {
             Piece::Tramp { x, base, cap, power } => {
                 let (x, base, cap) = (*x, *base, *cap);
                 let height = cap - base - 160.0 * 0.28;
-                if height < 130.0 {
-                    b.poly(&[v(x - 70.0, base), v(x + 70.0, base), v(x + 40.0, base + height - 6.0), v(x - 40.0, base + height - 6.0)]);
+                if let Some(ped) = &ped {
+                    b.poly(ped);
                 }
                 b.trampoline(v(x, base), height, 160.0, *power);
             }
@@ -653,6 +698,17 @@ impl Expander {
     fn floor(&mut self, top: &[Vec2]) {
         let min = top.iter().map(|p| p.y).fold(f32::MAX, f32::min);
         self.b.ground(top, (min - self.bottom).max(80.0));
+    }
+
+    /// Height at `x` of the floor top nearest `near_y` (within 40 px).
+    pub fn surface_at(&self, x: f32, near_y: f32) -> Option<f32> {
+        self.floors
+            .iter()
+            .flat_map(|r| r.windows(2))
+            .filter(|w| w[0].x <= x && x <= w[1].x && w[1].x > w[0].x)
+            .map(|w| w[0].y + (w[1].y - w[0].y) * (x - w[0].x) / (w[1].x - w[0].x))
+            .filter(|y| (y - near_y).abs() < 40.0)
+            .min_by(|a, b| (a - near_y).abs().total_cmp(&(b - near_y).abs()))
     }
 
     /// Height of the roof underside at `x` (lowest roof covering x).
@@ -750,9 +806,20 @@ impl Expander {
             pts.reverse();
         }
         self.b.poly(&pts);
-        // The tunnel floor: jelly-skinned like any floor.
+        // The tunnel floor: jelly-skinned like any floor. Its skin runs a
+        // few px out of the mouth, under the floor outside, so the two
+        // skins overlap like neighbouring tiles instead of butting together.
         let (a, b) = (x_face, x(d));
+        let j0 = self.b.level.jelly.len();
         self.b.ground(&[v(a.min(b), y), v(a.max(b), y)], y - base);
+        let lap = -facing * metrics::SEAM_LAP;
+        for j in &mut self.b.level.jelly[j0..] {
+            if let Shape::Poly { points } = &mut j.shape {
+                for p in points.iter_mut().filter(|p| (p.x - x_face).abs() < 0.01) {
+                    p.x += lap;
+                }
+            }
+        }
     }
 }
 

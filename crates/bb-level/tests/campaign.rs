@@ -7,32 +7,13 @@
 
 use bb_level::campaign::{self, Blueprint, CHAPTERS, Course, Move, Waypoint};
 use bb_level::*;
-use bb_sim::{Input, Sim, Vec2, physics::geom};
+use bb_level::lint;
+use bb_sim::{Input, Sim, Vec2, physics::geom, validate};
 
 const R: f32 = 32.0;
 
 fn courses() -> Vec<(u8, Course)> {
     (1..=CHAPTERS).map(|n| (n, campaign::course(n))).collect()
-}
-
-/// Solid polygons of the level (terrain that isn't one-way, jelly, movers at rest).
-fn solids(l: &Level) -> Vec<Vec<Vec2>> {
-    l.terrain
-        .iter()
-        .filter(|t| !t.one_way)
-        .map(|t| t.shape.outline())
-        .chain(l.jelly.iter().map(|j| j.shape.outline()))
-        .collect()
-}
-
-fn dist_to_poly(p: Vec2, poly: &[Vec2]) -> f32 {
-    (0..poly.len())
-        .map(|i| geom::closest_on_segment(p, poly[i], poly[(i + 1) % poly.len()]).0.distance(p))
-        .fold(f32::MAX, f32::min)
-}
-
-fn embedded(solids: &[Vec<Vec2>], p: Vec2, margin: f32) -> bool {
-    solids.iter().any(|s| geom::point_in_polygon(p, s) || dist_to_poly(p, s) < margin)
 }
 
 // ------------------------------------------------------------------ basics
@@ -65,161 +46,39 @@ fn blueprint_files_round_trip() {
 
 #[test]
 fn chapters_have_story_structure() {
-    for (n, c) in courses() {
-        let l = &c.level;
-        let id = format!("ch{n:02}");
-        assert_eq!(l.id, id);
-        assert_eq!(l.intro, format!("{id}_intro"));
-        assert_eq!(l.outro, format!("{id}_outro"));
-        assert!((3..=5).contains(&l.checkpoints.len()), "{id}: {} checkpoints", l.checkpoints.len());
-        assert!((30..=60).contains(&l.pickups.len()), "{id}: {} pickups", l.pickups.len());
-        assert!(l.goal.is_some(), "{id}: no goal");
-        assert!(l.story.len() >= 2, "{id}: needs mid-level story beats");
-        for s in &l.story {
-            assert!(s.script.starts_with(&format!("{id}_")), "{id}: script {} misnamed", s.script);
-        }
-        // Length: total critical path travel.
-        let travel: f32 = c.path.windows(2).map(|w| w[0].at.distance(w[1].at)).sum();
-        println!("{id}: travel {travel:.0} px, {} checkpoints, {} pickups", l.checkpoints.len(), l.pickups.len());
-        assert!(travel >= 8000.0, "{id}: only {travel} px of travel");
-        // Checkpoints in path order, each death costs at most ~4500 px of path.
-        let idx: Vec<usize> = l.respawn_points().iter().map(|p| nearest_wp(&c.path, *p)).collect();
-        let goal_idx = nearest_wp(&c.path, l.goal.as_ref().unwrap().center());
-        let mut stops = idx.clone();
-        stops.push(goal_idx);
-        for w in stops.windows(2) {
-            assert!(w[0] < w[1], "{id}: checkpoints out of path order {stops:?}");
-            let seg: f32 = c.path[w[0]..=w[1]].windows(2).map(|p| p[0].at.distance(p[1].at)).sum();
-            assert!(seg <= 4800.0, "{id}: {seg:.0} px between respawns (path {:?}..{:?})", w[0], w[1]);
-        }
-    }
+    let errs: Vec<String> = courses().iter().flat_map(|(n, c)| lint::story_structure(c).into_iter().map(move |f| format!("ch{n:02}: {f}"))).collect();
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
 }
 
 fn nearest_wp(path: &[Waypoint], p: Vec2) -> usize {
-    path.iter().enumerate().min_by(|a, b| a.1.at.distance(p).total_cmp(&b.1.at.distance(p))).unwrap().0
+    lint::nearest_wp(path, p)
 }
 
 #[test]
 fn goal_and_pickups_are_not_in_rock() {
-    for (n, c) in courses() {
-        let l = &c.level;
-        let solid = solids(l);
-        for (i, p) in l.pickups.iter().enumerate() {
-            assert!(!embedded(&solid, *p, 12.0), "ch{n:02}: pickup {i} at {p} is embedded");
-        }
-        let g = l.goal.as_ref().unwrap().center();
-        assert!(!embedded(&solid, g, 40.0), "ch{n:02}: goal at {g} is embedded");
-        for cp in &l.checkpoints {
-            assert!(!embedded(&solid, cp.pos, 30.0), "ch{n:02}: checkpoint {} embedded", cp.pos);
-        }
-        for w in &c.path {
-            assert!(!embedded(&solid, w.at + Vec2::new(0.0, R), 20.0), "ch{n:02}: waypoint {:?} embedded", w);
-        }
-    }
+    let errs: Vec<String> = courses().iter().flat_map(|(n, c)| lint::buried_items(c).into_iter().map(move |f| format!("ch{n:02}: {f}"))).collect();
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
 }
 
 // --------------------------------------------------- resting at respawns
 
 fn rest_check(n: u8) {
-    let mut l = campaign::chapter(n);
-    // Followers teleport next to the player; this is a geometry check, so
-    // leave them out (the bot playtests keep them).
-    l.npcs.retain(|npc| npc.role != NpcRole::Follower);
-    let solid = solids(&l);
-    for (k, at) in l.respawn_points().iter().enumerate() {
-        let mut sim = Sim::new(l.clone());
-        sim.checkpoint = k;
-        sim.add_player(0, "Pip", 0xff5d73);
-        let body = sim.players[0].ctl.body;
-        sim.world.respawn(body, *at);
-        let mut grounded_late = false;
-        for f in 0..300 {
-            sim.step();
-            assert!(sim.players[0].dead.is_none(), "ch{n:02} respawn {k} at {at}: popped at frame {f}");
-            if f > 240 && sim.players[0].ctl.grounded {
-                grounded_late = true;
-            }
-        }
-        let b = sim.world.body(body).unwrap();
-        let c = b.centroid();
-        assert!(c.is_finite(), "ch{n:02} respawn {k}: NaN");
-        assert!(c.y > l.kill_y, "ch{n:02} respawn {k}: fell out");
-        assert!(grounded_late, "ch{n:02} respawn {k} at {at}: not resting on ground (now {c})");
-        assert!(c.distance(*at) < 260.0, "ch{n:02} respawn {k} at {at}: drifted to {c}");
-        assert!(b.velocity().length() < 120.0, "ch{n:02} respawn {k}: still moving {}", b.velocity());
-        assert!(!solid.iter().any(|s| geom::point_in_polygon(c, s)), "ch{n:02} respawn {k}: inside rock at {c}");
-    }
+    let errs = validate::rest_at_respawns(&campaign::chapter(n));
+    assert!(errs.is_empty(), "ch{n:02}:\n{}", errs.iter().map(|f| f.to_string()).collect::<Vec<_>>().join("\n"));
 }
 
 // ------------------------------------------------------ gap/height audit
 
 /// Airborne horizontal reach for a jump that lands `rise` px higher.
-fn reach(rise: f32) -> f32 {
-    let (v0, g) = (930.0f32, 1800.0f32);
-    let t = |h: f32| (v0 + (v0 * v0 - 2.0 * g * h).max(0.0).sqrt()) / g;
-    (420.0 * t(rise) / t(0.0)).min(620.0)
-}
 
 fn ground_below(sim: &Sim, p: Vec2, depth: f32) -> bool {
-    // Props (see-saw planks, balls, toy blocks) count as ground too.
-    let mask = bb_sim::load::layer::WORLD | bb_sim::load::layer::PROP;
-    sim.world.raycast(p + Vec2::new(0.0, 100.0), Vec2::NEG_Y, 100.0 + depth, mask, None).is_some()
+    validate::ground_below(sim, p, depth)
 }
 
-fn audit(n: u8) -> Vec<String> {
-    let c = campaign::course(n);
-    let sim = Sim::new(c.level.clone());
-    let mut errs = Vec::new();
-    let mut assisted = 0;
-    for (i, w) in c.path.windows(2).enumerate() {
-        let (a, b) = (w[0].at, w[1].at);
-        let rise = b.y - a.y;
-        let dx = (b.x - a.x).abs();
-        let tag = format!("ch{n:02} step {} {:?} {a}→{b}", i + 1, w[1].how);
-        if w[1].how.assisted() {
-            assisted += 1;
-            continue;
-        }
-        if !ground_below(&sim, b, 60.0) {
-            errs.push(format!("{tag}: no ground at landing"));
-        }
-        match w[1].how {
-            Move::Jump => {
-                if rise > 190.0 {
-                    errs.push(format!("{tag}: jump rise {rise} > 190"));
-                }
-                if dx > reach(rise) {
-                    errs.push(format!("{tag}: jump {dx} px > reach {:.0}", reach(rise)));
-                }
-            }
-            Move::Drop => {
-                if rise > 20.0 || dx > 620.0 {
-                    errs.push(format!("{tag}: not a drop (rise {rise}, dx {dx})"));
-                }
-            }
-            _ => {
-                // Walking: continuous ground underfoot and no sheer climbs.
-                let steps = (dx / 30.0).ceil().max(1.0) as usize;
-                for k in 0..=steps {
-                    let p = a.lerp(b, k as f32 / steps as f32);
-                    if !ground_below(&sim, p, 160.0) {
-                        errs.push(format!("{tag}: gap underfoot at x={:.0}", p.x));
-                        break;
-                    }
-                }
-                if rise / dx.max(1.0) > 1.2 {
-                    errs.push(format!("{tag}: too steep to walk"));
-                }
-            }
-        }
-    }
-    println!("ch{n:02}: {} path steps, {assisted} assisted", c.path.len() - 1);
-    errs
-}
 
 #[test]
 fn critical_paths_respect_jump_metrics() {
-    let errs: Vec<String> = (1..=CHAPTERS).flat_map(audit).collect();
+    let errs: Vec<String> = courses().iter().flat_map(|(n, c)| validate::path_metrics(c).into_iter().map(move |f| format!("ch{n:02}: {f}"))).collect();
     assert!(errs.is_empty(), "path audit:\n{}", errs.join("\n"));
 }
 
@@ -825,68 +684,12 @@ fn ch03_mushrooms_replace_trampolines() {
 const PENDING: &[u8] = &[];
 
 /// Points along the critical path every ~20 px (feet positions).
-fn path_samples(c: &Course) -> Vec<(Vec2, Move)> {
-    let mut out = Vec::new();
-    for w in c.path.windows(2) {
-        let n = ((w[1].at - w[0].at).length() / 20.0).ceil().max(1.0) as usize;
-        for k in 0..=n {
-            out.push((w[0].at.lerp(w[1].at, k as f32 / n as f32), w[1].how));
-        }
-    }
-    out
-}
 
 /// Floor hazards: spike strips whose teeth point up, and kill zones (top
 /// edge). Each as a polyline (left to right).
-fn floor_hazards(l: &Level) -> Vec<(String, Vec2, Vec2)> {
-    let mut v: Vec<(String, Vec2, Vec2)> = l
-        .spikes
-        .iter()
-        .filter(|s| (s.b - s.a).perp().y > 0.0 && s.b.x > s.a.x)
-        .map(|s| (format!("spikes {}→{}", s.a, s.b), s.a, s.b))
-        .collect();
-    for z in &l.zones {
-        if matches!(z.kind, ZoneKind::Kill) {
-            let (lo, hi) = z.shape.bounds();
-            v.push((format!("kill zone {lo}..{hi}"), Vec2::new(lo.x, hi.y), hi));
-        }
-    }
-    v
-}
 
 fn hazard_depth_errors(n: u8) -> Vec<String> {
-    let c = campaign::course(n);
-    let l = &c.level;
-    let sim = Sim::new(l.clone());
-    let mut errs = Vec::new();
-    for (name, a, b) in floor_hazards(l) {
-        let mut worst: Option<(f32, Vec2)> = None;
-        for (p, how) in path_samples(&c) {
-            // Standing on a prop you pushed in: it's what's beneath you.
-            if p.x < a.x || p.x > b.x || how == Move::Prop {
-                continue;
-            }
-            let hy = a.y + (b.y - a.y) * (p.x - a.x) / (b.x - a.x).max(1e-3);
-            let depth = p.y - hy;
-            if depth <= 0.0 || depth > 2500.0 {
-                continue;
-            }
-            // Only if it's really what's beneath you (nothing solid between).
-            let hit = sim.world.raycast(p + Vec2::new(0.0, 4.0), Vec2::NEG_Y, depth - 8.0, bb_sim::load::layer::WORLD, None);
-            if hit.is_some() {
-                continue;
-            }
-            if worst.is_none_or(|(d, _)| depth > d) {
-                worst = Some((depth, p));
-            }
-        }
-        if let Some((d, p)) = worst {
-            if d > metrics::MAX_HAZARD_DEPTH + 1.0 {
-                errs.push(format!("ch{n:02}: {name} is {d:.0} px below the path at {p} (max {})", metrics::MAX_HAZARD_DEPTH));
-            }
-        }
-    }
-    errs
+    validate::hazard_depth(&campaign::course(n)).into_iter().map(|f| format!("ch{n:02}: {f}")).collect()
 }
 
 /// Rule 1: danger is always visible. No spike / kill hazard sits deeper
@@ -920,32 +723,11 @@ fn hazard_metric_fits_the_view() {
 /// the ceiling isn't a shortcut.
 #[test]
 fn vine_crossings_have_spiked_ceilings() {
-    let mut errs = Vec::new();
-    for n in 1..=CHAPTERS {
-        if PENDING.contains(&n) {
-            continue;
-        }
-        let c = campaign::course(n);
-        let l = &c.level;
-        let ceiling: Vec<(f32, f32)> =
-            l.spikes.iter().filter(|s| (s.b - s.a).perp().y < 0.0).map(|s| (s.a.x.min(s.b.x), s.a.x.max(s.b.x))).collect();
-        for w in c.path.windows(2) {
-            if w[1].how != Move::Rope {
-                continue;
-            }
-            let (x0, x1) = (w[0].at.x.min(w[1].at.x), w[0].at.x.max(w[1].at.x));
-            for (name, a, b) in floor_hazards(l) {
-                let (o0, o1) = (a.x.max(x0), b.x.min(x1));
-                if o1 - o0 < 150.0 {
-                    continue;
-                }
-                let covered: f32 = ceiling.iter().map(|(c0, c1)| (c1.min(o1) - c0.max(o0)).max(0.0)).sum();
-                if covered < (o1 - o0) * 0.4 {
-                    errs.push(format!("ch{n:02}: rope crossing {x0}..{x1} over {name}: only {covered:.0} of {:.0} px of ceiling spiked", o1 - o0));
-                }
-            }
-        }
-    }
+    let errs: Vec<String> = courses()
+        .iter()
+        .filter(|(n, _)| !PENDING.contains(n))
+        .flat_map(|(n, c)| lint::vine_ceilings(c).into_iter().map(move |f| format!("ch{n:02}: {f}")))
+        .collect();
     assert!(errs.is_empty(), "{}", errs.join("\n"));
 }
 
@@ -954,58 +736,43 @@ fn vine_crossings_have_spiked_ceilings() {
 /// exit tunnel; no big round "sun" lights.
 #[test]
 fn chapters_are_bookended_by_caves() {
-    let themes = [Theme::Hollow, Theme::Drip, Theme::Fungus, Theme::Vines, Theme::Stoneworks, Theme::Lake, Theme::Chimney, Theme::Toys, Theme::CaveIn, Theme::Well];
-    for (n, c) in courses() {
-        let l = &c.level;
-        let i = n as usize - 1;
-        assert_eq!(l.theme, themes[i], "ch{n:02} theme");
-        if PENDING.contains(&n) && l.mouths.is_empty() {
-            println!("(pending) ch{n:02}: no cave mouths yet");
-            continue;
-        }
-        let entry: Vec<_> = l.mouths.iter().filter(|m| m.kind == MouthKind::Entry).collect();
-        let exit: Vec<_> = l.mouths.iter().filter(|m| m.kind == MouthKind::Exit).collect();
-        assert_eq!(entry.len(), 1, "ch{n:02}: one entry cave");
-        assert_eq!(exit.len(), 1, "ch{n:02}: one exit cave");
-        assert_eq!(entry[0].theme, if i == 0 { Theme::Hollow } else { themes[i - 1] }, "ch{n:02}: entry glows with the previous chapter");
-        if i + 1 < themes.len() {
-            assert_eq!(exit[0].theme, themes[i + 1], "ch{n:02}: exit glows with the next chapter");
-        } else {
-            assert!(exit[0].daylight, "ch10 opens onto daylight");
-        }
-        let (lo, hi) = exit[0].interior();
-        let g = l.goal.as_ref().unwrap().center();
-        assert!(g.x > lo.x && g.x < hi.x && g.y > lo.y && g.y < hi.y, "ch{n:02}: goal {g} not inside the exit tunnel {lo}..{hi}");
-        assert!(!l.decor.iter().any(|d| d.kind == "sun"), "ch{n:02}: no round sun lights");
-        // The tunnels are open air (you can stand in them).
-        let solid = solids(l);
-        for m in [entry[0], exit[0]] {
-            let p = m.pos + Vec2::new(m.facing * 120.0, R + 10.0);
-            assert!(!embedded(&solid, p, 8.0), "ch{n:02}: {:?} mouth at {} is filled with rock", m.kind, m.pos);
-        }
-    }
+    let errs: Vec<String> = courses().iter().flat_map(|(n, c)| lint::caves(c).into_iter().map(move |f| format!("ch{n:02}: {f}"))).collect();
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
 }
 
 /// Rule 7 / feedback: ground decor (crystals, mushrooms, toys) stands on
 /// something; nothing floats in mid-air.
 #[test]
 fn ground_decor_is_grounded() {
+    let errs: Vec<String> = courses().iter().flat_map(|(n, c)| validate::decor_grounded(&c.level).into_iter().map(move |f| format!("ch{n:02}: {f}"))).collect();
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
+}
+
+/// Sterling: "the platforms don't mesh together perfectly: they push each
+/// other up/down". No near-miss floor joints, no overlapping floors or
+/// jelly, no rock poking into a jelly skin, no flush joints left unmerged.
+#[test]
+fn seams_are_clean() {
     let mut errs = Vec::new();
-    for (n, c) in courses() {
-        let l = &c.level;
-        let sim = Sim::new(l.clone());
-        let solid = solids(l);
-        for d in &l.decor {
-            if !matches!(d.kind.as_str(), "crystal" | "mushroom" | "sock" | "crayon" | "block_letters") {
-                continue;
-            }
-            let mask = bb_sim::load::layer::WORLD;
-            let down = sim.world.raycast(d.pos + Vec2::new(0.0, 30.0), Vec2::NEG_Y, 70.0, mask, None);
-            let inside = solid.iter().any(|s| geom::point_in_polygon(d.pos + Vec2::new(0.0, 30.0 * d.scale), s));
-            if down.is_none() || inside {
-                errs.push(format!("ch{n:02}: {} at {} is {}", d.kind, d.pos, if inside { "buried in rock" } else { "floating" }));
-            }
-        }
+    for n in 1..=CHAPTERS {
+        let bp = campaign::blueprint(n);
+        errs.extend(lint::seams(&bp.expand(), Some(&bp)).into_iter().map(|f| format!("ch{n:02}: {f}")));
+    }
+    assert!(errs.is_empty(), "{}", errs.join("\n"));
+}
+
+/// The whole rule set the `validate` command runs (minus the slow resting
+/// check, covered by rest_chNN) passes on every chapter, including story
+/// lines for every trigger.
+#[test]
+fn validator_passes_the_campaign() {
+    let scripts = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../bb-game/src/story/scripts.rs")).unwrap();
+    let has = |id: &str| scripts.contains(&format!("\"{id}\""));
+    let opts = validate::Options { rest: false, has_script: Some(&has) };
+    let mut errs = Vec::new();
+    for n in 1..=CHAPTERS {
+        let bp = campaign::blueprint(n);
+        errs.extend(validate::validate(&bp.expand(), Some(&bp), &opts).into_iter().map(|f| format!("ch{n:02}: {f}")));
     }
     assert!(errs.is_empty(), "{}", errs.join("\n"));
 }

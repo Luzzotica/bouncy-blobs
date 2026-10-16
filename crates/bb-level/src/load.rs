@@ -163,7 +163,7 @@ fn is_defaultish(v: &Value) -> bool {
 
 /// Line numbers (1-based) where each element of the top-level array `key`
 /// starts.
-fn item_lines(text: &str, key: &str) -> Vec<usize> {
+pub fn item_lines(text: &str, key: &str) -> Vec<usize> {
     let b = text.as_bytes();
     let needle = format!("\"{key}\"");
     let mut depth = 0i32;
@@ -269,15 +269,17 @@ pub fn explain(msg: &str, piece: bool) -> String {
     if let Some(rest) = msg.strip_prefix("unknown variant ") {
         let names = tick(rest);
         if let Some((bad, options)) = names.split_first() {
-            let hint = closest(bad, options.iter().map(|s| s.as_str())).map(|n| format!(" — did you mean `{n}`?")).unwrap_or_default();
             let what = if piece && options.iter().any(|o| o == "ledge") { "unknown piece type" } else { "unknown value" };
-            return format!("{what} `{bad}`{hint} (choices: {})", options.join(", "));
+            return match closest(bad, options.iter().map(|s| s.as_str())) {
+                Some(n) => format!("{what} `{bad}`: did you mean `{n}`?"),
+                None => format!("{what} `{bad}` (choices: {})", options.join(", ")),
+            };
         }
     }
     if let Some(rest) = msg.strip_prefix("unknown field ") {
         let names = tick(rest);
         if let Some((bad, options)) = names.split_first() {
-            let hint = closest(bad, options.iter().map(|s| s.as_str())).map(|n| format!(" — did you mean `{n}`?")).unwrap_or_default();
+            let hint = closest(bad, options.iter().map(|s| s.as_str())).map(|n| format!(": did you mean `{n}`?")).unwrap_or_default();
             return format!("unknown field `{bad}`{hint} (this piece takes: {})", options.join(", "));
         }
     }
@@ -344,11 +346,11 @@ mod tests {
         let bad = GOOD.replace("\"ledge\"", "\"ledg\"").replace("\"walk\"", "\"wlak\"");
         let e = load_level_text(&bad).unwrap_err();
         assert_eq!(e.problems.len(), 2, "{e}");
-        assert!(e.problems[0].starts_with("line 4, piece 1 (ledg): unknown piece type `ledg` — did you mean `ledge`?"), "{e}");
+        assert!(e.problems[0].starts_with("line 4, piece 1 (ledg): unknown piece type `ledg`: did you mean `ledge`?"), "{e}");
         assert!(e.problems[1].contains("line 5, piece 2 (wp)") && e.problems[1].contains("`walk`"), "{e}");
         let bad = GOOD.replace("\"x1\"", "\"x2\"");
         let e = load_level_text(&bad).unwrap_err();
-        assert!(e.problems[0].contains("unknown field `x2` — did you mean `x0`?") || e.problems[0].contains("did you mean `x1`"), "{e}");
+        assert!(e.problems[0].contains("unknown field `x2`: did you mean `x0`?") || e.problems[0].contains("did you mean `x1`"), "{e}");
         let bad = GOOD.replace("0}},\n    {\"wp\"", "0}}\n    {\"wp\"");
         let e = load_level_text(&bad).unwrap_err();
         assert!(e.problems[0].starts_with("line 5"), "{e}");

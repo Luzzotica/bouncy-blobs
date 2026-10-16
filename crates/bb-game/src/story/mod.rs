@@ -98,10 +98,11 @@ pub struct StoryFlow {
     pub goal_timer: Option<f32>,
 }
 
-/// The campaign chapter (crates/bb-level/src/campaign), with Glimmer the
+/// The campaign chapter (crates/bb-game/assets/levels/campaign), with Glimmer the
 /// companion along from chapter 2 on.
 pub fn chapter_level(n: u8) -> Level {
-    let mut level = bb_level::campaign::chapter(n);
+    // Dev builds read the chapter file off disk (edits apply on restart).
+    let mut level = crate::level_files::campaign_level(n).0;
     glimmer::join(&mut level, n);
     level
 }

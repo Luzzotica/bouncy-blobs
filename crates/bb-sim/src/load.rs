@@ -70,6 +70,29 @@ pub(crate) fn load(sim: &mut Sim, level: &Level) {
         sim.tags.insert(id, BodyTag::Jelly);
         sim.jelly.push((id, j.material));
     }
+    // Jelly never collides with jelly: neighbouring ground tiles overlap a
+    // few px (so there's no hairline seam) and, colliding, they'd shove each
+    // other apart: every seam bulged and notched (~8 px) and jostled as you
+    // rolled over it. The layer bits can't say this (both tiles are WORLD
+    // too, so `mask = !JELLY` still matches), so the touching pairs are
+    // ignored explicitly.
+    let tiles: Vec<(BodyId, Vec2, Vec2)> = sim
+        .jelly
+        .iter()
+        .filter_map(|(id, _)| {
+            let b = w.body(*id)?;
+            let lo = b.x.iter().fold(Vec2::splat(f32::MAX), |a, p| a.min(*p)) - Vec2::splat(4.0);
+            let hi = b.x.iter().fold(Vec2::splat(f32::MIN), |a, p| a.max(*p)) + Vec2::splat(4.0);
+            Some((*id, lo, hi))
+        })
+        .collect();
+    for (i, a) in tiles.iter().enumerate() {
+        for b in &tiles[i + 1..] {
+            if a.1.x <= b.2.x && b.1.x <= a.2.x && a.1.y <= b.2.y && b.1.y <= a.2.y {
+                w.ignore_collision(a.0, b.0);
+            }
+        }
+    }
 
     let mut named: HashMap<String, BodyId> = HashMap::new();
 

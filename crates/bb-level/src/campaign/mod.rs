@@ -34,7 +34,8 @@ pub const FILES: [&str; CHAPTERS as usize] = chapter_files!("01", "02", "03", "0
 /// Where chapter `n`'s file lives in the source tree (for dev tools and
 /// live reload; shipped builds use the compiled-in copy).
 pub fn source_path(n: u8) -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../bb-game/assets/levels/campaign")).join(format!("ch{n:02}.json"))
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".."));
+    crates.join("bb-game/assets/levels/campaign").join(format!("ch{n:02}.json"))
 }
 
 /// Chapter number of a campaign id ("ch01" … "ch10").

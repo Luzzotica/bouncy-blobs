@@ -18,6 +18,9 @@ pub mod metrics {
     pub const SKIN: f32 = 26.0;
     /// Max jelly tile length before splitting.
     pub const TILE: f32 = 280.0;
+    /// How far neighbouring jelly tiles overlap (so there's no hairline
+    /// seam between them; jelly never collides with jelly).
+    pub const SEAM_LAP: f32 = 3.0;
 
     // ── Camera framing (bb-game `camera.rs` uses these) ──────────────────
     /// Minimum visible world height at zoom 1 (the window adds width).
@@ -120,15 +123,36 @@ impl LevelBuilder {
         }
         self.level.terrain.push(Terrain { shape: Shape::Poly { points: core }, material, one_way: false });
         // Jelly tiles along the surface.
-        for w in top.windows(2) {
+        let segs = top.len() - 1;
+        // Lap across a corner only between gentle slopes (a flat lap on a
+        // steep tile would tilt its underside into the core).
+        let gentle = |i: usize| top.get(i + 1).is_some_and(|b| ((b.y - top[i].y) / (b.x - top[i].x).abs().max(1e-3)).abs() < 0.5);
+        for (si, w) in top.windows(2).enumerate() {
             let (a, b) = (w[0], w[1]);
             let n = ((b - a).length() / metrics::TILE).ceil().max(1.0) as usize;
             for k in 0..n {
                 // Overlap neighbours by a few px so anti-aliased edges don't
                 // leave hairline seams (jelly never collides with jelly).
+                // Across a corner of the polyline the overlap runs flat, at
+                // the corner's height, so it never dips into the next core.
                 let dir = (b - a).normalize_or_zero() * 3.0;
-                let p0 = a.lerp(b, k as f32 / n as f32) - if k > 0 { dir } else { Vec2::ZERO };
-                let p1 = a.lerp(b, (k + 1) as f32 / n as f32) + if k + 1 < n { dir } else { Vec2::ZERO };
+                let lap = v(metrics::SEAM_LAP, 0.0);
+                let p0 = a.lerp(b, k as f32 / n as f32)
+                    - if k > 0 {
+                        dir
+                    } else if si > 0 && gentle(si) && gentle(si - 1) {
+                        lap
+                    } else {
+                        Vec2::ZERO
+                    };
+                let p1 = a.lerp(b, (k + 1) as f32 / n as f32)
+                    + if k + 1 < n {
+                        dir
+                    } else if si + 1 < segs && gentle(si) && gentle(si + 1) {
+                        lap
+                    } else {
+                        Vec2::ZERO
+                    };
                 let pts = vec![p0 - v(0.0, skin), p1 - v(0.0, skin), p1, p0];
                 self.level.jelly.push(Jelly { shape: Shape::Poly { points: pts }, material, wobble });
             }

@@ -11,6 +11,7 @@ pub mod modes;
 pub mod npc;
 mod runtime;
 pub mod tuning;
+pub mod validate;
 
 use std::collections::HashMap;
 

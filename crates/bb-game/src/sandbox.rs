@@ -2,6 +2,8 @@
 //!
 //! Dev env vars:
 //! * `BB_LEVEL=chNN` — play campaign chapter NN instead of the sandbox.
+//! * `BB_LEVEL_FILE=path.json` — play any level file. Dev builds reload
+//!   either one live when the file is saved (`crate::level_files`).
 //! * `BB_CHECKPOINT=k` — start at respawn point k (0 = level spawn).
 //! * `BB_ZOOM=z` — camera zoom-out factor (e.g. 3 for an overview).
 //! * `BB_CAM=x,y` — pin the camera at a world position.
@@ -48,26 +50,25 @@ pub fn sandbox_level() -> bb_level::Level {
     b.build()
 }
 
-fn start(mut load: MessageWriter<LoadLevel>, mut dir: ResMut<crate::camera::CameraDirector>, mut next: ResMut<NextState<AppState>>) {
+fn start(mut load: MessageWriter<LoadLevel>, mut dir: ResMut<crate::camera::CameraDirector>, mut next: ResMut<NextState<AppState>>, mut commands: Commands) {
     match std::env::var("BB_START").as_deref() {
         Ok("story") => return next.set(AppState::Story),
         Ok("kids") => return next.set(AppState::Kids),
         Ok("party") => return next.set(AppState::Party),
         Ok("sandbox") => {}
-        _ if std::env::var("BB_LEVEL").is_ok() => {}
+        _ if std::env::var("BB_LEVEL").is_ok() || std::env::var("BB_LEVEL_FILE").is_ok() => {}
         _ => return, // Boot → Title.
     }
     next.set(AppState::Playing);
-    let level = std::env::var("BB_LEVEL")
-        .ok()
-        .and_then(|id| {
-            let l = bb_level::campaign::by_id(&id);
-            if l.is_none() {
-                warn!("BB_LEVEL={id}: no such chapter, using the sandbox");
+    let level = match crate::level_files::startup_level() {
+        Some((level, watch)) => {
+            if let Some(path) = watch {
+                commands.insert_resource(crate::level_files::LevelWatch::new(path));
             }
-            l
-        })
-        .unwrap_or_else(sandbox_level);
+            level
+        }
+        None => sandbox_level(),
+    };
     if let Some(z) = std::env::var("BB_ZOOM").ok().and_then(|s| s.parse::<f32>().ok()) {
         dir.zoom = Some(z);
     }

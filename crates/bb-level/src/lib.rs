@@ -5,6 +5,7 @@ pub mod blueprint;
 pub mod builder;
 pub mod pretty;
 pub mod legacy;
+pub mod lint;
 pub mod load;
 pub mod campaign;
 pub mod types;

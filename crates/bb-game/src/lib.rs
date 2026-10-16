@@ -22,6 +22,7 @@ pub mod hud;
 pub mod ink;
 pub mod input;
 pub mod kids;
+pub mod level_files;
 pub mod level_view;
 pub mod menu;
 pub mod menu_feel;
@@ -99,6 +100,7 @@ impl Plugin for GamePlugin {
                 cave::CavePlugin,
                 alive::AlivePlugin,
                 sandbox::SandboxPlugin,
+                level_files::LevelFilesPlugin,
                 softtext::SoftTextPlugin,
             ))
             .add_plugins(mouths::MouthsPlugin)
