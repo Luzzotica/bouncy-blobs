@@ -204,6 +204,8 @@ pub struct Parallax(pub f32);
 #[derive(Component)]
 pub struct Mote {
     seed: f32,
+    /// Where it drifts from (world), before wrapping around the view.
+    base: Vec2,
 }
 
 pub struct LevelViewPlugin;
@@ -1355,29 +1357,39 @@ fn motes(
         let mat = mats.add(ColorMaterial { color: glow, alpha_mode: bevy::sprite_render::AlphaMode2d::Blend, ..default() });
         for i in 0..40 {
             let seed = i as f32 * 12.9898;
-            let p = centre + Vec2::new((seed.sin() * 43758.5).fract() * 1800.0 - 900.0, (seed.cos() * 23421.6).fract() * 1100.0 - 550.0);
+            let base = Vec2::new((seed.sin() * 43758.5).fract() * 1800.0 - 900.0, (seed.cos() * 23421.6).fract() * 1100.0 - 550.0);
+            let p = mote_at(base, seed, time.elapsed_secs(), centre);
             commands.spawn((
                 Mesh2d(shared.circle.clone()),
                 MeshMaterial2d(mat.clone()),
                 Transform::from_xyz(p.x, p.y, z::DECOR_BACK + 1.0).with_scale(Vec3::splat(2.0 + (seed * 3.1).sin().abs() * 3.0)),
-                Mote { seed },
+                Mote { seed, base },
                 LevelEntity,
             ));
         }
         return;
     }
     let t = time.elapsed_secs();
-    let dt = time.delta_secs();
     for (m, mut tf) in q.iter_mut() {
-        tf.translation.x += ((t * 0.3 + m.seed).sin() * 14.0 + 6.0) * dt;
-        tf.translation.y += ((t * 0.21 + m.seed * 1.7).cos() * 10.0 + 9.0) * dt;
-        // Wrap around the view so there are always some on screen.
-        let d = tf.translation.truncate() - centre;
-        if d.x > 1000.0 { tf.translation.x -= 2000.0; }
-        if d.x < -1000.0 { tf.translation.x += 2000.0; }
-        if d.y > 650.0 { tf.translation.y -= 1300.0; }
-        if d.y < -650.0 { tf.translation.y += 1300.0; }
+        let p = mote_at(m.base, m.seed, t, centre);
+        tf.translation.x = p.x;
+        tf.translation.y = p.y;
     }
+}
+
+/// A mote's position at game time `t`, wrapped into the 2000 x 1300 window
+/// around the view `centre` so there are always some on screen. A pure
+/// function of time and camera (the drift is integrated in closed form), not
+/// a per-frame accumulation: how many frames ran before (a capture's
+/// wall-time warm-up) and when it was spawned can't change where it is.
+fn mote_at(base: Vec2, seed: f32, t: f32, centre: Vec2) -> Vec2 {
+    // d/dt = (sin(0.3t + s) * 14 + 6, cos(0.21t + 1.7s) * 10 + 9).
+    let drift = Vec2::new(
+        -(t * 0.3 + seed).cos() * (14.0 / 0.3) + 6.0 * t,
+        (t * 0.21 + seed * 1.7).sin() * (10.0 / 0.21) + 9.0 * t,
+    );
+    let d = base + drift - centre;
+    centre + Vec2::new((d.x + 1000.0).rem_euclid(2000.0) - 1000.0, (d.y + 650.0).rem_euclid(1300.0) - 650.0)
 }
 
 // ------------------------------------------------------------------ water
