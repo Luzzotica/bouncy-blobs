@@ -194,7 +194,7 @@ fn resolve_build(s: &Scene, bin: Option<PathBuf>) -> Result<Build, String> {
 }
 
 /// Build the game at `commit` from a `git archive` export (nobody's
-/// worktree is touched), sharing the build cache, and keep the binary.
+/// worktree's sources are touched), into this repo's ./target, and keep the binary.
 fn build_commit(commit: &str, short: &str, cache: &Path) -> Result<(), String> {
     println!("Building the game at {short} (once; cached in {})…", cache.display());
     let t = Instant::now();
@@ -207,19 +207,14 @@ fn build_commit(commit: &str, short: &str, cache: &Path) -> Result<(), String> {
     if !st.success() {
         return Err("Couldn't export the commit with git archive.".into());
     }
-    // Never make a new target dir (disk): reuse the shared build cache.
-    let Some(target) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from) else {
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err("Building the game needs CARGO_TARGET_DIR set to the shared build cache (so no new target dir fills the disk). Set it, or pass --bin with a binary of this exact commit.".into());
-    };
+    // Build into this repo's own ./target (the machine's build rules: each
+    // worktree keeps its own target dir, no shared CARGO_TARGET_DIR, no
+    // per-invocation flags; dependencies come from sccache). The export is a
+    // different source path, so its crates get their own artifacts there.
+    let target = repo().join("target");
     let mut cmd = Command::new("cargo");
     cmd.current_dir(&dir).args(["build", "-p", "bb-game", "--bin", "bouncy-blobs"]);
-    for p in ["bb-game", "bb-level", "bb-sim", "bb-physics", "bb-net"] {
-        // Distinct artifacts per build, so another tree's build of the same
-        // crate can never be picked up from a shared target dir.
-        cmd.args(["--config", &format!("profile.dev.package.{p}.codegen-units=255")]);
-    }
-    let st = cmd.env("CARGO_TARGET_DIR", &target).env("CARGO_INCREMENTAL", "0").env("CARGO_PROFILE_DEV_DEBUG", "0").env("BB_GIT_COMMIT", short).status().map_err(|e| e.to_string())?;
+    let st = cmd.env("CARGO_TARGET_DIR", &target).env("BB_GIT_COMMIT", short).status().map_err(|e| e.to_string())?;
     if !st.success() {
         let _ = std::fs::remove_dir_all(&dir);
         return Err(format!("Building {short} failed (see the cargo output above)."));
@@ -229,7 +224,7 @@ fn build_commit(commit: &str, short: &str, cache: &Path) -> Result<(), String> {
     let here = dir.file_name().unwrap().to_string_lossy().to_string();
     if !deps.contains(&here) {
         let _ = std::fs::remove_dir_all(&dir);
-        return Err("The built binary isn't from the exported commit (shared build cache collision); try again.".into());
+        return Err("The built binary isn't from the exported commit (another build replaced it in ./target meanwhile); try again.".into());
     }
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
     std::fs::copy(target.join("debug/bouncy-blobs"), cache.join("bouncy-blobs")).map_err(|e| e.to_string())?;
