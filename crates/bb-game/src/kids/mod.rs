@@ -31,7 +31,7 @@ use crate::camera::{CameraDirector, MainCamera};
 use crate::flow::AppState;
 use crate::input::{GatherInput, LocalDevices, RemoteSlots};
 use crate::palette::hex;
-use crate::sim::{Game, Inputs};
+use crate::sim::{Game, Inputs, InstallGame};
 use fx::{Glyph, Particles};
 use lessons::{KidsVoice, LearnMode};
 use level::{KIDS_SHAPES, KidsShape};
@@ -179,7 +179,7 @@ fn enter(
     ui::spawn_overlay(&mut commands, &mut meshes, &shared, &ui);
     spawn_backdrop(&mut commands, &mut meshes, &shared);
     spawn_portrait_gate(&mut commands);
-    commands.insert_resource(Game::new_with(sim));
+    hand_over(&mut commands, sim);
     commands.insert_resource(Kids {
         mode,
         color,
@@ -211,6 +211,16 @@ fn enter(
     }
 }
 
+/// Starts Kids Mode's world through the sim's loader, not straight in: the
+/// menu's OnExit has just asked to unload the title's world, and that unload
+/// (next frame) took a Game inserted here with it, leaving Kids Mode with no
+/// sim at all (no friends, chips or frame; HOME dead). The old world goes
+/// now so nothing runs Kids Mode against it in the meantime.
+fn hand_over(commands: &mut Commands, sim: Sim) {
+    commands.remove_resource::<Game>();
+    commands.insert_resource(InstallGame(Some(Game::new_with(sim))));
+}
+
 fn exit(
     mut commands: Commands,
     q: Query<Entity, With<KidsEntity>>,
@@ -227,6 +237,7 @@ fn exit(
     }
     commands.remove_resource::<KidsVoice>();
     commands.remove_resource::<Kids>();
+    commands.remove_resource::<InstallGame>();
     commands.remove_resource::<Game>();
     devices.touch_slot = Some(0);
     for s in 1..=8 {
@@ -772,5 +783,78 @@ fn demo(time: Res<Time>, game: Res<Game>, mut kids: ResMut<Kids>, mut t0: Local<
             kids.injected.push((2, c, Phase::Down));
         }
         *step = 2;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use bevy::state::app::StatesPlugin;
+    use bevy::time::TimeUpdateStrategy;
+
+    use super::*;
+    use crate::sim::{LoadLevel, SimPlugin, UnloadLevel};
+
+    /// Frames on which `Game` appeared / went away.
+    #[derive(Resource, Default)]
+    struct Edges {
+        frame: u32,
+        added: Vec<u32>,
+        removed: Vec<u32>,
+    }
+
+    fn edges(mut e: ResMut<Edges>, game: Option<Res<Game>>, mut had: Local<bool>) {
+        e.frame += 1;
+        let f = e.frame;
+        let added = game.as_ref().is_some_and(|g| g.is_added());
+        if *had && (game.is_none() || added) {
+            e.removed.push(f);
+        }
+        if added {
+            e.added.push(f);
+        }
+        *had = game.is_some();
+    }
+
+    /// Title → Kids from the menu: the title's OnExit unloads its world in
+    /// the same transition Kids Mode starts its own. Kids Mode's world must
+    /// survive that unload (it used to vanish a frame later: no friends, no
+    /// chips, no frame, HOME dead), and the old world's teardown and the new
+    /// one's arrival land on different frames.
+    #[test]
+    fn kids_world_survives_the_title_unloading() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, SimPlugin));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)));
+        app.init_state::<AppState>().init_resource::<Edges>();
+        app.add_systems(Last, edges);
+        // The title runs a world of its own and unloads it on exit (menu.rs).
+        app.add_systems(OnEnter(AppState::Title), |mut load: MessageWriter<LoadLevel>| {
+            load.write(LoadLevel { level: crate::sandbox::sandbox_level(), players: vec![(0, "Pip".into(), 0xff5d73)] });
+        });
+        app.add_systems(OnExit(AppState::Title), |mut unload: MessageWriter<UnloadLevel>| {
+            unload.write(UnloadLevel);
+        });
+        app.add_systems(OnEnter(AppState::Kids), |mut commands: Commands| hand_over(&mut commands, Sim::new(level::playground())));
+
+        app.world_mut().resource_mut::<NextState<AppState>>().set(AppState::Title);
+        for _ in 0..5 {
+            app.update();
+        }
+        let title_id = app.world().resource::<Game>().sim.level.id.clone();
+        assert_ne!(title_id, level::playground().id);
+
+        app.world_mut().resource_mut::<NextState<AppState>>().set(AppState::Kids);
+        for _ in 0..30 {
+            app.update();
+        }
+        let game = app.world().get_resource::<Game>().expect("Kids Mode lost its world");
+        assert_eq!(game.sim.level.id, level::playground().id);
+        assert!(app.world().get_resource::<InstallGame>().is_none());
+        let e = app.world().resource::<Edges>();
+        assert_eq!(e.added.len(), 2, "{:?}", e.added);
+        assert_eq!(e.removed.len(), 1, "{:?}", e.removed);
+        assert!(e.added.iter().all(|f| !e.removed.contains(f)), "removed and added in one frame: {:?} / {:?}", e.removed, e.added);
     }
 }

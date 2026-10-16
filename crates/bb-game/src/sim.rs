@@ -46,6 +46,14 @@ pub struct LoadLevel {
 #[derive(Message, Clone)]
 pub struct UnloadLevel;
 
+/// A ready-made world to run (Kids Mode builds its own sim), installed the
+/// way [`LoadLevel`] installs a level: never in the same frame as an unload,
+/// so a state's `OnEnter` can hand it over while the previous state's
+/// `OnExit` is still unloading (inserting `Game` straight away lost it to
+/// that unload a frame later).
+#[derive(Resource)]
+pub struct InstallGame(pub Option<Game>);
+
 pub struct SimPlugin;
 
 impl Plugin for SimPlugin {
@@ -55,7 +63,7 @@ impl Plugin for SimPlugin {
             .add_message::<SimMsg>()
             .add_message::<LoadLevel>()
             .add_message::<UnloadLevel>()
-            .add_systems(PreUpdate, (unload_levels, load_levels).chain())
+            .add_systems(PreUpdate, (unload_levels, load_levels, install_games).chain())
             .init_resource::<Interp>()
             .add_systems(PreUpdate, update_interp)
             .add_systems(FixedUpdate, step.run_if(resource_exists::<Game>));
@@ -106,6 +114,26 @@ fn load_levels(
         for (slot, name, color) in &req.players {
             game.sim.add_player(*slot, name, *color);
         }
+        commands.insert_resource(game);
+    }
+}
+
+/// Hands over an [`InstallGame`] once the old `Game` is gone and no unload
+/// is in flight (same one-frame gap as [`load_levels`]).
+fn install_games(
+    mut commands: Commands,
+    mut unloads: MessageReader<UnloadLevel>,
+    existing: Option<Res<Game>>,
+    install: Option<ResMut<InstallGame>>,
+) {
+    let unloaded_now = unloads.read().count() > 0;
+    let Some(mut install) = install else { return };
+    if existing.is_some() || unloaded_now {
+        commands.remove_resource::<Game>();
+        return;
+    }
+    commands.remove_resource::<InstallGame>();
+    if let Some(game) = install.0.take() {
         commands.insert_resource(game);
     }
 }
