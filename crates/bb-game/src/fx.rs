@@ -145,8 +145,11 @@ fn react(
     mut mats: ResMut<Assets<ColorMaterial>>,
     mut cam: ResMut<CameraDirector>,
     overrides: Res<crate::render::StyleOverrides>,
+    held: Option<Res<crate::menu::HeldBlobs>>,
 ) {
     let mut bumped = std::collections::HashSet::new();
+    // A title blob dragged into a tile scrapes it every frame: no spray.
+    let held = |id: &bb_physics::BodyId| held.as_ref().is_some_and(|h| h.0.contains(id));
     let theme = palette::theme(game.sim.level.theme);
     let accent = theme.accent.to_srgba();
     let accent_rgb = ((accent.red * 255.0) as u32) << 16 | ((accent.green * 255.0) as u32) << 8 | (accent.blue * 255.0) as u32;
@@ -179,7 +182,7 @@ fn react(
             SimEvent::Impact { pos, speed, body } => {
                 // Landing on something: splash in the blob's colour, thrown
                 // along its direction of travel.
-                if *speed > 520.0 && is_blob(&game, *body) {
+                if *speed > 520.0 && is_blob(&game, *body) && !held(body) {
                     if let (Some(col), Some(b)) = (body_color(&game, &overrides, *body), game.sim.world.body(*body)) {
                         let v = b.velocity();
                         let n = ((*speed - 400.0) / 120.0).clamp(2.0, 8.0) as u32;
@@ -192,7 +195,7 @@ fn react(
                 // Two blobs collide: each sheds a few drops of its own colour,
                 // carried by the pair's shared motion and flung out sideways.
                 let key = if a.index < b.index { (*a, *b) } else { (*b, *a) };
-                if *speed > 260.0 && (is_blob(&game, *a) || is_blob(&game, *b)) && bumped.insert(key) {
+                if *speed > 260.0 && (is_blob(&game, *a) || is_blob(&game, *b)) && !held(a) && !held(b) && bumped.insert(key) {
                     let va = game.sim.world.body(*a).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
                     let vb = game.sim.world.body(*b).map_or(bb_sim::Vec2::ZERO, |x| x.velocity());
                     let shared_v = (va + vb) * 0.5;

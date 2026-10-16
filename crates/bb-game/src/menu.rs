@@ -7,7 +7,7 @@
 //! [`crate::softtext`]), and the whole page falls in from above on entry.
 
 use bb_level::{LevelBuilder, NpcRole, Theme, v};
-use bb_physics::{BodyDesc, BodyId, Vec2 as PVec2};
+use bb_physics::{BodyDesc, BodyId, ForceModel, Vec2 as PVec2, World};
 use bb_sim::BodyTag;
 use bevy::prelude::*;
 
@@ -180,7 +180,8 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Title), enter)
+        app.init_resource::<HeldBlobs>()
+            .add_systems(OnEnter(AppState::Title), enter)
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
                 Update,
@@ -235,11 +236,107 @@ const BLOB_COLORS: [u32; 8] = [0x4ac8c8, 0xff6b7d, 0x5a9cff, 0xffd54a, 0xff7bd5,
 const VIEW_BOTTOM: f32 = 380.0 - crate::camera::VIEW_H * 0.5;
 const VIEW_HALF_W: f32 = crate::camera::VIEW_W * 0.5;
 
+/// The title blobs are far softer than gameplay blobs (v2 `menuBlobs.ts`):
+/// gameplay springs and pressure but shape matching ~5× weaker (k 26,
+/// damp 0.35 vs 132 / 1.5), so they squash and wobble on every landing,
+/// stretch when dragged by the rim and spin freely around the grab point.
+/// These are the v2 forces per unit mass (÷ its hull mass 0.12), scaled
+/// for our smaller blob (radius 36 vs 48) so it squashes and sags by the
+/// same fraction of its size: stiffness × 48/36, damping × √(48/36),
+/// pressure × (48/36)³. Set per body, so gameplay blobs keep their feel.
+pub const MENU_BLOB_FORCES: ForceModel = ForceModel {
+    spring_k: 610.0,
+    spring_damp: 33.5,
+    shear: 0.85,
+    pressure_k: 2.4,
+    shape_k: 290.0,
+    shape_damp: 3.35,
+    spin_damp: 0.0,
+};
+/// A press this close to a blob's centre grabs it (v2: 74 for radius 48).
+const GRAB_RADIUS: f32 = BLOB_R * 1.55;
+/// The held rim point glides toward the pointer: this fraction of the gap
+/// per second, at most `MAX_PULL_SPEED` (a velocity servo: never a
+/// teleport, which would explode the springs).
+const FOLLOW_RATE: f32 = 18.0;
+const MAX_PULL_SPEED: f32 = 2800.0;
+/// Cap on each axis of the throw on release.
+const MAX_FLING: f32 = 1800.0;
+
+/// One pointer holding a title blob by the rim point nearest the press.
+#[derive(Clone, Debug)]
+pub struct Grip {
+    pub body: BodyId,
+    /// The held particle (an outline point).
+    pub particle: usize,
+    target: PVec2,
+    /// Smoothed pointer velocity (world px/s), thrown on release.
+    vel: PVec2,
+}
+
+impl Grip {
+    pub fn new(body: BodyId, particle: usize, at: PVec2) -> Grip {
+        Grip { body, particle, target: at, vel: PVec2::ZERO }
+    }
+
+    /// The pointer is at `at` after `dt` seconds.
+    pub fn track(&mut self, at: PVec2, dt: f32) {
+        if dt > 0.0 {
+            self.vel = self.vel * 0.6 + (at - self.target) / dt * 0.4;
+        }
+        self.target = at;
+    }
+
+    /// Steer the held point toward the pointer; the rest of the blob trails
+    /// on its own springs and sags under gravity.
+    pub fn pull(&self, world: &mut World) {
+        if let Some(b) = world.body_mut(self.body) {
+            if let Some(&x) = b.x.get(self.particle) {
+                b.v[self.particle] = ((self.target - x) * FOLLOW_RATE).clamp_length_max(MAX_PULL_SPEED);
+            }
+        }
+    }
+
+    /// Let go: the whole blob takes the pointer's velocity.
+    pub fn fling(&self, world: &mut World) {
+        if let Some(b) = world.body_mut(self.body) {
+            b.add_velocity(self.vel.clamp(PVec2::splat(-MAX_FLING), PVec2::splat(MAX_FLING)));
+        }
+    }
+}
+
+/// What a press at `p` grabs: the outline point nearest `p` among the blobs
+/// whose centre is within reach. A press on a button or logo tile is the
+/// tile's (it still clicks), never a blob's.
+pub fn grab_at(world: &World, blobs: &[BodyId], p: PVec2) -> Option<(BodyId, usize)> {
+    if world.pick(p, crate::load_layer::UI).is_some_and(|id| world.body(id).is_some_and(|b| b.home.is_some())) {
+        return None;
+    }
+    let mut best = None;
+    let mut best_d = f32::INFINITY;
+    for &id in blobs {
+        let Some(b) = world.body(id).filter(|b| b.enabled && b.centroid().distance(p) <= GRAB_RADIUS) else { continue };
+        for &i in &b.boundary {
+            let d = b.x[i as usize].distance(p);
+            if d < best_d {
+                best_d = d;
+                best = Some((id, i as usize));
+            }
+        }
+    }
+    best
+}
+
+/// Title blobs held by a pointer right now (their scrapes against the
+/// tiles they're dragged into don't spray: see `fx`).
+#[derive(Resource, Default)]
+pub struct HeldBlobs(pub Vec<BodyId>);
+
 #[derive(Default)]
 pub struct Launcher {
     seed: u32,
-    /// Blob being dragged by the pointer.
-    held: Option<BodyId>,
+    /// Blobs held by pointers (mouse and each touch), by pointer id.
+    grips: std::collections::BTreeMap<u64, Grip>,
     started: bool,
     /// Seconds each blob has been sitting still (on a button or letter).
     resting: std::collections::HashMap<BodyId, f32>,
@@ -277,13 +374,14 @@ fn menu_blobs(
     touches: Res<Touches>,
     windows: Query<&Window>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    (menu, time, progress): (Res<Menu>, Res<Time>, Res<StoryProgress>),
+    (menu, time, progress, mut pointer, mut held_blobs): (Res<Menu>, Res<Time>, Res<StoryProgress>, ResMut<crate::menu_feel::MenuPointer>, ResMut<HeldBlobs>),
 ) {
+    use crate::menu_feel::MOUSE_POINTER;
     let g = game.sim.tuning.gravity.gravity;
     let ids: Vec<BodyId> = game.sim.npcs.iter().map(|n| n.ctl.body).collect();
     if game.is_added() || !st.started {
         st.started = true;
-        st.held = None;
+        st.grips.clear();
         if st.seed == 0 {
             st.seed = 0x9e37_79b9;
         }
@@ -303,40 +401,64 @@ fn menu_blobs(
         }
     }
 
-    // Pointer: grab a blob (not a button) and fling it.
-    let pointer = (|| {
-        let (camera, tf) = cam.single().ok()?;
-        let w = windows.iter().next()?;
-        let screen = touches.iter().next().map(|t| t.position()).or_else(|| w.cursor_position())?;
-        camera.viewport_to_world_2d(tf, screen).ok()
-    })();
-    let down = mouse.pressed(MouseButton::Left) || touches.iter().next().is_some();
-    let just = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
-    if !down {
-        st.held = None;
-    } else if just && menu.pending.is_none() {
-        if let Some(p) = pointer {
-            let p = PVec2::new(p.x, p.y);
-            st.held = ids.iter().copied().find(|&id| game.sim.world.body(id).is_some_and(|b| b.centroid().distance(p) < BLOB_R * 1.6));
-        }
-    }
-    if let (Some(id), Some(p)) = (st.held, pointer) {
+    // Title blobs are soft (set every frame: a live tuning edit resets
+    // every blob body to the gameplay forces).
+    for &id in &ids {
         if let Some(b) = game.sim.world.body_mut(id) {
-            // Velocity servo toward the pointer (bounded, so it's stable);
-            // letting go keeps the speed: a throw.
-            let mut want = (PVec2::new(p.x, p.y) - b.centroid()) * 14.0;
-            if want.length() > 2800.0 {
-                want = want.normalize() * 2800.0;
-            }
-            let v = b.velocity();
-            b.add_velocity(want - v);
+            b.params.forces = Some(MENU_BLOB_FORCES);
         }
     }
 
-    // A blob that lands on a button or letter sits a moment, then hops off.
+    // Pointers (mouse and every touch): a press on a blob grabs its rim
+    // point nearest the press; dragging pulls the blob by its skin and
+    // letting go throws it with the pointer's velocity.
     let dt = time.delta_secs();
+    let to_world = |s: Vec2| {
+        let (camera, tf) = cam.single().ok()?;
+        camera.viewport_to_world_2d(tf, s).ok().map(|w| PVec2::new(w.x, w.y))
+    };
+    let cursor = windows.iter().next().and_then(|w| w.cursor_position());
+    let now = |id: u64| if id == MOUSE_POINTER { cursor.filter(|_| mouse.pressed(MouseButton::Left)) } else { touches.get_pressed(id).map(|t| t.position()) };
+    let held: Vec<u64> = st.grips.keys().copied().collect();
+    for id in held {
+        match now(id).and_then(to_world) {
+            Some(at) => {
+                if let Some(g) = st.grips.get_mut(&id) {
+                    g.track(at, dt);
+                }
+            }
+            None => {
+                if let Some(g) = st.grips.remove(&id) {
+                    g.fling(&mut game.sim.world);
+                }
+            }
+        }
+    }
+    if menu.pending.is_none() {
+        let mut presses: Vec<(u64, Vec2)> = touches.iter_just_pressed().map(|t| (t.id(), t.position())).collect();
+        if mouse.just_pressed(MouseButton::Left) {
+            presses.extend(cursor.map(|c| (MOUSE_POINTER, c)));
+        }
+        for (id, s) in presses {
+            let Some(at) = to_world(s) else { continue };
+            let free: Vec<BodyId> = ids.iter().copied().filter(|b| !st.grips.values().any(|g| g.body == *b)).collect();
+            if let Some((body, particle)) = grab_at(&game.sim.world, &free, at) {
+                st.grips.insert(id, Grip::new(body, particle, at));
+                pointer.claim(id);
+            }
+        }
+    }
+    for g in st.grips.values() {
+        g.pull(&mut game.sim.world);
+    }
+    let held: Vec<BodyId> = st.grips.values().map(|g| g.body).collect();
+    if held_blobs.0 != held {
+        held_blobs.0 = held.clone();
+    }
+
+    // A blob that lands on a button or letter sits a moment, then hops off.
     for &id in &ids {
-        if st.held == Some(id) {
+        if held.contains(&id) {
             continue;
         }
         let slow = game.sim.world.body(id).is_some_and(|b| b.velocity().length() < 90.0);
@@ -354,7 +476,7 @@ fn menu_blobs(
 
     // Recycle anything that left the screen (or got wedged somewhere).
     for &id in &ids {
-        if st.held == Some(id) {
+        if held.contains(&id) {
             continue;
         }
         let Some(c) = game.sim.world.body(id).map(|b| b.centroid()) else { continue };
@@ -401,8 +523,9 @@ fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mu
     });
 }
 
-fn exit(mut commands: Commands, labels: Query<Entity, With<MenuEntity>>, mut cam: ResMut<CameraDirector>, mut unload: MessageWriter<UnloadLevel>, mut overrides: ResMut<StyleOverrides>) {
+fn exit(mut commands: Commands, mut held: ResMut<HeldBlobs>, labels: Query<Entity, With<MenuEntity>>, mut cam: ResMut<CameraDirector>, mut unload: MessageWriter<UnloadLevel>, mut overrides: ResMut<StyleOverrides>) {
     commands.remove_resource::<Menu>();
+    held.0.clear();
     for e in labels.iter() {
         commands.entity(e).despawn();
     }
@@ -1253,5 +1376,111 @@ mod tests {
         let full = page_buttons(Page::Party, &p, &own(Owned::Full));
         assert_ne!(demo[0].2, full[0].2);
         assert_eq!(demo[1].2, full[1].2);
+    }
+
+    /// One title blob (soft forces) at `at`, in a world with `gravity`.
+    fn blob_world(gravity: f32) -> (World, BodyId) {
+        let mut w = World::new(bb_physics::Config { gravity: PVec2::new(0.0, -gravity), ..Default::default() });
+        let mut d = BodyDesc::blob(PVec2::ZERO, BLOB_R, 16, 1.0);
+        d.params.forces = Some(MENU_BLOB_FORCES);
+        d.layer = crate::load_layer::NPC;
+        let id = w.add_body(d);
+        (w, id)
+    }
+
+    #[test]
+    fn grab_takes_the_rim_point_nearest_the_press() {
+        let (mut w, a) = blob_world(0.0);
+        let mut d = BodyDesc::blob(PVec2::new(90.0, 0.0), BLOB_R, 16, 1.0);
+        d.layer = crate::load_layer::NPC;
+        let b2 = w.add_body(d);
+        let blobs = [a, b2];
+        for p in [PVec2::new(30.0, 4.0), PVec2::new(-10.0, -40.0), PVec2::new(0.0, 0.5), PVec2::new(46.0, 2.0), PVec2::new(100.0, 30.0)] {
+            let (got, i) = grab_at(&w, &blobs, p).expect("a press on a blob grabs it");
+            // The globally nearest outline point of any blob in reach.
+            let best = blobs
+                .iter()
+                .flat_map(|&id| {
+                    let b = w.body(id).unwrap();
+                    b.boundary.iter().map(move |&k| (id, k as usize, b.x[k as usize].distance(p)))
+                })
+                .min_by(|x, y| x.2.total_cmp(&y.2))
+                .unwrap();
+            assert_eq!((got, i), (best.0, best.1), "{p}");
+            assert!(w.body(got).unwrap().boundary.contains(&(i as u32)));
+        }
+        // Right of blob a's centre: its rightmost rim point (index 0, angle 0).
+        assert_eq!(grab_at(&w, &blobs, PVec2::new(30.0, 4.0)), Some((a, 0)));
+        // Nothing in reach.
+        assert_eq!(grab_at(&w, &blobs, PVec2::new(0.0, 200.0)), None);
+    }
+
+    #[test]
+    fn a_press_on_a_button_never_grabs_a_blob() {
+        let (mut w, blob) = blob_world(0.0);
+        // A button tile overlapping the blob's left half.
+        let mut d = BodyDesc::mesh_from_outline(&rounded_rect(PVec2::new(-40.0, 0.0), PVec2::new(120.0, 60.0), 12.0), 18.0, 1.0);
+        d.layer = crate::load_layer::UI;
+        let tile = w.add_body(d);
+        w.body_mut(tile).unwrap().anchor_home(1e-5);
+        assert!(w.pick(PVec2::new(-10.0, 0.0), crate::load_layer::UI) == Some(tile));
+        assert_eq!(grab_at(&w, &[blob], PVec2::new(-10.0, 0.0)), None, "the button keeps its press");
+        // Off the button, the same blob grabs.
+        assert!(grab_at(&w, &[blob], PVec2::new(30.0, 0.0)).is_some_and(|g| g.0 == blob));
+    }
+
+    #[test]
+    fn letting_go_throws_with_the_pointer_velocity() {
+        let (mut w, id) = blob_world(0.0);
+        let mut g = Grip::new(id, 0, PVec2::new(BLOB_R, 0.0));
+        // 20 px right per 1/60 s frame: 1200 px/s.
+        for k in 1..=12 {
+            g.track(PVec2::new(BLOB_R + 20.0 * k as f32, 0.0), 1.0 / 60.0);
+            g.pull(&mut w);
+            w.step(1.0 / 60.0);
+        }
+        let v0 = w.body(id).unwrap().velocity();
+        g.fling(&mut w);
+        let dv = w.body(id).unwrap().velocity() - v0;
+        assert!((dv.x - 1200.0).abs() < 10.0 && dv.y.abs() < 1.0, "{dv}");
+        // While held, the grabbed rim point leads: the blob is dragged by its
+        // skin (stretched toward the pointer), not moved as a whole.
+        let b = w.body(id).unwrap();
+        assert!(b.x[0].x - b.centroid().x > BLOB_R * 1.05, "{}", b.x[0].x - b.centroid().x);
+        // A wild flick is capped.
+        let mut g = Grip::new(id, 0, PVec2::ZERO);
+        g.track(PVec2::new(-500.0, 0.0), 1.0 / 60.0);
+        let v0 = w.body(id).unwrap().velocity();
+        g.fling(&mut w);
+        assert!(((w.body(id).unwrap().velocity() - v0).x + MAX_FLING).abs() < 1.0);
+    }
+
+    /// A blob dropped on a floor: the lowest height/width it squashes to,
+    /// and how much it wobbles in all (∫|height/width − 1| dt over 1.5 s).
+    fn landing_squash(forces: ForceModel) -> (f32, f32) {
+        let (mut w, id) = blob_world(2613.0);
+        w.body_mut(id).unwrap().params.forces = Some(forces);
+        w.add_static(bb_physics::StaticDesc::rect(PVec2::new(-600.0, -400.0), PVec2::new(600.0, -300.0)));
+        w.body_mut(id).unwrap().add_velocity(PVec2::new(0.0, -900.0));
+        let (mut lo, mut wobble) = (f32::INFINITY, 0.0);
+        for _ in 0..90 {
+            w.step(1.0 / 60.0);
+            let b = w.body(id).unwrap();
+            let (mn, mx) = b.x.iter().fold((PVec2::splat(f32::INFINITY), PVec2::splat(-f32::INFINITY)), |(a, c), p| (a.min(*p), c.max(*p)));
+            let r = (mx.y - mn.y) / (mx.x - mn.x);
+            lo = lo.min(r);
+            wobble += (r - 1.0).abs() / 60.0;
+        }
+        (lo, wobble)
+    }
+
+    #[test]
+    fn title_blobs_squash_and_wobble_more_than_gameplay_blobs() {
+        let game = bb_sim::tuning::Tuning::default().force_model();
+        let (menu_lo, menu_wobble) = landing_squash(MENU_BLOB_FORCES);
+        let (game_lo, game_wobble) = landing_squash(game);
+        assert!(menu_lo < game_lo * 0.85, "menu squash {menu_lo} vs gameplay {game_lo}");
+        assert!(menu_wobble > game_wobble * 1.5, "menu wobble {menu_wobble} vs gameplay {game_wobble}");
+        assert!(menu_lo > 0.3, "no collapse ({menu_lo})");
     }
 }

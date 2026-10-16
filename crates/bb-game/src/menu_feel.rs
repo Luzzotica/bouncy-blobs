@@ -6,6 +6,9 @@
 //!   you and springs back home when you let go (its home tether, loosened
 //!   while held). A press that doesn't move is still a click: menus read
 //!   [`MenuPointer::take_click`] instead of a raw mouse press.
+//! * **Blobs:** a press that grabs one of the title's launched blobs is
+//!   [claimed](MenuPointer::claim) by the menu, so letting go (wherever it
+//!   is, even over a button) is a throw, never a click.
 
 use bb_physics::{BodyId, Vec2 as PVec2};
 use bevy::prelude::*;
@@ -24,6 +27,8 @@ const GRAB_RADIUS: f32 = 48.0;
 /// jelly back every physics step and make it teleport); on release it pulls
 /// the tile home with a wobble.
 const HELD_COMPLIANCE: f32 = 1.0;
+/// Pointer id of the mouse (touches use their own ids).
+pub const MOUSE_POINTER: u64 = u64::MAX;
 
 #[derive(Resource, Default)]
 pub struct MenuPointer {
@@ -36,6 +41,8 @@ pub struct MenuPointer {
     lean: Vec2,
     /// The button/letter tile under the mouse (none while dragging).
     hovered: Option<BodyId>,
+    /// Pointers whose press grabbed a title blob: their release is no click.
+    claimed: Vec<u64>,
 }
 
 struct Drag {
@@ -57,6 +64,21 @@ impl MenuPointer {
     /// The tile the mouse is over, for a hover effect.
     pub fn hovered(&self) -> Option<BodyId> {
         self.hovered
+    }
+
+    /// This pointer's press grabbed something else (a title blob): its
+    /// release won't click.
+    pub fn claim(&mut self, pointer: u64) {
+        if !self.claimed.contains(&pointer) {
+            self.claimed.push(pointer);
+        }
+    }
+
+    /// Forget a claim; true if `pointer` had one.
+    fn unclaim(&mut self, pointer: u64) -> bool {
+        let had = self.claimed.contains(&pointer);
+        self.claimed.retain(|&p| p != pointer);
+        had
     }
 
     /// True while a button/letter is being dragged.
@@ -116,17 +138,19 @@ fn drag(
     // A click is only good for the frame it happened in.
     p.click = None;
     let Ok((camera, tf)) = cam.single() else { return };
-    let Some(window) = windows.iter().next() else { return };
+    // No window in a headless run: touches (`BB_TAP`) still press and click.
+    let cursor = windows.iter().next().and_then(|w| w.cursor_position());
     let touch = touches.iter().next().map(|t| t.position());
-    let screen = touch.or_else(|| window.cursor_position());
+    let screen = touch.or(cursor);
     let world = |s: Vec2| camera.viewport_to_world_2d(tf, s).ok();
     let pressed = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
     let released = mouse.just_released(MouseButton::Left) || touches.iter_just_released().next().is_some();
     let held = mouse.pressed(MouseButton::Left) || touch.is_some();
     let release_at = touches.iter_just_released().next().map(|t| t.position()).or(screen);
+    let release_id = touches.iter_just_released().next().map(|t| t.id()).or(mouse.just_released(MouseButton::Left).then_some(MOUSE_POINTER));
     // Hover (mouse only; touch has no hover).
     p.hovered = if touch.is_none() && p.drag.is_none() {
-        window.cursor_position().and_then(world).and_then(|w| game.sim.world.pick(PVec2::new(w.x, w.y), crate::load_layer::UI))
+        cursor.and_then(world).and_then(|w| game.sim.world.pick(PVec2::new(w.x, w.y), crate::load_layer::UI))
     } else {
         None
     };
@@ -181,6 +205,7 @@ fn drag(
     }
 
     if released {
+        let claimed = release_id.is_some_and(|id| p.unclaim(id));
         if let Some(d) = p.drag.take() {
             if let Some(b) = game.sim.world.body_mut(d.body) {
                 b.home_compliance = d.compliance;
@@ -188,7 +213,7 @@ fn drag(
             if !d.moved {
                 p.click = release_at.and_then(world);
             }
-        } else {
+        } else if !claimed {
             p.click = release_at.and_then(world);
         }
     }

@@ -38,7 +38,10 @@
 //! * `BB_CAPTURE_UI=1` — keep screen UI (title-menu text, HUD) anyway.
 //! * `BB_TAP=target@f[-g];...` — scripted touches (finger down on tick f,
 //!   up after g, default f+6). Targets: `x,y` (world), `chip:green` (a Kids
-//!   Mode colour chip), `blob:n` (player slot n's blob).
+//!   Mode colour chip), `blob:n` (player slot n's blob), `npc:n` or
+//!   `npc:n+dx,dy` (NPC n's blob, e.g. a title blob, plus an offset).
+//!   `target>x,y` drags: the finger lands on the target and slides in a
+//!   straight line to world x,y, arriving as it lifts (a fling).
 //! * Headless runs also write `<out>.audio.tsv`: every sound the game
 //!   started during the clip (asset path, start/end in clip seconds, gain,
 //!   speed, loop) so `scripts/capture.sh` can rebuild the soundtrack from
@@ -873,6 +876,8 @@ pub enum TapTarget {
     World(Vec2),
     Chip(String),
     Blob(u8),
+    /// NPC n's blob centre plus an offset.
+    Npc(u8, Vec2),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -880,12 +885,18 @@ pub struct Tap {
     pub target: TapTarget,
     pub down: u32,
     pub up: u32,
+    /// Drag: slide from where the finger landed to this world point.
+    pub to: Option<Vec2>,
 }
 
 pub fn parse_taps(spec: &str) -> Vec<Tap> {
     spec.split(';')
         .filter_map(|item| {
             let (t, when) = item.trim().rsplit_once('@')?;
+            let (t, to) = match t.split_once('>') {
+                Some((t, to)) => (t, Some(pair(to, ',').map(|(x, y)| Vec2::new(x, y))?)),
+                None => (t, None),
+            };
             let (down, up) = match when.split_once('-') {
                 Some((a, b)) => (a.parse().ok()?, b.parse().ok()?),
                 None => {
@@ -897,11 +908,16 @@ pub fn parse_taps(spec: &str) -> Vec<Tap> {
                 TapTarget::Chip(c.to_string())
             } else if let Some(n) = t.strip_prefix("blob:") {
                 TapTarget::Blob(n.parse().ok()?)
+            } else if let Some(n) = t.strip_prefix("npc:") {
+                match n.split_once('+') {
+                    Some((n, off)) => TapTarget::Npc(n.parse().ok()?, pair(off, ',').map(|(x, y)| Vec2::new(x, y))?),
+                    None => TapTarget::Npc(n.parse().ok()?, Vec2::ZERO),
+                }
             } else {
                 let (x, y) = pair(t, ',')?;
                 TapTarget::World(Vec2::new(x, y))
             };
-            Some(Tap { target, down, up: up.max(down + 1) })
+            Some(Tap { target, down, up: up.max(down + 1), to })
         })
         .collect()
 }
@@ -920,6 +936,12 @@ fn tap_world(t: &TapTarget, game: Option<&Game>, kids: Option<&crate::kids::Kids
             let c = b.centroid();
             Some(Vec2::new(c.x, c.y))
         }
+        TapTarget::Npc(n, off) => {
+            let g = game?;
+            let b = g.sim.world.body(g.sim.npcs.get(*n as usize)?.ctl.body)?;
+            let c = b.centroid();
+            Some(Vec2::new(c.x, c.y) + *off)
+        }
     }
 }
 
@@ -932,6 +954,7 @@ fn tap(
     mut out: MessageWriter<bevy::input::touch::TouchInput>,
     mut frame: Local<u32>,
     mut held: Local<std::collections::HashMap<usize, Vec2>>,
+    mut starts: Local<std::collections::HashMap<usize, Vec2>>,
 ) {
     use bevy::input::touch::{TouchInput, TouchPhase};
     *frame += 1;
@@ -947,9 +970,24 @@ fn tap(
             (false, false) => continue,
         };
         let pos = if phase == TouchPhase::Ended {
+            starts.remove(&i);
             held.remove(&i)
         } else {
-            tap_world(&t.target, game.as_deref(), kids.as_deref()).and_then(|w| camera.world_to_viewport(tf, w.extend(0.0)).ok())
+            let w = match t.to {
+                // A drag: land on the target, then slide to `to` (frozen
+                // start, so the path doesn't chase the target).
+                Some(to) => {
+                    if phase == TouchPhase::Started {
+                        if let Some(w) = tap_world(&t.target, game.as_deref(), kids.as_deref()) {
+                            starts.insert(i, w);
+                        }
+                    }
+                    let k = (f - t.down) as f32 / (t.up - 1 - t.down).max(1) as f32;
+                    starts.get(&i).map(|s| s.lerp(to, k.min(1.0)))
+                }
+                None => tap_world(&t.target, game.as_deref(), kids.as_deref()),
+            };
+            w.and_then(|w| camera.world_to_viewport(tf, w.extend(0.0)).ok())
         };
         let Some(pos) = pos else { continue };
         if phase != TouchPhase::Ended {
@@ -1166,9 +1204,14 @@ mod tests {
     fn tap_specs() {
         let t = parse_taps("600,200@120; chip:green@200-230;blob:2@300;nope@x");
         assert_eq!(t.len(), 3);
-        assert_eq!(t[0], Tap { target: TapTarget::World(Vec2::new(600.0, 200.0)), down: 120, up: 126 });
-        assert_eq!(t[1], Tap { target: TapTarget::Chip("green".into()), down: 200, up: 230 });
+        assert_eq!(t[0], Tap { target: TapTarget::World(Vec2::new(600.0, 200.0)), down: 120, up: 126, to: None });
+        assert_eq!(t[1], Tap { target: TapTarget::Chip("green".into()), down: 200, up: 230, to: None });
         assert_eq!(t[2].target, TapTarget::Blob(2));
+        // Drags, from an NPC's blob (offset onto its rim) or a point.
+        let d = parse_taps("npc:1+30,-5>400,700@60-75;10,20>30,40@5-9;npc:0@3");
+        assert_eq!(d[0], Tap { target: TapTarget::Npc(1, Vec2::new(30.0, -5.0)), down: 60, up: 75, to: Some(Vec2::new(400.0, 700.0)) });
+        assert_eq!(d[1].to, Some(Vec2::new(30.0, 40.0)));
+        assert_eq!(d[2].target, TapTarget::Npc(0, Vec2::ZERO));
     }
 
     #[test]

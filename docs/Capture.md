@@ -37,7 +37,7 @@ It works with `BB_LEVEL=chNN`, `BB_START=story|kids` and the title screen.
 | `BB_CAPTURE_SCENE=spikeloop` | capture-only stage in The Drip's look: a spike strip with Pip spawning at (0,260) above it, popping again and again (pair with `BB_CAPTURE_RESPAWN`). `BB_SPIKELOOP_SLOPE=k` makes the strip a gentle tent so droplets slide off the sides instead of cushioning the spikes. |
 | `BB_CAPTURE_CRF=q` | x264 quality (default 16) |
 | `BB_PRESS=...` | scripted keys (existing): `key@f`, `key@a-b`, `key@a-` (hold from a on), `key@every:P:H[:from[:to]]` (hold H ticks every P). In a headless capture these are **sim ticks**, so a script is the same at any speed. |
-| `BB_TAP=target@f[-g];...` | scripted touches: `x,y` (world), `chip:green` (Kids colour chip), `blob:n` (player slot n). Finger up at g (default f+6). |
+| `BB_TAP=target@f[-g];...` | scripted touches: `x,y` (world), `chip:green` (Kids colour chip), `blob:n` (player slot n), `npc:n[+dx,dy]` (NPC n's blob, e.g. a title blob, plus an offset). Finger up at g (default f+6). `target>x,y@f-g` drags: lands on the target, slides straight to world x,y and lifts there (a fling on the title). |
 
 ## Headless video render
 
