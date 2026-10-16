@@ -67,7 +67,7 @@ pub fn spawn_join_panel(commands: &mut Commands) -> Entity {
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(16.0),
-                right: Val::Px(16.0),
+                right: Val::Px(16.0 + crate::platform::SAFE_SIDE),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(8.0),

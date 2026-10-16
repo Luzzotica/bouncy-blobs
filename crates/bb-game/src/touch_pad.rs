@@ -55,12 +55,15 @@ enum Part {
 fn wanted(
     state: &State<AppState>,
     story: Option<&crate::story::StoryFlow>,
+    party: Option<&crate::party::Party>,
     devices: &LocalDevices,
     last: LastDevice,
     has_game: bool,
 ) -> bool {
     let in_level = match state.get() {
-        AppState::Playing | AppState::Party => true,
+        AppState::Playing => true,
+        // The party lobby is a menu: only rounds get the pad.
+        AppState::Party => party.is_some_and(|p| !p.in_lobby()),
         AppState::Story => story.is_some_and(|s| s.phase == crate::story::Phase::Level),
         _ => false,
     };
@@ -163,13 +166,13 @@ fn draw(
     roots: Query<Entity, With<PadRoot>>,
     mut vis: Query<&mut Visibility, With<PadRoot>>,
     mut parts: Query<(&Part, &mut Node, Option<&mut BackgroundColor>, Option<&mut BorderColor>), Without<PadRoot>>,
-    (state, story, devices, last, game): (Option<Res<State<AppState>>>, Option<Res<crate::story::StoryFlow>>, Res<LocalDevices>, Res<LastDevice>, Option<Res<Game>>),
+    (state, story, party, devices, last, game): (Option<Res<State<AppState>>>, Option<Res<crate::story::StoryFlow>>, Option<Res<crate::party::Party>>, Res<LocalDevices>, Res<LastDevice>, Option<Res<Game>>),
     pad: Res<TouchPad>,
     windows: Query<&Window>,
     assets: Option<Res<crate::assets::GameAssets>>,
     time: Res<Time>,
 ) {
-    let show = state.is_some_and(|state| wanted(&state, story.as_deref(), &devices, *last, game.is_some()));
+    let show = state.is_some_and(|state| wanted(&state, story.as_deref(), party.as_deref(), &devices, *last, game.is_some()));
     if roots.is_empty() {
         if show {
             spawn(&mut commands, assets.map(|a| a.font.clone()));

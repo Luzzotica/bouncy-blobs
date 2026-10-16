@@ -73,6 +73,13 @@ pub struct Party {
     drop: DropIn,
 }
 
+impl Party {
+    /// In the lobby (a menu) rather than a round.
+    pub fn in_lobby(&self) -> bool {
+        self.phase == PartyPhase::Lobby
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PartyButton {
     Map,
@@ -286,9 +293,10 @@ fn lobby_ui(
         party.drop.clear();
         let items = [(PartyButton::Map, 0x5dd6ff), (PartyButton::Start, 0x6bcb77), (PartyButton::Back, 0xd0c4e8)];
         for (i, (b, color)) in items.iter().enumerate() {
-            // Left of centre so the phone join panel (top right) stays clear.
-            let center = PVec2::new(140.0, 620.0 - i as f32 * 96.0);
-            let id = jelly_tile(&mut game, center, PVec2::new(520.0, 78.0), BodyTag::Ui, crate::menu::BUTTON_SPRING);
+            // A column under the title, so the phone join panel (top right)
+            // stays clear on 4:3 iPads and 19.5:9 phones alike.
+            let center = PVec2::new(-480.0, 500.0 - i as f32 * 96.0);
+            let id = jelly_tile(&mut game, center, PVec2::new(440.0, 78.0), BodyTag::Ui, crate::menu::BUTTON_SPRING);
             overrides.0.insert(id, button_style(*color, false));
             let text = button_label(*b, &party);
             label_with(&mut commands, &assets, id, &text, 34.0, Color::WHITE, LobbyItem);
