@@ -16,6 +16,9 @@ pub const IS_MOBILE: bool = cfg!(any(target_os = "ios", target_os = "android"));
 /// rounded corners sit within ~60 px of the side edges in landscape.
 pub const SAFE_SIDE: f32 = if IS_MOBILE { 60.0 } else { 0.0 };
 
+/// Landscape bottom inset (logical px): the iPhone / iPad home indicator.
+pub const SAFE_BOTTOM: f32 = if IS_MOBILE { 20.0 } else { 0.0 };
+
 /// `DefaultPlugins` configured for the current target.
 pub fn default_plugins() -> PluginGroupBuilder {
     // Android: no GPU debug labels. Debug builds label every wgpu object, and
