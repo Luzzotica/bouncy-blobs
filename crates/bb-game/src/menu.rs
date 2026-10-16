@@ -253,8 +253,22 @@ pub const MENU_BLOB_FORCES: ForceModel = ForceModel {
     shape_damp: 3.35,
     spin_damp: 0.0,
 };
-/// A press this close to a blob's centre grabs it (v2: 74 for radius 48).
+/// The title blobs fall at this fraction of blob gravity: about 60% of the
+/// speed over the same drop (√0.38), so they're easier to click and catch.
+/// Launches, hops and sideways drift scale by √ of it so the arcs keep
+/// their height and shape; a fling (the pointer's own speed) goes further.
+pub const TITLE_GRAVITY: f32 = 0.38;
+/// A press this close to a blob's centre grabs it (v2: 74 for radius 48)...
 const GRAB_RADIUS: f32 = BLOB_R * 1.55;
+/// ...plus this many seconds of its speed (a moving blob is a little ahead
+/// of where you saw it), up to `MAX_REACH_BONUS`.
+const REACH_LEAD: f32 = 0.06;
+const MAX_REACH_BONUS: f32 = BLOB_R * 0.75;
+
+/// How close to a blob moving at `speed` a press must be to grab it.
+pub fn grab_reach(speed: f32) -> f32 {
+    GRAB_RADIUS + (speed * REACH_LEAD).min(MAX_REACH_BONUS)
+}
 /// The held rim point glides toward the pointer: this fraction of the gap
 /// per second, at most `MAX_PULL_SPEED` (a velocity servo: never a
 /// teleport, which would explode the springs).
@@ -306,7 +320,8 @@ impl Grip {
 }
 
 /// What a press at `p` grabs: the outline point nearest `p` among the blobs
-/// whose centre is within reach. A press on a button or logo tile is the
+/// whose centre is within reach ([`grab_reach`]: further for fast ones).
+/// A press on a button or logo tile is the
 /// tile's (it still clicks), never a blob's.
 pub fn grab_at(world: &World, blobs: &[BodyId], p: PVec2) -> Option<(BodyId, usize)> {
     if world.pick(p, crate::load_layer::UI).is_some_and(|id| world.body(id).is_some_and(|b| b.home.is_some())) {
@@ -315,7 +330,7 @@ pub fn grab_at(world: &World, blobs: &[BodyId], p: PVec2) -> Option<(BodyId, usi
     let mut best = None;
     let mut best_d = f32::INFINITY;
     for &id in blobs {
-        let Some(b) = world.body(id).filter(|b| b.enabled && b.centroid().distance(p) <= GRAB_RADIUS) else { continue };
+        let Some(b) = world.body(id).filter(|b| b.enabled && b.centroid().distance(p) <= grab_reach(b.velocity().length())) else { continue };
         for &i in &b.boundary {
             let d = b.x[i as usize].distance(p);
             if d < best_d {
@@ -351,10 +366,11 @@ impl Launcher {
         (self.seed >> 8) as f32 / (1u32 << 24) as f32
     }
 
-    /// Launch velocity: up to an apex 55–90% of the screen height.
+    /// Launch velocity: up to an apex 55–90% of the screen height (`g` is
+    /// the blobs' full gravity; they fly at [`TITLE_GRAVITY`] of it).
     fn launch_vel(&mut self, g: f32) -> PVec2 {
         let apex = crate::camera::VIEW_H * (0.55 + self.rand() * 0.35);
-        PVec2::new((self.rand() * 2.0 - 1.0) * 260.0, (2.0 * g * apex).sqrt())
+        PVec2::new((self.rand() * 2.0 - 1.0) * 260.0, (2.0 * g * apex).sqrt()) * TITLE_GRAVITY.sqrt()
     }
 
     /// New random colour (the first blob is always you, in Pip's colour).
@@ -387,6 +403,7 @@ fn menu_blobs(
         }
         for n in game.sim.npcs.iter_mut() {
             n.scripted = true;
+            n.ctl.gravity_mult = TITLE_GRAVITY;
         }
         // Seed the screen mid-flight so it's lively from the first frame.
         for &id in &ids {
@@ -469,7 +486,7 @@ fn menu_blobs(
             let side = if st.rand() < 0.5 { -1.0 } else { 1.0 };
             let up = 700.0 + st.rand() * 500.0;
             if let Some(b) = game.sim.world.body_mut(id) {
-                b.add_velocity(PVec2::new(side * (150.0 + st.rand() * 250.0), up));
+                b.add_velocity(PVec2::new(side * (150.0 + st.rand() * 250.0), up) * TITLE_GRAVITY.sqrt());
             }
         }
     }
@@ -1482,5 +1499,62 @@ mod tests {
         assert!(menu_lo < game_lo * 0.85, "menu squash {menu_lo} vs gameplay {game_lo}");
         assert!(menu_wobble > game_wobble * 1.5, "menu wobble {menu_wobble} vs gameplay {game_wobble}");
         assert!(menu_lo > 0.3, "no collapse ({menu_lo})");
+    }
+
+    /// Seconds for title NPC `i` (with `mult` gravity) to fall 600 px from
+    /// rest in the real title sim, and its speed then.
+    fn title_fall(mult: f32) -> (f32, f32) {
+        let mut sim = bb_sim::Sim::new(title_level());
+        let ids: Vec<BodyId> = sim.npcs.iter().map(|n| n.ctl.body).collect();
+        for (k, n) in sim.npcs.iter_mut().enumerate() {
+            n.scripted = true;
+            n.ctl.gravity_mult = mult;
+            // Spread out so they never touch.
+            let at = PVec2::new(-1500.0 + k as f32 * 600.0, 3000.0);
+            sim.world.respawn(ids[k], at);
+        }
+        let (id, y0) = (ids[0], 3000.0);
+        for tick in 1..600 {
+            sim.step();
+            let b = sim.world.body(id).unwrap();
+            if b.centroid().y < y0 - 600.0 {
+                return (tick as f32 / 60.0, -b.velocity().y);
+            }
+        }
+        panic!("never fell");
+    }
+
+    #[test]
+    fn title_blobs_fall_gentler_than_gameplay_blobs() {
+        let (t_game, v_game) = title_fall(1.0);
+        let (t_title, v_title) = title_fall(TITLE_GRAVITY);
+        let speed = v_title / v_game;
+        println!("600 px fall: gameplay {t_game:.2}s at {v_game:.0} px/s, title {t_title:.2}s at {v_title:.0} px/s ({speed:.2}×)");
+        assert!((0.55..=0.65).contains(&speed), "title falls at {speed} of the speed ({v_title} vs {v_game})");
+        assert!(t_title > t_game * 1.45, "fall time {t_title}s vs {t_game}s");
+        // And the gameplay default is untouched.
+        assert_eq!(bb_sim::Sim::new(title_level()).npcs[0].ctl.gravity_mult, 1.0);
+    }
+
+    #[test]
+    fn a_fast_blob_is_easier_to_catch() {
+        let (mut w, id) = blob_world(0.0);
+        // Just outside a still blob's reach...
+        let p = PVec2::new(GRAB_RADIUS + 20.0, 0.0);
+        assert_eq!(grab_at(&w, &[id], p), None);
+        // ...but a blob flying by at 800 px/s can still be caught there, by
+        // its nearest rim point.
+        w.body_mut(id).unwrap().add_velocity(PVec2::new(0.0, -800.0));
+        assert_eq!(grab_at(&w, &[id], p), Some((id, 0)));
+        // The bonus is capped: a rocket isn't catchable from across the room.
+        w.body_mut(id).unwrap().add_velocity(PVec2::new(0.0, -9000.0));
+        assert_eq!(grab_at(&w, &[id], PVec2::new(GRAB_RADIUS + MAX_REACH_BONUS + 5.0, 0.0)), None);
+        assert!(grab_reach(800.0) > grab_reach(0.0) && grab_reach(1e6) == GRAB_RADIUS + MAX_REACH_BONUS);
+        // A press on a button still wins over a fast blob.
+        let mut d = BodyDesc::mesh_from_outline(&rounded_rect(PVec2::new(-40.0, 0.0), PVec2::new(120.0, 60.0), 12.0), 18.0, 1.0);
+        d.layer = crate::load_layer::UI;
+        let tile = w.add_body(d);
+        w.body_mut(tile).unwrap().anchor_home(1e-5);
+        assert_eq!(grab_at(&w, &[id], PVec2::new(-10.0, 0.0)), None);
     }
 }

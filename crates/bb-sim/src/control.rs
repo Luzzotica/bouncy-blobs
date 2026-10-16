@@ -86,6 +86,9 @@ pub struct Controller {
     jump_carry_t: f32,
     /// Floats with no gravity at all (Glimmer).
     pub weightless: bool,
+    /// Multiplies the blob's gravity (1 = normal; the title's launched
+    /// blobs fall gentler so they're easier to catch).
+    pub gravity_mult: f32,
     /// Seconds since the button was pressed (while it's held).
     press_t: f32,
 }
@@ -141,6 +144,7 @@ impl Controller {
             jump_carry: 0.0,
             jump_carry_t: 0.0,
             weightless: false,
+            gravity_mult: 1.0,
             press_t: 99.0,
         }
     }
@@ -209,7 +213,7 @@ impl Controller {
         let vel = body.velocity();
         // The player blob falls at 2.x's (scaled) gravity whatever the level's.
         let g_len = g_world.length().max(1.0);
-        let g_scale = if self.weightless { 0.0 } else { t.gravity.gravity / g_len };
+        let g_scale = if self.weightless { 0.0 } else { t.gravity.gravity / g_len * self.gravity_mult };
         let down = g_world / g_len;
         let up = -down;
         let right = Vec2::new(-down.y, down.x);
