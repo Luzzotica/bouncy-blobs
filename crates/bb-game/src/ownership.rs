@@ -17,7 +17,8 @@
 //!
 //! Dev overrides: `BB_DEMO=1` forces the demo, `BB_OWNED=1` (debug builds)
 //! the full game. Headless runs (screenshots, captures, scene renders) act
-//! as owned unless `BB_DEMO=1`, so dev tooling can reach every chapter.
+//! as owned unless `BB_DEMO=1` (or a test player's `BB_PARTII_PLAYER_TOKEN`
+//! is set), so dev tooling can reach every chapter.
 //!
 //! Buying: [`BuyRequest`]. On desktop that's partii checkout in the browser,
 //! with `refresh()` when the window gets focus back; on iOS, StoreKit 2
@@ -210,7 +211,10 @@ impl Plugin for OwnershipPlugin {
 fn dev() -> Option<bool> {
     static DEV: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
     *DEV.get_or_init(|| {
-        let d = dev_override(env_on("BB_OWNED"), env_on("BB_DEMO"), cfg!(debug_assertions), crate::platform::headless());
+        // A test player token (`BB_PARTII_PLAYER_TOKEN`) means "test the real
+        // entitlement", so headless runs with one don't assume owned.
+        let tooling = crate::platform::headless() && !env_on("BB_PARTII_PLAYER_TOKEN");
+        let d = dev_override(env_on("BB_OWNED"), env_on("BB_DEMO"), cfg!(debug_assertions), tooling);
         if let Some(d) = d {
             info!("ownership: dev override, {}", if d { "owned" } else { "demo" });
         }

@@ -700,7 +700,8 @@ fn build_page(
         } else if grid {
             (Vec2::new(left + 330.0, top - 2.0 * 130.0 - 110.0), 28.0, 640.0)
         } else {
-            (Vec2::new(left + 200.0, top - rows * 100.0 + 14.0), 28.0, 560.0)
+            // Wrapped to the tile column so it never runs off the left edge.
+            (Vec2::new(left + 200.0, top - rows * 100.0 + 4.0), 28.0, 400.0)
         };
         commands.spawn((SoftText::new(hint, size).at(at).wrap(wrap).color(Color::srgb(1.0, 0.93, 0.75)).z(z::FX - 0.5).stagger(0.012), MenuHint, MenuEntity));
         if unlock {
