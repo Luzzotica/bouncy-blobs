@@ -26,6 +26,9 @@ default = []
 dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 # Desktop Steam builds only (steamworks can't link on mobile/web).
 steam = ["dep:steamworks"]
+# iOS: buy through StoreKit 2 (src/store.rs). Needs the Swift bridge that
+# bb-mobile's `storekit` feature compiles and links; see docs/MobileRelease.md.
+storekit = []
 
 [dependencies]
 bb-physics = { path = "../bb-physics" }
