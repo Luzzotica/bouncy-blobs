@@ -20,6 +20,11 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "bb-mobile"
 path = "src/main.rs"
 
+[features]
+# iOS: buy the full game with StoreKit 2 (compiles ios/StoreKitBridge via
+# build.rs). Needs the iOS 15 deployment target; see docs/MobileRelease.md.
+storekit = ["bb-game/storekit"]
+
 [dependencies]
 bb-game = { path = "../bb-game" }
 bevy = { version = "0.19.1", default-features = false }

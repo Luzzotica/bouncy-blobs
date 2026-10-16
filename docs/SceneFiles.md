@@ -74,6 +74,8 @@ Each key takes over at `t`. With `by` (seconds) and `ease` (`ease` or `linear`),
 | `pan` | Moves to `at` over `by`. |
 | `zoom` | Changes the size over `by`. |
 | `shake` | Shakes by `amount` (world px), decaying over `by` (default 0.6 s). |
+| `follow` + `lock_zoom: true` | Same follow, but the zoom is fixed for the whole shot at `view: [w, 0]` (world width) and never comes from the subject's size; the camera only pans, with `lag` and `deadzone`. Can't be combined with `subject_width` or with any other key that changes the zoom. |
+| `follow` + `axes: ["x"]` (or `["y"]`) | Follows on the listed axes only. An axis that's left out follows through the pre-roll, then holds the camera position of recorded frame 1 for the rest of the shot. Omitted, or both axes, means follow both. |
 | `timescale` | Capture-side slow motion, `rate` (0.25 = 4×) until `until`. The simulation stays exact, and it isn't a game change. |
 
 How much a key shows:

@@ -1,0 +1,15 @@
+{
+  "name": "Bouncy Blobs",
+  "colors": {
+    "background": "#1b1226", "surface": "#1a1a2e", "border": "#3a4a6a", "ink": "#fffae6", "muted": "#8a7fa8",
+    "primary": "#e8788a", "primary_lip": "#b84a5c", "primary_ink": "#ffffff",
+    "secondary": "#2a3a5a", "secondary_lip": "#1a1a2e", "secondary_ink": "#fffae6",
+    "stick": "#2a3a5a", "stick_ring": "#a78bfa", "knob": "#a78bfa", "error": "#ff6666"
+  },
+  "fonts": { "heading": "fredoka-bold.ttf", "body": "fredoka-medium.ttf" },
+  "radius": 16,
+  "border": 2,
+  "lip": 4,
+  "caps": true,
+  "letter_spacing": 0.06
+}

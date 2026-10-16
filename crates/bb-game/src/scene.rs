@@ -228,6 +228,14 @@ pub struct CamKey {
     /// timescale: game time per video second, until `until`.
     pub rate: Option<f32>,
     pub until: Option<f32>,
+    /// follow: keep the zoom fixed for the whole shot at `view: [w, 0]`
+    /// (world width); the camera only pans, with lag and deadzone.
+    #[serde(default)]
+    pub lock_zoom: bool,
+    /// follow: which axes follow ("x", "y"). A missing axis follows through
+    /// the pre-roll, then holds the camera position of recorded frame 1.
+    /// Omitted (or both) = follow both, as before.
+    pub axes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
@@ -386,6 +394,17 @@ impl Scene {
         self.pip().and_then(|c| c.color.as_deref()).and_then(color).unwrap_or(0xff5d73)
     }
     /// Timescale windows from the camera timeline: (from_s, to_s, rate).
+    /// For a follow key: (follow x, follow y).
+    pub fn follow_axes(k: &CamKey) -> (bool, bool) {
+        match &k.axes {
+            None => (true, true),
+            Some(a) => (a.iter().any(|x| x == "x"), a.iter().any(|x| x == "y")),
+        }
+    }
+    /// The fixed view of a lock_zoom follow key (it holds for the whole shot).
+    pub fn locked_view(&self) -> Option<[f32; 2]> {
+        self.camera.iter().find(|k| k.lock_zoom && k.r#do == "follow").and_then(|k| k.view).map(|[w, h]| [w.max(1.0), h.max(1.0)])
+    }
     pub fn timescales(&self) -> Vec<(f32, f32, f32)> {
         self.camera.iter().filter(|k| k.r#do == "timescale").map(|k| (k.t, k.until.unwrap_or(f32::MAX), k.rate.unwrap_or(1.0))).collect()
     }
@@ -660,6 +679,30 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         if matches!(k.r#do.as_str(), "frame" | "pan" | "follow") && i == 0 && k.view.is_none() && k.subject_width.is_none() {
             e.push(format!("Camera key {n}: say how much to show: \"subject_width\" (fraction of the frame width) or \"view\": [w, h]."));
         }
+        if let Some(ax) = &k.axes {
+            if k.r#do != "follow" {
+                e.push(format!("Camera key {n}: axes is for follow keys."));
+            }
+            for a in ax {
+                if a != "x" && a != "y" {
+                    e.push(format!("Camera key {n}: axis {a:?} isn't \"x\" or \"y\"."));
+                }
+            }
+            if ax.is_empty() {
+                e.push(format!("Camera key {n}: axes needs \"x\", \"y\" or both (omit it to follow both)."));
+            }
+        }
+        if k.lock_zoom {
+            if k.r#do != "follow" {
+                e.push(format!("Camera key {n}: lock_zoom is for follow keys."));
+            }
+            if k.subject_width.is_some() {
+                e.push(format!("Camera key {n}: lock_zoom keeps the zoom fixed, so it can't also frame to subject_width; give \"view\": [width, 0] instead."));
+            }
+            if !k.view.is_some_and(|v| v[0] > 0.0) {
+                e.push(format!("Camera key {n}: lock_zoom needs \"view\": [width, 0] (the fixed world width)."));
+            }
+        }
         if k.subject_width.is_some() && k.view.is_some() {
             e.push(format!("Camera key {n} has both subject_width and view. Each output frames itself to subject_width; put a minimum view on the output instead (outputs[].view)."));
         }
@@ -671,6 +714,13 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         if let Some(x) = &k.ease {
             if !["linear", "ease", "cut"].contains(&x.as_str()) {
                 e.push(format!("Camera key {n}: ease is linear, ease or cut."));
+            }
+        }
+    }
+    if s.locked_view().is_some() {
+        for (i, k) in s.camera.iter().enumerate() {
+            if !k.lock_zoom && (k.view.is_some() || k.subject_width.is_some() || k.r#do == "zoom") {
+                e.push(format!("Camera key {}: the shot has lock_zoom, so no other key may change the zoom (view, subject_width or zoom).", i + 1));
             }
         }
     }
@@ -1077,6 +1127,50 @@ mod tests {
         // Into the spike strip's ground.
         s.cast[1].spawn = Some([200.0, -40.0]);
         assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("\"bluey\"") && m.contains("rock or jelly")));
+    }
+
+    #[test]
+    fn follow_axes_parse_and_validate() {
+        let mut s = parse(SPIKE).unwrap();
+        let fk = |axes: Option<Vec<&str>>| CamKey { t: 0.0, r#do: "follow".into(), who: Some(Value::String("pip".into())), view: Some([640.0, 0.0]), lock_zoom: true, axes: axes.map(|v| v.into_iter().map(String::from).collect()), ..Default::default() };
+        s.camera = vec![fk(Some(vec!["x"]))];
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        assert_eq!(Scene::follow_axes(&s.camera[0]), (true, false));
+        assert_eq!(Scene::follow_axes(&fk(None)), (true, true));
+        assert_eq!(Scene::follow_axes(&fk(Some(vec!["x", "y"]))), (true, true));
+        assert_eq!(Scene::follow_axes(&fk(Some(vec!["y"]))), (false, true));
+        s.camera = vec![fk(Some(vec!["z"]))];
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("\"z\"")));
+        let mut frame = parse(SPIKE).unwrap();
+        frame.camera[0].axes = Some(vec!["x".into()]);
+        assert!(validate(&frame).unwrap_err().iter().any(|m| m.contains("axes is for follow keys")));
+        // The field round-trips from JSON and is absent by default.
+        assert!(parse(SPIKE).unwrap().camera[0].axes.is_none());
+        let j = SPIKE.replace(r#""do": "frame", "at": [0, 215], "view": [366, 500]"#, r#""do": "follow", "who": "pip", "view": [640, 0], "lock_zoom": true, "axes": ["x"]"#);
+        assert_eq!(parse(&j).unwrap().camera[0].axes, Some(vec!["x".to_string()]));
+    }
+
+    #[test]
+    fn lock_zoom_fixes_the_view() {
+        let mut s = parse(SPIKE).unwrap();
+        assert_eq!(s.locked_view(), None);
+        s.cast[0].spawn = Some([0.0, 260.0]);
+        s.camera = vec![CamKey { t: 0.0, r#do: "follow".into(), who: Some(Value::String("pip".into())), view: Some([760.0, 0.0]), lag: Some(0.35), deadzone: Some([220.0, 140.0]), lock_zoom: true, ..Default::default() }];
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        assert_eq!(s.locked_view(), Some([760.0, 1.0]));
+        // It can't be combined with subject_width or another zoom.
+        s.camera[0].subject_width = Some(0.2);
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("lock_zoom")));
+        s.camera[0].subject_width = None;
+        s.camera.push(CamKey { t: 2.0, r#do: "zoom".into(), view: Some([400.0, 0.0]), by: Some(1.0), ..Default::default() });
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("lock_zoom")));
+        s.camera.pop();
+        s.camera[0].view = None;
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("lock_zoom needs")));
+        // Without the flag nothing about framing changes.
+        let plain = parse(SPIKE).unwrap();
+        assert_eq!(plain.camera[0].lock_zoom, false);
+        assert!(serde_json::to_value(&plain.camera[0]).unwrap()["lock_zoom"] == false);
     }
 
     #[test]

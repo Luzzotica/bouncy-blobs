@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { carriedQuery } from '../lib/partii';
+import { carriedQuery, codeFromPath } from '../lib/play';
 import { COLORS } from '../theme/uiTheme';
 
 export default function JoinLobby() {
@@ -18,7 +18,7 @@ export default function JoinLobby() {
     const code = joinCode.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (!code) return;
     setCodeError('');
-    navigate(`/controller/${code}${carriedQuery()}`);
+    navigate(`/c/${code}${carriedQuery()}`);
   }, [joinCode, navigate]);
 
   // QR scanner — uses camera + BarcodeDetector API (Chrome/Safari)
@@ -47,11 +47,17 @@ export default function JoinLobby() {
             const barcodes = await detector.detect(videoRef.current);
             for (const barcode of barcodes) {
               const url = barcode.rawValue as string;
-              // Match /controller/<CODE> in the URL (keeping its ?k=&e= overrides)
-              const match = url.match(/\/controller\/([A-Za-z0-9]+)(\?[^#]*)?/);
-              if (match) {
+              // Match /c/<CODE> (or the older /controller/<CODE>) in the URL,
+              // keeping its ?k=&e=&g= overrides.
+              let found: { code: string; search: string } | null = null;
+              try {
+                const u = new URL(url);
+                const code = codeFromPath(u.pathname);
+                if (code) found = { code, search: u.search };
+              } catch { /* not a URL */ }
+              if (found) {
                 stopScanning();
-                navigate(`/controller/${match[1].toUpperCase()}${carriedQuery(match[2] ?? window.location.search)}`);
+                navigate(`/c/${found.code}${carriedQuery(found.search || window.location.search)}`);
                 return;
               }
             }

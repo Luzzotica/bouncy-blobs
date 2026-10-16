@@ -118,6 +118,32 @@ scripts/ios-build.sh --build 3.0.0.N    # nightly: pass the next build number
 * Upload (nightly job only): `scripts/ios-upload-testflight.sh` (altool with
   an ASC API key or Apple ID, or Transporter).
 
+## Buying the full game on iOS (StoreKit 2)
+
+The demo gate (`crates/bb-game/src/ownership.rs`) is the same on every
+platform. Join is always free. Hosting, Party and Sandbox need the full game.
+Kids Mode and Story chapter 1 are the free part. On desktop, Buy opens partii
+checkout in the browser. Apple requires StoreKit for unlocking inside an
+iPhone app, so on iOS Buy goes through the App Store instead:
+
+1. Buy → `store::purchase()` → `bb_sk_purchase()` (Swift, `ios/StoreKitBridge/StoreKitBridge.swift`) shows Apple's sheet for product `me.sterlinglong.bouncyblobs.full`.
+2. A verified `Transaction` arrives as `{"kind":"purchased","transaction":"<Transaction.id>"}`. Rust sends it with `acct.submit_receipt("appstore", {"transaction": id})`.
+3. Only after `take_receipt()` is `Ok` does Rust call `bb_sk_finish(id)` (`Transaction.finish()`). On an error the transaction stays unfinished, and StoreKit delivers it again (`Transaction.unfinished` / `Transaction.updates`) on the next launch.
+4. **Restore Purchases** (on the unlock page, iOS only) → `AppStore.sync()`, then each `Transaction.currentEntitlements` id for the product is submitted the same way. `claimed_by_another_account` is shown as "This purchase belongs to another partii account".
+5. `owns("full")` turns true after partii accepts the receipt, and the locks lift live.
+
+**Status:** the code is written. It is behind bb-mobile's `storekit` feature, which is off by default, so builds without it show "The App Store isn't available in this build yet." The Swift file type-checks and builds as a static library for the iOS SDK (arm64 device and simulator). `crates/bb-mobile/build.rs` compiles and links it when the feature is on. The full iOS app with the feature has not been linked and run on a device yet.
+
+**TODO to turn it on:**
+
+- [ ] **App Store Connect (blocker, Sterling):** create a non-consumable in-app purchase with Product ID `me.sterlinglong.bouncyblobs.full` (price tier matching the $5 partii listing), with a review screenshot, and attach it to the next app version. Also give partii what it needs to verify App Store receipts for bundle `me.sterlinglong.bouncyblobs`; ask partii-backend which App Store Server API key or issuer setup it uses for `playersReceipt`.
+- [ ] **iOS 15:** StoreKit 2 and Swift concurrency need iOS 15. Raise `deploymentTarget.iOS` in `ios/project.yml` and `IPHONEOS_DEPLOYMENT_TARGET` in `ios/build-rust.sh` from 14.0 to 15.0.
+- [ ] **Build flag:** in `ios/build-rust.sh`, build with `cargo build ... -p bb-mobile --bin bb-mobile --features storekit`.
+- [ ] Optional, for local testing: add a StoreKit configuration file (`BouncyBlobs.storekit`, with the same product id) to the Xcode scheme, to buy in the simulator without App Store Connect.
+- [ ] Test on TestFlight with a sandbox Apple ID: buy, kill the app before partii answers (the purchase should come back on relaunch), Restore on a second device, and Ask to Buy (shows "Waiting for approval").
+
+**Android:** Google Play requires Play Billing for digital goods in Play-distributed apps. For now, Buy on Android shows "Get the full game at partii.games". The same pattern (Play Billing → `submit_receipt(<Play store id>, {"purchase_token", "product_id"})` → acknowledge after Ok) is still to be done.
+
 ## Android
 
 See `docs/Platforms.md` › Android (`scripts/android-build.sh`, GameActivity,

@@ -7,8 +7,8 @@
 //! its members and messages onto links. The game drains events with
 //! `try_recv` each frame and never awaits anything.
 //!
-//! On the wire, phones speak UTF-8 JSON text (the controller page's
-//! protocol). Screens are both this crate, so their frames carry a one-byte
+//! On the wire, phones send partii's binary `0x50` input frames
+//! ([`crate::play`]) and UTF-8 JSON text for everything else. Screens are both this crate, so their frames carry a one-byte
 //! tag: [`TAG_TEXT`] or [`TAG_BINARY`]. `Channel::Reliable` is the engine's
 //! reliable, ordered stream; `Channel::Unreliable` its latest-wins datagrams.
 
@@ -55,6 +55,8 @@ pub(crate) fn encode(kind: PeerKind, msg: Payload) -> Vec<u8> {
 /// unknown-tag screen frame (dropped like a corrupt packet).
 pub(crate) fn decode(kind: PeerKind, bytes: Vec<u8>) -> Option<Payload> {
     match kind {
+        // Input frames start with "P"; JSON never does.
+        PeerKind::Phone if bytes.first() == Some(&crate::play::FRAME_TAG) => Some(Payload::Binary(bytes)),
         PeerKind::Phone => Some(Payload::Text(String::from_utf8_lossy(&bytes).into_owned())),
         _ => match bytes.split_first() {
             Some((&TAG_TEXT, rest)) => Some(Payload::Text(String::from_utf8_lossy(rest).into_owned())),
@@ -137,11 +139,14 @@ pub struct HostOptions {
     pub max_peers: u32,
     pub public: bool,
     pub password: Option<String>,
+    /// A home room: made at launch so phones can join from the menu. Guest
+    /// screens are refused until [`HostSession::open_screens`].
+    pub home: bool,
 }
 
 impl Default for HostOptions {
     fn default() -> Self {
-        HostOptions { display_name: "Bouncy Lobby".into(), max_peers: 8, public: false, password: None }
+        HostOptions { display_name: "Bouncy Lobby".into(), max_peers: 8, public: false, password: None, home: false }
     }
 }
 
@@ -161,11 +166,16 @@ pub enum HostEvent {
     /// The member left the room (or was kicked).
     PeerLeft(String),
     Error(NetError),
+    /// The room couldn't be made or was closed: the partii error code
+    /// (`rate_limited`, `offline`, `expired`, …), for the retry policy.
+    /// Comes just before `Error` + `Ended`.
+    Failed(String),
     Ended,
 }
 
 enum HostCmd {
     SetJoinable(bool),
+    OpenScreens(bool),
     Kick(String),
     End,
 }
@@ -199,6 +209,11 @@ impl HostSession {
         let _ = self.cmds.try_send(HostCmd::SetJoinable(joinable));
     }
 
+    /// Let guest screens join (hosting) or refuse them (home room only).
+    pub fn open_screens(&self, open: bool) {
+        let _ = self.cmds.try_send(HostCmd::OpenScreens(open));
+    }
+
     /// Drop a peer and free its seat.
     pub fn kick(&self, peer_id: &str) {
         let _ = self.cmds.try_send(HostCmd::Kick(peer_id.into()));
@@ -228,7 +243,12 @@ impl Host {
     fn new(cfg: &NetConfig, opts: &HostOptions, ev: Sender<HostEvent>, cmds: Receiver<HostCmd>) -> Host {
         let engine = Engine::start(engine_config(cfg, "host"));
         // The engine holds this until it is online.
-        engine.create(&cfg.game_id, Some(opts.max_peers + 1), "screen", &opts.display_name, json!({}));
+        if opts.home {
+            let settings = crate::play::home_settings(opts.max_peers + 1, PeerKind::Screen.as_str(), opts.max_peers);
+            engine.create_with(&cfg.game_id, PeerKind::Screen.as_str(), &opts.display_name, json!({}), settings);
+        } else {
+            engine.create(&cfg.game_id, Some(opts.max_peers + 1), PeerKind::Screen.as_str(), &opts.display_name, json!({}));
+        }
         Host { engine, cfg: cfg.clone(), ev, cmds, wires: HashMap::new(), created: false }
     }
 
@@ -245,6 +265,7 @@ impl Host {
         while let Ok(cmd) = self.cmds.try_recv() {
             match cmd {
                 HostCmd::SetJoinable(j) => self.engine.update(json!({ "joinable": j })),
+                HostCmd::OpenScreens(j) => self.engine.update(crate::play::open_kind(PeerKind::Screen.as_str(), j)),
                 HostCmd::Kick(id) => {
                     if let Ok(mid) = id.parse::<u16>() {
                         self.engine.kick(mid);
@@ -264,6 +285,7 @@ impl Host {
                     let _ = self.ev.try_send(HostEvent::Ready(info));
                 }
                 Event::Failed { code, message, .. } if !self.created => {
+                    let _ = self.ev.try_send(HostEvent::Failed(code.clone()));
                     let _ = self.ev.try_send(HostEvent::Error(failed(&code, &message)));
                     return self.end();
                 }
@@ -290,6 +312,7 @@ impl Host {
                     }
                 }
                 Event::RoomClosed { reason } => {
+                    let _ = self.ev.try_send(HostEvent::Failed(reason.clone()));
                     let _ = self.ev.try_send(HostEvent::Error(NetError::Io(format!("room closed: {reason}"))));
                     return self.end();
                 }
@@ -429,6 +452,9 @@ mod tests {
                 assert_eq!(decode(kind, encode(kind, p.clone())), Some(p), "{kind:?}");
             }
         }
+        // A phone's input frame stays binary; its JSON is text.
+        let frame = crate::play::Frame::default().encode().to_vec();
+        assert_eq!(decode(PeerKind::Phone, frame.clone()), Some(Payload::Binary(frame)));
         assert_eq!(decode(PeerKind::Screen, vec![]), None);
         assert_eq!(decode(PeerKind::Screen, vec![9, 1]), None);
     }

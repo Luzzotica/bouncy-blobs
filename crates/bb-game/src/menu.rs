@@ -19,6 +19,7 @@ use crate::palette::{darken, hex, lighten};
 use crate::render::{Style, StyleOverrides, z};
 use crate::dropin::{DropIn, DropStyle};
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
+use crate::ownership::{BuyRequest, Feature, Ownership, RestoreRequest};
 use crate::softtext::{Ride, SoftText};
 use crate::story::{CHAPTERS, StoryProgress};
 
@@ -29,6 +30,41 @@ pub enum Page {
     Chapters,
     Party,
     Settings,
+    /// "Get the full game": why it's locked, Buy, (iOS) Restore, Back.
+    Unlock(Lock),
+}
+
+/// What a locked tile needs the full game for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lock {
+    Host,
+    Sandbox,
+    Kids,
+    /// The Story tile on the Play page (the chapter it would start).
+    Story(u8),
+    /// A tile on the Chapters page.
+    Chapter(u8),
+}
+
+impl Lock {
+    /// The friendly line on the unlock page.
+    pub fn reason(self) -> String {
+        match self {
+            Lock::Host => "Own it to host. Friends can always join you.".into(),
+            Lock::Sandbox => "Sandbox comes with the full game.".into(),
+            Lock::Kids => "Kids Mode comes with the full game.".into(),
+            Lock::Story(c) | Lock::Chapter(c) => format!("Chapter {c} and the rest of Pip's story come with the full game."),
+        }
+    }
+
+    /// The page the locked tile was on.
+    pub fn back(self) -> Page {
+        match self {
+            Lock::Host | Lock::Sandbox => Page::Party,
+            Lock::Kids | Lock::Story(_) => Page::Play,
+            Lock::Chapter(_) => Page::Chapters,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,8 +78,63 @@ pub enum Action {
     JoinFriend,
     Color,
     ToggleFullscreen,
+    ToggleStreamer,
     Quit,
+    /// A tile that needs the full game: opens its unlock page.
+    Locked(Lock),
+    Buy,
+    Restore,
 }
+
+/// Lock `action` if this player can't do it yet (the demo gate).
+pub fn gate(action: Action, own: &Ownership, progress: &StoryProgress) -> Action {
+    let need = match &action {
+        Action::Continue => Some((Feature::Chapter(progress.current), Lock::Story(progress.current))),
+        Action::Chapter(c) => Some((Feature::Chapter(*c), Lock::Chapter(*c))),
+        Action::Kids => Some((Feature::Kids, Lock::Kids)),
+        Action::PartyHost => Some((Feature::Host, Lock::Host)),
+        Action::Sandbox => Some((Feature::Sandbox, Lock::Sandbox)),
+        _ => None,
+    };
+    match need {
+        Some((f, l)) if !own.allows(f) => Action::Locked(l),
+        _ => action,
+    }
+}
+
+/// The muted colour of a locked tile.
+fn muted(c: u32) -> u32 {
+    let (g, k) = (0x8a8199u32, 0.6f32);
+    let ch = |x: u32, s: u32| ((((x >> s) & 0xff) as f32) * (1.0 - k) + (((g >> s) & 0xff) as f32) * k) as u32;
+    (ch(c, 16) << 16) | (ch(c, 8) << 8) | ch(c, 0)
+}
+
+/// The small line under a page's tiles (only where something is locked;
+/// never a popup).
+pub fn page_hint(page: Page, own: &Ownership) -> Option<String> {
+    match page {
+        Page::Party if !own.allows(Feature::Host) => Some(crate::menu::Lock::Host.reason()),
+        Page::Chapters if !own.full() => Some(format!("Chapter 1 is free. Own it for all {CHAPTERS}.")),
+        Page::Unlock(l) => Some(l.reason()),
+        _ => None,
+    }
+}
+
+/// A padlock riding a locked tile.
+#[derive(Component)]
+struct LockBadge {
+    body: BodyId,
+    offset: Vec2,
+    anchor: Option<bb_physics::RestAnchor>,
+}
+
+/// A page's hint line.
+#[derive(Component)]
+struct MenuHint;
+
+/// The unlock page's purchase status line.
+#[derive(Component)]
+struct MenuStatus;
 
 /// A jelly button.
 #[derive(Clone, Debug)]
@@ -87,7 +178,7 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
                 Update,
-                (build_page, interact, menu_blobs).chain().run_if(in_state(AppState::Title).and_then(title_world)),
+                (build_page, interact, menu_blobs, place_badges, buy_status).chain().run_if(in_state(AppState::Title).and_then(title_world)),
             )
             .add_systems(Update, boot.run_if(in_state(AppState::Boot)));
     }
@@ -410,7 +501,18 @@ pub fn kick_label(labels: &mut Query<&mut SoftText>, body: BodyId, strength: f32
     }
 }
 
-fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u32)> {
+fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
+    let mut v = page_tiles(page, progress, own);
+    for t in v.iter_mut() {
+        t.1 = gate(t.1.clone(), own, progress);
+        if matches!(t.1, Action::Locked(_)) {
+            t.2 = muted(t.2);
+        }
+    }
+    v
+}
+
+fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
     match page {
         Page::Main => vec![
             ("Play".into(), Action::Goto(Page::Play), 0xff8fab),
@@ -430,8 +532,10 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
             v
         }
         Page::Chapters => {
+            // The demo also shows the chapters that come with the full game
+            // (locked); free chapters not reached yet stay hidden.
             let mut v: Vec<(String, Action, u32)> = (1..=CHAPTERS)
-                .filter(|c| *c <= progress.unlocked)
+                .filter(|c| *c <= progress.unlocked || !own.allows(Feature::Chapter(*c)))
                 .map(|c| (format!("{c}"), Action::Chapter(c), crate::palette_cycle(c as usize)))
                 .collect();
             v.push(("Back".into(), Action::Goto(Page::Play), 0xd0c4e8));
@@ -446,9 +550,23 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
         Page::Settings => vec![
             ("Blob Color".into(), Action::Color, progress.pip_color),
             ("Fullscreen".into(), Action::ToggleFullscreen, 0x5dd6ff),
+            (streamer_label(), Action::ToggleStreamer, 0xffc75f),
             ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
         ],
+        Page::Unlock(l) => {
+            let mut v = vec![("Get the Full Game".into(), Action::Buy, 0xffc75f)];
+            if crate::ownership::NATIVE_STORE {
+                v.push(("Restore Purchases".into(), Action::Restore, 0x5dd6ff));
+            }
+            v.push(("Back".into(), Action::Goto(l.back()), 0xd0c4e8));
+            v
+        }
     }
+}
+
+/// Streamer mode hides room codes and QR codes (net/ui.rs).
+fn streamer_label() -> String {
+    format!("Streamer Mode  ·  {}", if crate::net::ui::streamer() { "On" } else { "Off" })
 }
 
 pub fn button_style(color: u32, focused: bool) -> Style {
@@ -466,17 +584,19 @@ fn build_page(
     progress: Res<StoryProgress>,
     labels: Query<(Entity, &BodyLabel), With<MenuEntity>>,
     mut overrides: ResMut<StyleOverrides>,
-    mut built: Local<Option<(Page, u64)>>,
+    mut built: Local<Option<(Page, (bool, crate::ownership::DemoScope))>>,
+    (own, mut meshes, mut mats, hints, mut badge_mesh): (Res<Ownership>, ResMut<Assets<Mesh>>, ResMut<Assets<ColorMaterial>>, Query<Entity, With<MenuHint>>, Local<Option<BadgeMeshes>>),
 ) {
     // Coming back from a level, the old level's Game is still around for a
     // frame or two: never build the menu into it.
     if game.sim.level.id != TITLE_ID {
         return;
     }
-    // Rebuild when the page changes or a new title world was loaded.
-    let key = (menu.page, game.sim.world.time().to_bits() & 0);
+    // Rebuild when the page changes, a new title world was loaded, or the
+    // gates moved (buying lifts the locks live).
+    let key = (menu.page, (own.full(), own.scope));
     let fresh = game.is_added();
-    if !fresh && built.is_some_and(|b| b.0 == key.0) {
+    if !fresh && *built == Some(key) {
         return;
     }
     *built = Some(key);
@@ -512,6 +632,9 @@ fn build_page(
         }
     }
     overrides.0.retain(|id, _| keep.contains(id) || game.sim.npcs.iter().any(|n| n.ctl.body == *id));
+    for e in hints.iter() {
+        commands.entity(e).despawn();
+    }
     menu.drop.clear();
     // The first page rains in fast; a new page drops in slower, so it
     // arrives above the old one tumbling out — bumping it (and the blobs)
@@ -539,7 +662,8 @@ fn build_page(
     }
 
     // Buttons.
-    let items = page_buttons(menu.page, &progress);
+    let items = page_buttons(menu.page, &progress, &own);
+    let badge = badge_mesh.get_or_insert_with(|| BadgeMeshes::new(&mut meshes, &mut mats)).clone();
     let grid = menu.page == Page::Chapters;
     let top = if menu.page == Page::Main { 470.0 } else { 560.0 };
     for (i, (text, action, color)) in items.into_iter().enumerate() {
@@ -554,8 +678,47 @@ fn build_page(
         };
         let id = jelly_tile(&mut game, center, size, BodyTag::Ui, BUTTON_SPRING);
         overrides.0.insert(id, button_style(color, i == 0));
-        label(&mut commands, &assets, id, &text, if grid && size.x < 200.0 { 54.0 } else { BUTTON_FONT }, Color::WHITE);
+        let font = if grid && size.x < 200.0 { 54.0 } else { BUTTON_FONT };
+        if matches!(action, Action::Locked(_)) {
+            // A padlock rides the tile; the label makes room for it.
+            let small = size.x < 200.0;
+            let (text_at, lock_at, scale) = if small {
+                (Vec2::new(-12.0, 8.0), Vec2::new(size.x * 0.5 - 30.0, -size.y * 0.5 + 30.0), 0.85)
+            } else {
+                (Vec2::new(-18.0, 0.0), Vec2::new(size.x * 0.5 - 36.0, 2.0), 1.0)
+            };
+            commands.spawn((
+                SoftText::new(text.clone(), font).ride(Ride::Game(id)).at(text_at).color(Color::WHITE).z(z::FX - 0.5).stagger(0.025),
+                BodyLabel { body: id, size: font },
+                MenuEntity,
+            ));
+            spawn_badge(&mut commands, &badge, id, lock_at, scale);
+        } else {
+            label(&mut commands, &assets, id, &text, font, Color::WHITE);
+        }
         menu.buttons.push(Button { body: id, action, color });
+    }
+    // The page's hint line (and the unlock page's status line).
+    if let Some(hint) = page_hint(menu.page, &own) {
+        let unlock = matches!(menu.page, Page::Unlock(_));
+        let rows = menu.buttons.len() as f32;
+        let (at, size, wrap) = if unlock {
+            (Vec2::new(260.0, 520.0), 40.0, 640.0)
+        } else if grid {
+            (Vec2::new(left + 330.0, top - 2.0 * 130.0 - 110.0), 28.0, 640.0)
+        } else {
+            // Wrapped to the tile column so it never runs off the left edge.
+            (Vec2::new(left + 200.0, top - rows * 100.0 + 4.0), 28.0, 400.0)
+        };
+        commands.spawn((SoftText::new(hint, size).at(at).wrap(wrap).color(Color::srgb(1.0, 0.93, 0.75)).z(z::FX - 0.5).stagger(0.012), MenuHint, MenuEntity));
+        if unlock {
+            commands.spawn((
+                SoftText::new(own.buy.line(own.owned), 30.0).at(Vec2::new(260.0, 400.0)).wrap(760.0).color(Color::WHITE).z(z::FX - 0.5).stagger(0.012),
+                MenuStatus,
+                MenuHint,
+                MenuEntity,
+            ));
+        }
     }
     // Everything rains in from the bottom up — bottom button first, the
     // logo's top row last, left to right — so nothing ever falls through
@@ -594,7 +757,15 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    (mut labels, label_bodies, beat, mut pointer): (Query<&mut SoftText>, Query<(Entity, &BodyLabel)>, Res<MusicBeat>, ResMut<crate::menu_feel::MenuPointer>),
+    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores): (
+        Query<&mut SoftText>,
+        Query<(Entity, &BodyLabel)>,
+        Res<MusicBeat>,
+        ResMut<crate::menu_feel::MenuPointer>,
+        Res<Ownership>,
+        MessageWriter<BuyRequest>,
+        MessageWriter<RestoreRequest>,
+    ),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     // Remove the previous page's tiles once they've fallen away.
@@ -638,11 +809,19 @@ fn interact(
     if join.is_some() {
         return;
     }
+    // Bought: the unlock page steps back to where the lock was, unlocked.
+    if let Page::Unlock(l) = menu.page {
+        if own.full() && menu.pending.is_none() {
+            menu.page = l.back();
+            return;
+        }
+    }
     // Fire a pending action once the squish has played.
     if let Some((action, t)) = menu.pending.as_mut() {
         *t -= dt;
         if *t <= 0.0 {
-            let action = action.clone();
+            // Gate again at the moment it fires (ownership can change).
+            let action = gate(action.clone(), &own, &progress);
             menu.pending = None;
             match action {
                 Action::Continue => next.set(AppState::Story),
@@ -689,8 +868,28 @@ fn interact(
                         };
                     }
                 }
+                Action::ToggleStreamer => {
+                    crate::net::ui::set_streamer(!crate::net::ui::streamer());
+                    let want = streamer_label();
+                    if let Some(body) = menu.buttons.iter().find(|b| b.action == Action::ToggleStreamer).map(|b| b.body) {
+                        for (e, l) in label_bodies.iter() {
+                            if l.body == body {
+                                if let Ok(mut t) = labels.get_mut(e) {
+                                    t.text = want.clone();
+                                }
+                            }
+                        }
+                    }
+                }
                 Action::Quit => {
                     exit.write(AppExit::Success);
+                }
+                Action::Locked(l) => menu.page = Page::Unlock(l),
+                Action::Buy => {
+                    buys.write(BuyRequest);
+                }
+                Action::Restore => {
+                    restores.write(RestoreRequest);
                 }
             }
         }
@@ -749,7 +948,11 @@ fn interact(
         chosen = Some(menu.focus);
     }
     if keys.just_pressed(KeyCode::Escape) && menu.page != Page::Main {
-        menu.page = if matches!(menu.page, Page::Chapters | Page::Party) { Page::Play } else { Page::Main };
+        menu.page = match menu.page {
+            Page::Chapters | Page::Party => Page::Play,
+            Page::Unlock(l) => l.back(),
+            _ => Page::Main,
+        };
         return;
     }
 
@@ -778,17 +981,181 @@ fn interact(
     }
 }
 
+/// The padlock's meshes (made once).
+#[derive(Clone)]
+struct BadgeMeshes {
+    parts: Vec<(Handle<Mesh>, Handle<ColorMaterial>, Vec2, f32)>,
+}
+
+impl BadgeMeshes {
+    fn new(meshes: &mut Assets<Mesh>, mats: &mut Assets<ColorMaterial>) -> BadgeMeshes {
+        let gold = hex(0xffd93d);
+        let rim = darken(gold, 0.55);
+        let (gold, rim) = (mats.add(ColorMaterial::from(gold)), mats.add(ColorMaterial::from(rim)));
+        // A shackle (ring) half hidden behind the body, each with a dark rim
+        // like the jelly tiles, and a keyhole.
+        let parts = vec![
+            (meshes.add(Annulus::new(4.5, 13.5)), rim.clone(), Vec2::new(0.0, 8.0), 0.00),
+            (meshes.add(Rectangle::new(36.0, 30.0)), rim.clone(), Vec2::new(0.0, -4.0), 0.01),
+            (meshes.add(Annulus::new(7.0, 11.0)), gold.clone(), Vec2::new(0.0, 8.0), 0.02),
+            (meshes.add(Rectangle::new(30.0, 24.0)), gold, Vec2::new(0.0, -4.0), 0.03),
+            (meshes.add(Circle::new(3.6)), rim.clone(), Vec2::new(0.0, -1.5), 0.04),
+            (meshes.add(Rectangle::new(3.0, 7.0)), rim, Vec2::new(0.0, -6.0), 0.04),
+        ];
+        BadgeMeshes { parts }
+    }
+}
+
+fn spawn_badge(commands: &mut Commands, m: &BadgeMeshes, body: BodyId, offset: Vec2, scale: f32) {
+    commands
+        .spawn((LockBadge { body, offset, anchor: None }, Transform::from_scale(Vec3::splat(scale)), Visibility::Hidden, MenuEntity))
+        .with_children(|p| {
+            for (mesh, mat, at, dz) in &m.parts {
+                p.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(mat.clone()), Transform::from_xyz(at.x, at.y, *dz)));
+            }
+        });
+}
+
+/// Padlocks ride their tiles (wobble, drop-in, tumble out) and go with them.
+fn place_badges(mut commands: Commands, game: Res<Game>, menu: Res<Menu>, mut badges: Query<(Entity, &mut LockBadge, &mut Transform, &mut Visibility)>) {
+    for (e, mut b, mut tf, mut vis) in badges.iter_mut() {
+        let live = menu.buttons.iter().any(|x| x.body == b.body) || menu.falling.iter().any(|f| f.0 == b.body);
+        let Some(body) = game.sim.world.body(b.body).filter(|_| live) else {
+            commands.entity(e).despawn();
+            continue;
+        };
+        let off = b.offset;
+        let anchor = *b.anchor.get_or_insert_with(|| body.rest_anchor(PVec2::new(off.x, off.y)));
+        let (p, f) = body.anchor_pose(&anchor);
+        let (angle, _) = crate::softtext::decompose(f);
+        tf.translation = Vec3::new(p.x, p.y, z::FX - 0.6);
+        tf.rotation = Quat::from_rotation_z(angle);
+        *vis = if body.enabled { Visibility::Inherited } else { Visibility::Hidden };
+    }
+}
+
+/// Keep the unlock page's status line current.
+fn buy_status(own: Res<Ownership>, mut status: Query<&mut SoftText, With<MenuStatus>>) {
+    if !own.is_changed() {
+        return;
+    }
+    let line = own.buy.line(own.owned);
+    for mut t in status.iter_mut() {
+        if t.text != line {
+            t.text = line.clone();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ownership::Owned;
+
+    fn own(owned: Owned) -> Ownership {
+        Ownership { owned, ..Default::default() }
+    }
+
+    const PAGES: [Page; 10] = [
+        Page::Main,
+        Page::Play,
+        Page::Chapters,
+        Page::Party,
+        Page::Settings,
+        Page::Unlock(Lock::Host),
+        Page::Unlock(Lock::Sandbox),
+        Page::Unlock(Lock::Kids),
+        Page::Unlock(Lock::Story(2)),
+        Page::Unlock(Lock::Chapter(10)),
+    ];
 
     #[test]
     fn every_menu_label_has_glyphs() {
         let progress = StoryProgress { unlocked: CHAPTERS, current: 3, pip_color: 0xff5d73 };
-        for page in [Page::Main, Page::Play, Page::Chapters, Page::Party, Page::Settings] {
-            for (text, _, _) in page_buttons(page, &progress) {
-                assert!(crate::softtext::missing_glyphs(&text).is_empty(), "{text:?}");
+        for o in [Owned::Full, Owned::Demo] {
+            let own = own(o);
+            for page in PAGES {
+                for (text, _, _) in page_buttons(page, &progress, &own) {
+                    assert!(crate::softtext::missing_glyphs(&text).is_empty(), "{text:?}");
+                }
+                for text in page_hint(page, &own).into_iter().chain([own.buy.line(o)]) {
+                    assert!(crate::softtext::missing_glyphs(&text).is_empty(), "{text:?}");
+                }
             }
         }
+        for b in [
+            crate::ownership::BuyStatus::Starting,
+            crate::ownership::BuyStatus::InBrowser,
+            crate::ownership::BuyStatus::InStore,
+            crate::ownership::BuyStatus::Verifying,
+            crate::ownership::BuyStatus::Restoring,
+        ] {
+            assert!(crate::softtext::missing_glyphs(&b.line(Owned::Demo)).is_empty(), "{b:?}");
+        }
+    }
+
+    fn actions(page: Page, progress: &StoryProgress, o: Owned) -> Vec<Action> {
+        page_buttons(page, progress, &own(o)).into_iter().map(|t| t.1).collect()
+    }
+
+    #[test]
+    fn demo_locks_host_and_sandbox_but_never_join() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let demo = actions(Page::Party, &p, Owned::Demo);
+        assert!(demo.contains(&Action::Locked(Lock::Host)));
+        assert!(demo.contains(&Action::Locked(Lock::Sandbox)));
+        assert!(demo.contains(&Action::JoinFriend));
+        assert_eq!(actions(Page::Party, &p, Owned::Unknown), demo);
+        let full = actions(Page::Party, &p, Owned::Full);
+        assert!(full.contains(&Action::PartyHost) && full.contains(&Action::Sandbox) && full.contains(&Action::JoinFriend));
+    }
+
+    #[test]
+    fn demo_story_is_chapter_one_and_kids_is_free() {
+        let fresh = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let play = actions(Page::Play, &fresh, Owned::Demo);
+        assert!(play.contains(&Action::Continue) && play.contains(&Action::Kids));
+        // Chapter 1 done: the Story tile would start chapter 2, so it's locked.
+        let done = StoryProgress { unlocked: 2, current: 2, pip_color: 0 };
+        let play = actions(Page::Play, &done, Owned::Demo);
+        assert!(play.contains(&Action::Locked(Lock::Story(2))));
+        assert!(play.contains(&Action::Goto(Page::Chapters)));
+        assert!(actions(Page::Play, &done, Owned::Full).contains(&Action::Continue));
+    }
+
+    #[test]
+    fn demo_chapters_page_shows_the_rest_locked() {
+        let done = StoryProgress { unlocked: 2, current: 2, pip_color: 0 };
+        let ch = actions(Page::Chapters, &done, Owned::Demo);
+        assert_eq!(ch[0], Action::Chapter(1));
+        for c in 2..=CHAPTERS {
+            assert!(ch.contains(&Action::Locked(Lock::Chapter(c))), "{c}");
+        }
+        // Owners see what they've reached, all open.
+        let full = actions(Page::Chapters, &done, Owned::Full);
+        assert_eq!(full, vec![Action::Chapter(1), Action::Chapter(2), Action::Goto(Page::Play)]);
+    }
+
+    #[test]
+    fn unlock_page_buys_and_goes_back() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let a = actions(Page::Unlock(Lock::Host), &p, Owned::Demo);
+        assert_eq!(a.first(), Some(&Action::Buy));
+        assert_eq!(a.last(), Some(&Action::Goto(Page::Party)));
+        assert_eq!(a.contains(&Action::Restore), crate::ownership::NATIVE_STORE);
+        assert_eq!(Lock::Chapter(3).back(), Page::Chapters);
+        assert_eq!(Lock::Story(2).back(), Page::Play);
+        // No hint (no nagging) on pages with nothing locked.
+        assert_eq!(page_hint(Page::Main, &own(Owned::Demo)), None);
+        assert_eq!(page_hint(Page::Party, &own(Owned::Full)), None);
+    }
+
+    #[test]
+    fn locked_tiles_look_muted() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let demo = page_buttons(Page::Party, &p, &own(Owned::Demo));
+        let full = page_buttons(Page::Party, &p, &own(Owned::Full));
+        assert_ne!(demo[0].2, full[0].2);
+        assert_eq!(demo[1].2, full[1].2);
     }
 }

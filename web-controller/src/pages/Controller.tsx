@@ -5,6 +5,7 @@ import { WebRTCMessage } from '../types/webrtc';
 import { COLOR_PALETTE } from '../constants/customization';
 import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
 import { COLORS } from '../theme/uiTheme';
+import { BUTTON, TICK_MS, framePacer, holdBits, helloMsg, parseGameMsg, rumble } from '../lib/play';
 
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 interface PhaseEntry { ts: number; phase: string; detail?: string }
@@ -243,11 +244,14 @@ function NormalModeZones({
   expanding,
   onExpandPress,
   onExpandRelease,
+  label = 'EXPAND',
 }: {
   onMove: (x: number, y: number) => void;
   expanding: boolean;
   onExpandPress: () => void;
   onExpandRelease: () => void;
+  /** The game's name for the button (partii `layout`); EXPAND by default. */
+  label?: string;
 }) {
   // Left zone — dynamic joystick
   const [joystickOrigin, setJoystickOrigin] = useState<{ x: number; y: number } | null>(null);
@@ -371,6 +375,7 @@ function NormalModeZones({
 
       {/* Right zone — expand */}
       <div
+        data-testid="controller-expand-zone"
         onPointerDown={handleRightDown}
         onPointerUp={handleRightUp}
         onPointerCancel={handleRightUp}
@@ -397,7 +402,7 @@ function NormalModeZones({
           transition: 'all 0.15s',
           textShadow: expanding ? '0 0 12px rgba(224, 96, 112, 0.6)' : 'none',
         }}>
-          {expanding ? 'EXPANDING' : 'EXPAND'}
+          {expanding ? (label === 'EXPAND' ? 'EXPANDING' : label) : label}
         </span>
       </div>
     </div>
@@ -452,16 +457,25 @@ export default function Controller() {
   const playerIdRef = useRef<string>('');
   const inputRef = useRef({ moveX: 0, moveY: 0, expanding: false });
   const sendIntervalRef = useRef<ReturnType<typeof setInterval>>();
+  /** EXPAND as partii's PRIMARY bit, held at least MIN_PRESS_MS so a quick
+   *  tap still reaches the game. */
+  const holdRef = useRef(holdBits());
+  /** One pacer for the page's life: its seq must keep rising across phase
+   *  changes, or the game drops every frame as stale. */
+  const paceRef = useRef(framePacer());
+  /** The seat the game gave us (partii `seat`), and its button names. */
+  const [seat, setSeat] = useState<{ label: string; color: string } | null>(null);
+  const [buttonLabels, setButtonLabels] = useState<string[]>(['EXPAND']);
 
   /** What used to ride the reliable `data` channel: same JSON, reliable to the host. */
   const sendData = useCallback((json: string) => {
     const e = engineRef.current, host = hostRef.current;
     if (e && host !== null) e.send(host, true, encodeText(json));
   }, []);
-  /** What used to ride the `input` channel: same JSON, unreliable to the host. */
-  const sendInput = useCallback((json: string) => {
+  /** Input frames (partii's 0x50 frame), unreliable to the host. */
+  const sendFrame = useCallback((frame: Uint8Array) => {
     const e = engineRef.current, host = hostRef.current;
-    if (e && host !== null) e.send(host, false, encodeText(json));
+    if (e && host !== null) e.send(host, false, frame);
   }, []);
 
   // Debounce for party box navigation
@@ -504,12 +518,14 @@ export default function Controller() {
       return;
     }
     inputRef.current.expanding = true;
+    holdRef.current.press(BUTTON.PRIMARY);
     setExpanding(true);
   }, [controllerMode, itemSelected, highlightedItem, placementConfirmed, sendData]);
 
   const handleExpandRelease = useCallback(() => {
     if (controllerMode !== 'normal') return;
     inputRef.current.expanding = false;
+    holdRef.current.release(BUTTON.PRIMARY);
     setExpanding(false);
   }, [controllerMode]);
 
@@ -526,7 +542,14 @@ export default function Controller() {
   /** A JSON message from the game (formerly the `data` channel). */
   const handleHostMessage = useCallback((text: string) => {
     try {
-      const message: WebRTCMessage = JSON.parse(text);
+      const raw = JSON.parse(text);
+      // partii's standard messages: seat, layout, rumble.
+      const std = parseGameMsg(raw);
+      if (std?.t === 'seat') setSeat({ label: std.label, color: std.color });
+      else if (std?.t === 'layout') { if (std.buttons.length) setButtonLabels(std.buttons); }
+      else if (std?.t === 'rumble') rumble(std.ms);
+      if (std) return;
+      const message: WebRTCMessage = raw;
       if (message.type === 'customization_update' && message.value) {
         setTakenColors(message.value.takenColors ?? []);
         setTakenFaces(message.value.takenFaces ?? []);
@@ -621,6 +644,8 @@ export default function Controller() {
               faceId: 'default',
             },
           } satisfies WebRTCMessage));
+          // partii's standard greeting too (same meaning; the game keeps one).
+          sendData(helloMsg(name));
           // Connected — jump straight into the game (customize → play). The
           // connection-flow log is only surfaced on FAILURE (the Error screen),
           // where it's copyable next to a Retry button.
@@ -677,42 +702,24 @@ export default function Controller() {
     setPhase('connected');
   }, []);
 
-  // Send input at ~30Hz (active during both customizing and connected phases)
+  // Send input frames (active during both customizing and connected
+  // phases): partii's 10-byte 0x50 frame, unreliable, ~30 Hz plus at once on
+  // any change. A dropped frame is superseded by the next one; the game
+  // keeps the newest (by seq) and lets go after 3 s of silence.
   useEffect(() => {
     if (phase !== 'connected' && phase !== 'customizing') return;
-
+    const pace = paceRef.current;
     sendIntervalRef.current = setInterval(() => {
       if (hostRef.current === null) return;
-
-      const { moveX, moveY, expanding } = inputRef.current;
-
-      // Continuous level-state input goes unreliable: latest-value, no
-      // head-of-line blocking on a lossy link. A dropped packet is superseded
-      // by the next 30Hz sample 33ms later, and the host coasts on its
-      // last-known joystick value in the meantime.
-      if (controllerMode === 'placement') {
-        // In placement mode, send cursor movement
-        sendInput(JSON.stringify({
-          type: 'cursor_move',
-          value: { x: moveX, y: moveY },
-        }));
-      } else {
-        // Normal mode + party box: send standard input
-        sendInput(JSON.stringify({
-          type: 'player_input_batch',
-          timestamp: Date.now(),
-          inputs: {
-            joystick_left: { x: moveX, y: moveY },
-            button_right: { pressed: expanding },
-          },
-        } satisfies WebRTCMessage));
-      }
-    }, 33);
+      const { moveX, moveY } = inputRef.current;
+      const frame = pace({ lx: moveX, ly: moveY, rx: 0, ry: 0, buttons: holdRef.current.bits() });
+      if (frame) sendFrame(frame);
+    }, TICK_MS);
 
     return () => {
       if (sendIntervalRef.current) clearInterval(sendIntervalRef.current);
     };
-  }, [phase, controllerMode, sendInput]);
+  }, [phase, sendFrame]);
 
   // Keyboard input (WASD + Space)
   useEffect(() => {
@@ -736,8 +743,9 @@ export default function Controller() {
       if (['a', 'd', 'w', 's', ' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
         e.preventDefault();
         keys.add(key);
-        if (key === ' ') {
+        if (key === ' ' && !inputRef.current.expanding) {
           inputRef.current.expanding = true;
+          holdRef.current.press(BUTTON.PRIMARY);
           setExpanding(true);
         }
         updateFromKeys();
@@ -749,6 +757,7 @@ export default function Controller() {
       keys.delete(key);
       if (key === ' ') {
         inputRef.current.expanding = false;
+        holdRef.current.release(BUTTON.PRIMARY);
         setExpanding(false);
       }
       updateFromKeys();
@@ -1048,7 +1057,7 @@ export default function Controller() {
 
   // Connected — show controller UI based on mode
   return (
-    <div style={{
+    <div data-testid="controller" data-seat={seat?.label ?? ''} data-seat-color={seat?.color ?? ''} style={{
       width: '100%',
       height: '100%',
       display: 'flex',
@@ -1157,6 +1166,7 @@ export default function Controller() {
           expanding={expanding}
           onExpandPress={handleExpandPress}
           onExpandRelease={handleExpandRelease}
+          label={buttonLabels[0]}
         />
       )}
     </div>

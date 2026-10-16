@@ -1,10 +1,16 @@
-//! The phone-controller protocol, byte-compatible with the deployed web page
-//! (`src/pages/Controller.tsx`). All messages are JSON text frames.
+//! Bouncy Blobs' phone messages (`web-controller/src/pages/Controller.tsx`).
 //!
-//! Phone → host: `player_join` (once, on `data`), `customization_update`
-//! (on `data`), `player_input_batch` (~30 Hz on `input`, falling back to
-//! `data`). Host → phone: a personalised `customization_update` with the
-//! colours/faces other players hold.
+//! Input is partii's standard 10-byte `0x50` frame ([`crate::play`]),
+//! unreliable, ~30 Hz: the left stick moves, PRIMARY (bit 0) expands. The
+//! game-specific parts stay JSON on the reliable lane:
+//!
+//! Phone → host: `player_join` (once), `hello` (partii's standard greeting,
+//! same meaning), `customization_update` (colour/face picks). Host → phone:
+//! a personalised `customization_update` with the colours/faces other
+//! players hold, plus partii's `seat`, `layout` and `rumble`.
+//!
+//! The old JSON input (`player_input_batch`) is still understood for one
+//! release, for pages cached on phones.
 
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -109,6 +115,11 @@ enum RawMsg {
 /// Parse one text frame from a phone. Malformed input is an error, never a
 /// panic.
 pub fn parse(text: &str) -> Result<PhoneMsg, String> {
+    // partii's standard greeting means the same as `player_join`, without
+    // a colour or face picked yet.
+    if let Some((name, player)) = crate::play::parse_hello(text) {
+        return Ok(PhoneMsg::Join(PhoneJoin { player_id: player.unwrap_or_default(), name, color: String::new(), face_id: String::new() }));
+    }
     let raw: RawMsg = serde_json::from_str(text).map_err(|e| e.to_string())?;
     Ok(match raw {
         RawMsg::PlayerJoin { player } => PhoneMsg::Join(player),
@@ -143,9 +154,10 @@ pub fn taken_message(taken_colors: &[String], taken_faces: &[String]) -> String 
     .unwrap_or_default()
 }
 
-/// One phone's latest controls, with the host's per-key monotonic dedupe:
-/// a late or reordered unreliable packet (older timestamp) is dropped, so
-/// the newest value always wins and stays applied until replaced.
+/// One phone's latest controls. Frames go through a [`crate::play::Pad`]
+/// (seq ordering, press latch, idle release). The legacy JSON input keeps
+/// the per-key monotonic dedupe: a late packet (older timestamp) is
+/// dropped, and the newest value stays applied until replaced.
 #[derive(Clone, Debug, Default)]
 pub struct PhoneInput {
     /// Game convention: +y up.
@@ -153,6 +165,9 @@ pub struct PhoneInput {
     pub button: bool,
     last_stick: Option<f64>,
     last_button: Option<f64>,
+    pad: crate::play::Pad,
+    /// The phone sends frames (so `stick`/`button` come from `pad`).
+    framed: bool,
 }
 
 fn num(v: &Value, key: &str) -> f32 {
@@ -161,7 +176,30 @@ fn num(v: &Value, key: &str) -> f32 {
 }
 
 impl PhoneInput {
-    /// Apply a parsed `Input` message. Returns true if anything changed.
+    /// Apply an input frame (`0x50`). Returns true if it was newer than the
+    /// last one.
+    pub fn apply_frame(&mut self, bytes: &[u8], now_ms: f64) -> bool {
+        let Some(f) = crate::play::Frame::decode(bytes) else { return false };
+        self.framed = true;
+        let fresh = self.pad.apply(f, now_ms);
+        self.refresh(now_ms);
+        fresh
+    }
+
+    /// Bring `stick`/`button` up to `now_ms` (latched taps expire, an idle
+    /// phone lets go). A no-op for phones on the legacy JSON input.
+    pub fn refresh(&mut self, now_ms: f64) {
+        if !self.framed {
+            return;
+        }
+        let l = self.pad.left(now_ms);
+        // The frame's y is screen-down; the game's is up (+0.0 turns -0.0
+        // into 0.0).
+        self.stick = Vec2::new(l.x, -l.y + 0.0);
+        self.button = self.pad.buttons(now_ms) & crate::play::button::PRIMARY != 0;
+    }
+
+    /// Apply a parsed legacy `Input` message. Returns true if anything changed.
     /// `now_ms` stamps messages that carry no timestamp.
     pub fn apply(&mut self, entries: &[(String, Value)], timestamp: Option<f64>, now_ms: f64) -> bool {
         let ts = timestamp.filter(|t| t.is_finite()).unwrap_or(now_ms);
@@ -257,6 +295,8 @@ mod tests {
         assert!(p.apply(&e, ts, 5.0));
         assert!(p.button);
         assert!(matches!(parse(r#"{"type":"cursor_move","value":{"x":1,"y":2}}"#), Ok(PhoneMsg::Other)));
+        let Ok(PhoneMsg::Join(h)) = parse(r#"{"t":"hello","name":"Sam","player":null,"profile":null}"#) else { panic!() };
+        assert_eq!(h.name, "Sam");
         assert!(parse("not json").is_err());
         assert!(parse(r#"{"type":"player_join"}"#).is_err());
         // Garbage values clamp instead of exploding.
@@ -268,6 +308,26 @@ mod tests {
         };
         p.apply(&e, Some(10.0), 0.0);
         assert_eq!(p.stick, Vec2::new(0.0, -1.0));
+    }
+
+    #[test]
+    fn frames_drive_stick_and_expand() {
+        use crate::play::{Frame, button};
+        let mut p = PhoneInput::default();
+        let f = |seq, x: f32, y: f32, b| Frame { seq, left: Vec2::new(x, y), buttons: b, ..Default::default() }.encode();
+        // Up on the phone (screen y = -1) is +y in the game; PRIMARY expands.
+        assert!(p.apply_frame(&f(1, 1.0, -1.0, button::PRIMARY), 0.0));
+        assert_eq!(p.stick, Vec2::new(1.0, 1.0));
+        assert!(p.button);
+        assert!(!p.apply_frame(&f(1, 0.0, 0.0, 0), 5.0), "same seq is stale");
+        p.apply_frame(&f(2, 0.0, 1.0, 0), 33.0);
+        assert_eq!(p.stick, Vec2::new(0.0, -1.0));
+        assert!(p.button, "the tap is latched for a moment");
+        p.refresh(200.0);
+        assert!(!p.button);
+        p.refresh(5000.0);
+        assert_eq!(p.stick, Vec2::ZERO, "a silent phone lets go");
+        assert!(!p.apply_frame(br#"{"type":"x"}"#, 0.0));
     }
 
     #[test]
