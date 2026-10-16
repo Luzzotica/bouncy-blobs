@@ -20,7 +20,7 @@ bb-scene render   scenes/examples/spike-loop.json   # check first, then the fina
 ## What the runner guarantees
 
 - **Real game, current build.** `"build": "current"` means the head of `origin/game-polish`. The runner refuses to render if that commit doesn't include `origin/port-capture`, because the capture code there would be stale.
-  - It renders with a game built from exactly that commit. If needed it builds it once from a `git archive` export, without touching anyone's worktree, and caches it in `~/.cache/bb-scene/<commit>/`.
+  - It renders with a game built from exactly that commit. If needed it builds it once from a `git archive` export, without touching anyone's worktree, and caches it in `~/.cache/bb-scene/<commit>/`. The build goes into this repo's own `./target` (no `CARGO_TARGET_DIR` needed) and waits its turn in the machine's cargo queue like any build, so run `bb-scene render` in the background.
   - A `--bin` is only used if it reports the same commit (`BB_PRINT_BUILD=1`).
   - An older commit needs `"allow_old_build": "<reason>"`.
   - NOTES records the exact hash.
