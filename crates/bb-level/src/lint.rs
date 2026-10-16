@@ -344,7 +344,8 @@ fn surfaces(p: &Piece, bottom: f32) -> Vec<(Vec<Vec2>, &'static str)> {
 /// Clean seams (Sterling: "the platforms don't mesh together perfectly").
 ///
 /// * **near-miss joint**: two floors whose ends nearly meet but don't line
-///   up (a few px gap, overlap or step): make them meet exactly, or merge.
+///   up (a few px gap or overlap, at a step too, or a tiny step): make them
+///   meet exactly, or merge.
 /// * **overlapping floors**: two floors covering the same stretch at about
 ///   the same height.
 /// * **flush joint**: two plain floors meet exactly at the same height:
@@ -373,7 +374,8 @@ pub fn seams(c: &Course, bp: Option<&Blueprint>) -> Vec<Finding> {
                 // Which ends face each other.
                 for (p, q) in [(a1, b0), (b1, a0)] {
                     let d = q - p;
-                    if d.x.abs() > SEAM_SNAP || d.y.abs() > SEAM_SNAP {
+                    // Far apart, or a clean step (same x, different height).
+                    if d.x.abs() >= SEAM_SNAP || (d.x.abs() < 0.01 && d.y.abs() >= SEAM_SNAP) {
                         continue;
                     }
                     let (first, second) = if p == a1 { (*ia, *ib) } else { (*ib, *ia) };
