@@ -186,6 +186,17 @@ impl PhoneInput {
         fresh
     }
 
+    /// The phone (re)joined: a new page starts its frame seq again, so
+    /// forget the old one (else every new frame looks stale and input
+    /// freezes). Controls let go until the next frame.
+    pub fn reset_frames(&mut self) {
+        self.pad = crate::play::Pad::default();
+        if self.framed {
+            self.stick = Vec2::ZERO;
+            self.button = false;
+        }
+    }
+
     /// Bring `stick`/`button` up to `now_ms` (latched taps expire, an idle
     /// phone lets go). A no-op for phones on the legacy JSON input.
     pub fn refresh(&mut self, now_ms: f64) {
@@ -328,6 +339,18 @@ mod tests {
         p.refresh(5000.0);
         assert_eq!(p.stick, Vec2::ZERO, "a silent phone lets go");
         assert!(!p.apply_frame(br#"{"type":"x"}"#, 0.0));
+    }
+
+    #[test]
+    fn a_rejoin_restarts_seq() {
+        use crate::play::Frame;
+        let mut p = PhoneInput::default();
+        let f = |seq, x: f32| Frame { seq, left: Vec2::new(x, 0.0), ..Default::default() }.encode();
+        assert!(p.apply_frame(&f(2000, 1.0), 0.0));
+        assert!(!p.apply_frame(&f(1, -1.0), 10.0), "without a rejoin, seq 1 is stale");
+        p.reset_frames();
+        assert!(p.apply_frame(&f(1, -1.0), 20.0), "after a rejoin the new page's frames count");
+        assert_eq!(p.stick.x, -1.0);
     }
 
     #[test]

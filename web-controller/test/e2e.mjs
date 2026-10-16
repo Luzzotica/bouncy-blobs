@@ -58,6 +58,12 @@ try {
           if (ev.ev === "failed") reject(new Error(`${ev.code}: ${ev.message}`));
           if (ev.ev === "member_joined") g.members.push(ev.member);
           if (ev.ev === "member_left") g.left.push(ev.mid);
+          if (ev.ev === "peer_connected" || ev.ev === "path_changed") {
+            const to = ev.ev === "peer_connected" ? ev.path : ev.to;
+            let name = String(to);
+            if (typeof to === "number") try { name = String(mod.WebEngine.pathName(to)); } catch {}
+            (g.paths ??= []).push({ mid: ev.mid, at: performance.now(), path: name });
+          }
           if (ev.ev === "message") {
             const b = new Uint8Array(ev.bytes);
             if (b[0] === 0x50 && b.length >= 9) {
@@ -170,8 +176,13 @@ const all = await msgs();
 const frames = all.filter((m) => m.frame).map((m) => ({ ...m.frame, reliable: m.reliable, at: m.at }));
 // Unreliable frames may arrive out of order (the game drops stale ones), but
 // seq never restarts: a restart would make the game drop every later frame.
+// [seq, highest seq seen when it arrived].
 let maxSeq = 0;
-const backsteps = frames.filter((f) => { const back = f.seq < maxSeq; maxSeq = Math.max(maxSeq, f.seq); return back; }).map((f) => [f.seq, maxSeq]);
+const backsteps = [];
+for (const f of frames) {
+  if (f.seq < maxSeq) backsteps.push([f.seq, maxSeq]);
+  maxSeq = Math.max(maxSeq, f.seq);
+}
 // A restart would leave the stream's newest frames far below the highest seq
 // seen; stragglers (old frames arriving late, seen on staging just after the
 // path upgrade) don't.
@@ -187,6 +198,16 @@ const lateMs = frames
   })
   .filter((ms) => ms > 0);
 const maxLateMs = lateMs.length ? Math.max(...lateMs) : 0;
+// Timings for each straggler: arrival (ms after the first frame), the seq
+// it was overtaken by, and the path to the phone at arrival.
+const paths = (await game.evaluate(() => window.__game.paths ?? [])).filter((p) => p.mid === phoneMember?.mid);
+const t0f = frames[0]?.at ?? 0;
+const pathAt = (at) => paths.filter((p) => p.at <= at).pop()?.path ?? "?";
+const stragglerTimes = frames
+  .map((f, i) => ({ f, newer: frames.slice(0, i).find((g) => g.seq > f.seq) }))
+  .filter((x) => x.newer)
+  .map(({ f, newer }) => ({ seq: f.seq, overtaken_by: newer.seq, arrived_ms: Math.round(f.at - t0f), late_ms: Math.round(f.at - newer.at), path: pathAt(f.at) }));
+const pathLog = paths.map((p) => ({ ms: Math.round(p.at - t0f), path: p.path }));
 const fromPhone = all.every((m) => m.from === phoneMember?.mid);
 
 // The host leaves: the playing phone goes back to /join (keeping ?k=&e=).
@@ -226,5 +247,7 @@ await done({
   seq_backsteps: backsteps.slice(0, 10),
   stragglers: lateMs.length,
   straggler_max_late_ms: maxLateMs,
+  straggler_times: stragglerTimes.slice(0, 10),
+  paths: pathLog,
   checks,
 });
