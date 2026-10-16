@@ -90,6 +90,8 @@ struct SceneState {
     entered: Option<(usize, Vec2, Vec2)>,
     now: Option<(Vec2, Vec2)>,
     frozen: Option<(usize, Vec2)>,
+    /// Camera position on recorded frame 1 (held by axes that don't follow).
+    axis_hold: Option<Vec2>,
     frames: Vec<FrameCheck>,
     events: Vec<EventRow>,
     written: bool,
@@ -381,7 +383,24 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
         _ => 1.0,
     };
     let u = if ki == moves[0].0 && st.now.is_none() { 1.0 } else { u };
-    let pos = pos0.lerp(target_pos, u);
+    let mut pos = pos0.lerp(target_pos, u);
+    // Follow axes: an axis that doesn't follow tracks through the pre-roll,
+    // then holds where the camera was on recorded frame 1.
+    if key.r#do == "follow" {
+        let (fx, fy) = Scene::follow_axes(key);
+        let f = frame_now().unwrap_or(-1);
+        if f <= 0 {
+            st.axis_hold = Some(pos);
+        }
+        if let (Some(h), true) = (st.axis_hold, f > 0) {
+            if !fx {
+                pos.x = h.x;
+            }
+            if !fy {
+                pos.y = h.y;
+            }
+        }
+    }
     // lock_zoom: one fixed view for the whole shot; only the position moves.
     let view = match s.locked_view() {
         Some([w, h]) => Vec2::new(w, h),
