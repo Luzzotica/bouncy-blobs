@@ -261,6 +261,12 @@ pub fn on() -> bool {
 }
 
 /// Run condition: capture mode is off (for tips and other screen clutter).
+/// Headless capture: everything must run on the game clock alone (no audio
+/// device position, no wall time), so a scene replays tick for tick.
+pub fn fixed_clock() -> bool {
+    config().is_some_and(CaptureConfig::headless)
+}
+
 pub fn off() -> bool {
     !on()
 }

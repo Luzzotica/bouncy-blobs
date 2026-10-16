@@ -85,6 +85,22 @@ pub fn app() -> App {
     app
         .add_plugins(platform::PlatformPlugin)
         .add_plugins(GamePlugin);
+    // BB_AMBIGUITIES=1: log every pair of systems that touch the same data
+    // with no order between them (their order can change from run to run,
+    // which breaks a capture's same-seed-same-frames promise).
+    if std::env::var_os("BB_AMBIGUITIES").is_some() {
+        use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings};
+        let settings = ScheduleBuildSettings { ambiguity_detection: LogLevel::Warn, ..default() };
+        let mut warn = |label: bevy::ecs::intern::Interned<dyn bevy::ecs::schedule::ScheduleLabel>| {
+            app.edit_schedule(label, |s| {
+                s.set_build_settings(settings.clone());
+            });
+        };
+        use bevy::ecs::schedule::ScheduleLabel as _;
+        for label in [PreUpdate.intern(), Update.intern(), PostUpdate.intern(), FixedUpdate.intern(), FixedPostUpdate.intern()] {
+            warn(label);
+        }
+    }
     // Headless runs (screenshots, captures, test playthroughs) and BB_MUTE=1
     // never make a sound through the speakers. Capture still logs every
     // sound for its own mixdown.

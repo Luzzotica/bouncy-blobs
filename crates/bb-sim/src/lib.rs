@@ -482,6 +482,22 @@ impl Sim {
         self.tuning = t;
     }
 
+    /// Hash of the exact sim state (physics bodies bit for bit, clock,
+    /// players' lives). Same level + same inputs must give the same hash
+    /// after every step; see `tests/determinism.rs` and `BB_SIM_TRACE`.
+    pub fn state_hash(&self) -> u64 {
+        let mut h = bb_physics::world::Fnv(self.world.state_hash());
+        h.u32(self.time.to_bits());
+        for p in &self.players {
+            h.u32(p.slot as u32);
+            h.u32(p.dead.map_or(u32::MAX, f32::to_bits));
+        }
+        for n in &self.npcs {
+            h.u32(n.dead.map_or(u32::MAX, f32::to_bits));
+        }
+        h.0
+    }
+
     pub fn step(&mut self) {
         let dt = DT;
         self.time += dt;

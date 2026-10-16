@@ -195,18 +195,50 @@ impl MusicBeat {
     }
 }
 
-fn track_beat_clock(mut beat: ResMut<MusicBeat>, q: Query<(&Music, Option<&AudioSink>)>, time: Res<Time<Real>>) {
-    let playing = q.iter().find(|(m, s)| !m.fading_out && s.is_some_and(|s| !s.is_paused()));
-    let now = match playing {
-        Some((m, Some(sink))) => {
-            let (bpm, offset, beats) = track_beat(m.track);
-            let pos = sink.position().as_secs_f64() - offset;
-            (pos * bpm / 60.0).rem_euclid(beats)
-        }
-        _ => (time.elapsed_secs_f64() * 2.0).rem_euclid(64.0),
-    };
+fn track_beat_clock(
+    mut beat: ResMut<MusicBeat>,
+    q: Query<(Entity, &Music, Option<&AudioSink>)>,
+    time: Res<Time<Real>>,
+    vtime: Res<Time<Virtual>>,
+    mut started: Local<Option<(Entity, f64)>>,
+) {
     beat.prev = beat.beat;
-    beat.beat = now;
+    beat.beat = if crate::capture::fixed_clock() {
+        fixed_beat(&q, &vtime, &mut started)
+    } else {
+        let playing = q.iter().find(|(_, m, s)| !m.fading_out && s.is_some_and(|s| !s.is_paused()));
+        match playing {
+            Some((_, m, Some(sink))) => {
+                let (bpm, offset, beats) = track_beat(m.track);
+                let pos = sink.position().as_secs_f64() - offset;
+                (pos * bpm / 60.0).rem_euclid(beats)
+            }
+            _ => (time.elapsed_secs_f64() * 2.0).rem_euclid(64.0),
+        }
+    };
+}
+
+/// The beat on the game's own clock, for headless captures. The live clock
+/// above reads the audio device's play position (or wall time), which runs
+/// on its own thread: a capture's sim steps are game-clock exact, so two
+/// runs of one scene would see the beat land on different ticks, and the
+/// dancing NPCs (`dance.rs`) would get their hop a tick or two apart. Here
+/// the track's position is game time since it started (its start in the
+/// audio log), so the beat, and every hop, lands on the same tick each run.
+fn fixed_beat(q: &Query<(Entity, &Music, Option<&AudioSink>)>, vtime: &Time<Virtual>, started: &mut Option<(Entity, f64)>) -> f64 {
+    let now = vtime.elapsed_secs_f64();
+    let Some((e, m, _)) = q.iter().filter(|(_, m, _)| !m.fading_out).min_by_key(|(e, ..)| *e) else {
+        *started = None;
+        return (now * 2.0).rem_euclid(64.0);
+    };
+    if started.is_none_or(|(s, _)| s != e) {
+        // Spawned in last update's `Update`, which ran at that update's
+        // clock: now minus this update's step.
+        *started = Some((e, now - vtime.delta_secs_f64()));
+    }
+    let (bpm, offset, beats) = track_beat(m.track);
+    let pos = now - started.map_or(now, |s| s.1) - offset;
+    (pos * bpm / 60.0).rem_euclid(beats)
 }
 
 /// Forces a particular music track (cutscenes, menus); `None` = by theme.
@@ -253,10 +285,31 @@ pub fn spawn_sound(commands: &mut Commands, clip: Handle<AudioSource>, volume: f
     commands
         .spawn((
             AudioPlayer(clip),
-            PlaybackSettings { mode: PlaybackMode::Despawn, volume: Volume::Linear(volume), speed, ..default() },
+            // A headless capture keeps finished sounds (silent anyway): the
+            // audio thread despawns them on wall time, which would shift every
+            // later entity id and so the draw order of equal-depth sprites
+            // from run to run.
+            PlaybackSettings {
+                mode: if crate::capture::fixed_clock() { PlaybackMode::Once } else { PlaybackMode::Despawn },
+                volume: Volume::Linear(volume),
+                speed,
+                ..default()
+            },
             Sfx,
         ))
         .id()
+}
+
+/// (elapsed s, delta s) for sound timing: wall time live (sounds play in
+/// real time, even while the game is paused), the game clock in a headless
+/// capture, so which clip plays and which repeats are throttled is the same
+/// every run.
+fn clock(real: &Time<Real>, virt: &Time<Virtual>) -> (f64, f32) {
+    if crate::capture::fixed_clock() {
+        (virt.elapsed_secs_f64(), virt.delta_secs())
+    } else {
+        (real.elapsed_secs_f64(), real.delta_secs())
+    }
 }
 
 fn play_sfx(
@@ -265,8 +318,9 @@ fn play_sfx(
     mut bank: ResMut<SfxBank>,
     settings: Res<AudioSettings>,
     time: Res<Time<Real>>,
+    vtime: Res<Time<Virtual>>,
 ) {
-    let now = time.elapsed_secs_f64();
+    let now = clock(&time, &vtime).0;
     let gain = settings.sfx_gain();
     for m in reader.read() {
         if gain <= 0.0 || m.volume <= 0.0 {
@@ -307,7 +361,7 @@ impl Gained<'_, '_> {
 fn sim_sounds(
     mut reader: MessageReader<SimMsg>,
     game: Option<Res<Game>>,
-    time: Res<Time<Real>>,
+    (time, vtime): (Res<Time<Real>>, Res<Time<Virtual>>),
     mut out: MessageWriter<PlaySfx>,
     mut seed: Local<u32>,
     mut last_land: Local<HashMap<bb_sim::BodyId, f64>>,
@@ -317,7 +371,7 @@ fn sim_sounds(
     if *seed == 0 {
         *seed = 0x2545_f491;
     }
-    let now = time.elapsed_secs_f64();
+    let now = clock(&time, &vtime).0;
     // Sounds fade with distance from the camera: full on screen, silent
     // well off it, so blobs far away don't chatter in your ear.
     let (cam_p, zoom) = cam
@@ -469,7 +523,7 @@ fn music(
     state: Option<Res<State<AppState>>>,
     over: Res<MusicOverride>,
     settings: Res<AudioSettings>,
-    time: Res<Time<Real>>,
+    (time, vtime): (Res<Time<Real>>, Res<Time<Virtual>>),
     mut q: Query<(Entity, &mut Music, Option<&mut AudioSink>)>,
     global: Res<bevy::audio::GlobalVolume>,
 ) {
@@ -479,7 +533,7 @@ fn music(
     let global = global.volume.to_linear();
     let booting = state.is_some_and(|s| *s.get() == AppState::Boot) && game.is_none();
     let want = over.0.or_else(|| game.as_ref().map(|g| theme_music(g.sim.level.theme))).or((!booting).then_some(("music/theme-cave.mp3", 1.0)));
-    let dt = time.delta_secs();
+    let dt = clock(&time, &vtime).1;
     let mut have = false;
     for (e, mut m, sink) in q.iter_mut() {
         if want.is_none_or(|w| w.0 != m.track) {

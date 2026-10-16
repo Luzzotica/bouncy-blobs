@@ -46,7 +46,8 @@ impl Plugin for AlivePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Alive>()
             .add_systems(PostUpdate, setup.run_if(resource_added::<Game>))
-            .add_systems(PostUpdate, update.after(setup).run_if(resource_exists::<Game>))
+            // After the body visuals: both puff `Spores` (see `cave.rs`).
+            .add_systems(PostUpdate, update.after(setup).after(crate::render::sync_bodies).run_if(resource_exists::<Game>))
             .add_systems(PostUpdate, clear.run_if(resource_removed::<Game>));
     }
 }
@@ -608,7 +609,7 @@ struct Actor {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn update(
+pub(crate) fn update(
     game: Res<Game>,
     time: Res<Time>,
     mut msgs: MessageReader<SimMsg>,

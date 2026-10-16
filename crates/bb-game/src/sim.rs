@@ -166,7 +166,17 @@ fn step(mut game: ResMut<Game>, inputs: Res<Inputs>, mut out: MessageWriter<SimM
     }
     game.sim.step();
     game.tick += 1;
+    if trace() {
+        eprintln!("BB_SIM_TRACE tick {} hash {:016x}", game.tick, game.sim.state_hash());
+    }
     for e in game.sim.drain_events() {
         out.write(SimMsg(e));
     }
+}
+
+/// `BB_SIM_TRACE=1`: print the sim's state hash after every fixed step
+/// (stderr), so two runs can be diffed step by step.
+pub fn trace() -> bool {
+    static T: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *T.get_or_init(|| std::env::var_os("BB_SIM_TRACE").is_some())
 }

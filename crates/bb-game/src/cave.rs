@@ -14,7 +14,17 @@ pub struct CavePlugin;
 impl Plugin for CavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Spores>()
-            .add_systems(PostUpdate, (react_decor, update_spores).run_if(resource_exists::<Game>))
+            // Every writer of `Spores` in a fixed order: puffs number their
+            // spores in call order, so letting the scheduler pick the order
+            // gave each run different spores (and different frames).
+            .add_systems(
+                PostUpdate,
+                (react_decor, update_spores)
+                    .chain()
+                    .after(crate::render::sync_bodies)
+                    .after(crate::alive::update)
+                    .run_if(resource_exists::<Game>),
+            )
             .add_systems(PostUpdate, clear_spores.run_if(resource_removed::<Game>));
     }
 }

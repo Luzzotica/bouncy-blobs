@@ -1516,7 +1516,7 @@ fn face_kind(game: &Game, id: BodyId) -> Option<FaceKind> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn sync_bodies(
+pub(crate) fn sync_bodies(
     mut commands: Commands,
     game: Res<Game>,
     time: Res<Time>,

@@ -15,7 +15,7 @@
 //! violating a limit at the end of the substep was forced there by a joint or
 //! geometry. That residual is the "strain" that eventually pops a body.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use glam::Vec2;
 
@@ -96,7 +96,7 @@ impl StaticDesc {
 }
 
 /// What a body touched.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Collider {
     Static(StaticId),
     Body(BodyId),
@@ -181,6 +181,26 @@ impl World {
 
     pub fn time(&self) -> f64 {
         self.time
+    }
+
+    /// FNV-1a hash of the exact simulation state (every body's particle
+    /// positions and velocities, bit for bit, plus the clock). Two runs that
+    /// replay identically produce identical hashes step for step; used by
+    /// determinism tests and `BB_SIM_TRACE`.
+    pub fn state_hash(&self) -> u64 {
+        let mut h = Fnv::new();
+        h.u64(self.time.to_bits());
+        for (i, s) in self.slots.iter().enumerate() {
+            let Some(b) = s.body.as_ref() else { continue };
+            h.u32(i as u32);
+            h.u32(s.generation);
+            h.u32(b.enabled as u32);
+            for p in b.x.iter().chain(&b.v) {
+                h.u32(p.x.to_bits());
+                h.u32(p.y.to_bits());
+            }
+        }
+        h.0
     }
 
     // ---------------------------------------------------------------- bodies
@@ -477,7 +497,9 @@ impl World {
         }
         let prev_touching = std::mem::take(&mut self.touching);
         self.neighbours.clear();
-        let mut impacts: HashMap<(BodyId, Collider), Contact> = HashMap::new();
+        // Ordered by key so impact events come out in the same order every
+        // run (a HashMap's iteration order is random per instance).
+        let mut impacts: BTreeMap<(BodyId, Collider), Contact> = BTreeMap::new();
         let mut forced = vec![false; self.slots.len()];
 
         for sub in 0..substeps {
@@ -598,7 +620,7 @@ impl World {
         }
     }
 
-    fn collide(&mut self, ctx: &SubstepCtx, impacts: &mut HashMap<(BodyId, Collider), Contact>) {
+    fn collide(&mut self, ctx: &SubstepCtx, impacts: &mut BTreeMap<(BodyId, Collider), Contact>) {
         // Broadphase: sort-and-sweep on x over enabled bodies.
         let mut order: Vec<(f32, u32)> = self
             .slots
@@ -761,5 +783,29 @@ fn ray_segment(o: Vec2, e: Vec2, a: Vec2, b: Vec2) -> Option<(f32, Vec2)> {
         Some((t, Vec2::new(s.y, -s.x).normalize_or_zero()))
     } else {
         None
+    }
+}
+
+/// Minimal FNV-1a (64-bit), for [`World::state_hash`].
+pub struct Fnv(pub u64);
+
+impl Fnv {
+    pub fn new() -> Fnv {
+        Fnv(0xcbf2_9ce4_8422_2325)
+    }
+    pub fn u32(&mut self, v: u32) {
+        for b in v.to_le_bytes() {
+            self.0 = (self.0 ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    pub fn u64(&mut self, v: u64) {
+        self.u32(v as u32);
+        self.u32((v >> 32) as u32);
+    }
+}
+
+impl Default for Fnv {
+    fn default() -> Fnv {
+        Fnv::new()
     }
 }
