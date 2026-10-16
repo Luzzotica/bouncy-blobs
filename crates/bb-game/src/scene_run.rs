@@ -382,7 +382,11 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
     };
     let u = if ki == moves[0].0 && st.now.is_none() { 1.0 } else { u };
     let pos = pos0.lerp(target_pos, u);
-    let view = view0.lerp(target_view, u);
+    // lock_zoom: one fixed view for the whole shot; only the position moves.
+    let view = match s.locked_view() {
+        Some([w, h]) => Vec2::new(w, h),
+        None => view0.lerp(target_view, u),
+    };
     st.now = Some((pos, view));
     let mut shake = Vec2::ZERO;
     for (i, k) in s.camera.iter().enumerate().filter(|(_, k)| k.r#do == "shake") {
