@@ -37,6 +37,7 @@ pub mod menu_feel;
 pub mod mouths;
 pub mod net;
 pub mod online;
+pub mod ownership;
 pub mod palette;
 pub mod party;
 pub mod party_assets;
@@ -48,6 +49,7 @@ pub mod sandbox;
 pub mod save;
 pub mod sim;
 pub mod softtext;
+pub mod store;
 pub mod story;
 pub mod story_iface;
 pub mod tuning;
@@ -99,6 +101,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(not(target_arch = "wasm32"))]
         app.add_plugins(account::AccountPlugin);
+        app.add_plugins(ownership::OwnershipPlugin);
         app.insert_resource(ClearColor(Color::srgb(0.02, 0.015, 0.03)))
             .add_plugins((
                 assets::AssetsPlugin,

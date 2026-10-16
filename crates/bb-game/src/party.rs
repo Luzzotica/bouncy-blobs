@@ -208,7 +208,15 @@ fn enter(
     mut cam: ResMut<CameraDirector>,
     mut net: MessageWriter<crate::net::NetCommand>,
     session: Option<Res<crate::net::NetSession>>,
+    (own, mut next): (Option<Res<crate::ownership::Ownership>>, ResMut<NextState<crate::flow::AppState>>),
 ) {
+    // Party (hosting, local multiplayer) needs the full game; the menu
+    // shows it locked, so this only catches dev shortcuts.
+    if !crate::ownership::allowed(own.as_deref(), crate::ownership::Feature::Host) {
+        warn!("party: needs the full game");
+        next.set(crate::flow::AppState::Title);
+        return;
+    }
     // Party = phones welcome: open a room (unless we're already in one).
     if session.is_none() {
         net.write(crate::net::NetCommand::Host(crate::net::HostOptions::default()));

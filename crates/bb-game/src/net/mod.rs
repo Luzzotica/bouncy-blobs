@@ -221,10 +221,15 @@ fn handle_commands(
     mut game: Option<ResMut<Game>>,
     mut remote: ResMut<RemoteSlots>,
     mut devices: ResMut<LocalDevices>,
+    own: Option<Res<crate::ownership::Ownership>>,
 ) {
     let mut session = session;
     for cmd in cmds.read() {
         match cmd.clone() {
+            // Hosting needs the full game (joining never does).
+            NetCommand::Host(_) if !crate::ownership::allowed(own.as_deref(), crate::ownership::Feature::Host) => {
+                warn!("net: not hosting: hosting needs the full game");
+            }
             NetCommand::Host(opts) => {
                 leave(&mut commands, session.as_deref_mut(), game.as_deref_mut(), &mut remote);
                 commands.insert_resource(NetSession {
