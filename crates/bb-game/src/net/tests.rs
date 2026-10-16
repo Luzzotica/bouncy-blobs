@@ -95,7 +95,9 @@ fn phone_joins_customizes_drives_and_leaves() {
         assert_eq!(p.face, 7);
     }
     let after = texts(&phone);
-    assert!(after.iter().all(|t| !t.contains("#6ecf6e")), "own colour reported as taken: {after:?}");
+    assert!(after.iter().filter(|t| t.contains("customization_update")).all(|t| !t.contains("#6ecf6e")), "own colour reported as taken: {after:?}");
+    // ...while its seat carries it.
+    assert!(after.iter().any(|t| t == r##"{"t":"seat","label":"P2","color":"#6ecf6e"}"##), "{after:?}");
 
     // Stick right + up (screen y = -1), button held.
     let x0 = centre(&host, 1).unwrap().x;
@@ -193,4 +195,75 @@ fn guest_screen_mirrors_the_host_and_owns_its_blob() {
     }
     let d = prop(&host).distance(prop(&guest));
     assert!(d < 10.0, "prop disagrees by {d} px after settling");
+}
+
+/// The home room: a phone that joins from the menu waits (connected, no
+/// blob); Host seats it with `seat`/`layout`; its `0x50` frames drive the
+/// blob and a pop buzzes it; Leave unseats it but keeps it connected.
+#[test]
+fn home_room_phone_waits_then_seats_plays_and_stays() {
+    use bb_net::play::{Frame, button};
+    let mut host = host_app(vec![(0, "Pip".into(), 0xff5d73)]);
+    {
+        let mut s = host.world_mut().resource_mut::<NetSession>();
+        s.home = true;
+        s.seating = false;
+    }
+    let (host_end, phone) = loopback(PeerKind::Phone, "host", "phone-1", 0.0);
+    attach(&mut host, "phone-1", host_end, PeerKind::Phone);
+    host.update();
+    let greet = texts(&phone);
+    assert!(greet.iter().any(|t| t == r#"{"t":"layout","buttons":["EXPAND"]}"#), "{greet:?}");
+
+    phone.send(Channel::Reliable, Payload::Text(r#"{"t":"hello","name":"Ann","player":null,"profile":null}"#.into()));
+    phone.send(Channel::Reliable, Payload::Text(r##"{"type":"customization_update","value":{"color":"#6ecf6e","faceId":"cat"}}"##.into()));
+    host.update();
+    host.update();
+    {
+        let s = host.world().resource::<NetSession>();
+        assert!(s.roster.is_empty(), "not seated while only in the home room");
+        assert!(s.waiting.contains_key("phone-1"));
+        assert!(host.world().resource::<Game>().sim.player(1).is_none());
+    }
+
+    // Host (in the home room): the waiting phone is seated with its picks.
+    host.world_mut().write_message(super::NetCommand::Host(super::HostOptions::default()));
+    host.update();
+    host.update();
+    {
+        let s = host.world().resource::<NetSession>();
+        assert!(s.seating && s.home, "same home room, now hosting");
+        let e = s.roster.get(&1).expect("phone seated in slot 1");
+        assert_eq!((e.name.as_str(), e.color, e.face), ("Ann", 0x6ecf6e, 7));
+    }
+    let told = texts(&phone);
+    assert!(told.iter().any(|t| t == r##"{"t":"seat","label":"P2","color":"#6ecf6e"}"##), "{told:?}");
+
+    // Frames: right + up, EXPAND held.
+    let x0 = centre(&host, 1).unwrap().x;
+    for i in 0..60u16 {
+        let b = if i < 5 { button::PRIMARY } else { 0 };
+        let f = Frame { seq: i + 1, left: bb_sim::Vec2::new(1.0, -1.0), buttons: b, ..Default::default() };
+        phone.send(Channel::Unreliable, Payload::Binary(f.encode().to_vec()));
+        host.update();
+    }
+    let input = host.world().resource::<Inputs>().slots[1];
+    assert_eq!((input.stick.x, input.stick.y), (1.0, 1.0));
+    assert!(centre(&host, 1).unwrap().x - x0 > 100.0, "frames roll the blob right");
+
+    // A pop on the phone's blob buzzes the phone.
+    let _ = texts(&phone);
+    host.world_mut().write_message(crate::sim::SimMsg(bb_sim::SimEvent::Popped { who: bb_sim::Who::Player(1), pos: bb_sim::Vec2::ZERO, color: 0 }));
+    host.update();
+    assert!(texts(&phone).iter().any(|t| t.starts_with(r#"{"t":"rumble""#)));
+
+    // Leave: back to a plain home room; the phone stays, without a blob.
+    host.world_mut().write_message(super::NetCommand::Leave);
+    host.update();
+    host.update();
+    let s = host.world().resource::<NetSession>();
+    assert!(!s.seating && s.roster.is_empty());
+    assert!(s.peers.contains_key("phone-1") && s.waiting.contains_key("phone-1"), "phone stays connected");
+    assert!(host.world().resource::<Game>().sim.player(1).is_none());
+    assert!(!host.world().resource::<RemoteSlots>().0[1]);
 }

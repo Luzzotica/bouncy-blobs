@@ -42,6 +42,7 @@ pub enum Action {
     JoinFriend,
     Color,
     ToggleFullscreen,
+    ToggleStreamer,
     Quit,
 }
 
@@ -446,9 +447,15 @@ fn page_buttons(page: Page, progress: &StoryProgress) -> Vec<(String, Action, u3
         Page::Settings => vec![
             ("Blob Color".into(), Action::Color, progress.pip_color),
             ("Fullscreen".into(), Action::ToggleFullscreen, 0x5dd6ff),
+            (streamer_label(), Action::ToggleStreamer, 0xffc75f),
             ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
         ],
     }
+}
+
+/// Streamer mode hides room codes and QR codes (net/ui.rs).
+fn streamer_label() -> String {
+    format!("Streamer Mode  ·  {}", if crate::net::ui::streamer() { "On" } else { "Off" })
 }
 
 pub fn button_style(color: u32, focused: bool) -> Style {
@@ -687,6 +694,19 @@ fn interact(
                         } else {
                             bevy::window::WindowMode::Windowed
                         };
+                    }
+                }
+                Action::ToggleStreamer => {
+                    crate::net::ui::set_streamer(!crate::net::ui::streamer());
+                    let want = streamer_label();
+                    if let Some(body) = menu.buttons.iter().find(|b| b.action == Action::ToggleStreamer).map(|b| b.body) {
+                        for (e, l) in label_bodies.iter() {
+                            if l.body == body {
+                                if let Ok(mut t) = labels.get_mut(e) {
+                                    t.text = want.clone();
+                                }
+                            }
+                        }
                     }
                 }
                 Action::Quit => {

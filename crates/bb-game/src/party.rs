@@ -209,8 +209,9 @@ fn enter(
     mut net: MessageWriter<crate::net::NetCommand>,
     session: Option<Res<crate::net::NetSession>>,
 ) {
-    // Party = phones welcome: open a room (unless we're already in one).
-    if session.is_none() {
+    // Party = phones welcome: host (in the home room when there is one, so
+    // phones already in it get seated) unless we're already hosting.
+    if session.as_deref().is_none_or(|s| s.home && !s.seating) {
         net.write(crate::net::NetCommand::Host(crate::net::HostOptions::default()));
     }
     let panel = crate::net::ui::spawn_join_panel(&mut commands);
