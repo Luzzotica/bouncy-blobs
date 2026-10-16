@@ -507,6 +507,35 @@ pub fn kick_label(labels: &mut Query<&mut SoftText>, body: BodyId, strength: f32
     }
 }
 
+/// The y of a page's first button row.
+fn page_top(page: Page) -> f32 {
+    if page == Page::Main { 470.0 } else { 560.0 }
+}
+
+/// Where button `i` of a page sits: (centre, size).
+fn button_slot(page: Page, i: usize, action: &Action) -> (PVec2, PVec2) {
+    let left = -VIEW_HALF_W + 48.0;
+    let top = page_top(page);
+    let grid = page == Page::Chapters;
+    if grid && !matches!(action, Action::Goto(_)) {
+        let (col, row) = (i % 5, i / 5);
+        (PVec2::new(left + 60.0 + col as f32 * 140.0, top - row as f32 * 130.0), PVec2::new(116.0, 106.0))
+    } else if grid {
+        (PVec2::new(left + 150.0, top - 2.0 * 130.0 - 20.0), PVec2::new(300.0, 76.0))
+    } else {
+        let w = 400.0;
+        (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, BUTTON_H))
+    }
+}
+
+/// Everything a page shows that depends on progress and ownership: its
+/// tiles and its hint line.
+type PageKey = (Page, Vec<(String, Action, u32)>, Option<String>);
+
+fn page_key(page: Page, progress: &StoryProgress, own: &Ownership) -> PageKey {
+    (page, page_buttons(page, progress, own), page_hint(page, own))
+}
+
 fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
     let mut v = page_tiles(page, progress, own);
     for t in v.iter_mut() {
@@ -598,7 +627,7 @@ fn build_page(
     progress: Res<StoryProgress>,
     labels: Query<(Entity, &BodyLabel), With<MenuEntity>>,
     mut overrides: ResMut<StyleOverrides>,
-    mut built: Local<Option<(Page, (bool, crate::ownership::DemoScope))>>,
+    mut built: Local<Option<PageKey>>,
     (own, mut meshes, mut mats, hints, mut badge_mesh): (Res<Ownership>, ResMut<Assets<Mesh>>, ResMut<Assets<ColorMaterial>>, Query<Entity, With<MenuHint>>, Local<Option<BadgeMeshes>>),
 ) {
     // Coming back from a level, the old level's Game is still around for a
@@ -606,11 +635,15 @@ fn build_page(
     if game.sim.level.id != TITLE_ID {
         return;
     }
-    // Rebuild when the page changes, a new title world was loaded, or the
-    // gates moved (buying lifts the locks live).
-    let key = (menu.page, (own.full(), own.scope));
+    // Rebuild when the page changes, a new title world was loaded, or what
+    // the page shows changed (buying lifts the locks live). Only then: a
+    // rebuild drops every tile and rains the page in again, so an ownership
+    // or listing update that leaves this page as it was (the store's demo
+    // scope arriving a moment after the title settled) must not knock the
+    // buttons down mid-menu.
+    let key = page_key(menu.page, &progress, &own);
     let fresh = game.is_added();
-    if !fresh && *built == Some(key) {
+    if !fresh && built.as_ref() == Some(&key) {
         return;
     }
     *built = Some(key);
@@ -679,17 +712,9 @@ fn build_page(
     let items = page_buttons(menu.page, &progress, &own);
     let badge = badge_mesh.get_or_insert_with(|| BadgeMeshes::new(&mut meshes, &mut mats)).clone();
     let grid = menu.page == Page::Chapters;
-    let top = if menu.page == Page::Main { 470.0 } else { 560.0 };
+    let top = page_top(menu.page);
     for (i, (text, action, color)) in items.into_iter().enumerate() {
-        let (center, size) = if grid && !matches!(action, Action::Goto(_)) {
-            let (col, row) = (i % 5, i / 5);
-            (PVec2::new(left + 60.0 + col as f32 * 140.0, top - row as f32 * 130.0), PVec2::new(116.0, 106.0))
-        } else if grid {
-            (PVec2::new(left + 150.0, top - 2.0 * 130.0 - 20.0), PVec2::new(300.0, 76.0))
-        } else {
-            let w = 400.0;
-            (PVec2::new(left + w * 0.5, top - i as f32 * 100.0), PVec2::new(w, BUTTON_H))
-        };
+        let (center, size) = button_slot(menu.page, i, &action);
         let id = jelly_tile(&mut game, center, size, BodyTag::Ui, BUTTON_SPRING);
         overrides.0.insert(id, button_style(color, i == 0));
         let font = if grid && size.x < 200.0 { 54.0 } else { BUTTON_FONT };
@@ -1156,6 +1181,45 @@ mod tests {
         // Owners see what they've reached, all open.
         let full = actions(Page::Chapters, &done, Owned::Full);
         assert_eq!(full, vec![Action::Chapter(1), Action::Chapter(2), Action::Chapter(3), Action::Goto(Page::Play)]);
+    }
+
+    /// A listing / ownership update that leaves a page as it was must not
+    /// rebuild it (a rebuild knocks every tile down and rains the page in
+    /// again: the demo title's buttons tumbled across each other when the
+    /// store's demo scope arrived after the title had settled).
+    #[test]
+    fn title_only_rebuilds_when_what_it_shows_changes() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let mut a = own(Owned::Unknown);
+        let mut b = own(Owned::Demo);
+        a.scope.story_chapters = 2;
+        b.scope.story_chapters = 1;
+        assert_eq!(page_key(Page::Main, &p, &a), page_key(Page::Main, &p, &b));
+        assert_eq!(page_key(Page::Play, &p, &a), page_key(Page::Play, &p, &b));
+        // ...but it does when the page itself changes.
+        assert_ne!(page_key(Page::Chapters, &p, &a), page_key(Page::Chapters, &p, &b));
+        assert_ne!(page_key(Page::Main, &p, &b), page_key(Page::Main, &p, &own(Owned::Full)));
+    }
+
+    /// The title's buttons (4 in the demo, 3 owned) stack without touching,
+    /// inside the narrowest view the camera ever shows.
+    #[test]
+    fn title_buttons_stack_clear_of_each_other_and_on_screen() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        for o in [Owned::Demo, Owned::Full] {
+            for page in [Page::Main, Page::Play, Page::Party, Page::Settings] {
+                let rects: Vec<(PVec2, PVec2)> = page_buttons(page, &p, &own(o)).iter().enumerate().map(|(i, b)| button_slot(page, i, &b.1)).collect();
+                for (i, (c, s)) in rects.iter().enumerate() {
+                    let (lo, hi) = (*c - *s * 0.5, *c + *s * 0.5);
+                    assert!(lo.x >= -VIEW_HALF_W && hi.x <= VIEW_HALF_W, "{o:?} {page:?} #{i} off the side");
+                    assert!(lo.y >= VIEW_BOTTOM && hi.y <= VIEW_BOTTOM + crate::camera::VIEW_H, "{o:?} {page:?} #{i} off screen");
+                    for (c2, s2) in &rects[i + 1..] {
+                        let gap = (c.y - c2.y).abs() - (s.y + s2.y) * 0.5;
+                        assert!(gap >= 20.0, "{o:?} {page:?} #{i} touches the next one ({gap})");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
