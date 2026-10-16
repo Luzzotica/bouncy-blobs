@@ -696,7 +696,7 @@ fn build_page(
         let unlock = matches!(menu.page, Page::Unlock(_));
         let rows = menu.buttons.len() as f32;
         let (at, size, wrap) = if unlock {
-            (Vec2::new(260.0, 520.0), 40.0, 760.0)
+            (Vec2::new(260.0, 520.0), 40.0, 640.0)
         } else if grid {
             (Vec2::new(left + 330.0, top - 2.0 * 130.0 - 110.0), 28.0, 640.0)
         } else {
