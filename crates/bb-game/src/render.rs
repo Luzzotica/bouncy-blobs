@@ -246,6 +246,20 @@ pub struct MeshBuf {
     pub pos: Vec<[f32; 3]>,
     pub col: Vec<[f32; 4]>,
     pub idx: Vec<u32>,
+    /// Tests: every open strip drawn, so they can check how lines end.
+    #[cfg(test)]
+    pub strips: Vec<Strip>,
+}
+
+/// Tests: one open strip in a [`MeshBuf`] — `pairs` cross-sections of two
+/// vertices each from vertex `first`, and which ends were declared to run
+/// into something solid (so they may stop at full width).
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub struct Strip {
+    pub first: u32,
+    pub pairs: u32,
+    pub held: (bool, bool),
 }
 
 impl MeshBuf {
@@ -258,6 +272,15 @@ impl MeshBuf {
     pub fn tri(&mut self, a: u32, b: u32, c: u32) {
         self.idx.extend_from_slice(&[a, b, c]);
     }
+
+    /// Tests: note the open strip whose cross-sections start at `first`.
+    #[cfg(test)]
+    fn log_strip(&mut self, first: u32, held: (bool, bool)) {
+        let pairs = (self.pos.len() as u32 - first) / 2;
+        self.strips.push(Strip { first, pairs, held });
+    }
+    #[cfg(not(test))]
+    fn log_strip(&mut self, _first: u32, _held: (bool, bool)) {}
 
     /// Filled convex-ish polygon fanned from its centroid.
     pub fn fan(&mut self, pts: &[PVec2], centre: PVec2, z: f32, inner: [f32; 4], outer: [f32; 4]) {
@@ -318,6 +341,7 @@ impl MeshBuf {
             self.vert(pts[i] + nrm, z, c);
             self.vert(pts[i] - nrm, z, c);
         }
+        self.log_strip(start, (false, false));
         for i in 0..(n - 1) as u32 {
             let (a, b, c2, d) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
             self.tri(a, b, d);
@@ -445,6 +469,7 @@ impl MeshBuf {
             self.vert(pts[i] - nrm[i] * a, z, ca[i]);
             self.vert(pts[i] - nrm[i] * b, z, cb[i]);
         }
+        self.log_strip(start, (false, false));
         for i in 0..(n - 1) as u32 {
             let (p, q, r, s) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
             self.tri(p, q, s);
@@ -495,6 +520,7 @@ impl MeshBuf {
             self.vert(pts[i] + nr, z, cols[i]);
             self.vert(pts[i] - nr, z, cols[i]);
         }
+        self.log_strip(start, (cap_start, cap_end));
         for i in 0..(n - 1) as u32 {
             let (a, b, c, d) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
             self.tri(a, b, d);
@@ -564,66 +590,128 @@ impl MeshBuf {
         }
         let col = |i: usize| cols[if cols.len() == n { i } else { 0 }];
         let wid = |i: usize| widths[if widths.len() == n { i } else { 0 }];
-        let mut s = vec![0.0f32; n];
-        for i in 1..n {
-            s[i] = s[i - 1] + pts[i].distance(pts[i - 1]);
-        }
-        let total = s[n - 1];
-        if total < 1e-4 {
-            return;
-        }
-        let share = if ends == Ends::Both { 0.45 } else { 0.9 };
-        let tl = taper_len.min(total * share).max(1e-3);
-        let (t0, t1) = (if ends.start() { tl } else { 0.0 }, if ends.end() { total - tl } else { total });
-        // Resample: finer steps inside the tapers, the line as-is between.
-        let step = tl / 6.0;
-        let mut rp: Vec<PVec2> = Vec::with_capacity(n + 16);
-        let mut rs: Vec<f32> = Vec::with_capacity(n + 16);
-        let mut rw: Vec<f32> = Vec::with_capacity(n + 16);
-        let mut rc: Vec<[f32; 4]> = Vec::with_capacity(n + 16);
-        for i in 0..n - 1 {
-            let len = s[i + 1] - s[i];
-            let in_taper = s[i] < t0 || s[i + 1] > t1;
-            let sub = if in_taper { ((len / step).ceil() as usize).clamp(1, 16) } else { 1 };
-            let (c0, c1) = (col(i), col(i + 1));
-            for k in 0..sub {
-                let f = k as f32 / sub as f32;
-                rp.push(pts[i].lerp(pts[i + 1], f));
-                rs.push(s[i] + len * f);
-                rw.push(wid(i) + (wid(i + 1) - wid(i)) * f);
-                rc.push([0, 1, 2, 3].map(|c| c0[c] + (c1[c] - c0[c]) * f));
-            }
-        }
-        rp.push(pts[n - 1]);
-        rs.push(total);
-        rw.push(wid(n - 1));
-        rc.push(col(n - 1));
+        let Some(samples) = taper_samples(pts, taper_len, ends) else { return };
+        let rp: Vec<PVec2> = samples.iter().map(|q| q.at(pts)).collect();
         let m = rp.len();
         let start = self.pos.len() as u32;
-        for i in 0..m {
-            let mut e = 1.0f32;
-            if ends.start() {
-                e = e.min(rs[i] / tl);
-            }
-            if ends.end() {
-                e = e.min((total - rs[i]) / tl);
-            }
-            let a = smooth01(e);
+        for (i, q) in samples.iter().enumerate() {
+            let a = smooth01(q.e);
             // Width narrows to a point a touch slower than the light fades.
             let wf = a.sqrt();
             let d = rp[(i + 1).min(m - 1)] - rp[i.saturating_sub(1)];
-            let nr = PVec2::new(-d.y, d.x).normalize_or_zero() * rw[i] * wf * 0.5;
-            let mut c = rc[i];
+            let nr = PVec2::new(-d.y, d.x).normalize_or_zero() * q.lerp(wid(q.i), wid(q.i + 1)) * wf * 0.5;
+            let mut c = q.lerp4(col(q.i), col(q.i + 1));
             c[3] *= a;
             self.vert(rp[i] + nr, z, c);
             self.vert(rp[i] - nr, z, c);
         }
-        for i in 0..(m - 1) as u32 {
+        self.log_strip(start, (!ends.start(), !ends.end()));
+        self.strip_tris(start, m);
+    }
+
+    /// [`MeshBuf::band`] that tapers like [`MeshBuf::stroke_taper`]: over
+    /// `taper_len` at each tapered end its alpha eases to nothing and both
+    /// offsets close in on the line, so a glow hugging an outline (goop on a
+    /// rock's flank) thins to a point instead of stopping in a flat edge.
+    #[allow(clippy::too_many_arguments)]
+    pub fn band_taper(&mut self, pts: &[PVec2], nrm: &[PVec2], a: f32, b: f32, z: f32, ca: &[[f32; 4]], cb: &[[f32; 4]], taper_len: f32, ends: Ends) {
+        let n = pts.len();
+        if n < 2 || nrm.len() != n || ca.len() != n || cb.len() != n {
+            return;
+        }
+        let Some(samples) = taper_samples(pts, taper_len, ends) else { return };
+        let start = self.pos.len() as u32;
+        for q in &samples {
+            let k = smooth01(q.e);
+            let wf = k.sqrt();
+            let p = q.at(pts);
+            let nr = nrm[q.i].lerp(nrm[q.i + 1], q.f).normalize_or(nrm[q.i]);
+            let (mut c0, mut c1) = (q.lerp4(ca[q.i], ca[q.i + 1]), q.lerp4(cb[q.i], cb[q.i + 1]));
+            c0[3] *= k;
+            c1[3] *= k;
+            self.vert(p - nr * a * wf, z, c0);
+            self.vert(p - nr * b * wf, z, c1);
+        }
+        self.log_strip(start, (!ends.start(), !ends.end()));
+        self.strip_tris(start, samples.len());
+    }
+
+    /// Two triangles per step of an open strip of `m` vertex pairs.
+    fn strip_tris(&mut self, start: u32, m: usize) {
+        for i in 0..m.saturating_sub(1) as u32 {
             let (a, b, c, d) = (start + i * 2, start + i * 2 + 1, start + i * 2 + 2, start + i * 2 + 3);
             self.tri(a, b, d);
             self.tri(a, d, c);
         }
     }
+}
+
+/// One sample along an open line: `f` of the way along segment `i`, with
+/// `e` 0..1 how far it is out of the nearest tapered end (1 = untapered).
+#[derive(Clone, Copy)]
+struct TaperSample {
+    i: usize,
+    f: f32,
+    e: f32,
+}
+
+impl TaperSample {
+    fn at(&self, pts: &[PVec2]) -> PVec2 {
+        pts[self.i].lerp(pts[self.i + 1], self.f)
+    }
+    fn lerp(&self, a: f32, b: f32) -> f32 {
+        a + (b - a) * self.f
+    }
+    fn lerp4(&self, a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+        [0, 1, 2, 3].map(|c| a[c] + (b[c] - a[c]) * self.f)
+    }
+}
+
+/// Where an open line is sampled for a taper: every point, plus finer
+/// steps inside the tapers (`taper_len` capped to a share of the line).
+/// Zero-length steps (repeated points) are dropped so the line's direction
+/// is defined everywhere. `None` for a line with no length.
+fn taper_samples(pts: &[PVec2], taper_len: f32, ends: Ends) -> Option<Vec<TaperSample>> {
+    let n = pts.len();
+    let mut s = vec![0.0f32; n];
+    for i in 1..n {
+        s[i] = s[i - 1] + pts[i].distance(pts[i - 1]);
+    }
+    let total = s[n - 1];
+    if total < 1e-4 {
+        return None;
+    }
+    let share = if ends == Ends::Both { 0.45 } else { 0.9 };
+    let tl = taper_len.min(total * share).max(1e-3);
+    let (t0, t1) = (if ends.start() { tl } else { 0.0 }, if ends.end() { total - tl } else { total });
+    let e_at = |sv: f32| {
+        let mut e = 1.0f32;
+        if ends.start() {
+            e = e.min(sv / tl);
+        }
+        if ends.end() {
+            e = e.min((total - sv) / tl);
+        }
+        e.clamp(0.0, 1.0)
+    };
+    let step = tl / 6.0;
+    let mut out = Vec::with_capacity(n + 16);
+    for i in 0..n - 1 {
+        let len = s[i + 1] - s[i];
+        if len < 1e-5 {
+            continue;
+        }
+        let in_taper = s[i] < t0 || s[i + 1] > t1;
+        let sub = if in_taper { ((len / step).ceil() as usize).clamp(1, 16) } else { 1 };
+        for k in 0..sub {
+            let f = k as f32 / sub as f32;
+            out.push(TaperSample { i, f, e: e_at(s[i] + len * f) });
+        }
+    }
+    // The last point, as the end of the last segment with any length.
+    let last = (0..n - 1).rev().find(|i| s[i + 1] - s[*i] >= 1e-5)?;
+    out.push(TaperSample { i: last, f: 1.0, e: e_at(total) });
+    Some(out)
 }
 
 /// An open polyline as a smooth curve through its points (Catmull-Rom,

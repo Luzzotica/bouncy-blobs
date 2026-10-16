@@ -359,7 +359,6 @@ fn update_backdrop(
             let rock = mix(Color::BLACK, hue, layer.k);
             // Roots get a touch darker so edges settle into the vignette.
             let root = mix(Color::BLACK, hue, layer.k * 0.75);
-            let ext = 40.0;
             let pulses = layer_pulses(l, first, last, t, &beats);
             let dr = Dress { theme: &theme, layer, l, u, t, zz: zz + 0.0015, rock, half: PVec2::new(w * 0.5, h * 0.5) * u, off_x, pulses: &pulses };
             for col in first..=last {
@@ -369,32 +368,26 @@ fn update_backdrop(
                     let s = i as f32 / (n.max(2) - 1) as f32;
                     lin(mix(root, rock, (s * 2.5).min(1.0)))
                 };
-                if let Some(s) = &cc.column {
-                    let cx = base_x + cc.cx_top;
-                    let left: Vec<PVec2> = s.left.iter().map(|p| to(cx + p.x, -ext + p.y * (h + 2.0 * ext))).collect();
-                    let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, -ext + p.y * (h + 2.0 * ext))).collect();
+                for (part, left, right) in col_rock(cc, base_x, h, &to) {
                     let n = left.len();
-                    fill_strip(&mut buf, &left, &right, zz, |i| {
-                        let e = (i as f32 / (n - 1) as f32 * 2.0 - 1.0).abs();
-                        lin(mix(rock, root, (e - 0.6).max(0.0) * 2.0))
-                    });
-                    dress(&mut glows, &dr, &left, &right, Part::Column, (col + cs.off) * 3, col as f32);
-                }
-                if let Some((s, len)) = &cc.top {
-                    let cx = base_x + cc.cx_top;
-                    let left: Vec<PVec2> = s.left.iter().map(|p| to(cx + p.x, -ext + p.y * (len + ext))).collect();
-                    let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, -ext + p.y * (len + ext))).collect();
-                    let n = left.len();
-                    fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    dress(&mut glows, &dr, &left, &right, Part::Top, (col + cs.off) * 3 + 1, col as f32);
-                }
-                if let Some((s, len, cx_off)) = &cc.bot {
-                    let cx = base_x + cx_off;
-                    let left: Vec<PVec2> = s.left.iter().map(|p| to(cx + p.x, h + ext - p.y * (len + ext))).collect();
-                    let right: Vec<PVec2> = s.right.iter().map(|p| to(cx + p.x, h + ext - p.y * (len + ext))).collect();
-                    let n = left.len();
-                    fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
-                    dress(&mut glows, &dr, &left, &right, Part::Bot, (col + cs.off) * 3 + 2, col as f32 + 0.5);
+                    let (k, q) = match part {
+                        Part::Column => {
+                            fill_strip(&mut buf, &left, &right, zz, |i| {
+                                let e = (i as f32 / (n - 1) as f32 * 2.0 - 1.0).abs();
+                                lin(mix(rock, root, (e - 0.6).max(0.0) * 2.0))
+                            });
+                            (0, 0.0)
+                        }
+                        Part::Top => {
+                            fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
+                            (1, 0.0)
+                        }
+                        Part::Bot => {
+                            fill_strip(&mut buf, &left, &right, zz, |i| grad(i, n));
+                            (2, 0.5)
+                        }
+                    };
+                    dress(&mut glows, &dr, &left, &right, part, (col + cs.off) * 3 + k, col as f32 + q);
                 }
             }
             // This layer's glows sit just in front of it.
@@ -423,6 +416,38 @@ fn update_backdrop(
             buf.write(&mut m);
         }
     }
+}
+
+/// A column's rock mapped to local space through `to` (screen px ->
+/// local): its column, stalactite and stalagmite as (part, left, right),
+/// each running root to tip. `h` is the screen height; roots run a little
+/// past the screen edge.
+fn col_rock(cc: &Col, base_x: f32, h: f32, to: &impl Fn(f32, f32) -> PVec2) -> Vec<(Part, Vec<PVec2>, Vec<PVec2>)> {
+    let ext = 40.0;
+    let map = |s: &Shape, f: &dyn Fn(PVec2) -> (f32, f32)| -> (Vec<PVec2>, Vec<PVec2>) {
+        let m = |p: &PVec2| {
+            let (x, y) = f(*p);
+            to(x, y)
+        };
+        (s.left.iter().map(m).collect(), s.right.iter().map(m).collect())
+    };
+    let mut out = Vec::new();
+    if let Some(s) = &cc.column {
+        let cx = base_x + cc.cx_top;
+        let (l, r) = map(s, &|p| (cx + p.x, -ext + p.y * (h + 2.0 * ext)));
+        out.push((Part::Column, l, r));
+    }
+    if let Some((s, len)) = &cc.top {
+        let cx = base_x + cc.cx_top;
+        let (l, r) = map(s, &|p| (cx + p.x, -ext + p.y * (len + ext)));
+        out.push((Part::Top, l, r));
+    }
+    if let Some((s, len, cx_off)) = &cc.bot {
+        let cx = base_x + cx_off;
+        let (l, r) = map(s, &|p| (cx + p.x, h + ext - p.y * (len + ext)));
+        out.push((Part::Bot, l, r));
+    }
+    out
 }
 
 fn append(dst: &mut MeshBuf, src: MeshBuf) {
@@ -533,7 +558,7 @@ impl Net {
 }
 
 /// Which kind of rock a piece of life sits on.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Part {
     /// Floor-to-ceiling column; index 0 at the top.
     Column,
@@ -869,9 +894,12 @@ fn goop(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], nrm: &[PVec2], thin: f32, p
     let clear: Vec<[f32; 4]> = (0..m).map(|i| la(cols[i], 0.0)).collect();
     // Never deeper than the rock is thick, or a thin tip fills solid.
     let depth = ((4.0 + 5.0 * hash2(seed, 3)) * u).min(thin * 0.4);
-    buf.band(&p2, &n2, 0.0, depth, d.zz, &film(0.42), &clear);
-    buf.band(&p2, &n2, 0.0, (1.4 * u).min(depth), d.zz + 0.0001, &film(0.6), &film(0.25));
-    buf.band(&p2, &n2, 0.0, -14.0 * u, d.zz - 0.0001, &film(0.14), &clear);
+    // The film, its bright edge and the spill all thin to a point at both
+    // ends (a flat-cut band read as a blunt bar of light up the flank).
+    let tl = 40.0 * u;
+    buf.band_taper(&p2, &n2, 0.0, depth, d.zz, &film(0.42), &clear, tl, Ends::Both);
+    buf.band_taper(&p2, &n2, 0.0, (1.4 * u).min(depth), d.zz + 0.0001, &film(0.6), &film(0.25), tl, Ends::Both);
+    buf.band_taper(&p2, &n2, 0.0, -14.0 * u, d.zz - 0.0001, &film(0.14), &clear, tl, Ends::Both);
     let lumps = 1 + (hash2(seed, 4) * 3.0) as usize;
     for k in 0..lumps {
         let i = 1 + ((hash2(seed + k as i32, 5) * (m - 2) as f32) as usize).min(m - 3);
@@ -885,7 +913,8 @@ fn goop(buf: &mut MeshBuf, d: &Dress, pts: &[PVec2], nrm: &[PVec2], thin: f32, p
         if n2[i].y < -0.25 || (part == Part::Top && hash2(seed + k as i32, 7) < 0.5) {
             let s = (d.t * 0.25 + hash2(seed + k as i32, 8) * 3.0).fract();
             let len = (4.0 + 12.0 * s) * u;
-            buf.stroke(&[p, p - PVec2::new(0.0, len)], 1.0 * u, d.zz + 0.0001, la(cols[i], 0.35 * ai));
+            // Thins out of the lump; the drop covers its lower end.
+            buf.stroke_taper(&[p, p - PVec2::new(0.0, len)], 1.0 * u, d.zz + 0.0001, &[la(cols[i], 0.35 * ai)], len * 0.5, Ends::Start);
             buf.ellipse(p - PVec2::new(0.0, len), PVec2::new(1.3, 1.7) * u, 0.0, d.zz + 0.0002, la(lighten(cols[i], 0.45), 0.7 * ai));
         }
     }
@@ -942,11 +971,12 @@ fn threads(buf: &mut MeshBuf, d: &Dress, tip: PVec2, seed: i32, lit: &dyn Fn(f32
         }
         let ss = arc_len(&pts, u);
         let g: Vec<f32> = ss.iter().map(|s| d.layer.goop * lit(*s)).collect();
-        // Silk: physical, never gone.
-        buf.stroke(&pts, 0.9 * u, d.zz, la(silk, 0.55));
+        // Silk: physical, never gone. It and its light thin out under the
+        // knot and the larva rather than stopping square.
+        buf.stroke_taper(&pts, 0.9 * u, d.zz, &[la(silk, 0.55)], 3.0 * u, Ends::Both);
         if g.iter().any(|x| *x > 0.004) {
             let cs: Vec<[f32; 4]> = (0..pts.len()).map(|i| la(lighten(col, 0.3), 0.45 * g[i])).collect();
-            buf.stroke_cols(&pts, 1.1 * u, d.zz + 0.00005, &cs);
+            buf.stroke_taper(&pts, 1.1 * u, d.zz + 0.00005, &cs, 3.0 * u, Ends::Both);
             for i in (2..pts.len()).step_by(2) {
                 buf.ellipse(pts[i], PVec2::splat(1.1 * u), 0.0, d.zz + 0.0001, la(lighten(col, 0.5), 0.6 * g[i]));
             }
@@ -1309,4 +1339,80 @@ fn taper(buf: &mut MeshBuf, pts: &[PVec2], widths: &[f32], zz: f32, col: [f32; 4
         buf.tri(a, d, c);
     }
     buf.ellipse(pts[n - 1], PVec2::splat((widths[n - 1] + extra) * 0.5), 0.0, zz, col);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every glowing line the backdrop dresses its rock with — veins and
+    /// branches, goop film and spill, drips, silk, mushroom threads and
+    /// gills — thins to nothing at each free end, in every dark level's own
+    /// cave, lit or not. An end may stop at full width only where it was
+    /// declared to run into something solid, or where it is opaque rock
+    /// (a mushroom stalk), not light.
+    #[test]
+    fn every_backdrop_glow_line_tapers_at_its_free_ends() {
+        let mut levels: Vec<(String, bb_level::Theme)> = bb_level::campaign::campaign().into_iter().map(|l| (l.id, l.theme)).collect();
+        levels.extend(crate::party_assets::PARTY_LEVELS.iter().filter_map(|b| crate::party_assets::party_level(b.id)).map(|l| (l.id, l.theme)));
+        let (w, h) = (REF_H * 16.0 / 9.0, REF_H);
+        let to = |x: f32, y: f32| PVec2::new(x - w * 0.5, h * 0.5 - y);
+        let (mut strips, mut levels_seen, mut bad) = (0usize, 0usize, Vec::new());
+        for (id, th) in &levels {
+            let theme = crate::palette::theme(*th);
+            if !theme.dark {
+                continue;
+            }
+            levels_seen += 1;
+            let cs = CaveSeed::for_level(id);
+            let hue = cave_hue(&theme);
+            for (l, layer) in LAYERS.iter().enumerate() {
+                let rock = mix(Color::BLACK, hue, layer.k);
+                // A few screens of scroll, each at a few moments of a pulse
+                // sweeping the whole layer (so every light is seen lit).
+                for screen in 0..4 {
+                    let off_x = screen as f32 * w;
+                    let first = ((off_x - layer.width * 1.5) / layer.spacing).floor() as i32;
+                    let last = ((off_x + w + layer.width * 1.5) / layer.spacing).ceil() as i32;
+                    let pulses: Vec<Pulse> = (first..=last).map(|q| Pulse { q: q as f32, t0: 0.0, amp: 1.0 }).collect();
+                    for t in [0.0, 0.8, 1.6, 2.6, 4.0] {
+                        let dr = Dress { theme: &theme, layer, l, u: 1.0, t, zz: 0.0, rock, half: PVec2::new(w * 0.5, h * 0.5), off_x, pulses: &pulses };
+                        for col in first..=last {
+                            let cc = build_col(l, col, &cs);
+                            let base_x = col as f32 * layer.spacing - off_x;
+                            for (k, (part, left, right)) in col_rock(&cc, base_x, h, &to).into_iter().enumerate() {
+                                let mut buf = MeshBuf::default();
+                                dress(&mut buf, &dr, &left, &right, part, (col + cs.off) * 3 + k as i32, col as f32);
+                                for s in &buf.strips {
+                                    strips += 1;
+                                    let alpha = |v: u32| buf.col[v as usize][3];
+                                    let peak = (s.first..s.first + s.pairs * 2).map(alpha).fold(0.0, f32::max);
+                                    if peak >= 0.9 || peak < 0.01 || s.pairs < 2 {
+                                        continue;
+                                    }
+                                    let end_of = |pair: u32| {
+                                        let (a, b) = (s.first + pair * 2, s.first + pair * 2 + 1);
+                                        let (pa, pb) = (buf.pos[a as usize], buf.pos[b as usize]);
+                                        let half_w = PVec2::new(pa[0] - pb[0], pa[1] - pb[1]).length() * 0.5;
+                                        (half_w, alpha(a).max(alpha(b)))
+                                    };
+                                    for (held, pair, which) in [(s.held.0, 0, "start"), (s.held.1, s.pairs - 1, "end")] {
+                                        // A fade alone is not a taper: a full-width end
+                                        // fading over one step still reads as a flat cut.
+                                        let (half_w, a) = end_of(pair);
+                                        if !held && half_w > 0.05 {
+                                            let mid = end_of(s.pairs / 2).0 * 2.0;
+                                            bad.push(format!("{id} layer {l} col {col} {part:?} t {t}: {which} of a {}-pair strip ({mid:.1} px wide mid-way, peak alpha {peak:.2}) is {:.2} px wide at alpha {a:.2}", s.pairs, half_w * 2.0));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(levels_seen >= 10 && strips > 10_000, "the sweep reached {levels_seen} levels, {strips} strips");
+        assert!(bad.is_empty(), "{} blunt glow ends, e.g.\n{}", bad.len(), bad.iter().take(25).cloned().collect::<Vec<_>>().join("\n"));
+    }
 }
