@@ -167,11 +167,14 @@ fn lead_of(v: &Option<Value>) -> Vec2 {
 /// The view (AutoMin min_width, min_height) a key asks for, if any. A
 /// subject width sets only the width, so every aspect shows Pip at that
 /// fraction of its own frame width.
+/// With both, `subject_width` sets the width and `view[1]` is a height
+/// floor (so a wide frame still shows enough height for a drop).
 fn key_view(k: &CamKey, pip_d: f32) -> Option<Vec2> {
-    if let Some([w, h]) = k.view {
-        return Some(Vec2::new(w, h));
+    match (k.subject_width, k.view) {
+        (Some(f), v) => Some(Vec2::new(pip_d / f, v.map_or(1.0, |v| v[1].max(1.0)))),
+        (None, Some([w, h])) => Some(Vec2::new(w.max(1.0), h.max(1.0))),
+        (None, None) => None,
     }
-    k.subject_width.map(|f| Vec2::new(pip_d / f, 1.0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -237,12 +240,7 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
             None => st.frozen.filter(|f| f.0 == ki).map_or(pos0, |f| f.1) + off,
         },
     };
-    let target_view = key_view(key, pip_d).map(|v| {
-        // A width-only view keeps the old height floor so a 16:9 frame isn't
-        // forced taller than asked.
-        if key.view.is_none() { Vec2::new(v.x, 1.0) } else { v }
-    });
-    let target_view = target_view.unwrap_or(view0);
+    let target_view = key_view(key, pip_d).unwrap_or(view0);
     let u = match key.by {
         Some(by) if by > 0.0 => eased(key.ease.as_deref(), (t - key.t) / by),
         _ => 1.0,

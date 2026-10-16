@@ -12,9 +12,9 @@
   "_pre_roll": "Seconds of game time before frame 1, so Pip is already falling on frame 1.",
   "pre_roll": 0.33,
 
-  "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in EVERY output (9:16 and 16:9 each frame to their own width).",
+  "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in every output; view [0, 420] adds a height floor so the wide 16:9 frame still shows the whole drop (there Pip comes out smaller).",
   "camera": [
-    { "t": 0, "do": "frame", "at": [0, 180], "subject_width": 0.175 }
+    { "t": 0, "do": "frame", "at": [0, 190], "subject_width": 0.175, "view": [0, 420] }
   ],
   "length": { "seconds": 11 },
 

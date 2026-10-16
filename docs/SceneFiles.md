@@ -78,6 +78,7 @@ How much a key shows:
 
 - `"subject_width": 0.18`: Pip is 18% of the frame width in every output. A 9:16 and a 16:9 twin each frame to their own width, so the twin's Pip isn't tiny.
 - `"view": [w, h]`: at least this much world in both directions; the longer side of each output's aspect grows to fit.
+- Both together: `subject_width` sets the width and `view[1]` is a height floor (`"view": [0, 420]`). A wide frame still shows a whole drop, and Pip comes out smaller there.
 
 ### capture_only: the changes a shot may make
 
