@@ -12,11 +12,11 @@
   "events": [ { "t": 0, "do": "respawn", "who": "pip", "at": [0, 150] } ],
 
   "_pre_roll": "Seconds of game time before frame 1, so Pip is already falling on frame 1.",
-  "pre_roll": 0.33,
+  "pre_roll": 0.15,
 
   "_camera": "Static framing. subject_width: Pip is 17.5% of the frame width in every output; each output size frames itself (a minimum view would go on an output as outputs[].view).",
   "camera": [
-    { "t": 0, "do": "frame", "at": [0, 88], "subject_width": 0.175 }
+    { "t": 0, "do": "frame", "at": [0, 140], "subject_width": 0.175 }
   ],
   "length": { "seconds": 11 },
 
@@ -30,7 +30,8 @@
   "check": { "band_x": [0.05, 0.95], "objects": ["pip", "word:POP!"], "min_subject_width": 0.12, "frame1_moving": true },
   "outputs": [
     { "kind": "video", "size": "1080x1920", "fps": 60 },
-    { "kind": "video", "size": "1920x1080", "fps": 60 },
+    { "_view": "The POP! word floats up about 200 px; a 16:9 frame at Pip's 17.5% is only ~206 px tall, so this output opts into a 330 px height floor (Pip is ~12% of its width).",
+      "kind": "video", "size": "1920x1080", "fps": 60, "view": [0, 330] },
     { "kind": "still", "size": "1080x1920", "at": "event:pop#3" }
   ],
   "audio": { "music_stem": true, "sfx_families": ["pop", "land", "ui"], "mix": true }

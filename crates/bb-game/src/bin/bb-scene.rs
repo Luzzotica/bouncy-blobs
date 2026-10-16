@@ -661,7 +661,10 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
             notes += "\n";
         }
     }
-    let _ = std::fs::remove_dir_all(&tmp);
+    // BB_SCENE_KEEP=1 keeps the per-run check files (debugging).
+    if std::env::var_os("BB_SCENE_KEEP").is_none() {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
     if !preview {
         let np = out.join("NOTES.md");
         let mut all = std::fs::read_to_string(&np).unwrap_or_default();

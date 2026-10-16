@@ -1,0 +1,37 @@
+{
+  "_comment": "Cast beyond Pip: Pip, a blue blob and two Kids Mode shape friends hop on the first floor of Fungus Caverns among the glowing mushrooms, each driven by its own player inputs. Two seeds = two takes, varied by vary.",
+  "scene": "bb-cast-friends",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [1, 2],
+  "stage": { "kind": "chapter", "id": "fungus-caverns" },
+  "cast": [
+    { "id": "pip", "kind": "blob", "color": "pink", "spawn": [240, 40] },
+    { "id": "bluey", "kind": "blob", "color": "blue", "spawn": [120, 40] },
+    { "id": "star", "kind": "blob", "shape": "star", "color": "yellow", "spawn": [360, 40] },
+    { "id": "square", "kind": "blob", "shape": "square", "color": "teal", "spawn": [0, 40] }
+  ],
+  "pre_roll": 0.6,
+  "inputs": [
+    { "t": -0.3, "who": "pip", "do": "jump", "hold": 0.12 },
+    { "t": 0.4, "who": "bluey", "do": "jump", "hold": 0.15 },
+    { "t": 0.8, "who": "star", "do": "jump", "hold": 0.12 },
+    { "t": 1.2, "who": "square", "do": "squish", "hold": 0.4 },
+    { "t": 1.6, "who": "pip", "do": "jump", "hold": 0.15 },
+    { "t": 2.0, "who": "bluey", "do": "jump", "hold": 0.15 },
+    { "t": 2.4, "who": "star", "do": "jump", "hold": 0.15 },
+    { "t": 3.0, "who": "square", "do": "jump", "hold": 0.15 },
+    { "t": 3.4, "who": "pip", "do": "jump", "hold": 0.12 }
+  ],
+  "_camera": "Follow the whole group: who lists every member, and subject_width keeps the group at 50% of each frame's width as they spread out. The 16:9 outputs add a 560 px height floor (outputs[].view) so a hop fits.",
+  "camera": [ { "t": 0, "do": "follow", "who": ["pip", "bluey", "star", "square"], "subject_width": 0.5, "lag": 0.08, "offset": [0, 80] } ],
+  "length": { "seconds": 5 },
+  "capture_only": [],
+  "vary": { "input_jitter": 0.08 },
+  "check": { "band_x": [0.05, 0.95], "objects": ["pip", "bluey", "star", "square"], "min_subject_width": 0.0 },
+  "outputs": [
+    { "kind": "video", "size": "1080x1920", "fps": 60 },
+    { "kind": "video", "size": "1920x1080", "fps": 60, "view": [0, 560] },
+    { "kind": "still", "size": "1920x1080", "at": "event:jump#3", "view": [0, 560] }
+  ]
+}

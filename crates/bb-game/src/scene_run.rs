@@ -238,8 +238,8 @@ fn who_list(v: &Option<Value>) -> Vec<String> {
     }
 }
 
-/// Centre, velocity and width (world) of a group of cast members.
-fn group(game: &Game, s: &Scene, who: &[String]) -> Option<(Vec2, Vec2, f32)> {
+/// Centre, velocity and size (world) of a group of cast members.
+fn group(game: &Game, s: &Scene, who: &[String]) -> Option<(Vec2, Vec2, Vec2)> {
     let mut lo = Vec2::splat(f32::MAX);
     let mut hi = Vec2::splat(f32::MIN);
     let mut vel = Vec2::ZERO;
@@ -256,7 +256,10 @@ fn group(game: &Game, s: &Scene, who: &[String]) -> Option<(Vec2, Vec2, f32)> {
         vel += Vec2::new(v.x, v.y);
         n += 1.0;
     }
-    (n > 0.0).then(|| ((lo + hi) * 0.5, vel / n, (hi.x - lo.x).max(2.0 * bb_sim::control::tune::RADIUS)))
+    // Width of the whole group's boxes (outline points plus the skin).
+    let r = 2.0;
+    let d = 2.0 * bb_sim::control::tune::RADIUS;
+    (n > 0.0).then(|| ((lo + hi) * 0.5, vel / n, Vec2::new((hi.x - lo.x + 2.0 * r).max(d), (hi.y - lo.y + 2.0 * r).max(d))))
 }
 
 fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneState>, mut cam: Query<(&mut Transform, &mut Projection), With<MainCamera>>) {
@@ -290,7 +293,7 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
         if w.is_empty() { s.members().first().map(|c| vec![c.id.clone()]).unwrap_or_default() } else { w }
     };
     let subject = game.as_ref().and_then(|g| group(g, s, &who));
-    let subj_w = subject.map_or(2.0 * bb_sim::control::tune::RADIUS, |g| g.2);
+    let subj = subject.map_or(Vec2::splat(2.0 * bb_sim::control::tune::RADIUS), |g| g.2);
     if let Some((p, v, _)) = subject {
         let fk = (key.r#do == "follow").then_some(key);
         let lead = fk.map_or(Vec2::ZERO, |k| lead_of(&k.lead));
@@ -332,7 +335,9 @@ fn scene_camera(game: Option<Res<Game>>, time: Res<Time>, mut st: ResMut<SceneSt
     };
     // Each output frames itself: subject_width sets only the width.
     let target_view = match (key.subject_width, key.view) {
-        (Some(f), _) => Vec2::new(subj_w / f, 1.0),
+        // The group's height gets the same share of the frame height, so a
+        // spread-out group (one up on a cap, one below) stays in too.
+        (Some(f), _) => Vec2::new(subj.x / f, if who.len() > 1 { subj.y / f } else { 1.0 }),
         (None, Some([w, h])) => Vec2::new(w.max(1.0), h.max(1.0)),
         (None, None) => view0,
     };
