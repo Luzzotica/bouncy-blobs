@@ -949,7 +949,10 @@ mod tests {
         for e in std::fs::read_dir(&dir).unwrap() {
             let p = e.unwrap().path();
             if p.extension().is_some_and(|x| x == "json") {
-                let s = parse(&std::fs::read_to_string(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                let mut s = parse(&std::fs::read_to_string(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                if let Some(r) = &s.replay {
+                    s.replay = Some(dir.join(r).to_string_lossy().into_owned());
+                }
                 assert!(validate(&s).is_ok(), "{}: {:?}", p.display(), validate(&s));
                 n += 1;
             }

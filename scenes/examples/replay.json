@@ -1,0 +1,69 @@
+{
+  "_comment": "Replay: the bounce chain driven by a recorded input file instead of scripted inputs. Record your own with BB_RECORD_INPUT=path in a normal run (see docs/SceneFiles.md); the recording must come from this build's version of the stage, or set allow_old_stage with a reason.",
+  "scene": "bb-bounce-replay",
+  "game": "bouncy-blobs",
+  "build": "current",
+  "seeds": [
+    1
+  ],
+  "stage": {
+    "kind": "chapter",
+    "id": "fungus-caverns"
+  },
+  "cast": [
+    {
+      "id": "pip",
+      "kind": "blob",
+      "color": "pink"
+    }
+  ],
+  "_cast": "No spawn: Pip starts where the recording started.",
+  "replay": "recordings/bounce-chain-ch03.json",
+  "pre_roll": 1.67,
+  "camera": [
+    {
+      "t": 0,
+      "do": "follow",
+      "who": "pip",
+      "subject_width": 0.14,
+      "lag": 0.2,
+      "lead": [
+        0.2,
+        0
+      ],
+      "deadzone": [
+        80,
+        80
+      ]
+    }
+  ],
+  "length": {
+    "seconds": 8
+  },
+  "capture_only": [],
+  "check": {
+    "band_x": [
+      0.2,
+      0.8
+    ],
+    "objects": [
+      "pip"
+    ]
+  },
+  "outputs": [
+    {
+      "kind": "video",
+      "size": "1080x1920",
+      "fps": 60
+    },
+    {
+      "kind": "video",
+      "size": "1920x1080",
+      "fps": 60,
+      "view": [
+        0,
+        760
+      ]
+    }
+  ]
+}

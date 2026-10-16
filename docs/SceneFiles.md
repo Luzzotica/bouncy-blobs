@@ -51,6 +51,7 @@ bb-scene render   scenes/examples/spike-loop.json   # check first, then the fina
 | `cast` | up to 8: `[{"id": "pip", "kind": "blob", "color": "pink", "spawn": [x, y], "can_die": true}, {"id": "star1", "kind": "blob", "shape": "star", "color": "yellow", "spawn": [x, y]}]`. Pip is player 1, the others are players 2..; each has their own inputs. Use `[{"from_stage": true}]` for stages whose actors come with them (end card, title, Kids Mode). Cast members can go in chapters, inline levels, `spikeloop` and `transparent`. |
 | `inputs` | `{"t": 0.0, "who": "pip", "do": "hold", "key": "right"}`, `{"do": "release", "key": "right"}`, `{"do": "jump", "hold": 0.25}`, `{"do": "squish", "hold": 0.4}`. `t` is video seconds from frame 1; negative means during the pre-roll. Inputs go into each cast member's input slot, the same path a keyboard, pad or phone uses. |
 | `pre_roll` | seconds of game time before frame 1, so frame 1 is already moving |
+| `replay` | a recorded input file that drives Pip (below); `allow_old_stage` is the reason to accept one recorded on a different build of the stage |
 | `events` | `{"t": 2.0, "do": "respawn", "who": "pip", "at": [x, y]}`: from then on, that cast member's next life starts there (needs `capture_only` `respawn_point`) |
 | `vary` | seeded take variation (below) |
 | `camera` | the timeline below, rendered for every size |
@@ -91,6 +92,23 @@ How much a key shows:
 | `droplet_life` | seconds | pop droplets melt sooner (game: ~42 s) |
 | `spikeloop_slope` | number | spikeloop's strip is a tent, so droplets slide off |
 | `can_die` | false | `cast` Pip with `"can_die": false` |
+
+## Replays: recorded human input
+
+**Recording.** Sterling plays normally with `BB_RECORD_INPUT=/path/run.json`, for example `BB_RECORD_INPUT=~/run.json BB_LEVEL=ch03 cargo run -p bb-game`, or in story mode.
+- The file holds player 1's input on every sim tick, from the moment the level loads, stored as changes only.
+- It also records the level id, a hash of the level as built, Pip's start position and the build commit.
+- It is saved every second and on quit. A new level starts a new recording; the file keeps the latest level played.
+
+**Replaying.** In a scene file, set `"replay": "recordings/run.json"` (relative to the scene file).
+- It drives Pip tick for tick through the same input slot, so the real simulation reproduces the run.
+- Pip starts where the recording started, unless his cast entry has a `spawn`.
+- Pip can't also have `inputs`; other cast members can.
+
+**Rules.**
+- The scene's stage must be the recording's level, or `validate` fails.
+- If the level was built differently when it was recorded (the level hash differs), the render is refused with a plain message. Re-record on the current build, or set `"allow_old_stage": "<reason>"`; NOTES then print the reason.
+- The example `replay.json` uses `recordings/bounce-chain-ch03.json`. It stops working, correctly, once Fungus Caverns changes; re-record it then.
 
 ## Names this game has (validate rejects anything else)
 
@@ -139,7 +157,6 @@ A failed check stops the render, names the frames and boxes, and prints a per-po
 
 ## Not supported yet
 
-- Replay files.
 - Staged moves.
 - Themes other than the stage's own.
 - Named characters in the cast.

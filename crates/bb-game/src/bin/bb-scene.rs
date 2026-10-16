@@ -255,10 +255,31 @@ fn run_game(s: &Scene, scene_path: &Path, bin: &Path, seed: u32, size: (u32, u32
     let _ = std::fs::remove_dir_all(&home);
     if !o.status.success() || !mp4.exists() || !check.exists() {
         let err = String::from_utf8_lossy(&o.stderr);
-        let tail: Vec<&str> = err.lines().filter(|l| l.contains("ERROR") || l.contains("panicked")).take(8).collect();
+        let tail: Vec<String> = err.lines().filter(|l| l.contains("ERROR") || l.contains("panicked")).take(8).map(plain).collect();
         return Err(format!("The game run ({}x{}, seed {seed}) failed ({}).\n  {}", size.0, size.1, o.status, tail.join("\n  ")));
     }
     Ok(())
+}
+
+/// A log line without terminal colours, timestamp or module path.
+fn plain(l: &str) -> String {
+    let mut out = String::new();
+    let mut it = l.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            for d in it.by_ref() {
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    match out.find("scene: ") {
+        Some(i) => out[i + 7..].to_string(),
+        None => out.trim().to_string(),
+    }
 }
 
 fn load(p: &Path) -> Result<Value, String> {
