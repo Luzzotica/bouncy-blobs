@@ -2,13 +2,18 @@
 
 /// partii game id (rooms, telemetry, store).
 pub const GAME_ID: &str = "bouncy-blobs";
-/// The partii production edge.
-pub const DEFAULT_EDGE: &str = "https://partii-edge.partii-games.workers.dev";
+/// The partii production edge (its stable domain).
+pub const DEFAULT_EDGE: &str = "https://api.partii.games";
+/// The same production worker under its workers.dev name (older builds and
+/// env files): still gets the production key.
+pub const PROD_EDGE_WORKERS: &str = "https://partii-edge.partii-games.workers.dev";
 /// bouncy-blobs' production publishable key (public by design), used when
 /// the edge is the default one and no key was given.
 pub const DEFAULT_KEY: &str = "pk_bouncyblobs_game_ChoZroQWd5sqZiwXtLpY-k";
 /// The partii staging edge.
 pub const STAGING_EDGE: &str = "https://partii-edge-staging.partii-games.workers.dev";
+/// Staging under its stable domain.
+pub const STAGING_EDGE_API: &str = "https://api-staging.partii.games";
 /// Where phones open the controller page (`web-controller/`, hosted on
 /// partii): `<this>/c/<CODE>?k=…&e=…&g=bouncy-blobs`. Override with
 /// `BB_CONTROLLER_URL` (the site, e.g. `http://192.168.1.5:5171`).
@@ -54,9 +59,9 @@ impl NetConfig {
     pub fn from_env() -> NetConfig {
         let d = NetConfig::default();
         let edge = env("BB_PARTII_API", option_env!("BB_PARTII_API")).unwrap_or(d.edge).trim_end_matches('/').to_string();
-        let site = if edge == STAGING_EDGE { STAGING_CONTROLLER_URL.to_string() } else { d.controller_url };
+        let site = if edge == STAGING_EDGE || edge == STAGING_EDGE_API { STAGING_CONTROLLER_URL.to_string() } else { d.controller_url };
         let controller_url = env("BB_CONTROLLER_URL", option_env!("BB_CONTROLLER_URL")).unwrap_or(site);
-        let key = env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_else(|| if edge == DEFAULT_EDGE { DEFAULT_KEY.into() } else { String::new() });
+        let key = env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_else(|| if edge == DEFAULT_EDGE || edge == PROD_EDGE_WORKERS { DEFAULT_KEY.into() } else { String::new() });
         NetConfig {
             edge,
             key,
@@ -82,7 +87,7 @@ mod tests {
         let c = NetConfig { key: DEFAULT_KEY.into(), ..NetConfig::default() };
         assert_eq!(
             c.controller_link("KXQPT"),
-            format!("https://bouncy-blobs.partii.games/c/KXQPT?k={DEFAULT_KEY}&e=https%3A%2F%2Fpartii-edge.partii-games.workers.dev&g=bouncy-blobs")
+            format!("https://bouncy-blobs.partii.games/c/KXQPT?k={DEFAULT_KEY}&e=https%3A%2F%2Fapi.partii.games&g=bouncy-blobs")
         );
     }
 

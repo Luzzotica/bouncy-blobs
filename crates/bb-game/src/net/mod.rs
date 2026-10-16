@@ -144,6 +144,8 @@ pub struct NetSession {
     pub seating: bool,
     /// Phones that joined while not seating (or with no free slot), by peer.
     pub(crate) waiting: BTreeMap<String, PhoneJoin>,
+    /// A line for the join panel while connecting (busy network, reclaim).
+    pub notice: Option<String>,
 }
 
 impl NetSession {
@@ -165,6 +167,7 @@ impl NetSession {
             home: false,
             seating: true,
             waiting: BTreeMap::new(),
+            notice: None,
         }
     }
 
@@ -430,6 +433,7 @@ fn pump(
                     }
                     s.room = Some(info);
                     s.status = NetStatus::Ready;
+                    s.notice = None;
                 }
                 HostEvent::Peer { peer_id, kind, name, link } => {
                     s.peers.insert(peer_id, Peer::new(link, kind, name));
@@ -438,6 +442,16 @@ fn pump(
                     phones::drop_peer(s, &id, game.as_deref_mut(), &mut remote, &mut inputs);
                 }
                 HostEvent::Failed(code) => home.last_failure = Some(code),
+                HostEvent::Busy { retry_in_ms } => {
+                    info!("net: partii is busy; retrying in {retry_in_ms} ms");
+                    s.notice = Some(bb_net::play::BUSY_NOTICE.into());
+                }
+                HostEvent::Reclaiming => {
+                    // Every member is gone (PeerLeft follows for each); the
+                    // same code comes back with Ready.
+                    s.status = NetStatus::Connecting;
+                    s.notice = Some("Reconnecting…".into());
+                }
                 HostEvent::Error(e) => {
                     warn!("net: {e}");
                     s.status = NetStatus::Error(e.to_string());
@@ -450,7 +464,7 @@ fn pump(
                     // make a new one after a while (phones must scan again).
                     if s.home {
                         let why = home.last_failure.clone().unwrap_or_default();
-                        home.retry_at = now + bb_net::play::home_retry_ms(&why) / 1000.0;
+                        home.retry_at = now + bb_net::play::retry_ms(&why, None, 0.0) / 1000.0;
                         let mut g = game.as_deref_mut();
                         for slot in s.roster.keys() {
                             remote.0[*slot as usize] = false;

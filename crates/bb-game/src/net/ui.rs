@@ -246,7 +246,7 @@ pub(crate) fn update_join_panels(
         };
         let hint = match (status, room) {
             (None, _) => "Not hosting".to_string(),
-            (Some(NetStatus::Connecting), _) => "Creating room…".into(),
+            (Some(NetStatus::Connecting), _) => session.as_deref().and_then(|s| s.notice.clone()).unwrap_or_else(|| "Creating room…".into()),
             (Some(NetStatus::Ready), Some(r)) => {
                 let s = session.as_deref();
                 let (n, what) = match s {

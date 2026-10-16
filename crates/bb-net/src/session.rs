@@ -170,6 +170,13 @@ pub enum HostEvent {
     /// (`rate_limited`, `offline`, `expired`, …), for the retry policy.
     /// Comes just before `Error` + `Ended`.
     Failed(String),
+    /// partii is busy (`rate_limited`): the create is retried by itself in
+    /// this long. Show [`crate::play::BUSY_NOTICE`].
+    Busy { retry_in_ms: u64 },
+    /// The host's session timed out (`host_lost`): every member is gone and
+    /// the room is being made again with the same code. `Ready` follows
+    /// (same code when the reclaim worked, a new one if not).
+    Reclaiming,
     Ended,
 }
 
@@ -233,23 +240,70 @@ impl Drop for HostSession {
 struct Host {
     engine: Engine,
     cfg: NetConfig,
+    name: String,
+    /// `create_with` settings (max members, kinds).
+    settings: serde_json::Value,
     ev: Sender<HostEvent>,
     cmds: Receiver<HostCmd>,
     wires: HashMap<u16, Wire>,
     created: bool,
+    /// The room's code and the host's reclaim token (from `Created`).
+    code: Option<String>,
+    reclaim: Option<String>,
+    /// Remaking the room after `host_lost`.
+    reclaiming: bool,
+    /// partii's `retry_after_ms` from the last `RateLimited`.
+    retry_after: Option<u64>,
+    /// When to send the create again (ms), after a busy refusal.
+    retry_at: Option<f64>,
+    /// When this round of create attempts began (ms), for giving up.
+    first_try: f64,
+    /// Guest screens are welcome (the home room opens them on Host).
+    screens_open: bool,
 }
 
 impl Host {
     fn new(cfg: &NetConfig, opts: &HostOptions, ev: Sender<HostEvent>, cmds: Receiver<HostCmd>) -> Host {
         let engine = Engine::start(engine_config(cfg, "host"));
+        let settings = if opts.home { crate::play::home_settings(PeerKind::Screen.as_str()) } else { json!({ "max_members": opts.max_peers + 1 }) };
+        let mut host = Host {
+            engine,
+            cfg: cfg.clone(),
+            name: opts.display_name.clone(),
+            settings,
+            ev,
+            cmds,
+            wires: HashMap::new(),
+            created: false,
+            code: None,
+            reclaim: None,
+            reclaiming: false,
+            retry_after: None,
+            retry_at: None,
+            first_try: crate::rt::now_ms(),
+            screens_open: !opts.home,
+        };
         // The engine holds this until it is online.
-        if opts.home {
-            let settings = crate::play::home_settings(opts.max_peers + 1, PeerKind::Screen.as_str(), opts.max_peers);
-            engine.create_with(&cfg.game_id, PeerKind::Screen.as_str(), &opts.display_name, json!({}), settings);
-        } else {
-            engine.create(&cfg.game_id, Some(opts.max_peers + 1), PeerKind::Screen.as_str(), &opts.display_name, json!({}));
+        host.create();
+        host
+    }
+
+    /// Ask for the room: fresh, or our old code back when reclaiming.
+    fn create(&mut self) {
+        let settings = match (&self.code, &self.reclaim) {
+            (Some(code), Some(token)) if self.reclaiming => crate::play::with_reclaim(self.settings.clone(), code, token),
+            _ => self.settings.clone(),
+        };
+        self.retry_at = None;
+        self.engine.create_with(&self.cfg.game_id, PeerKind::Screen.as_str(), &self.name, json!({}), settings);
+    }
+
+    /// Every member is gone (the room closed under us).
+    fn drop_members(&mut self, why: &str) {
+        for (mid, w) in self.wires.drain() {
+            w.driver.closed(why);
+            let _ = self.ev.try_send(HostEvent::PeerLeft(mid.to_string()));
         }
-        Host { engine, cfg: cfg.clone(), ev, cmds, wires: HashMap::new(), created: false }
     }
 
     fn end(&mut self) -> bool {
@@ -265,7 +319,12 @@ impl Host {
         while let Ok(cmd) = self.cmds.try_recv() {
             match cmd {
                 HostCmd::SetJoinable(j) => self.engine.update(json!({ "joinable": j })),
-                HostCmd::OpenScreens(j) => self.engine.update(crate::play::open_kind(PeerKind::Screen.as_str(), j)),
+                HostCmd::OpenScreens(j) => {
+                    self.screens_open = j;
+                    if self.created {
+                        self.engine.update(crate::play::open_kind(PeerKind::Screen.as_str(), j));
+                    }
+                }
                 HostCmd::Kick(id) => {
                     if let Ok(mid) = id.parse::<u16>() {
                         self.engine.kick(mid);
@@ -277,14 +336,41 @@ impl Host {
         if self.ev.is_closed() {
             return self.end();
         }
+        let now = crate::rt::now_ms();
+        if self.retry_at.is_some_and(|t| now >= t) {
+            self.create();
+        }
         for e in self.engine.poll() {
             match e {
                 Event::Created { room, .. } => {
                     self.created = true;
+                    if self.reclaiming && self.code.as_deref() != Some(room.code.as_str()) {
+                        log::warn!("bb-net: couldn't reclaim {:?}; new room {}", self.code, room.code);
+                    }
+                    self.reclaiming = false;
+                    self.retry_after = None;
+                    self.code = Some(room.code.clone());
+                    self.reclaim = room.reclaim.clone().or(self.reclaim.take());
+                    // Settings the room was made with don't carry a Host
+                    // that came while it was being (re)made.
+                    if self.screens_open && self.settings.get("kinds").is_some() {
+                        self.engine.update(crate::play::open_kind(PeerKind::Screen.as_str(), true));
+                    }
                     let info = RoomInfo { room_id: room.code.clone(), join_code: room.code.clone(), controller_url: self.cfg.controller_link(&room.code) };
                     let _ = self.ev.try_send(HostEvent::Ready(info));
                 }
+                Event::RateLimited { retry_after_ms, .. } => self.retry_after = Some(retry_after_ms),
                 Event::Failed { code, message, .. } if !self.created => {
+                    // Busy: wait as long as partii asks (with jitter) and
+                    // try again, for up to a minute.
+                    let busy = code == "rate_limited" || self.retry_after.is_some();
+                    if busy && now - self.first_try < crate::play::GIVE_UP_MS {
+                        let jitter = (now as u64 % 500) as f64;
+                        let wait = crate::play::retry_ms(&code, self.retry_after.take(), jitter);
+                        self.retry_at = Some(now + wait);
+                        let _ = self.ev.try_send(HostEvent::Busy { retry_in_ms: wait as u64 });
+                        continue;
+                    }
                     let _ = self.ev.try_send(HostEvent::Failed(code.clone()));
                     let _ = self.ev.try_send(HostEvent::Error(failed(&code, &message)));
                     return self.end();
@@ -310,6 +396,17 @@ impl Host {
                         w.driver.closed(reason);
                         let _ = self.ev.try_send(HostEvent::PeerLeft(mid.to_string()));
                     }
+                }
+                // Our session timed out: get the same code back (the QR on
+                // screen stays valid; phones rejoin it).
+                Event::RoomClosed { reason } if crate::play::reclaimable(&reason) && self.code.is_some() && self.reclaim.is_some() => {
+                    log::info!("bb-net: room {:?} lost ({reason}); reclaiming it", self.code);
+                    self.drop_members(&reason);
+                    self.created = false;
+                    self.reclaiming = true;
+                    self.first_try = now;
+                    let _ = self.ev.try_send(HostEvent::Reclaiming);
+                    self.create();
                 }
                 Event::RoomClosed { reason } => {
                     let _ = self.ev.try_send(HostEvent::Failed(reason.clone()));
