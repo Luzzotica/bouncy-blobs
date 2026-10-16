@@ -232,6 +232,10 @@ pub struct CamKey {
     /// (world width); the camera only pans, with lag and deadzone.
     #[serde(default)]
     pub lock_zoom: bool,
+    /// follow: which axes follow ("x", "y"). A missing axis follows through
+    /// the pre-roll, then holds the camera position of recorded frame 1.
+    /// Omitted (or both) = follow both, as before.
+    pub axes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
@@ -390,6 +394,13 @@ impl Scene {
         self.pip().and_then(|c| c.color.as_deref()).and_then(color).unwrap_or(0xff5d73)
     }
     /// Timescale windows from the camera timeline: (from_s, to_s, rate).
+    /// For a follow key: (follow x, follow y).
+    pub fn follow_axes(k: &CamKey) -> (bool, bool) {
+        match &k.axes {
+            None => (true, true),
+            Some(a) => (a.iter().any(|x| x == "x"), a.iter().any(|x| x == "y")),
+        }
+    }
     /// The fixed view of a lock_zoom follow key (it holds for the whole shot).
     pub fn locked_view(&self) -> Option<[f32; 2]> {
         self.camera.iter().find(|k| k.lock_zoom && k.r#do == "follow").and_then(|k| k.view).map(|[w, h]| [w.max(1.0), h.max(1.0)])
@@ -667,6 +678,19 @@ pub fn validate(s: &Scene) -> Result<Vec<String>, Vec<String>> {
         }
         if matches!(k.r#do.as_str(), "frame" | "pan" | "follow") && i == 0 && k.view.is_none() && k.subject_width.is_none() {
             e.push(format!("Camera key {n}: say how much to show: \"subject_width\" (fraction of the frame width) or \"view\": [w, h]."));
+        }
+        if let Some(ax) = &k.axes {
+            if k.r#do != "follow" {
+                e.push(format!("Camera key {n}: axes is for follow keys."));
+            }
+            for a in ax {
+                if a != "x" && a != "y" {
+                    e.push(format!("Camera key {n}: axis {a:?} isn't \"x\" or \"y\"."));
+                }
+            }
+            if ax.is_empty() {
+                e.push(format!("Camera key {n}: axes needs \"x\", \"y\" or both (omit it to follow both)."));
+            }
         }
         if k.lock_zoom {
             if k.r#do != "follow" {
@@ -1103,6 +1127,27 @@ mod tests {
         // Into the spike strip's ground.
         s.cast[1].spawn = Some([200.0, -40.0]);
         assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("\"bluey\"") && m.contains("rock or jelly")));
+    }
+
+    #[test]
+    fn follow_axes_parse_and_validate() {
+        let mut s = parse(SPIKE).unwrap();
+        let fk = |axes: Option<Vec<&str>>| CamKey { t: 0.0, r#do: "follow".into(), who: Some(Value::String("pip".into())), view: Some([640.0, 0.0]), lock_zoom: true, axes: axes.map(|v| v.into_iter().map(String::from).collect()), ..Default::default() };
+        s.camera = vec![fk(Some(vec!["x"]))];
+        assert!(validate(&s).is_ok(), "{:?}", validate(&s));
+        assert_eq!(Scene::follow_axes(&s.camera[0]), (true, false));
+        assert_eq!(Scene::follow_axes(&fk(None)), (true, true));
+        assert_eq!(Scene::follow_axes(&fk(Some(vec!["x", "y"]))), (true, true));
+        assert_eq!(Scene::follow_axes(&fk(Some(vec!["y"]))), (false, true));
+        s.camera = vec![fk(Some(vec!["z"]))];
+        assert!(validate(&s).unwrap_err().iter().any(|m| m.contains("\"z\"")));
+        let mut frame = parse(SPIKE).unwrap();
+        frame.camera[0].axes = Some(vec!["x".into()]);
+        assert!(validate(&frame).unwrap_err().iter().any(|m| m.contains("axes is for follow keys")));
+        // The field round-trips from JSON and is absent by default.
+        assert!(parse(SPIKE).unwrap().camera[0].axes.is_none());
+        let j = SPIKE.replace(r#""do": "frame", "at": [0, 215], "view": [366, 500]"#, r#""do": "follow", "who": "pip", "view": [640, 0], "lock_zoom": true, "axes": ["x"]"#);
+        assert_eq!(parse(&j).unwrap().camera[0].axes, Some(vec!["x".to_string()]));
     }
 
     #[test]
