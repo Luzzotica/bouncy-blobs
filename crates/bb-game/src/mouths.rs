@@ -7,7 +7,7 @@
 //!   the *previous* chapter's light leaking through the cracks.
 //! * **Daylight** (the finale's exit) — warm sunlight pouring in.
 //!
-//! The rock itself is ordinary level terrain (see `Ch::exit_cave`); this
+//! The rock itself is ordinary level terrain (the `exit_cave` blueprint piece, `bb_level::blueprint`); this
 //! module only paints light: the tunnel's depth gradient behind the rock,
 //! the glow of "the tunnel turning away" over the back wall, a pool of
 //! light spilling out over the floor and lip, and drifting motes.

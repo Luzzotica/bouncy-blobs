@@ -14,7 +14,7 @@
 | Online | **partii** rooms by code on the shared partii engine (native and wasm): relay first, then TURN or direct WebRTC when faster, reconnects across network changes. |
 | Steam | Achievements only (lobbies optional later). |
 | Targets | macOS, Windows, Linux, iOS (Xcode project), Android, **Web** (wasm). Tests run headless everywhere. |
-| Editor | **Dropped** in 3.0. Levels are authored in code (`LevelBuilder`, campaign) or imported from 2.x JSON. |
+| Editor | **Dropped** in 3.0. Levels are JSON files edited by hand with live reload (`docs/LevelFormat.md`; the campaign is blueprints in `crates/bb-game/assets/levels/campaign/`), built in code with `LevelBuilder` (sandbox, tests) or imported from 2.x JSON. |
 | Cutscenes | **In-engine softbody puppetry**: scripted actors, camera moves, speech bubbles, squash & stretch. |
 | Modes | **Story campaign** (1–8 co-op) + **party** (King of the Hill now; build-then-run rounds à la Ultimate Chicken Horse planned) + **Kids Mode**. |
 | Look | Everything is a softbody — terrain, props, and the menu buttons you tap. |

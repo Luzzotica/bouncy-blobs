@@ -973,6 +973,9 @@ fn clear_lip_glow(mut lip: ResMut<LipGlow>) {
 /// How far to shorten a ground skin's lip at each end where it overlaps the
 /// neighbouring tile (`LevelBuilder::ground` overlaps tiles by a few px so
 /// the jelly has no seams; drawing both lips there would double up).
+/// How far each skin lip runs past the middle of a tile overlap.
+const SEAM_LAP: f32 = 2.5;
+
 pub fn skin_trims(level: &bb_level::Level, j: usize) -> (f32, f32) {
     let top = |k: usize| match level.jelly.get(k).map(|d| &d.shape) {
         Some(bb_level::Shape::Poly { points }) if points.len() == 4 => Some((points[3], points[2])),
@@ -992,11 +995,15 @@ pub fn skin_trims(level: &bb_level::Level, j: usize) -> (f32, f32) {
             continue;
         }
         let Some((c, d)) = top(k) else { continue };
+        // Each lip stops a little past the middle of the overlap, so the two
+        // lips overlap by a few px: the tiles rest a hair compressed on
+        // their cores (ends ~1.5 px in), and meeting exactly left a dark
+        // notch in the rim at every seam.
         if on(c).is_some() {
-            r = r.max(b.distance(c) * 0.5);
+            r = r.max((b.distance(c) * 0.5 - SEAM_LAP).max(0.0));
         }
         if on(d).is_some() {
-            l = l.max(d.distance(a) * 0.5);
+            l = l.max((d.distance(a) * 0.5 - SEAM_LAP).max(0.0));
         }
     }
     (l, r)

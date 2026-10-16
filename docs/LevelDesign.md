@@ -1,8 +1,10 @@
 # Level design rules
 
-The rules every story chapter (`crates/bb-level/src/campaign/chNN.rs`) follows.
-Where a rule can be checked mechanically, a test checks it
-(`crates/bb-level/tests/campaign.rs`, `crates/bb-level/tests/puzzles.rs`).
+The rules every story chapter (`crates/bb-game/assets/levels/campaign/chNN.json`,
+format in `docs/LevelFormat.md`) follows. Where a rule can be checked
+mechanically, `cargo run -p bb-level --example validate` reports it and a test
+asserts it (`crates/bb-level/tests/campaign.rs`, `crates/bb-level/tests/puzzles.rs`;
+the rules themselves are `bb_level::lint` and `bb_sim::validate`).
 
 ## 1. Danger is always visible
 
@@ -68,7 +70,7 @@ Roll, swell-jump, squash, cling/climb, float, swim, grab.
 
 A section gated by a mechanic can't be skipped by crawling along the
 ceiling or climbing a wall. Wherever a vine, slinky or rope crosses a spike
-pit, the roof above it carries ceiling spikes (`Ch::roof_spikes`, leaving the
+pit, the roof above it carries ceiling spikes (the `roof_spikes` piece, leaving the
 vine roots clear), or the ceiling is out of reach.
 
 Test: `vine_crossings_have_spiked_ceilings`.
@@ -101,8 +103,8 @@ into an **exit cave** (it glows with the *next* chapter's colour; the goal is
 deep inside so you see yourself walk in). ch01's entry is the Back Drip
 (Hollow purple); ch10's exit opens onto daylight.
 
-Authoring: `Ch::entry_cave(x_far, x_face, floor_y, top, prev_theme)` and
-`Ch::exit_cave(x_face, x_far, floor_y, top, next_theme)` build the rock with
+Authoring: the `entry_cave` (`x_far`, `x_face`, `y`, `top`, `theme`) and
+`exit_cave` (`x_face`, `x_far`, `y`, `top`, `theme`) pieces build the rock with
 the tunnel cut into it and add a `CaveMouth` to `Level::mouths`;
 `bb-game/src/mouths.rs` paints the light. Test:
 `chapters_are_bookended_by_caves`; `camera::tests::exit_cave_keeps_the_blob_framed`.
@@ -113,7 +115,7 @@ Slopes into jumps (ch01's kicker) are checked by tests, not hoped for.
 
 ## Hazards on movers
 
-`Mover::spiked` (builder: `.spiked()` after adding the mover) puts teeth on a
+`Mover::spiked` (pieces: `"spiked": true` on a `piston` / `crusher`) puts teeth on a
 crusher's / falling rock's underside: touching its bottom face pops you, even
 while it hangs. ch05 has spiked pistons among plain ones; ch09's "jagged"
 rubble is spiked.
@@ -139,3 +141,21 @@ gadget gates are 900+ px (unjumpable), and the roof over them is 700+ px up
 or spiked (`gadget_crossings_have_no_ceiling_shortcut`). Tests:
 `bb-sim/tests/gadgets.rs` (mechanics) and `bb-level/tests/gadgets.rs` (each
 set-piece played in its chapter, including the wrong way failing).
+
+## 12. Seams line up
+
+Floors that meet, meet exactly: the same point, no few-px gaps, overlaps or
+steps (a step is a step: 16 px or more). Two plain floors meeting flush at the
+same height are one `floor` piece. Rock never pokes into a jelly skin (walls
+under a floor stop at its core, 26 px below the surface), and jelly bodies
+from different pieces don't overlap. Jelly skin tiles overlap their
+neighbours by 3 px and never collide with each other (`bb-sim` load).
+
+Test: `seams_are_clean` (and `bb-sim/tests/jelly.rs`: the floor lies still).
+
+## 13. Squeezes need the squish
+
+A low crawlspace (`Move::Squeeze`) is 48–54 px tall over a jelly floor:
+Pip rolls 58–66 px tall and squishes (stick down) to 40–44 px, so rolling
+or crawling along the ceiling gets stuck and only a squish fits. ch01's is
+51 px. Test: `ch01_crawlspace_needs_a_squish`.

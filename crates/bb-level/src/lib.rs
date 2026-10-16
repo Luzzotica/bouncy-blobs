@@ -1,12 +1,17 @@
 //! Bouncy Blobs level format (v3), builder helpers, legacy importer, and the
 //! story campaign.
 
+pub mod blueprint;
 pub mod builder;
+pub mod pretty;
 pub mod legacy;
+pub mod lint;
+pub mod load;
 pub mod campaign;
 pub mod types;
 
 pub use builder::{LevelBuilder, metrics, v};
 pub use legacy::{import_legacy, load_any};
+pub use load::{FileKind, LoadError, Loaded, load_level_file, load_level_text};
 pub use types::*;
 pub use campaign::{campaign, chapter};
