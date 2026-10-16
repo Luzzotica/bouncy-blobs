@@ -25,11 +25,11 @@ The 2.0.0.x builds on TestFlight were the Tauri app; 3.0.0.x are Bevy.
 (`option_env!`):
 
 1. `BB_PARTII_KEY` from the environment (CI secret, nightly job) wins.
-2. Otherwise `STAGING_BB_KEY` from `~/.config/partii/staging.env`, **paired with
-   `STAGING_EDGE`** as `BB_PARTII_API`. A staging key against the production
+2. `BB_STAGING=1`: `STAGING_BB_KEY` from `~/.config/partii/staging.env`, **paired
+   with `STAGING_EDGE`** as `BB_PARTII_API`. A staging key against the production
    edge never connects ("Online play unavailable: could not reach partii").
-3. Neither: the build falls back to the default production key and edge in
-   `crates/bb-net/src/config.rs`.
+3. Otherwise (the default, and what every release build uses): nothing is baked
+   and the game uses the production key and edge in `crates/bb-net/src/config.rs`.
 
 Both can be overridden at runtime (`BB_PARTII_KEY`, `BB_PARTII_API`), including
 in the simulator via `SIMCTL_CHILD_…`.
