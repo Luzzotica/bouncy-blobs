@@ -267,3 +267,35 @@ fn home_room_phone_waits_then_seats_plays_and_stays() {
     assert!(host.world().resource::<Game>().sim.player(1).is_none());
     assert!(!host.world().resource::<RemoteSlots>().0[1]);
 }
+
+/// The demo never opens a home room (no phones invited, no QR); Unknown
+/// waits for the answer; owning the game opens it; a home room left open
+/// when hosting isn't allowed is closed.
+#[test]
+fn home_room_only_for_owners() {
+    use super::{HomeStep, home_step};
+    use crate::ownership::{Owned, Ownership};
+    let own = |owned| Ownership { owned, ..Default::default() };
+    // Not open yet.
+    assert_eq!(home_step(true, Some(&own(Owned::Demo)), false, 10.0, 0.0), HomeStep::Wait);
+    assert_eq!(home_step(true, Some(&own(Owned::Unknown)), false, 10.0, 0.0), HomeStep::Wait);
+    assert_eq!(home_step(true, Some(&own(Owned::Full)), false, 10.0, 0.0), HomeStep::Open);
+    assert_eq!(home_step(true, Some(&own(Owned::Full)), false, 1.0, 5.0), HomeStep::Wait, "retry delay");
+    assert_eq!(home_step(false, Some(&own(Owned::Full)), false, 10.0, 0.0), HomeStep::Wait, "disabled (tests, headless)");
+    assert_eq!(home_step(true, None, false, 10.0, 0.0), HomeStep::Open, "no ownership resource");
+    // Open.
+    assert_eq!(home_step(true, Some(&own(Owned::Full)), true, 10.0, 0.0), HomeStep::Wait);
+    assert_eq!(home_step(true, Some(&own(Owned::Demo)), true, 10.0, 0.0), HomeStep::Close);
+    assert_eq!(home_step(false, Some(&own(Owned::Demo)), true, 10.0, 0.0), HomeStep::Wait, "disabled: hands off");
+
+    // In the app: a demo player's home room is closed; buying opens one.
+    let mut app = host_app(vec![(0, "Pip".into(), 0xff5d73)]);
+    app.world_mut().resource_mut::<NetSession>().home = true;
+    app.world_mut().resource_mut::<super::HomeRoom>().enabled = true;
+    app.insert_resource(own(Owned::Demo));
+    app.update();
+    assert!(app.world().get_resource::<NetSession>().is_none(), "demo: no home room");
+    app.update();
+    assert!(app.world().get_resource::<NetSession>().is_none(), "and none is opened");
+    // (Owned::Full would open a real partii room here; home_step covers it.)
+}

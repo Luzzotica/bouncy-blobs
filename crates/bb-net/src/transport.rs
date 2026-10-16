@@ -59,7 +59,9 @@ impl PeerKind {
     pub fn parse(s: &str) -> PeerKind {
         match s {
             "phone" => PeerKind::Phone,
-            "screen" => PeerKind::Screen,
+            // partii's standard kind for a full game client ("screen" was
+            // Bouncy Blobs' own name for it before).
+            "game" | "screen" => PeerKind::Screen,
             _ => PeerKind::Other,
         }
     }
@@ -67,7 +69,7 @@ impl PeerKind {
     pub fn as_str(self) -> &'static str {
         match self {
             PeerKind::Phone => "phone",
-            PeerKind::Screen => "screen",
+            PeerKind::Screen => "game",
             PeerKind::Other => "other",
         }
     }

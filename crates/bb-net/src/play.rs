@@ -203,11 +203,23 @@ pub fn masked_code(code: &str) -> String {
 
 // ─── The home room ──────────────────────────────────────────────────────────
 
-/// Settings for the home room: phones are always welcome (up to
-/// `max_phones`); full game clients of kind `game_kind` only while hosting
-/// (open them with [`open_kind`]).
-pub fn home_settings(max_members: u32, game_kind: &str, max_phones: u32) -> Value {
-    json!({ "max_members": max_members, "kinds": { game_kind: { "joinable": false }, "phone": { "max": max_phones } } })
+/// Members a home room takes (partii's maximum).
+pub const HOME_MAX_MEMBERS: u32 = 32;
+/// Stop retrying a refused create after this long (and say so).
+pub const GIVE_UP_MS: f64 = 60_000.0;
+
+/// Settings for the home room (partii `docs/PROTOCOL.md` "Kinds"): phones
+/// are always welcome; full game clients of kind `game_kind` get a clean
+/// `not_joinable` until the host opens them with [`open_kind`].
+pub fn home_settings(game_kind: &str) -> Value {
+    json!({ "max_members": HOME_MAX_MEMBERS, "kinds": { game_kind: { "joinable": false } } })
+}
+
+/// `settings` plus a reclaim of `code` with the host's token, so a host
+/// whose session timed out gets the same code back (and the QR stays valid).
+pub fn with_reclaim(mut settings: Value, code: &str, token: &str) -> Value {
+    settings["reclaim"] = json!({ "code": code, "token": token });
+    settings
 }
 
 /// The `update` patch that opens or closes one member kind.
@@ -215,11 +227,24 @@ pub fn open_kind(kind: &str, joinable: bool) -> Value {
     json!({ "kinds": { kind: { "joinable": joinable } } })
 }
 
-/// How long to wait before remaking the home room after it failed with
-/// `code` (or closed): 10 s when partii is busy, else 5 s.
-pub fn home_retry_ms(code: &str) -> f64 {
-    if code == "rate_limited" { 10_000.0 } else { 5_000.0 }
+/// How long to wait before trying again after a refusal with `code`:
+/// partii's `retry_after_ms` (plus up to `jitter_ms`) when it gave one,
+/// else 10 s when busy and 5 s for anything else.
+pub fn retry_ms(code: &str, retry_after_ms: Option<u64>, jitter_ms: f64) -> f64 {
+    match retry_after_ms {
+        Some(ms) => ms as f64 + jitter_ms.clamp(0.0, 1000.0),
+        None if code == "rate_limited" => 10_000.0,
+        None => 5_000.0,
+    }
 }
+
+/// A partii close reason after which the host may reclaim its code.
+pub fn reclaimable(reason: &str) -> bool {
+    reason == "host_lost"
+}
+
+/// What to tell the player while partii is busy and we wait to retry.
+pub const BUSY_NOTICE: &str = "Lots of players on this network right now. Still trying…";
 
 #[cfg(test)]
 mod tests {
@@ -287,11 +312,18 @@ mod tests {
 
     #[test]
     fn home_room_policy() {
-        let s = home_settings(9, "screen", 8);
-        assert_eq!(s["kinds"]["screen"]["joinable"], false);
-        assert_eq!(s["kinds"]["phone"]["max"], 8);
-        assert_eq!(open_kind("screen", true)["kinds"]["screen"]["joinable"], true);
-        assert_eq!(home_retry_ms("rate_limited"), 10_000.0);
-        assert_eq!(home_retry_ms("offline"), 5_000.0);
+        let s = home_settings("game");
+        assert_eq!(s["max_members"], 32);
+        assert_eq!(s["kinds"]["game"]["joinable"], false);
+        assert!(s["kinds"].get("phone").is_none(), "phones always welcome");
+        let r = with_reclaim(s, "KXQPT", "tok");
+        assert_eq!(r["reclaim"]["code"], "KXQPT");
+        assert_eq!(r["reclaim"]["token"], "tok");
+        assert_eq!(open_kind("game", true)["kinds"]["game"]["joinable"], true);
+        assert_eq!(retry_ms("rate_limited", Some(2500), 300.0), 2800.0);
+        assert_eq!(retry_ms("rate_limited", Some(2500), 9e9), 3500.0);
+        assert_eq!(retry_ms("rate_limited", None, 0.0), 10_000.0);
+        assert_eq!(retry_ms("offline", None, 0.0), 5_000.0);
+        assert!(reclaimable("host_lost") && !reclaimable("host_left") && !reclaimable("expired"));
     }
 }

@@ -38,6 +38,8 @@ fn main() {
                     std::process::exit(2);
                 }
                 HostEvent::Failed(code) => println!("failed {code}"),
+                HostEvent::Busy { retry_in_ms } => println!("busy, retrying in {retry_in_ms} ms"),
+                HostEvent::Reclaiming => println!("room lost, reclaiming its code"),
                 HostEvent::Ended => {}
             }
         }

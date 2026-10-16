@@ -167,7 +167,7 @@ await phone.waitForTimeout(400);
 const tapSeen = (await msgs()).slice(tapFrom).some((m) => m.frame && (m.frame.buttons & 1));
 
 const all = await msgs();
-const frames = all.filter((m) => m.frame).map((m) => ({ ...m.frame, reliable: m.reliable }));
+const frames = all.filter((m) => m.frame).map((m) => ({ ...m.frame, reliable: m.reliable, at: m.at }));
 // Unreliable frames may arrive out of order (the game drops stale ones), but
 // seq never restarts: a restart would make the game drop every later frame.
 let maxSeq = 0;
@@ -177,6 +177,16 @@ const backsteps = frames.filter((f) => { const back = f.seq < maxSeq; maxSeq = M
 // path upgrade) don't.
 const tail = frames.slice(-10).map((f) => f.seq).sort((a, b) => a - b);
 const seqUp = frames.length > 0 && maxSeq - tail[tail.length >> 1] < 30;
+// How late each out-of-order frame was: its arrival minus the arrival of the
+// first newer frame (expected: at most ~0.5 s, around the relay → WebRTC
+// switch). The game drops them as stale by seq either way.
+const lateMs = frames
+  .map((f, i) => {
+    const newer = frames.slice(0, i).find((g) => g.seq > f.seq);
+    return newer ? Math.round(f.at - newer.at) : 0;
+  })
+  .filter((ms) => ms > 0);
+const maxLateMs = lateMs.length ? Math.max(...lateMs) : 0;
 const fromPhone = all.every((m) => m.from === phoneMember?.mid);
 
 // The host leaves: the playing phone goes back to /join (keeping ?k=&e=).
@@ -197,6 +207,7 @@ const checks = {
   frames_unreliable_10_bytes: frames.length > 10 && frames.every((f) => f.reliable === false && f.len === 10),
   frames_about_30hz_at_rest: restFrames >= 20 && restFrames <= 45,
   seq_rises: seqUp,
+  stragglers_within_1s: maxLateMs <= 1000,
   moved_right: frames.some((f) => f.lx > 100 && f.ly === 0),
   expand_is_primary: frames.some((f) => f.buttons === 1),
   released: frames.length > 0 && frames[frames.length - 1].buttons === 0,
@@ -213,5 +224,7 @@ await done({
   frames: frames.length,
   rest_frames_per_s: restFrames,
   seq_backsteps: backsteps.slice(0, 10),
+  stragglers: lateMs.length,
+  straggler_max_late_ms: maxLateMs,
   checks,
 });

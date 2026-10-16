@@ -7,7 +7,7 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host",
-    "engine": "cp ../../partii/platform/sdk/engine-web/partii_engine.js ../../partii/platform/sdk/engine-web/partii_engine_bg.wasm public/engine/",
+    "engine": "cp ../../partii/platform/sdk/engine-web/partii_engine.js ../../partii/platform/sdk/engine-web/partii_engine_bg.wasm public/engine/ && git -C ../../partii log -1 --format='partii engine-web @ %h (%cs)' -- platform/sdk/engine-web > public/engine/VERSION",
     "test": "node test/frame.test.mjs && node test/e2e.mjs",
     "test:rust-host": "node test/rust-host.mjs"
   },

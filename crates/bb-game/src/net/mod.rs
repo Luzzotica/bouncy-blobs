@@ -144,6 +144,8 @@ pub struct NetSession {
     pub seating: bool,
     /// Phones that joined while not seating (or with no free slot), by peer.
     pub(crate) waiting: BTreeMap<String, PhoneJoin>,
+    /// A line for the join panel while connecting (busy network, reclaim).
+    pub notice: Option<String>,
 }
 
 impl NetSession {
@@ -165,6 +167,7 @@ impl NetSession {
             home: false,
             seating: true,
             waiting: BTreeMap::new(),
+            notice: None,
         }
     }
 
@@ -276,23 +279,69 @@ fn dev_autostart(mut commands: Commands, mut cmds: MessageWriter<NetCommand>) {
     }
 }
 
-/// Make the home room when none is open (at launch, after leaving a
-/// friend's room, or a while after the edge closed ours).
-fn keep_home(mut commands: Commands, mut home: ResMut<HomeRoom>, session: Option<Res<NetSession>>, time: Res<Time<Real>>) {
-    if !home.enabled || session.is_some() {
+/// What [`keep_home`] should do about the home room this frame.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HomeStep {
+    Wait,
+    Open,
+    /// The player can't host (the demo): no room, no phones invited.
+    Close,
+}
+
+/// The home room's rule: only for a player who may host (the full game).
+/// While ownership is still Unknown, wait for the answer rather than open
+/// a room and close it again. No `Ownership` resource (bare test apps)
+/// means hosting is allowed.
+pub(crate) fn home_step(enabled: bool, own: Option<&crate::ownership::Ownership>, home_open: bool, now: f64, retry_at: f64) -> HomeStep {
+    use crate::ownership::{Feature, Owned, allowed};
+    // Disabled (tests, headless runs, BB_OFFLINE…): hands off entirely.
+    if !enabled {
+        return HomeStep::Wait;
+    }
+    let may_host = allowed(own, Feature::Host);
+    let unknown = own.is_some_and(|o| o.owned == Owned::Unknown);
+    match (home_open, may_host) {
+        (true, false) if !unknown => HomeStep::Close,
+        (false, true) if now >= retry_at => HomeStep::Open,
+        _ => HomeStep::Wait,
+    }
+}
+
+/// Make the home room when none is open (at launch once ownership says we
+/// may host, after leaving a friend's room, a while after partii closed
+/// ours), and close it if the player can't host.
+fn keep_home(
+    mut commands: Commands,
+    mut home: ResMut<HomeRoom>,
+    session: Option<Res<NetSession>>,
+    time: Res<Time<Real>>,
+    own: Option<Res<crate::ownership::Ownership>>,
+) {
+    // Only the home room is ours to manage; a friend's room or a dev
+    // BB_HOST room is left alone.
+    if session.as_deref().is_some_and(|s| !s.home) {
         return;
     }
-    let now = time.elapsed_secs_f64();
-    if now < home.retry_at {
-        return;
+    let home_open = session.is_some();
+    match home_step(home.enabled, own.as_deref(), home_open, time.elapsed_secs_f64(), home.retry_at) {
+        HomeStep::Wait => {}
+        HomeStep::Close => {
+            info!("net: closing the home room: hosting needs the full game");
+            if let Some(h) = session.as_deref().and_then(|s| s.host.as_ref()) {
+                h.end();
+            }
+            commands.remove_resource::<NetSession>();
+        }
+        HomeStep::Open => {
+            home.last_failure = None;
+            commands.insert_resource(NetSession {
+                host: Some(HostSession::start(NetConfig::from_env(), home_options())),
+                home: true,
+                seating: home.hosting,
+                ..NetSession::new(NetRole::Host, "host")
+            });
+        }
     }
-    home.last_failure = None;
-    commands.insert_resource(NetSession {
-        host: Some(HostSession::start(NetConfig::from_env(), home_options())),
-        home: true,
-        seating: home.hosting,
-        ..NetSession::new(NetRole::Host, "host")
-    });
 }
 
 fn handle_commands(
@@ -435,6 +484,7 @@ fn pump(
                     }
                     s.room = Some(info);
                     s.status = NetStatus::Ready;
+                    s.notice = None;
                 }
                 HostEvent::Peer { peer_id, kind, name, link } => {
                     s.peers.insert(peer_id, Peer::new(link, kind, name));
@@ -443,6 +493,16 @@ fn pump(
                     phones::drop_peer(s, &id, game.as_deref_mut(), &mut remote, &mut inputs);
                 }
                 HostEvent::Failed(code) => home.last_failure = Some(code),
+                HostEvent::Busy { retry_in_ms } => {
+                    info!("net: partii is busy; retrying in {retry_in_ms} ms");
+                    s.notice = Some(bb_net::play::BUSY_NOTICE.into());
+                }
+                HostEvent::Reclaiming => {
+                    // Every member is gone (PeerLeft follows for each); the
+                    // same code comes back with Ready.
+                    s.status = NetStatus::Connecting;
+                    s.notice = Some("Reconnecting…".into());
+                }
                 HostEvent::Error(e) => {
                     warn!("net: {e}");
                     s.status = NetStatus::Error(e.to_string());
@@ -455,7 +515,7 @@ fn pump(
                     // make a new one after a while (phones must scan again).
                     if s.home {
                         let why = home.last_failure.clone().unwrap_or_default();
-                        home.retry_at = now + bb_net::play::home_retry_ms(&why) / 1000.0;
+                        home.retry_at = now + bb_net::play::retry_ms(&why, None, 0.0) / 1000.0;
                         let mut g = game.as_deref_mut();
                         for slot in s.roster.keys() {
                             remote.0[*slot as usize] = false;

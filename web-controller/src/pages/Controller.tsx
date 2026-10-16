@@ -7,6 +7,12 @@ import { shapeJoystickInput, BAND_HALF } from '../lib/joystickInput';
 import { COLORS } from '../theme/uiTheme';
 import { BUTTON, TICK_MS, framePacer, holdBits, helloMsg, parseGameMsg, rumble } from '../lib/play';
 
+/** After `host_lost` (the game's connection timed out; it takes the same
+ *  code back, partii PROTOCOL.md "Reclaim"): try the code this often, for
+ *  this long. */
+const HOST_LOST_RETRY_MS = 5_000;
+const HOST_LOST_WAIT_MS = 10 * 60_000;
+
 type ControllerPhase = 'joining' | 'waiting' | 'customizing' | 'connected' | 'error';
 interface PhaseEntry { ts: number; phase: string; detail?: string }
 
@@ -465,6 +471,10 @@ export default function Controller() {
   const paceRef = useRef(framePacer());
   /** The seat the game gave us (partii `seat`), and its button names. */
   const [seat, setSeat] = useState<{ label: string; color: string } | null>(null);
+  /** The game dropped and we're waiting to rejoin its code. */
+  const [reconnecting, setReconnecting] = useState(false);
+  /** Current picks, for re-joining after the game comes back. */
+  const picksRef = useRef({ color: '', faceId: 'default' });
   const [buttonLabels, setButtonLabels] = useState<string[]>(['EXPAND']);
 
   /** What used to ride the reliable `data` channel: same JSON, reliable to the host. */
@@ -610,6 +620,12 @@ export default function Controller() {
     }
     engineRef.current = engine;
     let joinSent = false;
+    let lostSince: number | null = null;
+    const rejoin = () => setTimeout(() => {
+      if (engineRef.current !== engine || lostSince === null) return;
+      addPhase('rejoining', `code=${code}`);
+      engine.join(code, 'phone', name, {});
+    }, HOST_LOST_RETRY_MS);
 
     const onEvent = (ev: EngineEvent) => {
       switch (ev.ev) {
@@ -629,7 +645,11 @@ export default function Controller() {
           hostRef.current = host;
           playerIdRef.current = String(ev.room.you);
           addPhase('joined-room', `you=${ev.room.you} host=${host}`);
-          // Immediately join the game with default appearance — blob spawns right away
+          const back = lostSince !== null;
+          lostSince = null;
+          setReconnecting(false);
+          // Immediately join the game (default appearance, or our picks when
+          // rejoining) — blob spawns right away
           sendData(JSON.stringify({
             type: 'player_join',
             player: {
@@ -640,8 +660,8 @@ export default function Controller() {
               status: 'connected',
               controller_config: null,
               joined_at: new Date().toISOString(),
-              color: '',
-              faceId: 'default',
+              color: back ? picksRef.current.color : '',
+              faceId: back ? picksRef.current.faceId : 'default',
             },
           } satisfies WebRTCMessage));
           // partii's standard greeting too (same meaning; the game keeps one).
@@ -649,10 +669,16 @@ export default function Controller() {
           // Connected — jump straight into the game (customize → play). The
           // connection-flow log is only surfaced on FAILURE (the Error screen),
           // where it's copyable next to a Retry button.
-          setPhase('customizing');
+          if (!back) setPhase('customizing');
           break;
         }
         case 'failed':
+          // Waiting for the game to take its code back: keep trying.
+          if (lostSince !== null && Date.now() - lostSince < HOST_LOST_WAIT_MS) {
+            addPhase('rejoin-failed', `${ev.code} (still waiting)`);
+            rejoin();
+            break;
+          }
           addPhase('join-failed', `${ev.code}: ${ev.message}`);
           setErrorMsg(ev.code === 'not_found' ? 'No game found with that code' : ev.message || 'Failed to join');
           setPhase('error');
@@ -668,6 +694,15 @@ export default function Controller() {
           if (ev.mid === hostRef.current) handleHostGone(`host left (${ev.reason})`);
           break;
         case 'room_closed':
+          if (ev.reason === 'host_lost') {
+            // The game's connection dropped; it may take this code back.
+            hostRef.current = null;
+            lostSince = Date.now();
+            addPhase('host-lost', 'waiting for the game to come back');
+            setReconnecting(true);
+            rejoin();
+            break;
+          }
           handleHostGone(`room closed (${ev.reason})`);
           break;
         case 'message':
@@ -691,6 +726,7 @@ export default function Controller() {
 
   /** Send a live customization update to the host. */
   const sendCustomizationUpdate = useCallback((color: string, faceId: string) => {
+    picksRef.current = { color, faceId };
     sendData(JSON.stringify({
       type: 'customization_update',
       value: { color, faceId },
@@ -1081,6 +1117,7 @@ export default function Controller() {
 
       <div style={{ padding: '8px 16px', textAlign: 'center', color: '#888', fontSize: 12, touchAction: 'none', userSelect: 'none', pointerEvents: 'none' }}>
         {playerName}
+        {reconnecting && <span data-testid="reconnecting" style={{ marginLeft: 8 }}>· reconnecting…</span>}
         {controllerMode !== 'normal' && (
           <span style={{ marginLeft: 8, color: COLORS.lavender, fontWeight: 'bold' }}>
             {controllerMode === 'party_box' ? 'PICK AN ITEM' : 'PLACE YOUR ITEM'}
