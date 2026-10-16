@@ -2,6 +2,7 @@
 
 pub mod bubble;
 pub mod cutscene;
+pub mod demo_end;
 pub mod glimmer;
 pub mod lulu;
 pub mod scripts;
@@ -141,6 +142,7 @@ impl Plugin for StoryPlugin {
             .add_systems(PreUpdate, merge_inputs_into_pip.after(crate::input::GatherInput).run_if(in_state(AppState::Story)))
             .add_systems(Startup, setup_cues_ui)
             .add_systems(Last, persist_progress);
+        demo_end::add(app);
     }
 }
 
@@ -159,6 +161,7 @@ fn exit(mut commands: Commands, cards: Query<Entity, With<EndCardUi>>, mut cues:
     commands.remove_resource::<StoryFlow>();
     commands.remove_resource::<Runner>();
     commands.remove_resource::<EndCard>();
+    commands.remove_resource::<demo_end::DemoEnd>();
     for e in cards.iter() {
         commands.entity(e).despawn();
     }
@@ -207,9 +210,18 @@ fn advance(
     mut load: MessageWriter<LoadLevel>,
     mut cues: ResMut<Cues>,
     mut cam: ResMut<CameraDirector>,
+    own: Option<Res<crate::ownership::Ownership>>,
 ) {
+    // The demo gate: chapters past the free ones stop on the demo's end
+    // card, at the boundary (never mid-level).
+    let free = |c: u8| crate::ownership::allowed(own.as_deref(), crate::ownership::Feature::Chapter(c));
     if pending.is_some() {
         commands.remove_resource::<PendingStart>();
+        if !free(flow.chapter) && std::env::var("BB_SCENE").is_err() {
+            flow.phase = Phase::End;
+            commands.insert_resource(demo_end::DemoEnd::new(flow.chapter, true));
+            return;
+        }
         // Dev: `BB_SCENE=ch10_outro` plays one cutscene (then carries on as
         // if its chapter had got there).
         if let Ok(id) = std::env::var("BB_SCENE") {
@@ -265,6 +277,14 @@ fn advance(
                 progress.current = 1;
                 flow.phase = Phase::End;
                 commands.insert_resource(EndCard::default());
+                return;
+            }
+            if !free(finished + 1) {
+                // The scene stays on screen under the demo's end card.
+                *cues = Cues::default();
+                progress.current = finished + 1;
+                flow.phase = Phase::End;
+                commands.insert_resource(demo_end::DemoEnd::new(finished + 1, false));
                 return;
             }
             *cam = CameraDirector::default();

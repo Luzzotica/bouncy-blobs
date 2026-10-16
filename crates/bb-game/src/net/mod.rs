@@ -307,10 +307,15 @@ fn handle_commands(
     mut devices: ResMut<LocalDevices>,
     mut inputs: ResMut<Inputs>,
     mut home: ResMut<HomeRoom>,
+    own: Option<Res<crate::ownership::Ownership>>,
 ) {
     let mut session = session;
     for cmd in cmds.read() {
         match cmd.clone() {
+            // Hosting needs the full game (joining never does).
+            NetCommand::Host(_) if !crate::ownership::allowed(own.as_deref(), crate::ownership::Feature::Host) => {
+                warn!("net: not hosting: hosting needs the full game");
+            }
             NetCommand::Host(opts) => {
                 home.hosting = true;
                 // Host in the home room: same code, phones already in it.
