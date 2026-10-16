@@ -7,10 +7,14 @@ pub const DEFAULT_EDGE: &str = "https://partii-edge.partii-games.workers.dev";
 /// bouncy-blobs' production publishable key (public by design), used when
 /// the edge is the default one and no key was given.
 pub const DEFAULT_KEY: &str = "pk_bouncyblobs_game_ChoZroQWd5sqZiwXtLpY-k";
-/// Where phones open the controller page (`web-controller/`, on Vercel
-/// production); the room code is appended. Override with
-/// `BB_CONTROLLER_URL` (anything ending in `/controller/`).
-pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs-controller.vercel.app/controller/";
+/// The partii staging edge.
+pub const STAGING_EDGE: &str = "https://partii-edge-staging.partii-games.workers.dev";
+/// Where phones open the controller page (`web-controller/`, hosted on
+/// partii): `<this>/c/<CODE>?k=…&e=…&g=bouncy-blobs`. Override with
+/// `BB_CONTROLLER_URL` (the site, e.g. `http://192.168.1.5:5171`).
+pub const DEFAULT_CONTROLLER_URL: &str = "https://bouncy-blobs.partii.games";
+/// The staging controller site, used when the edge is staging's.
+pub const STAGING_CONTROLLER_URL: &str = "https://bouncy-blobs-staging.partii.games";
 
 #[derive(Clone, Debug)]
 pub struct NetConfig {
@@ -19,7 +23,7 @@ pub struct NetConfig {
     /// The game's publishable key (`pk_…`).
     pub key: String,
     pub game_id: String,
-    /// Prefix the room code is appended to for the phone QR code.
+    /// The controller site the phone QR code points at.
     pub controller_url: String,
     /// The signed-in player's token, when there is one.
     pub player_token: Option<String>,
@@ -49,11 +53,9 @@ impl NetConfig {
     /// falling back to the same names at compile time.
     pub fn from_env() -> NetConfig {
         let d = NetConfig::default();
-        let mut controller_url = env("BB_CONTROLLER_URL", option_env!("BB_CONTROLLER_URL")).unwrap_or(d.controller_url);
-        if !controller_url.ends_with('/') {
-            controller_url.push('/');
-        }
         let edge = env("BB_PARTII_API", option_env!("BB_PARTII_API")).unwrap_or(d.edge).trim_end_matches('/').to_string();
+        let site = if edge == STAGING_EDGE { STAGING_CONTROLLER_URL.to_string() } else { d.controller_url };
+        let controller_url = env("BB_CONTROLLER_URL", option_env!("BB_CONTROLLER_URL")).unwrap_or(site);
         let key = env("BB_PARTII_KEY", option_env!("BB_PARTII_KEY")).unwrap_or_else(|| if edge == DEFAULT_EDGE { DEFAULT_KEY.into() } else { String::new() });
         NetConfig {
             edge,
@@ -64,25 +66,11 @@ impl NetConfig {
         }
     }
 
-    /// The URL phones scan: `<controller_url><CODE>`, plus the platform when
-    /// it isn't the default the page was built with.
+    /// The URL phones scan: `<site>/c/<CODE>?k=<key>&e=<edge>&g=<game>`
+    /// (partii `docs/CONTROLLER.md`).
     pub fn controller_link(&self, code: &str) -> String {
-        let mut url = format!("{}{}", self.controller_url, code);
-        if self.edge != DEFAULT_EDGE {
-            url.push_str(&format!("?k={}&e={}", self.key, encode(&self.edge)));
-        }
-        url
+        crate::play::controller_url(&self.controller_url, code, &self.key, &self.edge, &self.game_id)
     }
-}
-
-/// Percent-encode a URL for a query value.
-fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -90,14 +78,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn controller_link_appends_code() {
-        let c = NetConfig::default();
-        assert_eq!(c.controller_link("KXQPT"), format!("{DEFAULT_CONTROLLER_URL}KXQPT"));
+    fn controller_link_is_the_partii_hosted_page() {
+        let c = NetConfig { key: DEFAULT_KEY.into(), ..NetConfig::default() };
+        assert_eq!(
+            c.controller_link("KXQPT"),
+            format!("https://bouncy-blobs.partii.games/c/KXQPT?k={DEFAULT_KEY}&e=https%3A%2F%2Fpartii-edge.partii-games.workers.dev&g=bouncy-blobs")
+        );
     }
 
     #[test]
     fn controller_link_names_a_non_default_platform() {
-        let c = NetConfig { edge: "http://192.168.1.5:8787".into(), key: "pk_demo_k1_x".into(), ..NetConfig::default() };
-        assert_eq!(c.controller_link("KXQPT"), format!("{DEFAULT_CONTROLLER_URL}KXQPT?k=pk_demo_k1_x&e=http%3A%2F%2F192.168.1.5%3A8787"));
+        let c = NetConfig { edge: "http://192.168.1.5:8787".into(), key: "pk_demo_k1_x".into(), controller_url: "http://192.168.1.5:5171/".into(), ..NetConfig::default() };
+        assert_eq!(c.controller_link("KXQPT"), "http://192.168.1.5:5171/c/KXQPT?k=pk_demo_k1_x&e=http%3A%2F%2F192.168.1.5%3A8787&g=bouncy-blobs");
     }
 }

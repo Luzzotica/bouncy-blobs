@@ -6,13 +6,17 @@
 //!   code, relay → TURN → direct paths, reconnects): a link per member.
 //!   Everything runs off the game thread; the game drains events with
 //!   non-blocking `poll`s.
-//! * [`phone`]: the existing phone-controller JSON protocol.
+//! * [`play`]: the generic partii controller pieces (the `0x50` input frame,
+//!   seat/layout/rumble, the QR link, home-room policy), kept apart so the
+//!   shared `partii-play` crate can replace them.
+//! * [`phone`]: Bouncy Blobs' own phone messages (join, colours, faces).
 //! * [`wire`] + [`blend`]: eventual-consistency body sync for screen-to-screen
 //!   play (owner-authoritative, no rollback).
 
 pub mod blend;
 pub mod config;
 pub mod phone;
+pub mod play;
 pub mod rt;
 pub mod session;
 pub mod transport;

@@ -1,9 +1,15 @@
 //! Networking in the Bevy app: hosting a partii room for phones and guest
 //! screens, or joining one as a guest screen.
 //!
-//! * Phones speak the existing controller JSON and get slots 1..7 (slot 0 is
-//!   the local keyboard/touch player). Their blobs are host-owned: the host
-//!   simulates them from phone input like any local player.
+//! * Phones send partii's `0x50` input frames plus Bouncy Blobs' join and
+//!   customisation JSON, and get slots 1..7 (slot 0 is the local
+//!   keyboard/touch player). Their blobs are host-owned: the host simulates
+//!   them from phone input like any local player.
+//! * The **home room** is made once at launch ([`HomeRoom`]), so phones can
+//!   join from the menu and the code stays the same all session. Phones in
+//!   it are only *seated* (given a slot and a blob) while hosting
+//!   ([`NetSession::seating`]); Host opens it to guest screens, Leave closes
+//!   it again and keeps the phones connected.
 //! * Guest screens are owner-authoritative peers: each side simulates
 //!   everything, streams [`BodyState`]s for what it owns, and blends what it
 //!   doesn't ([`bb_net::blend`]). Remote-owned players have
@@ -21,6 +27,8 @@ mod tests;
 pub mod ui;
 
 use std::collections::{BTreeMap, HashMap};
+
+use bb_net::phone::PhoneJoin;
 
 use bb_net::session::{GuestEvent, GuestSession, HostEvent, HostSession};
 pub use bb_net::session::{HostOptions, RoomInfo};
@@ -85,6 +93,8 @@ pub(crate) struct Peer {
     pub tx: StateSender,
     /// Smoothed round trip (s).
     pub rtt: f32,
+    /// Phones: the last `seat` message sent.
+    pub told: String,
 }
 
 impl Peer {
@@ -98,6 +108,7 @@ impl Peer {
             rx: StateReceiver::default(),
             tx: StateSender::default(),
             rtt: 0.1,
+            told: String::new(),
         }
     }
 
@@ -127,6 +138,12 @@ pub struct NetSession {
     pub(crate) fixed_tick: u64,
     /// Guest: the host's level is loaded, so the roster owns the sim.
     pub(crate) level_from_host: bool,
+    /// The launch-time home room (kept across menus).
+    pub home: bool,
+    /// Phones get a slot and a blob (hosting). Off in a home room until Host.
+    pub seating: bool,
+    /// Phones that joined while not seating (or with no free slot), by peer.
+    pub(crate) waiting: BTreeMap<String, PhoneJoin>,
 }
 
 impl NetSession {
@@ -145,7 +162,20 @@ impl NetSession {
             last_ping: 0.0,
             fixed_tick: 0,
             level_from_host: false,
+            home: false,
+            seating: true,
+            waiting: BTreeMap::new(),
         }
+    }
+
+    /// A live home room we can host in.
+    pub fn home_alive(&self) -> bool {
+        self.home && !matches!(self.status, NetStatus::Error(_) | NetStatus::Ended)
+    }
+
+    /// Phones in the room (seated or not).
+    pub fn phones(&self) -> usize {
+        self.peers.values().filter(|p| p.open && p.kind == PeerKind::Phone).count()
     }
 
     pub fn is_host(&self) -> bool {
@@ -173,14 +203,46 @@ impl NetSession {
     }
 }
 
+/// Keeps a home room open while nothing else is (see the module docs).
+#[derive(Resource, Default)]
+pub struct HomeRoom {
+    pub enabled: bool,
+    /// Real time (s) to (re)make it at.
+    pub retry_at: f64,
+    /// Why the last one ended (a partii code), for the retry delay.
+    pub(crate) last_failure: Option<String>,
+    /// We are hosting (Host without a Leave yet): a remade home room seats
+    /// its phones and takes screens straight away.
+    pub(crate) hosting: bool,
+}
+
+/// Home rooms are for real players: never in tests, headless runs, or when
+/// `BB_OFFLINE` / `BB_JOIN` say so.
+fn home_room_wanted() -> bool {
+    if cfg!(test) || crate::platform::headless() {
+        return false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var("BB_OFFLINE").is_ok_and(|v| v != "0") || std::env::var("BB_JOIN").is_ok() || std::env::var("BB_HOST").is_ok() {
+        return false;
+    }
+    true
+}
+
+fn home_options() -> HostOptions {
+    HostOptions { home: true, ..HostOptions::default() }
+}
+
 pub struct NetPlugin;
 
 impl Plugin for NetPlugin {
     fn build(&self, app: &mut App) {
+        let windowed = app.is_plugin_added::<bevy::render::RenderPlugin>();
         app.add_message::<NetCommand>()
+            .insert_resource(HomeRoom { enabled: windowed && home_room_wanted(), ..default() })
             .add_systems(
                 PreUpdate,
-                (handle_commands, pump, phones::apply_inputs, sync_roster, screens::announce_roster)
+                (keep_home, handle_commands, pump, phones::seat_waiting, phones::apply_inputs, sync_roster, screens::announce_roster, phones::tell_seats)
                     .chain()
                     .after(GatherInput),
             )
@@ -194,7 +256,7 @@ impl Plugin for NetPlugin {
                     .chain()
                     .run_if(resource_exists::<NetSession>.and_then(resource_exists::<Game>)),
             )
-            .add_systems(Update, (screens::forward_sim_events, screens::ping, ui::update_join_panels));
+            .add_systems(Update, (screens::forward_sim_events, phones::rumble, screens::ping, ui::update_join_panels, ui::copy_clicks, ui::menu_join_panel));
         #[cfg(not(target_arch = "wasm32"))]
         if std::env::var("BB_HOST").is_ok() || std::env::var("BB_JOIN").is_ok() {
             app.add_systems(Startup, dev_autostart);
@@ -214,6 +276,25 @@ fn dev_autostart(mut commands: Commands, mut cmds: MessageWriter<NetCommand>) {
     }
 }
 
+/// Make the home room when none is open (at launch, after leaving a
+/// friend's room, or a while after the edge closed ours).
+fn keep_home(mut commands: Commands, mut home: ResMut<HomeRoom>, session: Option<Res<NetSession>>, time: Res<Time<Real>>) {
+    if !home.enabled || session.is_some() {
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    if now < home.retry_at {
+        return;
+    }
+    home.last_failure = None;
+    commands.insert_resource(NetSession {
+        host: Some(HostSession::start(NetConfig::from_env(), home_options())),
+        home: true,
+        seating: home.hosting,
+        ..NetSession::new(NetRole::Host, "host")
+    });
+}
+
 fn handle_commands(
     mut commands: Commands,
     mut cmds: MessageReader<NetCommand>,
@@ -221,11 +302,22 @@ fn handle_commands(
     mut game: Option<ResMut<Game>>,
     mut remote: ResMut<RemoteSlots>,
     mut devices: ResMut<LocalDevices>,
+    mut inputs: ResMut<Inputs>,
+    mut home: ResMut<HomeRoom>,
 ) {
     let mut session = session;
     for cmd in cmds.read() {
         match cmd.clone() {
             NetCommand::Host(opts) => {
+                home.hosting = true;
+                // Host in the home room: same code, phones already in it.
+                if let Some(s) = session.as_deref_mut().filter(|s| s.home_alive()) {
+                    s.seating = true;
+                    if let Some(h) = &s.host {
+                        h.open_screens(true);
+                    }
+                    continue;
+                }
                 leave(&mut commands, session.as_deref_mut(), game.as_deref_mut(), &mut remote);
                 commands.insert_resource(NetSession {
                     host: Some(HostSession::start(NetConfig::from_env(), opts)),
@@ -250,12 +342,37 @@ fn handle_commands(
                 }
             }
             NetCommand::Leave => {
+                home.hosting = false;
+                // Stop hosting but keep the home room and its phones.
+                if let Some(s) = session.as_deref_mut().filter(|s| s.home_alive()) {
+                    go_home(s, game.as_deref_mut(), &mut remote, &mut inputs);
+                    continue;
+                }
                 leave(&mut commands, session.as_deref_mut(), game.as_deref_mut(), &mut remote);
                 session = None;
                 devices.keyboard_slot = Some(0);
                 devices.touch_slot = Some(0);
             }
         }
+    }
+}
+
+/// Back to a plain home room: phones unseated (they stay connected and
+/// keep their picks), guest screens sent away, screens refused again.
+fn go_home(s: &mut NetSession, game: Option<&mut Game>, remote: &mut RemoteSlots, inputs: &mut Inputs) {
+    s.seating = false;
+    let mut game = game;
+    let screens: Vec<String> = s.peers.iter().filter(|(_, p)| p.kind != PeerKind::Phone).map(|(id, _)| id.clone()).collect();
+    for id in screens {
+        if let Some(p) = s.peers.get(&id) {
+            p.link.close();
+        }
+        phones::drop_peer(s, &id, game.as_deref_mut(), remote, inputs);
+    }
+    phones::unseat_all(s, game, remote, inputs);
+    if let Some(h) = &s.host {
+        h.open_screens(false);
+        h.set_joinable(true);
     }
 }
 
@@ -293,6 +410,7 @@ fn pump(
     mut load: MessageWriter<LoadLevel>,
     mut fx: MessageWriter<SimMsg>,
     time: Res<Time<Real>>,
+    (mut commands, mut home): (Commands, ResMut<HomeRoom>),
 ) {
     let Some(mut session) = session else { return };
     let s = &mut *session;
@@ -305,6 +423,11 @@ fn pump(
             match e {
                 HostEvent::Ready(info) => {
                     info!("net: hosting room {} (code {})", info.room_id, info.join_code);
+                    if s.home && s.seating {
+                        if let Some(h) = &s.host {
+                            h.open_screens(true);
+                        }
+                    }
                     s.room = Some(info);
                     s.status = NetStatus::Ready;
                 }
@@ -314,6 +437,7 @@ fn pump(
                 HostEvent::PeerLeft(id) => {
                     phones::drop_peer(s, &id, game.as_deref_mut(), &mut remote, &mut inputs);
                 }
+                HostEvent::Failed(code) => home.last_failure = Some(code),
                 HostEvent::Error(e) => {
                     warn!("net: {e}");
                     s.status = NetStatus::Error(e.to_string());
@@ -321,6 +445,21 @@ fn pump(
                 HostEvent::Ended => {
                     if !matches!(s.status, NetStatus::Error(_)) {
                         s.status = NetStatus::Ended;
+                    }
+                    // The home room is gone (expired, edge restart, offline):
+                    // make a new one after a while (phones must scan again).
+                    if s.home {
+                        let why = home.last_failure.clone().unwrap_or_default();
+                        home.retry_at = now + bb_net::play::home_retry_ms(&why) / 1000.0;
+                        let mut g = game.as_deref_mut();
+                        for slot in s.roster.keys() {
+                            remote.0[*slot as usize] = false;
+                            if let Some(g) = g.as_deref_mut() {
+                                g.sim.remove_player(*slot);
+                            }
+                        }
+                        commands.remove_resource::<NetSession>();
+                        return;
                     }
                 }
             }
@@ -366,7 +505,7 @@ fn pump(
                     p.open = true;
                 }
                 match (&s.role, kind) {
-                    (NetRole::Host, PeerKind::Phone) => phones::send_taken(s, game.as_deref()),
+                    (NetRole::Host, PeerKind::Phone) => phones::greet(s, &id, game.as_deref()),
                     (NetRole::Guest, _) => {
                         s.status = NetStatus::Ready;
                         screens::send_hello(s);
@@ -393,6 +532,11 @@ fn pump(
                 PeerKind::Phone => phones::on_text(s, &id, &text, game.as_deref_mut(), &devices, now),
                 _ => screens::on_text(s, &id, &text, game.as_deref_mut(), &mut devices, &mut load, &mut fx, now),
             },
+            LinkEvent::Message(_, Payload::Binary(bytes)) if kind == PeerKind::Phone => {
+                if let Some(p) = s.peers.get_mut(&id) {
+                    p.phone.apply_frame(&bytes, bb_net::rt::now_ms());
+                }
+            }
             LinkEvent::Message(_, Payload::Binary(bytes)) => {
                 if bytes.first() == Some(&bb_net::wire::STATES_MAGIC) {
                     if let Some(p) = s.peers.get_mut(&id) {

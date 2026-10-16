@@ -8,7 +8,11 @@
 
 export const GAME_ID = 'bouncy-blobs';
 
+/** partii production (the game's default; bb-net config.rs DEFAULT_EDGE). */
 const DEFAULT_EDGE = 'https://partii-edge.partii-games.workers.dev';
+/** Bouncy Blobs' production publishable key (public by design, as in the
+ *  game): a typed room code has no k= from a QR link. */
+const DEFAULT_KEY = 'pk_bouncyblobs_game_ChoZroQWd5sqZiwXtLpY-k';
 
 export interface EngineEvent {
   ev: string;
@@ -24,26 +28,17 @@ export interface Engine {
   pathName(id: number): string;
 }
 
-/** Platform settings: `?k=<publishable key>&e=<edge url>` override the
- *  build-time defaults (VITE_PARTII_KEY / VITE_PARTII_API). */
+/** Platform settings: the QR link's `?k=<publishable key>&e=<edge url>`
+ *  override the build-time defaults (VITE_PARTII_KEY / VITE_PARTII_API, set
+ *  for the staging site), which override production. */
 export function partiiSettings(search: string = location.search): { edge: string; key: string } {
   const q = new URLSearchParams(search);
-  const edge = q.get('e') || import.meta.env.VITE_PARTII_API || DEFAULT_EDGE;
-  const key = q.get('k') || import.meta.env.VITE_PARTII_KEY || '';
-  return { edge, key };
+  const builtEdge = import.meta.env.VITE_PARTII_API || DEFAULT_EDGE;
+  const builtKey = import.meta.env.VITE_PARTII_KEY || (builtEdge === DEFAULT_EDGE ? DEFAULT_KEY : '');
+  return { edge: q.get('e') || builtEdge, key: q.get('k') || builtKey };
 }
 
-/** Keep only the override params (k, e) so they survive /join → /controller. */
-export function carriedQuery(search: string = location.search): string {
-  const q = new URLSearchParams(search);
-  const out = new URLSearchParams();
-  for (const k of ['k', 'e']) {
-    const v = q.get(k);
-    if (v) out.set(k, v);
-  }
-  const s = out.toString();
-  return s ? `?${s}` : '';
-}
+export { carriedQuery } from './play';
 
 export async function startEngine(edge: string, key: string): Promise<Engine> {
   const url = new URL('/engine/partii_engine.js', location.href).href;
