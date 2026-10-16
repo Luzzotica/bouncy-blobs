@@ -8,8 +8,9 @@
 
 export const GAME_ID = 'bouncy-blobs';
 
-/** partii production (the game's default; bb-net config.rs DEFAULT_EDGE). */
-const DEFAULT_EDGE = 'https://partii-edge.partii-games.workers.dev';
+/** partii production under its stable domain (the game's default; bb-net
+ *  config.rs DEFAULT_EDGE). */
+const DEFAULT_EDGE = 'https://api.partii.games';
 /** Bouncy Blobs' production publishable key (public by design, as in the
  *  game): a typed room code has no k= from a QR link. */
 const DEFAULT_KEY = 'pk_bouncyblobs_game_ChoZroQWd5sqZiwXtLpY-k';

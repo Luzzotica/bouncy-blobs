@@ -34,7 +34,7 @@ Build-time env (`.env.local`, not committed):
 
 | var | meaning | default |
 | --- | --- | --- |
-| `VITE_PARTII_API` | partii edge URL | production (`https://partii-edge.partii-games.workers.dev`) |
+| `VITE_PARTII_API` | partii edge URL | production (`https://api.partii.games`) |
 | `VITE_PARTII_KEY` | partii publishable key (`pk_…`) | Bouncy Blobs' production key (with the default edge) |
 
 Query params override them per link, and survive `/join` → `/c/<CODE>`:
