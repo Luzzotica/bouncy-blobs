@@ -1,221 +1,174 @@
-# Mobile Release Checklist (iOS + Android)
+# Mobile Release (iOS + Android) — Bevy port
 
-How to go from the `mobile-port` branch to installable TestFlight / Play Store builds.
-Code-side parity (touch editor, host/guest pads, responsive UI, splash screens,
-version sync) is done; everything below is credentials + store plumbing that
-needs the Apple/Google developer accounts.
+The phone/tablet app is the **Bevy port** (`crates/bb-game` via `crates/bb-mobile`).
+The old Tauri/WebView app (`src-tauri/`, `npm run ios:*`) is retired: never build
+or ship it. Platform plumbing (Xcode project, Gradle project, asset paths) is in
+`docs/Platforms.md`; this page is the release runbook and what was verified.
 
-## Versioning (already wired)
+Uploads (TestFlight, Play internal) happen **only** in the nightly publish job.
+Local and agent runs build, test and archive, and stop there.
 
-- `src-tauri/tauri.conf.json` `"version"` points at `../package.json` — one
-  source of truth. Android picks it up automatically (`build.gradle.kts` reads
-  `tauri.properties`, written by the Tauri CLI from the config).
-- iOS project files are committed with literal versions; after any bump run:
-  ```sh
-  node scripts/sync-version.mjs
-  ```
-  (The `bump-version` skill flow should run this for bouncy-blobs.)
-- **Marketing version** = `CFBundleShortVersionString` (e.g. `2.0.0`).
-- **Build number** = `CFBundleVersion` — must be **strictly greater** than every
-  previously uploaded build for the same app. Apple treats missing components
-  as zero, so `2` == `2.0.0` (cannot re-use). Prefer `2.0.0.N` or bump the
-  patch of the build string when re-uploading the same marketing version.
+## Versions
 
-### TestFlight train (kids QA vs physics re-TF)
+| Field | Where | Rule |
+| --- | --- | --- |
+| Marketing (`CFBundleShortVersionString`) | `ios/project.yml` `MARKETING_VERSION` (3.0.0) | Bumped by a human release, never by a build |
+| Build (`CFBundleVersion`) | `ios/project.yml` `CURRENT_PROJECT_VERSION` (3.0.0.1), or `scripts/ios-build.sh --build 3.0.0.N` | Strictly greater than every build ever uploaded for this app. Apple treats missing parts as zero, so use `3.0.0.N` and bump `N` |
+| Android `versionCode` | `BB_VERSION_CODE` (default 3000001) | Must increase every Play upload |
 
-| Build | Marketing | CFBundleVersion | Contents | Status |
-| --- | --- | --- | --- | --- |
-| **TF #1** | 2.0.0 | `2.0.0` | Kids Mode vertical slice (speech, color rail, pick-up) | **Uploaded** 2026-07-19 · Delivery `567f659e-9091-4b34-8eee-c809310f90e7` |
-| **TF #2** | 2.0.0 | `2.0.0.2` | BB AppIcon + soft-platform expand P1 (local-surface deep-pen) | **Uploaded** 2026-07-19 · Delivery `f7df7b68-3e55-449f-951c-e479d139c74c` · IPA ~89 MB |
+The 2.0.0.x builds on TestFlight were the Tauri app; 3.0.0.x are Bevy.
 
-Next re-TF (build number must strictly increase):
+## Online / phone-controller key
 
-```sh
-# Marketing stays 2.0.0; Tauri --build-number N appends → CFBundleVersion 2.0.0.N
-node scripts/sync-version.mjs --build 2.0.0.3   # keep source in sync
-npm run ios:build -- --ci --build-number 3
-# then: npm run ios:upload  (or altool with tankii ASC key)
-```
+`scripts/lib/mp-api-key.sh` (sourced by every build script, including
+`ios/build-rust.sh`) bakes `BB_PARTII_KEY` and `BB_PARTII_API` into the binary
+(`option_env!`):
 
-## iOS → TestFlight
+1. `BB_PARTII_KEY` from the environment (CI secret, nightly job) wins.
+2. Otherwise `STAGING_BB_KEY` from `~/.config/partii/staging.env`, **paired with
+   `STAGING_EDGE`** as `BB_PARTII_API`. A staging key against the production
+   edge never connects ("Online play unavailable: could not reach partii").
+3. Neither: the build falls back to the default production key and edge in
+   `crates/bb-net/src/config.rs`.
 
-### Wired (code — do not re-ask Sterling for team enrollment)
+Both can be overridden at runtime (`BB_PARTII_KEY`, `BB_PARTII_API`), including
+in the simulator via `SIMCTL_CHILD_…`.
 
-| Item | Value |
-| --- | --- |
-| Bundle ID | `me.sterlinglong.bouncyblobs` |
-| ASC app | Bouncy Blobs (created by Sterling) |
-| Team ID | `74874V9Z5H` (Sterling Long — from local Xcode / pbxproj) |
-| `DEVELOPMENT_TEAM` | `project.yml` + `app.xcodeproj` (both configs) |
-| `CODE_SIGN_STYLE` | `Automatic` |
-| Export | `ExportOptions.plist` → `method=app-store-connect`, `teamID=74874V9Z5H` |
-| npm scripts | `ios:build` (ASC export), `ios:build:debug`, `ios:upload` |
+## iOS
 
-If the Team ID ever changes, update **both**:
-- `src-tauri/gen/apple/project.yml` → `targets.app_iOS.settings.base.DEVELOPMENT_TEAM`
-- `src-tauri/gen/apple/ExportOptions.plist` → `teamID`
-- then re-run xcodegen / `npm run ios:dev` once so pbxproj stays aligned
-  (or edit `DEVELOPMENT_TEAM` in `app.xcodeproj/project.pbxproj` debug+release).
+### Build for the simulator (headless)
 
-### Build .ipa
+Never open Simulator.app: boot devices with `simctl` only. Mute every run
+with `SIMCTL_CHILD_BB_MUTE=1`. Keep **one** simulator booted at a time (each
+takes about 1.5 GB). Cargo builds go through the machine-wide `rustq` queue
+(`~/.rustq/README.md`). `build-rust.sh` builds into this checkout's `./target`,
+so don't set `CARGO_TARGET_DIR` or profile flags. A queued build can wait for
+minutes; run it in the background.
 
 ```sh
-# From repo root (uses tauri.ios.conf.json beforeBuildCommand = build:mobile)
-npm run ios:build
-# → tauri ios build --export-method app-store-connect
-# IPA lands under src-tauri/gen/apple/build/… or src-tauri/target/… (see build log)
+DD=/tmp/bb-xcode   # throwaway DerivedData; delete when done
+xcodebuild -project ios/BouncyBlobs.xcodeproj -scheme BouncyBlobs -sdk iphonesimulator \
+  -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath $DD build
+APP="$DD/Build/Products/Debug-iphonesimulator/Bouncy Blobs.app"
+
+DEV=$(xcrun simctl list devices available | grep -m1 'iPhone 17 (' | grep -oE '[0-9A-F-]{36}')
+xcrun simctl boot $DEV && xcrun simctl bootstatus $DEV -b
+xcrun simctl install $DEV "$APP"
+SIMCTL_CHILD_BB_MUTE=1 xcrun simctl launch $DEV me.sterlinglong.bouncyblobs &
+#   …plus SIMCTL_CHILD_BB_START=sandbox (a level) or =party (host + QR panel)
+sleep 20; xcrun simctl io $DEV screenshot shot.png
+xcrun simctl shutdown $DEV          # then boot the iPad and repeat; finally:
+xcrun simctl shutdown all; rm -rf $DD
 ```
 
-First time on a machine:
-1. Open Xcode → Settings → Accounts → add Sterling’s Apple ID (team `74874V9Z5H`).
-2. Optional sanity: `open src-tauri/gen/apple/app.xcodeproj` → target app_iOS →
-   Signing & Capabilities → Team selected, Automatic.
-3. Need a **distribution** cert (automatic signing creates “Apple Distribution”
-   when exporting for App Store). Local identity already present for
-   development: `Apple Development: Sterling Long (628URCX593)`.
+Notes from the first run (2026-10-15, Xcode 26.6, iOS/iPadOS 26 simulators):
 
-Debug / device install (not TestFlight):
+* `simctl launch` can sit forever without returning even though the app is up.
+  Background it and take the screenshot anyway.
+* iPhone screenshots come out in the panel's portrait orientation. Rotate them
+  270° to view (`sips -r 270`).
+* iPadOS 26 runs this landscape-only app as a **landscape window letterboxed on
+  the portrait screen**: the simulator can't be rotated headless. The window is
+  about 1032×774 pt (4:3), which is the iPad layout we need to check. On a real
+  iPad held landscape the app is full screen.
+* The log is full of winit's `processing non RedrawRequested event after the
+  main event loop: AboutToWait`. It is harmless. To read the game's own log:
+  `xcrun simctl spawn $DEV log show --last 2m --predicate 'process == "BouncyBlobs"'`.
+
+### Touch controls
+
+Touch matches the phone controller (`web-controller/src/lib/joystickInput.ts`):
+
+* **Left half**: a fixed square pad, bottom-left. A touch that starts on the
+  left half is measured from the pad's centre, normalised by its half-size, and
+  shaped by `input::shape_pad`, an exact port of `shapeJoystickInput`.
+  Horizontal snaps to ±1 past 0.15. Vertical has three zones: inside the ±0.3
+  centre band is 0 (pure left/right), above it is up, and below it is down.
+* **Right half**: tap or hold to expand. A glowing button marks it.
+* The pad is drawn in levels, story levels and party rounds. It is hidden in
+  menus and the party lobby.
+* Layout (`input::pad_layout`) keeps the controls clear of the notch
+  (`platform::SAFE_SIDE`, 60 pt) and the home indicator
+  (`platform::SAFE_BOTTOM`, 20 pt).
+
+### Hosting a party from an iPad
+
+Play → Party (or `BB_START=party`) hosts a partii room and shows the join
+panel: a QR code plus a five-letter code for
+`bouncy-blobs-controller.vercel.app/join`. Phones join as controllers over
+WebRTC. Info.plist has `NSLocalNetworkUsageDescription` because direct
+Wi-Fi paths to the phones trigger iOS's local-network prompt. No extra
+entitlement is needed: outgoing connections are allowed by default, and we
+don't browse Bonjour.
+
+### Device archive and IPA
 
 ```sh
-npm run ios:build:debug   # --export-method debugging
-# or: npm run ios:dev
+scripts/ios-build.sh                    # CFBundleVersion from project.yml
+scripts/ios-build.sh --build 3.0.0.N    # nightly: pass the next build number
+# → build/ios/BouncyBlobs.xcarchive, build/ios/export/Bouncy Blobs.ipa
 ```
 
-### Upload path → TestFlight
+* Signing is automatic for team `74874V9Z5H`. The export uses
+  `ios/ExportOptions.plist`: `app-store-connect`, destination `export`,
+  "Apple Distribution", and `manageAppVersionAndBuildNumber = false`.
+* The script regenerates the Xcode project with `xcodegen` when it is
+  installed. The regenerated `project.pbxproj` names the worktree folder in a
+  group. That change is cosmetic: don't commit it from a worktree.
+* Upload (nightly job only): `scripts/ios-upload-testflight.sh` (altool with
+  an ASC API key or Apple ID, or Transporter).
 
-```sh
-# After a successful ios:build:
-npm run ios:upload
-# = bash scripts/ios-upload-testflight.sh [optional path/to.ipa]
-```
+## Android
 
-Auth for `ios:upload` (one of):
+See `docs/Platforms.md` › Android (`scripts/android-build.sh`, GameActivity,
+`--aab` for Play). Release signing:
 
-**A. App Store Connect API key** (preferred for CI / non-interactive):
-
-```sh
-export ASC_KEY_ID=XXXXXXXXXX
-export ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export ASC_KEY_PATH=~/AuthKey_XXXXXXXXXX.p8
-npm run ios:upload
-```
-
-**B. Apple ID + app-specific password**:
-
-```sh
-export APPLE_ID=you@example.com
-export APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
-npm run ios:upload
-```
-
-**C. Transporter.app** (GUI, no env vars):
-
-```sh
-open -a Transporter
-# drag the .ipa from the ios:build output path
-```
-
-Then in App Store Connect → TestFlight → wait for processing (~10 min) →
-add internal testers.
-
-### Store metadata (when going public)
-
-Privacy questionnaire (no tracking; anon device id + optional sign-in),
-screenshots per device class, age rating. Kids Mode is a local play path
-(no ads / chat) — see Kids Mode section below.
-
-### TestFlight deliveries (2026-07-19)
-
-| Train | Marketing / build | Contents | Delivery UUID |
-| --- | --- | --- | --- |
-| **#1** | 2.0.0 / `2.0.0` | Kids Mode slice | `567f659e-9091-4b34-8eee-c809310f90e7` |
-| **#2** | 2.0.0 / `2.0.0.2` | BB AppIcon + soft-platform P1 | `f7df7b68-3e55-449f-951c-e479d139c74c` |
-| **#3** | 2.0.0 / `2.0.0.9` | Full-screen iPad landscape Kids | `b613b950-7745-4bd3-b116-3f5aacf08f4a` |
-| **#4** | 2.0.0 / `2.0.0.10` | Hold-back + soft green + grab hold-expand | `c6e53771-49b3-49b7-b3b1-cecd7895d1f7` |
-
-IPA path (latest): `src-tauri/gen/apple/build/arm64/Bouncy Blobs.ipa` (~89 MB).  
-Export: `app-store-connect` / team `74874V9Z5H`. Upload: `altool` + tankii ASC key.
-
-Next (human): App Store Connect → TestFlight → wait for processing → add
-internal testers. Kids Mode: Home → Kids Mode → `/kids`.
-
-### Human blockers (not eng)
-
-- ~~ASC API key~~ — same-org tankii key works for altool uploads
-- Internal tester emails in TestFlight
-- Screenshots / listing copy when leaving TestFlight
-
-## Android → Play internal track
-
-1. **Release keystore** (once; keep it out of git — `~/keystores/` or a
-   password manager):
+1. Keystore (once; keep it out of git):
    ```sh
    keytool -genkeypair -v -keystore ~/keystores/bouncy-blobs.jks \
      -keyalg RSA -keysize 2048 -validity 10000 -alias bouncyblobs
    ```
-2. **`src-tauri/gen/android/keystore.properties`** (git-ignored; add to
-   `.gitignore` if not already):
-   ```properties
-   storeFile=/Users/<you>/keystores/bouncy-blobs.jks
-   storePassword=...
-   keyAlias=bouncyblobs
-   keyPassword=...
-   ```
-3. **`src-tauri/gen/android/app/build.gradle.kts`**: add a `signingConfigs`
-   block reading `keystore.properties` and set
-   `buildTypes.release.signingConfig = signingConfigs.getByName("release")`
-   (the standard Tauri Android signing recipe).
-4. **Build the bundle**:
-   ```sh
-   npm run android:build -- --aab
-   # → src-tauri/gen/android/app/build/outputs/bundle/universalRelease/
-   ```
-5. **Play Console**: create the app (`me.sterlinglong.bouncyblobs`), upload
-   the .aab to the *Internal testing* track, add tester emails.
-6. Data-safety form: WebRTC multiplayer (IPs processed transiently), anonymous
+2. `android/keystore.properties` (gitignored): `storeFile`, `storePassword`,
+   `keyAlias=bouncyblobs`, `keyPassword`.
+3. `scripts/android-build.sh --aab`, then upload to the Play *Internal testing*
+   track (nightly job).
+4. Data-safety form: WebRTC multiplayer (IPs processed transiently), anonymous
    device id, optional account sign-in; no ads, no tracking SDKs.
 
-## Splash screens (done, verify on device)
+## Store metadata (when leaving TestFlight)
 
-- iOS: `gen/apple/LaunchScreen.storyboard` — paper-cream background + centered
-  `LaunchLogo` image set.
-- Android 12+: `values-v31/themes.xml` (cream `windowSplashScreenBackground`
-  + launcher icon); pre-12: cream `windowBackground` in `values/themes.xml`.
+Privacy questionnaire (no tracking; anonymous device id plus optional sign-in),
+screenshots for each device class (iPad Pro 13" is 2752×2064; see
+`docs/AppStoreAssets.md`), age rating. Kids Mode is a local play mode (no ads,
+no chat).
 
-## Kids Mode (iPad entry point)
+## Verification log
 
-- **Route**: Home → **Kids Mode** sticky note → `/kids` (`src/pages/KidsMode.tsx`).
-- **Feature path**: dedicated kids play (not multiplayer). Soft `default` arena,
-  floating color rail, ABC-on-bounce speech, tap/drag blob pick-up.
-- **Speech**: on-device Web Speech API (`src/utils/speak.ts`) — no cloud. iOS
-  needs a first user gesture (`unlockSpeech`); voices load via `voiceschanged`.
-- **Touch**: targets ≥ 64–72pt; pad via `TouchControls`; safe-area insets on
-  back button, letter badge, and color rail.
-- **QA on device**: landscape + portrait iPad; color tap speaks; bounce speaks
-  A→B→C; grab/drag a friend blob speaks color + flings; leave route stops TTS.
-- **Store note**: Kids Mode is a local play mode (no ads, no chat). Age rating
-  / Kids Category questionnaire still a human gate in App Store Connect.
-- **App Store assets path (iPad screenshots)**: **documented only** — do not
-  generate full store art unless Sterling asks. Recipe, device sizes, Kids shot
-  list, skill command, and output dirs live in **`docs/AppStoreAssets.md`**
-  (skill: `games/.claude/skills/app-store-assets`). Lead sizes: iPad Pro 13"
-  `2752×2064` → `marketing/app-store/screenshots/ipad-13/`.
+### 2026-10-15: first iPhone + iPad run of the Bevy port (branch `port-ios`)
 
-## Known pre-launch items (out of scope of the parity work)
+Debug simulator build (`xcodebuild … -sdk iphonesimulator`), Xcode 26.6,
+iOS/iPadOS 26.
 
-- ~~`TODO(mobile-attestation)`~~ **DONE (2026-07-14)**: mobile attests with an
-  arcadii player JWT (`platform: "player"`), verified end-to-end against
-  production — see `docs/MobileAttestation.md` for the model, the enforcement
-  runbook, and the phase-2 device-integrity (App Attest / Play Integrity)
-  upgrade path.
-- **Native `confirm()/alert()/prompt()` probe**: ~22 call sites (editor list,
-  MyReplays deletes, toolbar errors). Verify on a real iOS device that Tauri's
-  WKWebView shows JS dialogs; if any are silently dropped, replace the
-  mobile-reachable sites with a themed `ConfirmDialog` built on
-  `modalBackdrop`/`modalCard` from `src/theme/uiTheme.ts`.
-- **Device test matrix** (per release): Editor — place every tool, pinch-zoom,
-  properties drawer, touch bar chips, Test Play round-trip (autosave +
-  `?restore=1`); GameMaster — auto-join, pad in freeplay + match, stacked
-  lobby, QR tap-to-copy; OnlineGuest — join, pad, stacked lobby; Home /
-  PlayHub / Multiplayer / MyReplays / **Kids Mode** on a notched device in
-  both orientations.
+| Check | iPhone 17 (874×402 pt) | iPad Pro 13" (M5), 4:3 window |
+| --- | --- | --- |
+| Builds, installs, launches, renders (Metal) | ✅ | ✅ |
+| Title menu fits, clear of the Dynamic Island | ✅ | ✅ |
+| Level (`BB_START=sandbox`): square + band pad bottom-left, glowing EXPAND button bottom-right, HUD counter | ✅ | ✅ |
+| Party host (`BB_START=party`): room created, join panel shows the QR and a 5-letter code, lobby buttons clear of the panel | ✅ | ✅ |
+
+Fixed on the way:
+
+* **Hosting failed** ("could not reach partii"): the build paired the staging
+  key with the production edge. `mp-api-key.sh` now pairs it with
+  `STAGING_EDGE`.
+* **Party lobby on 4:3 and 19.5:9:** the join panel covered the lobby buttons.
+  The buttons now form a column under the title, and on phones the join panel
+  uses a 160 pt QR and puts the URL on its own line.
+* **Touch:** the floating stick is gone (see Touch controls). The pad and the
+  join hint respect `SAFE_SIDE` / `SAFE_BOTTOM`.
+
+Not verified here: a real phone joining by QR (it can't be done headless), and
+a physical device. The signed device archive (`scripts/ios-build.sh`, release +
+LTO) was **deferred to the nightly window** under the machine's build protocol.
+The last archive, from before the bevy-port merge, was signed `Apple
+Distribution: Sterling Long (74874V9Z5H)` (see `docs/Platforms.md`).
