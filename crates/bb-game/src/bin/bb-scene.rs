@@ -133,7 +133,7 @@ fn resolve_build(s: &Scene, bin: Option<PathBuf>) -> Result<Build, String> {
                 }
             }
         }
-        (t.clone(), format!("{} ({})", s.build, &t[..9]))
+        (t.clone(), if t.starts_with(&s.build) { "an explicit commit".to_string() } else { format!("\"{}\"", s.build) })
     };
     let short = &target[..9];
     // 1. A binary passed in that reports exactly this commit.
@@ -447,7 +447,7 @@ fn run(s: &Scene, path: &Path, out: &Path, build: &Build, preview: bool) -> Resu
     let t0 = Instant::now();
     let cap_frames = s.length.seconds.map_or(120 * 60, |x| (x * 60.0).round() as u32);
     let mut notes = String::new();
-    println!("Build: {} ({})", build.commit, build.resolved);
+    println!("Build: {} — {}", build.commit, build.resolved);
     for &seed in &s.seeds {
         let base = format!("{}-{seed}", s.scene);
         let mut summary = Vec::new();
