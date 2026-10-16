@@ -51,6 +51,10 @@ pub(crate) fn on_text(s: &mut NetSession, peer: &str, text: &str, game: Option<&
     };
     match msg {
         PhoneMsg::Join(j) => {
+            // A (re)joining page starts its frame seq again.
+            if let Some(p) = s.peers.get_mut(peer) {
+                p.phone.reset_frames();
+            }
             if slot_of_phone(s, peer).is_some() || s.waiting.contains_key(peer) {
                 return; // duplicate join (re-sent after a blip, or hello + player_join)
             }
