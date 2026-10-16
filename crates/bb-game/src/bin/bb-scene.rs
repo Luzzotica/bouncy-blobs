@@ -98,9 +98,41 @@ fn is_ancestor(a: &str, b: &str) -> bool {
     Command::new("git").arg("-C").arg(repo()).args(["merge-base", "--is-ancestor", a, b]).status().is_ok_and(|s| s.success())
 }
 
+/// Ask a game binary which commit it was built from. The probe is always
+/// headless and muted with a time limit: a binary too old to know
+/// BB_PRINT_BUILD would otherwise start the game in a visible window.
 fn bin_commit(bin: &Path) -> Option<String> {
-    let o = Command::new(bin).env("BB_PRINT_BUILD", "1").output().ok()?;
-    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let probe = std::env::temp_dir().join(format!("bb-scene-probe-{}.png", std::process::id()));
+    let mut child = Command::new(bin)
+        .env("BB_PRINT_BUILD", "1")
+        .env("BB_MUTE", "1")
+        .env("BB_SHOT", &probe)
+        .env("BB_SHOT_FRAME", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if start.elapsed() > std::time::Duration::from_secs(20) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&probe);
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(_) => return None,
+        }
+    }
+    let _ = std::fs::remove_file(&probe);
+    let o = child.wait_with_output().ok()?;
+    let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    // A real stamp is a short hash (maybe "-dirty"); anything else
+    // (a game that ran a frame instead) means "unknown".
+    let hash = out.strip_suffix("-dirty").unwrap_or(&out);
+    (o.status.success() && !hash.is_empty() && hash.len() <= 40 && hash.chars().all(|c| c.is_ascii_hexdigit())).then_some(out)
 }
 
 fn resolve_build(s: &Scene, bin: Option<PathBuf>) -> Result<Build, String> {
