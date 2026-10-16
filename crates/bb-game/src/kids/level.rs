@@ -5,9 +5,13 @@
 //! the floor → side-platform hop exactly one comfortable jump):
 //! `new = ((x, 1100 − y)) · 2/3`.
 //!
-//! The walls and floor extend well past the box so the paper-craft surround
-//! fills any screen aspect; the floor doubles as the colour-chip tray and
-//! the ceiling as the button shelf.
+//! It's built from the game's own level pieces and drawn like any story
+//! level: real ground (rock core + jelly skin), rock walls and ceiling,
+//! glowing jelly platforms, the cave backdrop and props, in the Old Well's
+//! daylight colours (`palette::theme(Theme::Kids)`), the brightest biome.
+//! The walls and floor extend well past the room so the rock fills any
+//! screen aspect; the floor doubles as the colour-chip tray and the ceiling
+//! as the button shelf.
 
 use bb_level::{Level, LevelBuilder, Mode, Theme, v};
 use bb_physics::Vec2;
@@ -20,6 +24,10 @@ pub fn conv(x: f32, y: f32) -> Vec2 {
 /// Interior of the box (where blobs play).
 pub const INNER_MIN: Vec2 = Vec2::new(53.3, 80.0);
 pub const INNER_MAX: Vec2 = Vec2::new(1146.7, 680.0);
+/// The open air a held friend is kept inside: the floor's jelly skin top,
+/// the walls' and ceiling's faces.
+pub const ROOM_MIN: Vec2 = INNER_MIN;
+pub const ROOM_MAX: Vec2 = INNER_MAX;
 /// World rectangle the camera always fits on screen (box + chrome bands).
 pub const VIEW_MIN: Vec2 = Vec2::new(-40.0, -170.0);
 pub const VIEW_MAX: Vec2 = Vec2::new(1240.0, 830.0);
@@ -92,14 +100,13 @@ pub fn playground() -> Level {
     let mut b = LevelBuilder::new("kids-playground", "Kids Playground", Theme::Kids);
     b.level.modes = vec![Mode::Kids];
     let (lo, hi) = (INNER_MIN, INNER_MAX);
-    // A picture frame of four non-overlapping slabs (clean seams), plus
-    // one wobbly jelly skin on the floor.
+    // Real ground (a rock core under a jelly skin, as in the story levels)
+    // across the room, rock walls and a rock ceiling that don't overlap it.
     b.spawn(conv(900.0, 860.0))
-        .block(v(-700.0, -400.0), v(1900.0, lo.y - 26.0))
+        .ground(&[v(lo.x, lo.y), v(hi.x, lo.y)], lo.y + 400.0)
         .block(v(-700.0, hi.y), v(1900.0, 1300.0))
-        .block(v(-700.0, lo.y - 26.0), v(lo.x, hi.y))
-        .block(v(hi.x, lo.y - 26.0), v(1900.0, hi.y))
-        .jelly(v(lo.x, lo.y - 26.0), v(hi.x, lo.y), 0.5)
+        .block(v(-700.0, -400.0), v(lo.x, hi.y))
+        .block(v(hi.x, -400.0), v(1900.0, hi.y))
         .kill_y(-500.0);
     // Platforms: legacy centre + size, now soft jelly slabs that bob.
     for (x, y, w) in [(420.0, 720.0, 280.0), (1380.0, 720.0, 280.0), (900.0, 480.0, 320.0)] {
@@ -107,6 +114,18 @@ pub fn playground() -> Level {
         let h = v(w, 48.0) * (1.0 / 3.0);
         b.jelly(c - h, c + h, 0.35);
     }
+    // Props: toys on the floor, the Well's crystals and mushrooms (they
+    // glow and bob when bumped), glow-worms and drips under the ceiling.
+    b.decor("crystal", v(120.0, lo.y), 1.0, -1.0)
+        .decor("block_letters", v(250.0, lo.y), 0.9, -1.0)
+        .decor("mushroom", v(520.0, lo.y), 0.9, -1.0)
+        .decor("crayon", v(700.0, lo.y), 1.0, -1.0)
+        .decor("sock", v(850.0, lo.y), 0.9, -1.0)
+        .decor("mushroom", v(960.0, lo.y), 1.1, -1.0)
+        .decor("crystal", v(1080.0, lo.y), 0.8, -1.0)
+        .decor("glowworm", v(330.0, hi.y), 1.0, -1.0)
+        .decor("drip", v(760.0, hi.y), 1.0, -1.0)
+        .decor("glowworm", v(980.0, hi.y), 0.9, -1.0);
     b.build()
 }
 
@@ -120,6 +139,7 @@ mod tests {
         assert_eq!(l.spawn, v(600.0, 160.0));
         assert_eq!(l.jelly.iter().filter(|j| j.wobble == 0.35).count(), 3);
         assert_eq!(l.terrain.len(), 4);
+        assert!(!l.decor.is_empty());
         let back = Level::from_json(&l.to_json()).unwrap();
         assert_eq!(back.terrain.len(), l.terrain.len());
         // Every friend and the spawn sit inside the box.

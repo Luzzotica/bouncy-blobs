@@ -3,15 +3,17 @@
 //! * One player blob plus 8 shape friends (star / square / triangle) who
 //!   wander and puff on their own. Friends are sim *players* (slots 1–8)
 //!   driven by this module, so they get palette colours and faces.
-//! * Tap or drag any blob to pick it up (velocity servo, puffed while held,
-//!   flung on release). It says its colour (or shape / letter / note,
-//!   depending on the learn mode).
+//! * Tap or drag any blob to pick it up: its whole body glides to the
+//!   finger (a critically damped servo on the centre, every sim step, kept
+//!   inside the room), puffed while held, gently tossed on release. It says
+//!   its colour (or shape / letter / note, depending on the learn mode).
 //! * Tap empty space left / right of centre to roll that way.
 //! * PUFF (or Space) puffs everyone and fires the learn-mode lesson:
 //!   ABC → next letter, Music → next Twinkle note, Shape → morph into the
 //!   next shape, Color → say the colour.
 //! * Colour chips on the floor tray recolour the player and sing the colour.
-//! * Nothing pops. Hold HOME for 1.5 s to leave (the parental gate).
+//! * Nothing pops. A tap on HOME (or Escape / B / Select) goes back to the
+//!   title.
 
 pub mod fx;
 pub mod lessons;
@@ -40,11 +42,22 @@ use ui::{UiItem, UiKind};
 /// Grab hit radius from a blob's centroid (legacy 110 × 2/3).
 pub const TAP_HIT_R: f32 = 74.0;
 pub const PICK_PUFF_SEC: f32 = 0.95;
-pub const FOLLOW_RATE: f32 = 16.0;
-pub const MAX_PULL_SPEED: f32 = 2400.0;
-pub const FLING_CAP: f32 = 1600.0;
+/// Drag: the held friend's centre closes this fraction of the gap to the
+/// finger per second...
+pub const FOLLOW_RATE: f32 = 14.0;
+/// ...its velocity settles onto that this fast (4× = critically damped: it
+/// arrives without overshooting or ringing)...
+pub const GRIP_RATE: f32 = 4.0 * FOLLOW_RATE;
+/// ...never faster than this (≈2 px per physics substep, so it can't
+/// tunnel through anything).
+pub const MAX_PULL_SPEED: f32 = 1500.0;
+/// Internal damping while held: the friend wobbles a little, never jiggles.
+pub const HELD_DAMPING: f32 = 10.0;
+/// The finger holds a friend this close to its centre at most.
+pub const GRIP_OFFSET: f32 = bb_sim::control::tune::RADIUS * 0.5;
+/// Top speed of the toss on release (toddler-friendly).
+pub const TOSS_CAP: f32 = 900.0;
 pub const PICK_SCALE_PEAK: f32 = 1.55;
-pub const HOLD_SECS: f32 = 1.5;
 const MOUSE: u64 = u64::MAX;
 
 /// Despawned when Kids Mode exits.
@@ -62,15 +75,19 @@ pub struct Friend {
     pub self_hold: f32,
 }
 
+/// A friend held by a finger. The whole body is steered (never one rim
+/// point, which spun it round the finger and tore it on walls).
 #[derive(Clone, Debug)]
 pub struct Grab {
     pub slot: u8,
     pub body: BodyId,
-    pub particle: usize,
+    /// Where the finger holds it, from its centre (at most [`GRIP_OFFSET`]).
+    pub offset: PVec2,
+    /// The finger (world).
     pub target: PVec2,
-    pub last: PVec2,
-    pub pv: PVec2,
     pub pointer: u64,
+    /// The body's own internal damping, restored on release.
+    pub damping: f32,
 }
 
 #[derive(Resource)]
@@ -82,8 +99,8 @@ pub struct Kids {
     /// Side-tap: (pointer, -1 / +1).
     pub side: Option<(u64, f32)>,
     pub puff: Option<u64>,
-    /// Hold-to-exit: (pointer, seconds held).
-    pub home: Option<(u64, f32)>,
+    /// The pointer pressing HOME (it leaves when that pointer lifts).
+    pub home: Option<u64>,
     pub ui: Vec<UiItem>,
     pub was_group: bool,
     pub abc: usize,
@@ -100,6 +117,29 @@ pub struct Kids {
 }
 
 impl Kids {
+    fn new(mode: LearnMode, color: u32, friends: Vec<Friend>, ui: Vec<UiItem>) -> Kids {
+        Kids {
+            mode,
+            color,
+            friends,
+            grab: None,
+            side: None,
+            puff: None,
+            home: None,
+            ui,
+            was_group: false,
+            abc: 0,
+            note: 0,
+            shape_index: 0,
+            last_letter: -1.0,
+            last_note: -1.0,
+            badge: (Glyph::Text("-"), hex(fx::INK)),
+            player_shape: None,
+            injected: Vec::new(),
+            rng: 0x1234_5678,
+        }
+    }
+
     fn rand(&mut self) -> f32 {
         let mut r = crate::audio::synth::Rng(self.rng | 1);
         let v = r.f();
@@ -117,6 +157,7 @@ impl Plugin for KidsPlugin {
             .add_systems(OnEnter(AppState::Kids), (enter, fx::spawn_particle_mesh).chain())
             .add_systems(OnExit(AppState::Kids), exit)
             .add_systems(PreUpdate, (demo, pointers, drive).chain().after(GatherInput).run_if(running.clone()))
+            .add_systems(FixedUpdate, hold_friend.before(crate::sim::step).run_if(running.clone()))
             .add_systems(Update, (ui::visuals, fx::update, fit_camera, portrait_gate).run_if(running))
             .add_systems(Update, stop_voice_on_blur.run_if(resource_exists::<KidsVoice>));
     }
@@ -177,29 +218,9 @@ fn enter(
     }
     let ui = ui::spawn_items(&mut sim, &lessons::chip_colors());
     ui::spawn_overlay(&mut commands, &mut meshes, &shared, &ui);
-    spawn_backdrop(&mut commands, &mut meshes, &shared);
     spawn_portrait_gate(&mut commands);
     hand_over(&mut commands, sim);
-    commands.insert_resource(Kids {
-        mode,
-        color,
-        friends,
-        grab: None,
-        side: None,
-        puff: None,
-        home: None,
-        ui,
-        was_group: false,
-        abc: 0,
-        note: 0,
-        shape_index: 0,
-        last_letter: -1.0,
-        last_note: -1.0,
-        badge: (Glyph::Text("-"), hex(fx::INK)),
-        player_shape: None,
-        injected: Vec::new(),
-        rng: 0x1234_5678,
-    });
+    commands.insert_resource(Kids::new(mode, color, friends, ui));
     if let (Some(server), Some(mut sources)) = (server, sources) {
         commands.insert_resource(KidsVoice::load(&server, &mut sources));
     }
@@ -244,29 +265,6 @@ fn exit(
         remote.0[s] = false;
     }
     *director = CameraDirector::default();
-}
-
-/// Cream paper inside the box: soft polka dots on warm paper.
-fn spawn_backdrop(commands: &mut Commands, meshes: &mut Assets<Mesh>, shared: &crate::render::Shared) {
-    use crate::palette::lin;
-    use crate::render::MeshBuf;
-    let (lo, hi) = (level::INNER_MIN - PVec2::splat(30.0), level::INNER_MAX + PVec2::splat(30.0));
-    let mut buf = MeshBuf::default();
-    let q = [lo, PVec2::new(hi.x, lo.y), hi, PVec2::new(lo.x, hi.y)];
-    buf.fan(&q, (lo + hi) * 0.5, 0.0, lin(hex(0xfffcef)), lin(hex(0xfff3d6)));
-    let dot = lin(hex(0xf6e7c4));
-    let mut row = 0;
-    let mut y = lo.y + 40.0;
-    while y < hi.y {
-        let mut x = lo.x + 40.0 + if row % 2 == 0 { 0.0 } else { 45.0 };
-        while x < hi.x {
-            buf.ellipse(PVec2::new(x, y), PVec2::splat(7.0), 0.0, 0.001, dot);
-            x += 90.0;
-        }
-        y += 78.0;
-        row += 1;
-    }
-    commands.spawn((Mesh2d(meshes.add(buf.into_mesh())), MeshMaterial2d(shared.vertex.clone()), Transform::from_xyz(0.0, 0.0, -45.0), KidsEntity));
 }
 
 // ----------------------------------------------------------------- pointers
@@ -401,6 +399,7 @@ fn pointers(
     mut game: ResMut<Game>,
     mut kids: ResMut<Kids>,
     mut fx: LessonFx,
+    mut next: ResMut<NextState<AppState>>,
 ) {
     let Ok((camera, cam_tf)) = cam.single() else { return };
     let window = windows.single().ok();
@@ -471,21 +470,31 @@ fn pointers(
                 }
             }
             Phase::Up => {
-                if kids.grab.as_ref().is_some_and(|g| g.pointer == id) {
-                    release_grab(sim, &mut kids);
-                }
-                if kids.side.is_some_and(|s| s.0 == id) {
-                    kids.side = None;
-                }
-                if kids.puff == Some(id) {
-                    kids.puff = None;
-                }
-                if kids.home.is_some_and(|h| h.0 == id) {
-                    kids.home = None;
+                if lift(sim, &mut kids, id) {
+                    next.set(AppState::Title);
                 }
             }
         }
     }
+}
+
+/// Pointer `id` lifted: drop what it held. True when it was pressing HOME
+/// (a plain click or tap goes home; no hold needed).
+fn lift(sim: &mut Sim, kids: &mut Kids, id: u64) -> bool {
+    if kids.grab.as_ref().is_some_and(|g| g.pointer == id) {
+        release_grab(sim, kids);
+    }
+    if kids.side.is_some_and(|s| s.0 == id) {
+        kids.side = None;
+    }
+    if kids.puff == Some(id) {
+        kids.puff = None;
+    }
+    if kids.home == Some(id) {
+        kids.home = None;
+        return true;
+    }
+    false
 }
 
 fn hit_blob(sim: &Sim, p: PVec2) -> Option<(u8, BodyId)> {
@@ -531,7 +540,10 @@ fn tap_ui(sim: &mut Sim, kids: &mut Kids, fx: &mut LessonFx, kind: UiKind, point
             fx.sfx.write(PlaySfx::new("ui-click", 0.7, 1.0));
         }
         UiKind::Puff => kids.puff = Some(pointer),
-        UiKind::Home => kids.home = Some((pointer, 0.0)),
+        UiKind::Home => {
+            kids.home = Some(pointer);
+            fx.sfx.write(PlaySfx::new("ui-click", 0.7, 1.0));
+        }
         UiKind::Badge => {
             fx.sfx.write(PlaySfx::new("ui-hover", 0.4, 1.2));
         }
@@ -539,21 +551,70 @@ fn tap_ui(sim: &mut Sim, kids: &mut Kids, fx: &mut LessonFx, kind: UiKind, point
 }
 
 fn start_grab(sim: &mut Sim, kids: &mut Kids, fx: &mut LessonFx, slot: u8, body: BodyId, p: PVec2, pointer: u64) {
-    let Some(particle) = sim.world.nearest_particle(body, p) else { return };
-    let at = sim.world.body(body).map_or(p, |b| b.centroid());
-    kids.grab = Some(Grab { slot, body, particle: particle as usize, target: p, last: p, pv: PVec2::ZERO, pointer });
+    let Some(g) = grab(sim, slot, body, p, pointer) else { return };
+    let at = p - g.offset;
+    kids.grab = Some(g);
     let color = sim.player(slot).map_or(kids.color, |pl| pl.color);
     let shape = kids.friends.iter().find(|f| f.slot == slot).map(|f| f.shape);
     fire_lesson(sim, kids, fx, LessonOpts { shape, color: Some(color), at: Some(at) });
 }
 
+/// Take hold of `body` with a finger at `p`.
+pub fn grab(sim: &Sim, slot: u8, body: BodyId, p: PVec2, pointer: u64) -> Option<Grab> {
+    let b = sim.world.body(body)?;
+    let offset = (p - b.centroid()).clamp_length_max(GRIP_OFFSET);
+    Some(Grab { slot, body, offset, target: p, pointer, damping: b.params.internal_damping })
+}
+
+/// One sim step of holding: steer the whole friend so its centre glides to
+/// the finger (critically damped, speed-capped), weightless and calm, and
+/// never toward a spot where any of it would be inside the room's walls,
+/// floor or ceiling. Runs right before every sim step, so it holds the same
+/// at any frame rate.
+pub fn hold(sim: &mut Sim, g: &Grab, dt: f32) {
+    let gravity = sim.world.config.gravity;
+    let Some(b) = sim.world.body_mut(g.body) else { return };
+    let c = b.centroid();
+    let (mut lo, mut hi) = (PVec2::ZERO, PVec2::ZERO);
+    for p in b.outline() {
+        lo = lo.min(p - c);
+        hi = hi.max(p - c);
+    }
+    let pad = PVec2::splat(b.params.radius + 2.0);
+    let min = level::ROOM_MIN - lo + pad;
+    let max = (level::ROOM_MAX - hi - pad).max(min);
+    let want = (g.target - g.offset).clamp(min, max);
+    let servo = ((want - c) * FOLLOW_RATE).clamp_length_max(MAX_PULL_SPEED);
+    let v = b.velocity();
+    b.add_velocity((servo - v) * (1.0 - (-GRIP_RATE * dt).exp()));
+    b.add_accel(-gravity * b.params.gravity_scale);
+    b.params.internal_damping = HELD_DAMPING;
+}
+
+/// Let go: the friend keeps the speed it was carried at (capped at
+/// [`TOSS_CAP`]), without spin, and goes back to being soft.
+pub fn let_go(sim: &mut Sim, g: &Grab) {
+    if let Some(b) = sim.world.body_mut(g.body) {
+        b.params.internal_damping = g.damping;
+        let v = b.velocity();
+        b.add_velocity(v.clamp_length_max(TOSS_CAP) - v);
+        let w = b.angular_velocity();
+        b.add_spin(-w);
+    }
+}
+
+fn hold_friend(mut game: ResMut<Game>, kids: Res<Kids>) {
+    if game.paused {
+        return;
+    }
+    if let Some(g) = &kids.grab {
+        hold(&mut game.sim, g, bb_sim::DT);
+    }
+}
+
 fn release_grab(sim: &mut Sim, kids: &mut Kids) {
     let Some(g) = kids.grab.take() else { return };
-    if let Some(b) = sim.world.body_mut(g.body) {
-        let fling = g.pv.clamp(PVec2::splat(-FLING_CAP), PVec2::splat(FLING_CAP));
-        let v = b.velocity();
-        b.add_velocity(fling - v);
-    }
+    let_go(sim, &g);
     if let Some(f) = kids.friends.iter_mut().find(|f| f.slot == g.slot) {
         f.puff = 0.45;
     }
@@ -561,8 +622,10 @@ fn release_grab(sim: &mut Sim, kids: &mut Kids) {
 
 // -------------------------------------------------------------------- drive
 
-/// Per frame: grab servo, friend AI, input merge, lesson on the group-puff
-/// rising edge, the hold-to-exit timer.
+/// Per frame: friend AI, input merge, lesson on the group-puff rising edge,
+/// and the keyboard / controller way home. (The held friend is steered in
+/// [`hold_friend`], every sim step.)
+#[allow(clippy::too_many_arguments)]
 fn drive(
     time: Res<Time>,
     mut game: ResMut<Game>,
@@ -570,29 +633,16 @@ fn drive(
     mut inputs: ResMut<Inputs>,
     mut next: ResMut<NextState<AppState>>,
     mut fx: LessonFx,
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
 ) {
     let dt = time.delta_secs().max(1.0 / 240.0);
     let kids = &mut *kids;
     let sim = &mut game.sim;
 
-    if let Some(h) = kids.home.as_mut() {
-        h.1 += dt;
-        if h.1 >= HOLD_SECS {
-            kids.home = None;
-            next.set(AppState::Title);
-        }
-    }
-
-    // Grab: velocity servo toward the finger, never a teleport.
-    if let Some(g) = kids.grab.as_mut() {
-        g.pv = g.pv * 0.55 + (g.target - g.last) / dt * 0.45;
-        g.last = g.target;
-        if let Some(b) = sim.world.body_mut(g.body) {
-            let servo = ((g.target - b.x[g.particle]) * FOLLOW_RATE).clamp_length_max(MAX_PULL_SPEED);
-            let v = b.velocity();
-            b.add_velocity(servo - v);
-            b.v[g.particle] = servo;
-        }
+    if keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace]) || pads.iter().any(|p| p.any_just_pressed([GamepadButton::East, GamepadButton::Select])) {
+        next.set(AppState::Title);
+        return;
     }
     let held = kids.grab.as_ref().map(|g| g.slot);
 
@@ -861,6 +911,134 @@ mod tests {
         assert_eq!(view_aspect(Some(Vec2::new(2000.0, 1000.0)), Some(Vec2::new(1600.0, 900.0))), Some(2.0));
         assert_eq!(view_aspect(None, Some(Vec2::new(1600.0, 900.0))), Some(1600.0 / 900.0));
         assert_eq!(view_aspect(Some(Vec2::ZERO), None), None);
+    }
+
+    /// A friend standing in the playground, ready to be picked up (puffed
+    /// while held, as in the game).
+    fn friend_world() -> (Sim, BodyId, f32) {
+        let mut sim = Sim::new(level::playground());
+        sim.rules.players_pop = false;
+        let (pos, shape) = level::friends()[2];
+        let body = sim.add_player(3, "", 0xffffff).ctl.body;
+        sim.world.body_mut(body).unwrap().set_rest_shape(&shape.outline());
+        sim.world.respawn(body, pos);
+        for _ in 0..40 {
+            sim.step();
+        }
+        let area = sim.world.body(body).unwrap().area();
+        (sim, body, area)
+    }
+
+    /// One held step, as the game runs it: the friend puffs, the servo
+    /// steers, the sim steps.
+    fn held_step(sim: &mut Sim, g: &Grab) {
+        sim.set_input(g.slot, Input { stick: PVec2::ZERO, button: true });
+        sim.player_mut(g.slot).unwrap().ctl.expand_scale = Some(PICK_SCALE_PEAK);
+        hold(sim, g, bb_sim::DT);
+        sim.step();
+    }
+
+    /// Not inverted, not torn, not exploding.
+    fn assert_sturdy(sim: &Sim, body: BodyId, rest_area: f32, when: &str) {
+        let b = sim.world.body(body).unwrap();
+        assert!(b.x.iter().chain(&b.v).all(|p| p.is_finite()), "{when}: non-finite");
+        let a = b.area();
+        assert!(a > rest_area * 0.5 && a < rest_area * PICK_SCALE_PEAK * PICK_SCALE_PEAK * 1.5, "{when}: area {a} (rest {rest_area})");
+        let c = b.centroid();
+        let reach = b.outline().map(|p| p.distance(c)).fold(0.0, f32::max);
+        assert!(reach < 3.0 * 56.0 * (2.0 / 3.0) * PICK_SCALE_PEAK, "{when}: torn (reach {reach})");
+        assert!(b.velocity().length() < MAX_PULL_SPEED * 1.15, "{when}: speed {}", b.velocity().length());
+    }
+
+    #[test]
+    fn dragged_friend_follows_firmly_without_inverting_or_jitter() {
+        let (mut sim, body, rest) = friend_world();
+        let c0 = sim.world.body(body).unwrap().centroid();
+        let mut g = grab(&sim, 3, body, c0 + PVec2::new(40.0, 10.0), 1).unwrap();
+        assert!(g.offset.length() <= GRIP_OFFSET + 1e-3);
+        // Wild toddler scribbles: fast zig-zags all over the room.
+        for k in 0..240 {
+            let t = k as f32 * bb_sim::DT;
+            g.target = PVec2::new(600.0 + (t * 9.0).sin() * 520.0, 380.0 + (t * 13.0).cos() * 280.0);
+            held_step(&mut sim, &g);
+            assert_sturdy(&sim, body, rest, &format!("scribble step {k}"));
+        }
+        // Then hold still (in open air, under the top platform): it settles
+        // on the finger and stays put.
+        g.target = PVec2::new(600.0, 280.0);
+        let mut trail = Vec::new();
+        for k in 0..90 {
+            held_step(&mut sim, &g);
+            assert_sturdy(&sim, body, rest, &format!("settle step {k}"));
+            trail.push(sim.world.body(body).unwrap().centroid());
+        }
+        let c = *trail.last().unwrap();
+        assert!(c.distance(g.target - g.offset) < 12.0, "didn't reach the finger: {c}");
+        for w in trail[60..].windows(2) {
+            assert!(w[0].distance(w[1]) < 0.75, "jitters while held still: {} -> {}", w[0], w[1]);
+        }
+    }
+
+    #[test]
+    fn dragging_into_walls_floor_or_ceiling_keeps_the_friend_in_the_room() {
+        for (name, finger) in [("right wall", PVec2::new(5000.0, 300.0)), ("left wall", PVec2::new(-4000.0, 250.0)), ("floor", PVec2::new(600.0, -3000.0)), ("ceiling", PVec2::new(450.0, 4000.0))] {
+            let (mut sim, body, rest) = friend_world();
+            let c0 = sim.world.body(body).unwrap().centroid();
+            let mut g = grab(&sim, 3, body, c0, 1).unwrap();
+            for k in 0..150 {
+                // The finger gets there fast, then keeps pushing.
+                g.target = c0.lerp(finger, (k as f32 / 20.0).min(1.0));
+                held_step(&mut sim, &g);
+                assert_sturdy(&sim, body, rest, &format!("{name} step {k}"));
+                let b = sim.world.body(body).unwrap();
+                for p in b.outline() {
+                    // The floor's skin may dent a little; the rock never.
+                    assert!(
+                        p.x > level::ROOM_MIN.x - 1.0 && p.x < level::ROOM_MAX.x + 1.0 && p.y > level::ROOM_MIN.y - 20.0 && p.y < level::ROOM_MAX.y + 1.0,
+                        "{name} step {k}: {p} pushed into the rock"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn letting_go_tosses_gently() {
+        let (mut sim, body, _) = friend_world();
+        let c0 = sim.world.body(body).unwrap().centroid();
+        let mut g = grab(&sim, 3, body, c0, 1).unwrap();
+        let damping = g.damping;
+        // Carry it to the left, then a hard flick: the finger tears across
+        // the room at 6000 px/s.
+        g.target = PVec2::new(200.0, 300.0);
+        for _ in 0..90 {
+            held_step(&mut sim, &g);
+        }
+        for k in 0..12 {
+            g.target = PVec2::new(200.0 + k as f32 * 100.0, 300.0);
+            held_step(&mut sim, &g);
+        }
+        let_go(&mut sim, &g);
+        let b = sim.world.body(body).unwrap();
+        assert!(b.velocity().length() <= TOSS_CAP + 1.0, "toss {}", b.velocity().length());
+        assert!(b.velocity().x > 300.0, "no toss at all: {}", b.velocity());
+        assert!(b.angular_velocity().abs() < 0.5, "spun: {}", b.angular_velocity());
+        assert_eq!(b.params.internal_damping, damping);
+    }
+
+    #[test]
+    fn a_plain_tap_on_home_goes_home() {
+        let mut sim = Sim::new(level::playground());
+        let ui = ui::spawn_items(&mut sim, &lessons::chip_colors());
+        let mut kids = Kids::new(LearnMode::Alphabet, 0xff5d73, Vec::new(), ui);
+        let home = kids.ui.iter().find(|u| u.kind == UiKind::Home).unwrap();
+        // The HOME card is what a press on it hits.
+        assert_eq!(sim.world.pick(home.center, bb_sim::load::layer::UI), Some(home.body));
+        kids.home = Some(7);
+        assert!(!lift(&mut sim, &mut kids, 8), "another finger lifting isn't a tap on HOME");
+        assert!(lift(&mut sim, &mut kids, 7));
+        assert_eq!(kids.home, None);
+        assert!(!lift(&mut sim, &mut kids, 7));
     }
 
     #[test]

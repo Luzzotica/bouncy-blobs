@@ -175,7 +175,7 @@ pub fn update_interp(mut interp: ResMut<Interp>, fixed: Res<Time<Fixed>>) {
     interp.alpha = fixed.overstep_fraction().clamp(0.0, 1.0);
 }
 
-fn step(mut game: ResMut<Game>, inputs: Res<Inputs>, mut out: MessageWriter<SimMsg>, mut interp: ResMut<Interp>) {
+pub(crate) fn step(mut game: ResMut<Game>, inputs: Res<Inputs>, mut out: MessageWriter<SimMsg>, mut interp: ResMut<Interp>) {
     if game.paused {
         return;
     }

@@ -1,6 +1,6 @@
 //! Kids Mode chrome, built from softbodies like everything else: colour
 //! chips are candy blobs on the floor tray, the learn-mode picker and the
-//! hold-to-exit button are paper stickies on the ceiling shelf. They float
+//! HOME button are paper stickies on the ceiling shelf. They float
 //! on soft home tethers (no gravity, no collisions) and wobble when tapped.
 //!
 //! Sizes are in world units; the camera fits `VIEW_MIN..VIEW_MAX`, so on an
@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use super::fx::{self, Glyph, INK, LAVENDER, PAPER, Z_UI};
 use super::lessons::LearnMode;
-use super::{HOLD_SECS, Kids, KidsEntity};
+use super::{Kids, KidsEntity};
 use crate::palette::{darken, hex, lighten, lin, mix};
 use crate::render::{BodyEntities, BodyVisual, MeshBuf, Shared, Style, empty_mesh};
 use crate::sim::Game;
@@ -89,7 +89,7 @@ pub fn spawn_items(sim: &mut Sim, chips: &[u32]) -> Vec<UiItem> {
         add(sim, UiKind::Chip(*c), PVec2::new(110.0 + i as f32 * 108.0, TRAY_Y), PVec2::splat(CHIP_R * 2.0), 0.0, true);
     }
     add(sim, UiKind::Puff, PVec2::new(1138.0, TRAY_Y + 6.0), PVec2::splat(PUFF_R * 2.0), 0.0, true);
-    // Ceiling shelf: hold-to-exit, learn modes, badge.
+    // Ceiling shelf: HOME, learn modes, badge.
     add(sim, UiKind::Home, PVec2::new(118.0, SHELF_Y), PVec2::new(176.0, 86.0), -0.035, false);
     for (k, m) in LearnMode::ALL.iter().enumerate() {
         let x = 600.0 + (k as f32 - 1.5) * 116.0;
@@ -176,7 +176,7 @@ fn glyph_at(buf: &mut MeshBuf, g: Glyph, fill: Color, at: PVec2, size: f32, z: f
 }
 
 /// Per-frame look of the chrome: body styles, puff/selection scale, tape,
-/// rings, glyphs, the hold-to-exit fill, and label positions.
+/// rings, glyphs, the HOME press fill, and label positions.
 pub(crate) fn visuals(
     mut game: ResMut<Game>,
     kids: Res<Kids>,
@@ -199,17 +199,6 @@ pub(crate) fn visuals(
         if let Some((mut v, _)) = map.0.get(&body).and_then(|e| vis.get_mut(*e).ok()) {
             v.style.fill = hex(c);
             v.style.rim = darken(hex(c), 0.45);
-        }
-    }
-    // Jelly platforms as stickers: full darker rim instead of a top lip.
-    let jelly: Vec<BodyId> = game.sim.jelly.iter().map(|j| j.0).collect();
-    for body in jelly {
-        if let Some((mut v, _)) = map.0.get(&body).and_then(|e| vis.get_mut(*e).ok()) {
-            if v.style.top_rim_only {
-                v.style.top_rim_only = false;
-                v.style.rim = darken(v.style.fill, 0.32);
-                v.style.rim_w = 4.0;
-            }
         }
     }
     for (i, it) in kids.ui.iter().enumerate() {
@@ -287,13 +276,12 @@ pub(crate) fn visuals(
                 }
             }
             UiKind::Home => {
-                // Arrow ← and the hold progress fill.
-                let p = kids.home.map_or(0.0, |h| (h.1 / HOLD_SECS).min(1.0));
-                if p > 0.0 {
+                // Arrow ←, and a lavender fill while it's pressed.
+                if selected {
                     let w = it.size.x * s - 16.0;
                     let h = it.size.y * s - 16.0;
                     let lo = c - right * (w * 0.5) - up * (h * 0.5);
-                    let q = [lo, lo + right * w * p, lo + right * w * p + up * h, lo + up * h];
+                    let q = [lo, lo + right * w, lo + right * w + up * h, lo + up * h];
                     buf.fan(&q, (q[0] + q[2]) * 0.5, 0.1, lin(Color::srgba(0.78, 0.49, 1.0, 0.45)), lin(Color::srgba(0.78, 0.49, 1.0, 0.45)));
                 }
                 let a = c - right * 52.0;

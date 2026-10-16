@@ -68,10 +68,9 @@ pub fn theme(t: Theme) -> ThemeColors {
         Theme::Chimney => (0x2c2433, 0x5a4b6b, 0x7a6a8a, 0xc2b5ff, 0xffd6a5),
         Theme::Toys => (0x3d2c5e, 0xff8fb1, 0x8c6ad0, 0xffd166, 0x06d6a0),
         Theme::CaveIn => (0x1c1716, 0x3a2e2a, 0x5e4c45, 0xcf9b7a, 0xff6b6b),
-        Theme::Well => (0x3a5a7a, 0xfff2c6, 0x6f7f8f, 0xa8e6cf, 0xfff27a),
+        // Kids Mode plays in the Old Well's daylight: the friendliest biome.
+        Theme::Well | Theme::Kids => (0x3a5a7a, 0xfff2c6, 0x6f7f8f, 0xa8e6cf, 0xfff27a),
         Theme::Playroom => (0xffd6e0, 0xfff5e1, 0xf4a6c0, 0xbde0fe, 0xffafcc),
-        // Cream paper with lilac card walls and mint jelly.
-        Theme::Kids => (0xfff3d6, 0xfffae6, 0xd9c8f5, 0xa8e6cf, 0xff8fab),
         Theme::Party => (0x232946, 0x3e4a89, 0x5b5f97, 0xeebbc3, 0xffd803),
     };
     // Luminous accents for the black cave: (jelly, mushroom, crystal, drop glow).
@@ -88,8 +87,8 @@ pub fn theme(t: Theme) -> ThemeColors {
         Theme::Party => Some((0xff9fd0, 0xffd803, 0x8fd8ff, 0xfff27a)),
         // The Old Well: warm gold-and-mint life, the colour of the
         // daylight far above.
-        Theme::Well => Some((0x9fe8c8, 0xffe27a, 0xfff0b8, 0xfff2c6)),
-        Theme::Playroom | Theme::Kids => None,
+        Theme::Well | Theme::Kids => Some((0x9fe8c8, 0xffe27a, 0xfff0b8, 0xfff2c6)),
+        Theme::Playroom => None,
     };
     let rock_c = hex(rock);
     let jelly_c = hex(jelly);
