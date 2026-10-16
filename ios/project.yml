@@ -54,7 +54,7 @@ targets:
         EXECUTABLE_NAME: BouncyBlobs
         PRODUCT_BUNDLE_IDENTIFIER: me.sterlinglong.bouncyblobs
         MARKETING_VERSION: 3.0.0
-        CURRENT_PROJECT_VERSION: 3.0.0.1
+        CURRENT_PROJECT_VERSION: 3.0.0.2
         DEVELOPMENT_TEAM: 74874V9Z5H
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
