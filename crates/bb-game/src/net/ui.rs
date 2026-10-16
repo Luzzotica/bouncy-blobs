@@ -45,12 +45,16 @@ pub fn qr_image(data: &str) -> Option<Image> {
     Some(img)
 }
 
+const QR_SIZE: f32 = if crate::platform::IS_MOBILE { 160.0 } else { 180.0 };
+
 /// Spawn the panel (top-right overlay). Returns the root entity; despawn it
 /// to hide.
 pub fn spawn_join_panel(commands: &mut Commands) -> Entity {
     let qr = commands
         .spawn((
-            Node { width: Val::Px(180.0), height: Val::Px(180.0), ..default() },
+            // Phones are only ~400 pt tall in landscape: a smaller code keeps the
+            // panel clear of the lobby buttons and the join hint.
+            Node { width: Val::Px(QR_SIZE), height: Val::Px(QR_SIZE), ..default() },
             BackgroundColor(Color::WHITE),
             ImageNode::default(),
             Visibility::Hidden,
@@ -102,7 +106,7 @@ pub(crate) fn update_join_panels(
             (Some(NetStatus::Ready), Some(r)) => {
                 let players = session.as_deref().map_or(0, |s| s.roster.len());
                 let who = if players == 1 { "1 player".to_string() } else { format!("{players} players") };
-                format!("Scan to play on your phone\nor enter the code at {}\n{who} joined", join_page(&r.controller_url))
+                format!("Scan to play on your phone\nor enter the code at\n{}\n{who} joined", join_page(&r.controller_url))
             }
             (Some(NetStatus::Ready), None) => "Connected".into(),
             (Some(NetStatus::Error(e)), _) => format!("Online play unavailable:\n{e}"),
