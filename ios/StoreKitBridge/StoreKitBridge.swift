@@ -22,6 +22,8 @@ private final class Bridge: @unchecked Sendable {
     private var events: [String] = []
     private var unfinished: [UInt64: Transaction] = [:]
     private var updates: Task<Void, Never>?
+    /// The product's localized price ("$4.99"), once the App Store said.
+    private var price: String?
     var productID = ""
 
     func push(_ event: [String: Any]) {
@@ -37,6 +39,21 @@ private final class Bridge: @unchecked Sendable {
         if bytes.count > cap { return -bytes.count }
         bytes.withUnsafeBufferPointer { buf.update(from: $0.baseAddress!, count: bytes.count) }
         events.removeFirst()
+        return bytes.count
+    }
+
+    func setPrice(_ p: Product) {
+        lock.lock(); price = p.displayPrice; lock.unlock()
+    }
+
+    /// The price as UTF-8 in `buf`: its length, 0 when unknown, or minus the
+    /// size needed when `cap` is too small.
+    func copyPrice(into buf: UnsafeMutablePointer<UInt8>, cap: Int) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        guard let p = price, !p.isEmpty else { return 0 }
+        let bytes = Array(p.utf8)
+        if bytes.count > cap { return -bytes.count }
+        bytes.withUnsafeBufferPointer { buf.update(from: $0.baseAddress!, count: bytes.count) }
         return bytes.count
     }
 
@@ -62,6 +79,14 @@ private final class Bridge: @unchecked Sendable {
         Task.detached { [weak self] in
             for await result in Transaction.unfinished { self?.deliver(result) }
         }
+        // The localized price for the buy button (no price, no problem:
+        // the button just says "Get the Full Game").
+        Task.detached { [weak self] in
+            guard let self else { return }
+            if let product = try? await Product.products(for: [self.productID]).first {
+                self.setPrice(product)
+            }
+        }
     }
 
     func purchase() {
@@ -72,6 +97,7 @@ private final class Bridge: @unchecked Sendable {
                     self.push(["kind": "failed", "message": "The full game isn't in the App Store yet."])
                     return
                 }
+                self.setPrice(product)
                 switch try await product.purchase() {
                 case .success(let result): self.deliver(result)
                 case .userCancelled: self.push(["kind": "cancelled"])
@@ -133,6 +159,14 @@ public func bb_sk_restore() -> Bool {
 public func bb_sk_finish(_ transaction: UnsafePointer<CChar>) {
     guard #available(iOS 15.0, *), let id = UInt64(String(cString: transaction)) else { return }
     Bridge.shared.finish(id)
+}
+
+/// The full game's localized price ("$4.99") in `buf`: its length, 0 while
+/// unknown, or minus the size needed when `cap` is too small.
+@_cdecl("bb_sk_price")
+public func bb_sk_price(_ buf: UnsafeMutablePointer<UInt8>, _ cap: Int) -> Int {
+    guard #available(iOS 15.0, *) else { return 0 }
+    return Bridge.shared.copyPrice(into: buf, cap: cap)
 }
 
 /// Next event as JSON in `buf`: its length, 0 for none, or minus the size

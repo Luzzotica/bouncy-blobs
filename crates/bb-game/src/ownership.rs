@@ -28,8 +28,15 @@
 //!
 //! Wishlisting: [`WishlistRequest`] ("Wishlist Now" on the demo's title and
 //! end card) opens the game's Steam store page: in the Steam overlay when
-//! running under Steam, else in the browser (iOS and Android hand the URL to
-//! the system).
+//! running under Steam, else in the browser (Android hands the URL to the
+//! system).
+//!
+//! iOS ([`Storefront::AppStore`]): App Store rules allow no link or button
+//! out to Steam or to any other way to buy. There's no "Wishlist Now"; the
+//! demo offers the in-app purchase itself ("Get the Full Game", with the
+//! App Store's localized price when StoreKit has it), plus "Restore
+//! Purchases" (in Settings and on the unlock page). `wishlist` and
+//! [`open_url`] refuse to open anything there, whatever asks.
 
 use bevy::prelude::*;
 
@@ -170,6 +177,9 @@ pub struct Ownership {
     pub owned: Owned,
     pub scope: DemoScope,
     pub buy: BuyStatus,
+    /// The App Store's localized price for the full game ("$4.99"), once
+    /// StoreKit fetched it (iOS only; `None` elsewhere).
+    pub price: Option<String>,
 }
 
 impl Ownership {
@@ -206,6 +216,64 @@ pub struct RestoreRequest;
 
 /// True where purchases go through the platform's own store (StoreKit).
 pub const NATIVE_STORE: bool = cfg!(target_os = "ios");
+
+/// Which store rules the menus follow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Storefront {
+    /// iOS / iPadOS: buy only through StoreKit. No wishlist, no Steam, no
+    /// web checkout, no link out to any of them; Restore Purchases offered.
+    AppStore,
+    /// Desktop (Steam, partii checkout), Android and the web: "Wishlist Now"
+    /// opens the Steam page.
+    Open,
+}
+
+impl Storefront {
+    /// The platform this build runs on.
+    pub const PLATFORM: Storefront = if NATIVE_STORE { Storefront::AppStore } else { Storefront::Open };
+
+    /// Show "Wishlist Now" (the Steam page)?
+    pub fn wishlist(self) -> bool {
+        self == Storefront::Open
+    }
+    /// Offer "Restore Purchases" (Apple requires it for non-consumables)?
+    pub fn restore(self) -> bool {
+        self == Storefront::AppStore
+    }
+    /// May the game open `url` (a store page, a checkout) outside the app?
+    /// Never on the App Store build.
+    pub fn may_open(self, _url: &str) -> bool {
+        self == Storefront::Open
+    }
+}
+
+/// The storefront the game follows: the platform's. Debug desktop builds
+/// can preview the iOS menus with `BB_PLATFORM=ios` (layout only: buying
+/// still goes through the desktop path). Nothing turns an iOS build into
+/// [`Storefront::Open`].
+pub fn storefront() -> Storefront {
+    static S: std::sync::OnceLock<Storefront> = std::sync::OnceLock::new();
+    *S.get_or_init(|| {
+        let preview = cfg!(debug_assertions) && std::env::var("BB_PLATFORM").is_ok_and(|v| v.eq_ignore_ascii_case("ios"));
+        if preview && Storefront::PLATFORM == Storefront::Open {
+            info!("storefront: previewing the App Store menus (BB_PLATFORM=ios)");
+            Storefront::AppStore
+        } else {
+            Storefront::PLATFORM
+        }
+    })
+}
+
+/// The buy button: "Get the Full Game", with the App Store's price when
+/// known ("Get the Full Game  ·  $4.99"), and every character of it drawable
+/// (a currency sign the font lacks drops the price, not the button).
+pub fn buy_label(price: Option<&str>) -> String {
+    const BUY: &str = "Get the Full Game";
+    match price.map(str::trim) {
+        Some(p) if !p.is_empty() && crate::softtext::missing_glyphs(p).is_empty() => format!("{BUY}  ·  {p}"),
+        _ => BUY.into(),
+    }
+}
 
 pub struct OwnershipPlugin;
 
@@ -264,6 +332,12 @@ fn track(mut own: ResMut<Ownership>, mut asked: Local<bool>) {
         None
     };
     let owned = resolve(dev(), owns);
+    if own.price.is_none() && NATIVE_STORE {
+        if let Some(p) = crate::store::price() {
+            info!("store: full game is {p}");
+            own.price = Some(p);
+        }
+    }
     let scope = LISTING.lock().unwrap_or_else(|p| p.into_inner()).unwrap_or_default();
     if own.owned != owned {
         info!("ownership: {:?} -> {:?}", own.owned, owned);
@@ -312,6 +386,11 @@ fn buy(mut own: ResMut<Ownership>, mut buys: MessageReader<BuyRequest>, mut rest
 /// running the game, else the store page in the browser.
 fn wishlist(mut wishes: MessageReader<WishlistRequest>, ach: Option<Res<crate::achievements::Achievements>>) {
     if wishes.read().count() == 0 {
+        return;
+    }
+    // App Store rules: no way out to Steam (the menus never offer it there).
+    if !storefront().wishlist() {
+        warn!("wishlist: not offered on the App Store build");
         return;
     }
     if crate::platform::headless() {
@@ -428,7 +507,13 @@ fn checkout(
 /// Open a web page (a checkout, the Steam store page) in the default
 /// browser; iOS and Android hand it to the system, the web build opens a new
 /// tab. Headless runs only log it (they never open anything on screen).
+/// The App Store build opens nothing: no link out to another store or a
+/// checkout.
 pub fn open_url(url: &str) {
+    if !Storefront::PLATFORM.may_open(url) || !storefront().may_open(url) {
+        warn!("open: {url} refused (App Store build: purchases stay in StoreKit)");
+        return;
+    }
     if crate::platform::headless() {
         info!("open: {url} (headless: not opened)");
         return;
@@ -525,6 +610,34 @@ mod tests {
         // Headless tooling sees everything, unless asked for the demo.
         assert_eq!(dev_override(false, false, false, true), Some(true));
         assert_eq!(dev_override(false, true, false, true), Some(false));
+    }
+
+    #[test]
+    fn app_store_has_no_way_out_to_another_store() {
+        let s = Storefront::AppStore;
+        assert!(!s.wishlist());
+        assert!(s.restore());
+        for url in [STEAM_STORE_URL, "https://partii.games/checkout/abc", "https://bouncy-blobs.partii.games", "steam://store/4485010"] {
+            assert!(!s.may_open(url), "{url}");
+        }
+        // Desktop, Android, web: the Steam page as before; no Restore.
+        let o = Storefront::Open;
+        assert!(o.wishlist() && !o.restore() && o.may_open(STEAM_STORE_URL));
+        // This build's platform: iOS is the App Store, everything else is open.
+        assert_eq!(Storefront::PLATFORM == Storefront::AppStore, cfg!(target_os = "ios"));
+    }
+
+    #[test]
+    fn buy_label_shows_a_drawable_price() {
+        assert_eq!(buy_label(None), "Get the Full Game");
+        assert_eq!(buy_label(Some("$4.99")), "Get the Full Game  ·  $4.99");
+        assert_eq!(buy_label(Some("  ")), "Get the Full Game");
+        // A currency sign the font can't draw keeps the plain label.
+        let odd = "\u{20b9}\u{1F600}499";
+        if !crate::softtext::missing_glyphs(odd).is_empty() {
+            assert_eq!(buy_label(Some(odd)), "Get the Full Game");
+        }
+        assert!(crate::softtext::missing_glyphs(&buy_label(Some("$4.99"))).is_empty());
     }
 
     #[test]

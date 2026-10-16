@@ -19,7 +19,7 @@ use crate::palette::{darken, hex, lighten};
 use crate::render::{Style, StyleOverrides, z};
 use crate::dropin::{DropIn, DropStyle};
 use crate::sim::{Game, Inputs, LoadLevel, UnloadLevel};
-use crate::ownership::{BuyRequest, Feature, Ownership, RestoreRequest, WishlistRequest};
+use crate::ownership::{BuyRequest, Feature, Ownership, RestoreRequest, Storefront, WishlistRequest, buy_label, storefront};
 use crate::softtext::{Ride, SoftText};
 use crate::story::{CHAPTERS, StoryProgress};
 
@@ -82,9 +82,12 @@ pub enum Action {
     Quit,
     /// A tile that needs the full game: opens its unlock page.
     Locked(Lock),
+    /// Buy the full game: StoreKit's sheet on iOS (the demo title's buy
+    /// tile there), partii checkout elsewhere.
     Buy,
+    /// iOS: Restore Purchases.
     Restore,
-    /// The demo's "Wishlist Now": the game's Steam page.
+    /// The demo's "Wishlist Now": the game's Steam page (never on iOS).
     Wishlist,
 }
 
@@ -672,12 +675,29 @@ fn button_slot(page: Page, i: usize, action: &Action) -> (PVec2, PVec2) {
 /// tiles and its hint line.
 type PageKey = (Page, Vec<(String, Action, u32)>, Option<String>);
 
-fn page_key(page: Page, progress: &StoryProgress, own: &Ownership) -> PageKey {
-    (page, page_buttons(page, progress, own), page_hint(page, own))
+fn page_key(page: Page, progress: &StoryProgress, own: &Ownership, store: Storefront) -> PageKey {
+    (page, page_buttons(page, progress, own, store), page_hint(page, own))
 }
 
-fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
-    let mut v = page_tiles(page, progress, own);
+/// Same page, same tiles, same hint: only some labels differ (the App
+/// Store's price arriving). Those relabel in place instead of rebuilding.
+fn relabel_only(old: &PageKey, new: &PageKey) -> bool {
+    old != new
+        && old.0 == new.0
+        && old.2 == new.2
+        && old.1.len() == new.1.len()
+        && old.1.iter().zip(&new.1).all(|(a, b)| a.1 == b.1 && a.2 == b.2)
+}
+
+/// Pages with a buy/restore status line under their tiles (the unlock page
+/// has its own): the App Store demo's title (its buy tile) and Settings
+/// (Restore Purchases).
+fn shows_status(page: Page, own: &Ownership, store: Storefront) -> bool {
+    store == Storefront::AppStore && !own.full() && matches!(page, Page::Main | Page::Settings)
+}
+
+fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership, store: Storefront) -> Vec<(String, Action, u32)> {
+    let mut v = page_tiles(page, progress, own, store);
     for t in v.iter_mut() {
         t.1 = gate(t.1.clone(), own, progress);
         if matches!(t.1, Action::Locked(_)) {
@@ -687,13 +707,19 @@ fn page_buttons(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(S
     v
 }
 
-fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(String, Action, u32)> {
+fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership, store: Storefront) -> Vec<(String, Action, u32)> {
     match page {
         Page::Main => {
             let mut v = vec![("Play".into(), Action::Goto(Page::Play), 0xff8fab)];
-            // The demo invites a wishlist (the Steam page) right on the title.
+            // The demo invites a wishlist (the Steam page) right on the
+            // title; on iOS (no links out to Steam) it offers the in-app
+            // purchase itself.
             if !own.full() {
-                v.push(("Wishlist Now".into(), Action::Wishlist, WISHLIST_COLOR));
+                if store.wishlist() {
+                    v.push(("Wishlist Now".into(), Action::Wishlist, WISHLIST_COLOR));
+                } else {
+                    v.push((buy_label(own.price.as_deref()), Action::Buy, BUY_COLOR));
+                }
             }
             v.push(("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff));
             #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
@@ -727,16 +753,23 @@ fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(Str
             ("Sandbox".into(), Action::Sandbox, 0xff9f43),
             ("Back".into(), Action::Goto(Page::Play), 0xd0c4e8),
         ],
-        Page::Settings => vec![
-            ("Blob Color".into(), Action::Color, progress.pip_color),
-            ("Fullscreen".into(), Action::ToggleFullscreen, 0x5dd6ff),
-            (streamer_label(), Action::ToggleStreamer, 0xffc75f),
-            ("Back".into(), Action::Goto(Page::Main), 0xd0c4e8),
-        ],
+        Page::Settings => {
+            let mut v = vec![
+                ("Blob Color".into(), Action::Color, progress.pip_color),
+                ("Fullscreen".into(), Action::ToggleFullscreen, 0x5dd6ff),
+                (streamer_label(), Action::ToggleStreamer, 0xffc75f),
+            ];
+            // Apple requires a way to restore a non-consumable purchase.
+            if store.restore() && !own.full() {
+                v.push(("Restore Purchases".into(), Action::Restore, RESTORE_COLOR));
+            }
+            v.push(("Back".into(), Action::Goto(Page::Main), 0xd0c4e8));
+            v
+        }
         Page::Unlock(l) => {
-            let mut v = vec![("Get the Full Game".into(), Action::Buy, 0xffc75f)];
-            if crate::ownership::NATIVE_STORE {
-                v.push(("Restore Purchases".into(), Action::Restore, 0x5dd6ff));
+            let mut v = vec![(buy_label(own.price.as_deref()), Action::Buy, BUY_COLOR)];
+            if store.restore() {
+                v.push(("Restore Purchases".into(), Action::Restore, RESTORE_COLOR));
             }
             v.push(("Back".into(), Action::Goto(l.back()), 0xd0c4e8));
             v
@@ -746,6 +779,11 @@ fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership) -> Vec<(Str
 
 /// The "Wishlist Now" tile: Steam's blue.
 pub const WISHLIST_COLOR: u32 = 0x66c0f4;
+/// "Get the Full Game": the gold of the unlock page's buy tile and the demo
+/// end card's.
+pub const BUY_COLOR: u32 = 0xffc75f;
+/// "Restore Purchases".
+pub const RESTORE_COLOR: u32 = 0x5dd6ff;
 
 /// Streamer mode hides room codes and QR codes (net/ui.rs).
 fn streamer_label() -> String {
@@ -765,7 +803,7 @@ fn build_page(
     mut game: ResMut<Game>,
     assets: Res<GameAssets>,
     progress: Res<StoryProgress>,
-    labels: Query<(Entity, &BodyLabel), With<MenuEntity>>,
+    mut labels: Query<(Entity, &BodyLabel, &mut SoftText), With<MenuEntity>>,
     mut overrides: ResMut<StyleOverrides>,
     mut built: Local<Option<PageKey>>,
     (own, mut meshes, mut mats, hints, mut badge_mesh): (Res<Ownership>, ResMut<Assets<Mesh>>, ResMut<Assets<ColorMaterial>>, Query<Entity, With<MenuHint>>, Local<Option<BadgeMeshes>>),
@@ -781,9 +819,23 @@ fn build_page(
     // or listing update that leaves this page as it was (the store's demo
     // scope arriving a moment after the title settled) must not knock the
     // buttons down mid-menu.
-    let key = page_key(menu.page, &progress, &own);
+    let store = storefront();
+    let key = page_key(menu.page, &progress, &own, store);
     let fresh = game.is_added();
     if !fresh && built.as_ref() == Some(&key) {
+        return;
+    }
+    // Only a label changed (the App Store's price came in): swap the words
+    // on the standing tiles.
+    if !fresh && menu.buttons.len() == key.1.len() && built.as_ref().is_some_and(|old| relabel_only(old, &key)) {
+        for (b, (text, _, _)) in menu.buttons.iter().zip(&key.1) {
+            for (_, l, mut t) in labels.iter_mut() {
+                if l.body == b.body && t.text != *text {
+                    t.text = text.clone();
+                }
+            }
+        }
+        *built = Some(key);
         return;
     }
     *built = Some(key);
@@ -813,7 +865,7 @@ fn build_page(
         menu.falling.push((id, 1.6));
     }
     let keep: Vec<BodyId> = menu.falling.iter().map(|f| f.0).collect();
-    for (e, l) in labels.iter() {
+    for (e, l, _) in labels.iter() {
         if !keep.contains(&l.body) {
             commands.entity(e).despawn();
         }
@@ -849,7 +901,7 @@ fn build_page(
     }
 
     // Buttons.
-    let items = page_buttons(menu.page, &progress, &own);
+    let items = page_buttons(menu.page, &progress, &own, store);
     let badge = badge_mesh.get_or_insert_with(|| BadgeMeshes::new(&mut meshes, &mut mats)).clone();
     let grid = menu.page == Page::Chapters;
     let top = page_top(menu.page);
@@ -872,6 +924,13 @@ fn build_page(
                 MenuEntity,
             ));
             spawn_badge(&mut commands, &badge, id, lock_at, scale);
+        } else if action == Action::Buy {
+            // The buy tile may carry the price: shrink to fit the tile.
+            commands.spawn((
+                SoftText::new(text.clone(), font).ride(Ride::Game(id)).fit(size.x - 48.0).color(Color::WHITE).z(z::FX - 0.5).stagger(0.025),
+                BodyLabel { body: id, size: font },
+                MenuEntity,
+            ));
         } else {
             label(&mut commands, &assets, id, &text, font, Color::WHITE);
         }
@@ -898,6 +957,21 @@ fn build_page(
                 MenuEntity,
             ));
         }
+    } else if shows_status(menu.page, &own, store) {
+        // The App Store demo: how the purchase / restore is going, under the
+        // tiles (empty while idle).
+        let rows = menu.buttons.len() as f32;
+        commands.spawn((
+            SoftText::new(own.buy.line(own.owned), 28.0)
+                .at(Vec2::new(left + 200.0, top - rows * 100.0 + 4.0))
+                .wrap(400.0)
+                .color(Color::WHITE)
+                .z(z::FX - 0.5)
+                .stagger(0.012),
+            MenuStatus,
+            MenuHint,
+            MenuEntity,
+        ));
     }
     // Everything rains in from the bottom up — bottom button first, the
     // logo's top row last, left to right — so nothing ever falls through
@@ -1255,10 +1329,11 @@ mod tests {
     #[test]
     fn every_menu_label_has_glyphs() {
         let progress = StoryProgress { unlocked: CHAPTERS, current: 3, pip_color: 0xff5d73 };
-        for o in [Owned::Full, Owned::Demo] {
-            let own = own(o);
+        for (o, store) in [Owned::Full, Owned::Demo].into_iter().flat_map(|o| [(o, Storefront::Open), (o, Storefront::AppStore)]) {
+            let mut own = own(o);
+            own.price = Some("$4.99".into());
             for page in PAGES {
-                for (text, _, _) in page_buttons(page, &progress, &own) {
+                for (text, _, _) in page_buttons(page, &progress, &own, store) {
                     assert!(crate::softtext::missing_glyphs(&text).is_empty(), "{text:?}");
                 }
                 for text in page_hint(page, &own).into_iter().chain([own.buy.line(o)]) {
@@ -1278,7 +1353,11 @@ mod tests {
     }
 
     fn actions(page: Page, progress: &StoryProgress, o: Owned) -> Vec<Action> {
-        page_buttons(page, progress, &own(o)).into_iter().map(|t| t.1).collect()
+        actions_on(page, progress, o, Storefront::Open)
+    }
+
+    fn actions_on(page: Page, progress: &StoryProgress, o: Owned, store: Storefront) -> Vec<Action> {
+        page_buttons(page, progress, &own(o), store).into_iter().map(|t| t.1).collect()
     }
 
     #[test]
@@ -1334,11 +1413,21 @@ mod tests {
         let mut b = own(Owned::Demo);
         a.scope.story_chapters = 2;
         b.scope.story_chapters = 1;
-        assert_eq!(page_key(Page::Main, &p, &a), page_key(Page::Main, &p, &b));
-        assert_eq!(page_key(Page::Play, &p, &a), page_key(Page::Play, &p, &b));
+        let o = Storefront::Open;
+        assert_eq!(page_key(Page::Main, &p, &a, o), page_key(Page::Main, &p, &b, o));
+        assert_eq!(page_key(Page::Play, &p, &a, o), page_key(Page::Play, &p, &b, o));
         // ...but it does when the page itself changes.
-        assert_ne!(page_key(Page::Chapters, &p, &a), page_key(Page::Chapters, &p, &b));
-        assert_ne!(page_key(Page::Main, &p, &b), page_key(Page::Main, &p, &own(Owned::Full)));
+        assert_ne!(page_key(Page::Chapters, &p, &a, o), page_key(Page::Chapters, &p, &b, o));
+        assert_ne!(page_key(Page::Main, &p, &b, o), page_key(Page::Main, &p, &own(Owned::Full), o));
+        // The App Store's price arriving only relabels the buy tile.
+        let s = Storefront::AppStore;
+        let mut priced = b.clone();
+        priced.price = Some("$4.99".into());
+        let (before, after) = (page_key(Page::Main, &p, &b, s), page_key(Page::Main, &p, &priced, s));
+        assert_ne!(before, after);
+        assert!(relabel_only(&before, &after));
+        assert!(!relabel_only(&before, &before));
+        assert!(!relabel_only(&before, &page_key(Page::Main, &p, &own(Owned::Full), s)));
     }
 
     /// The title's buttons (4 in the demo, 3 owned) stack without touching,
@@ -1346,9 +1435,9 @@ mod tests {
     #[test]
     fn title_buttons_stack_clear_of_each_other_and_on_screen() {
         let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
-        for o in [Owned::Demo, Owned::Full] {
+        for (o, store) in [Owned::Demo, Owned::Full].into_iter().flat_map(|o| [(o, Storefront::Open), (o, Storefront::AppStore)]) {
             for page in [Page::Main, Page::Play, Page::Party, Page::Settings] {
-                let rects: Vec<(PVec2, PVec2)> = page_buttons(page, &p, &own(o)).iter().enumerate().map(|(i, b)| button_slot(page, i, &b.1)).collect();
+                let rects: Vec<(PVec2, PVec2)> = page_buttons(page, &p, &own(o), store).iter().enumerate().map(|(i, b)| button_slot(page, i, &b.1)).collect();
                 for (i, (c, s)) in rects.iter().enumerate() {
                     let (lo, hi) = (*c - *s * 0.5, *c + *s * 0.5);
                     assert!(lo.x >= -VIEW_HALF_W && hi.x <= VIEW_HALF_W, "{o:?} {page:?} #{i} off the side");
@@ -1366,10 +1455,53 @@ mod tests {
     fn demo_title_offers_wishlist_and_owners_dont_see_it() {
         let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
         for o in [Owned::Demo, Owned::Unknown] {
-            let main = page_buttons(Page::Main, &p, &own(o));
+            let main = page_buttons(Page::Main, &p, &own(o), Storefront::Open);
             assert_eq!(main[1], ("Wishlist Now".to_string(), Action::Wishlist, WISHLIST_COLOR));
+            assert!(!main.iter().any(|t| t.1 == Action::Buy || t.1 == Action::Restore));
         }
         assert!(!actions(Page::Main, &p, Owned::Full).contains(&Action::Wishlist));
+        // Desktop / Android Settings: no Restore.
+        assert!(!actions(Page::Settings, &p, Owned::Demo).contains(&Action::Restore));
+    }
+
+    /// iOS: the demo title buys the game in place of "Wishlist Now", in the
+    /// buy gold, priced once StoreKit has the price.
+    #[test]
+    fn app_store_demo_title_offers_the_purchase_not_the_wishlist() {
+        let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
+        let s = Storefront::AppStore;
+        for o in [Owned::Demo, Owned::Unknown] {
+            let mut own = own(o);
+            let main = page_buttons(Page::Main, &p, &own, s);
+            assert_eq!(main[1], ("Get the Full Game".to_string(), Action::Buy, BUY_COLOR));
+            own.price = Some("$4.99".into());
+            assert_eq!(page_buttons(Page::Main, &p, &own, s)[1].0, "Get the Full Game  ·  $4.99");
+            assert!(shows_status(Page::Main, &own, s) && shows_status(Page::Settings, &own, s));
+        }
+        assert!(!actions_on(Page::Main, &p, Owned::Full, s).contains(&Action::Buy));
+        assert!(!shows_status(Page::Main, &own(Owned::Demo), Storefront::Open));
+        // Restore Purchases is reachable from Settings (and the unlock page).
+        assert!(actions_on(Page::Settings, &p, Owned::Demo, s).contains(&Action::Restore));
+        assert!(!actions_on(Page::Settings, &p, Owned::Full, s).contains(&Action::Restore));
+    }
+
+    /// App Store rules: no page, owned or not, at any progress, leads out
+    /// to Steam (every Buy there is StoreKit's).
+    #[test]
+    fn app_store_menus_never_offer_the_wishlist() {
+        let s = Storefront::AppStore;
+        for progress in [StoryProgress { unlocked: 1, current: 1, pip_color: 0 }, StoryProgress { unlocked: CHAPTERS, current: 3, pip_color: 0 }] {
+            for o in [Owned::Unknown, Owned::Demo, Owned::Full] {
+                for page in PAGES {
+                    let a = actions_on(page, &progress, o, s);
+                    assert!(!a.contains(&Action::Wishlist), "{o:?} {page:?}");
+                    for (text, _, color) in page_buttons(page, &progress, &own(o), s) {
+                        assert!(!text.to_lowercase().contains("wishlist") && !text.to_lowercase().contains("steam"), "{text:?}");
+                        assert_ne!(color, WISHLIST_COLOR, "{page:?}: Steam blue on iOS");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1378,7 +1510,9 @@ mod tests {
         let a = actions(Page::Unlock(Lock::Host), &p, Owned::Demo);
         assert_eq!(a.first(), Some(&Action::Buy));
         assert_eq!(a.last(), Some(&Action::Goto(Page::Party)));
-        assert_eq!(a.contains(&Action::Restore), crate::ownership::NATIVE_STORE);
+        assert!(!a.contains(&Action::Restore));
+        let ios = actions_on(Page::Unlock(Lock::Host), &p, Owned::Demo, Storefront::AppStore);
+        assert_eq!(ios, vec![Action::Buy, Action::Restore, Action::Goto(Page::Party)]);
         assert_eq!(Lock::Chapter(3).back(), Page::Chapters);
         assert_eq!(Lock::Story(2).back(), Page::Play);
         // No hint (no nagging) on pages with nothing locked.
@@ -1389,8 +1523,8 @@ mod tests {
     #[test]
     fn locked_tiles_look_muted() {
         let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
-        let demo = page_buttons(Page::Party, &p, &own(Owned::Demo));
-        let full = page_buttons(Page::Party, &p, &own(Owned::Full));
+        let demo = page_buttons(Page::Party, &p, &own(Owned::Demo), Storefront::Open);
+        let full = page_buttons(Page::Party, &p, &own(Owned::Full), Storefront::Open);
         assert_ne!(demo[0].2, full[0].2);
         assert_eq!(demo[1].2, full[1].2);
     }

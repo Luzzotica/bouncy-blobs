@@ -5,6 +5,10 @@
 //! while the card is up, the first button turns into "Play Chapter 3" and the
 //! story carries on.
 //!
+//! iOS ([`Storefront::AppStore`]): no "Wishlist Now" (no link out to Steam);
+//! "Get the Full Game" is the StoreKit purchase (with the App Store's price
+//! once known), and "Back to Title".
+//!
 //! It only ever appears at a chapter boundary, never mid-level.
 
 use bevy::prelude::*;
@@ -12,7 +16,7 @@ use bevy::prelude::*;
 use super::{Cues, EndCardUi, PendingStart, Phase, StoryFlow};
 use crate::assets::GameAssets;
 use crate::flow::AppState;
-use crate::ownership::{BuyRequest, Ownership, WishlistRequest};
+use crate::ownership::{BuyRequest, Ownership, Storefront, WishlistRequest, buy_label, storefront};
 use crate::sim::Inputs;
 
 /// The demo's end card is up. `chapter` is the locked chapter it stopped before.
@@ -50,13 +54,15 @@ const PRIMARY: usize = 0;
 const WISHLIST: usize = 1;
 const BACK: usize = 2;
 
-/// The buttons on show (owners don't get the wishlist nudge).
-fn shown(owned: bool) -> &'static [usize] {
-    if owned { &[PRIMARY, BACK] } else { &[PRIMARY, WISHLIST, BACK] }
+/// The buttons on show (owners don't get the wishlist nudge; the App Store
+/// build never shows it).
+fn shown(owned: bool, store: Storefront) -> &'static [usize] {
+    if owned || !store.wishlist() { &[PRIMARY, BACK] } else { &[PRIMARY, WISHLIST, BACK] }
 }
 
 /// The card's words for owned / not owned (also checked for glyphs).
-pub fn lines(chapter: u8, owned: bool) -> (String, String, [String; 3]) {
+/// `price` is the App Store's, for the buy button.
+pub fn lines(chapter: u8, owned: bool, price: Option<&str>) -> (String, String, [String; 3]) {
     if owned {
         (
             "Unlocked!".into(),
@@ -68,7 +74,7 @@ pub fn lines(chapter: u8, owned: bool) -> (String, String, [String; 3]) {
         (
             "That's the demo!".into(),
             format!("Pip's story keeps going: {more} more chapters, Party with phones, and Sandbox. Friends can always join you."),
-            ["Get the Full Game".into(), "Wishlist Now".into(), "Back to Title".into()],
+            [buy_label(price), "Wishlist Now".into(), "Back to Title".into()],
         )
     }
 }
@@ -120,7 +126,7 @@ fn demo_end(
             ..default()
         };
         let shadow = TextShadow { offset: Vec2::new(4.0, 5.0), color: Color::srgba(0.0, 0.0, 0.0, 0.6) };
-        let (title, body, labels) = lines(card.chapter, owned);
+        let (title, body, labels) = lines(card.chapter, owned, own.price.as_deref());
         commands
             .spawn((
                 Node {
@@ -190,10 +196,11 @@ fn demo_end(
         }
     }
 
-    // Bought while the card is up: offer the next chapter.
-    if card.owned != Some(owned) {
+    // Bought while the card is up: offer the next chapter. (The App Store's
+    // price arriving relabels the buy button too.)
+    if card.owned != Some(owned) || (own.is_changed() && !owned) {
         card.owned = Some(owned);
-        let (title, body, labels) = lines(card.chapter, owned);
+        let (title, body, labels) = lines(card.chapter, owned, own.price.as_deref());
         for mut t in ui.p0().iter_mut() {
             t.0 = title.clone();
         }
@@ -213,7 +220,7 @@ fn demo_end(
 
     // Focus: arrows / stick / phone; activate: Enter, Space, pad A, phone
     // button, or a click/tap on a button.
-    let order = shown(owned);
+    let order = shown(owned, storefront());
     if !order.contains(&card.focus) {
         card.focus = PRIMARY;
     }
@@ -280,9 +287,11 @@ fn demo_end(
         Some(PRIMARY) => {
             buys.write(BuyRequest);
         }
-        Some(WISHLIST) => {
+        // (Never shown on the App Store build; `ownership` refuses it there too.)
+        Some(WISHLIST) if storefront().wishlist() => {
             wishes.write(WishlistRequest);
         }
+        Some(WISHLIST) => {}
         Some(_) => next.set(AppState::Title),
         None => {}
     }
@@ -295,20 +304,30 @@ mod tests {
     #[test]
     fn card_words_have_glyphs() {
         for owned in [false, true] {
-            let (t, b, l) = lines(3, owned);
+            let (t, b, l) = lines(3, owned, Some("$4.99"));
             for s in [t, b].into_iter().chain(l) {
                 assert!(crate::softtext::missing_glyphs(&s).is_empty(), "{s:?}");
             }
         }
         // The default demo stops before chapter 3.
-        assert!(lines(3, false).1.contains("8 more chapters"));
-        assert_eq!(lines(3, true).2[PRIMARY], "Play Chapter 3");
-        assert_eq!(lines(3, false).2[WISHLIST], "Wishlist Now");
+        assert!(lines(3, false, None).1.contains("8 more chapters"));
+        assert_eq!(lines(3, true, None).2[PRIMARY], "Play Chapter 3");
+        assert_eq!(lines(3, false, None).2[PRIMARY], "Get the Full Game");
+        assert_eq!(lines(3, false, Some("$4.99")).2[PRIMARY], "Get the Full Game  ·  $4.99");
+        assert_eq!(lines(3, false, None).2[WISHLIST], "Wishlist Now");
     }
 
     #[test]
     fn wishlist_is_offered_in_the_demo_only() {
-        assert_eq!(shown(false), &[PRIMARY, WISHLIST, BACK]);
-        assert_eq!(shown(true), &[PRIMARY, BACK]);
+        assert_eq!(shown(false, Storefront::Open), &[PRIMARY, WISHLIST, BACK]);
+        assert_eq!(shown(true, Storefront::Open), &[PRIMARY, BACK]);
+    }
+
+    /// iOS: buy (StoreKit) and Back to Title; never the Steam wishlist.
+    #[test]
+    fn app_store_card_buys_and_never_wishlists() {
+        for owned in [false, true] {
+            assert_eq!(shown(owned, Storefront::AppStore), &[PRIMARY, BACK]);
+        }
     }
 }
