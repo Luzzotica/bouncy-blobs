@@ -3,6 +3,7 @@
 #
 #   scripts/release-notes.sh version-txt [--commit <sha>]   # VERSION.txt (beside the content build)
 #   scripts/release-notes.sh steam                          # Steam patch-notes block (BBCode)
+#   scripts/release-notes.sh markdown                       # section body for `partii notes publish`
 #   scripts/release-notes.sh version                        # just the newest version number
 #
 # The newest section is the first "## <version>" heading. Its version must
@@ -27,6 +28,19 @@ body="$(awk 'BEGIN{n=0} /^## /{n++; next} n==1{print}' "$root/CHANGELOG.md" | se
 
 case "$mode" in
   version) echo "$version" ;;
+  markdown)
+    # One line per bullet: partii's excerpt treats a wrapped line as a new one.
+    printf '%s\n' "$body" | python3 -c '
+import sys
+out = []
+for line in sys.stdin.read().splitlines():
+    if line.startswith("  ") and out and out[-1].startswith("- "):
+        out[-1] += " " + line.strip()
+    else:
+        out.append(line)
+print("\n".join(out))
+'
+    ;;
   version-txt)
     echo "Bouncy Blobs $version"
     echo "commit $commit, built $(date -u +%Y-%m-%d)"
@@ -50,6 +64,10 @@ inlist = False
 for line in lines:
     t = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", line)
     t = re.sub(r"\*(.+?)\*", r"[i]\1[/i]", t)
+    if t.startswith("### "):
+        if inlist: print("[/list]"); inlist = False
+        print("[h3]" + t[4:] + "[/h3]")
+        continue
     if t.startswith("- "):
         if not inlist: print("[list]"); inlist = True
         print("[*]" + t[2:])
@@ -59,5 +77,5 @@ for line in lines:
 if inlist: print("[/list]")
 '
     ;;
-  *) echo "release-notes: mode is version-txt | steam | version" >&2; exit 2 ;;
+  *) echo "release-notes: mode is version-txt | steam | markdown | version" >&2; exit 2 ;;
 esac

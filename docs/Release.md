@@ -86,7 +86,14 @@ Report lines (spec format): `bouncy-blobs <full|demo> <macos|windows|linux> <ste
    **production** (`PROD_DEV_TOKEN` from `~/.config/partii/production.env`; never
    `bouncy-blobs-game.env`, which is staging). Live the moment it's uploaded. Then it
    keeps the new build + the previous one per platform and deletes older ones.
-   partii has no release-notes field yet (CLI 0.2.1).
+   Right after the uploads it publishes this version's patch notes with
+   `partii notes publish bouncy-blobs <version> --markdown @notes.md` (CLI 0.2.2+;
+   install with `PARTII_VERSION=0.2.2 curl -fsSL https://partii.games/install.sh | sh`).
+   notes.md is the CHANGELOG section body without its `## <version>` heading
+   (`scripts/release-notes.sh markdown`). It's idempotent per version, and it shows at
+   `https://partii.games/games/bouncy-blobs/updates/<version>`. The orchestrator's
+   Discord post links there and takes the first four "### New" bullets, so lead with
+   the biggest gameplay features.
 8. **Report**: `report.txt` + the Steam patch-notes block for the morning report.
 
 ## Windows C runtime

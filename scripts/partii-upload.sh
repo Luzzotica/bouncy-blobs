@@ -60,6 +60,22 @@ print("dry-run" if d.get("dry_run") else d.get("build",{}).get("id") or d.get("i
   echo "PARTII $platform $id $version ($(du -h "$file" | cut -f1))"
 done
 
+# Patch notes: this version's CHANGELOG section body (no "## version" heading) on
+# https://partii.games/games/<game>/updates/<version>. Idempotent per version, and
+# the Discord post links there, so a missing note means no link. Needs CLI 0.2.2+.
+notes="${TMPDIR:-/tmp}/partii-notes.$$.md"
+"$(dirname "${BASH_SOURCE[0]}")/release-notes.sh" markdown > "$notes"
+nargs=(notes publish "$game" "$version" --markdown "@$notes")
+[ "$dry" = true ] && nargs+=(--dry-run)
+nout="$(partii "${nargs[@]}" 2>&1 | redact)" || true
+nurl="$(printf '%s' "$nout" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+if d.get("ok") is False or "note" not in d and "url" not in d: sys.exit(1)
+print(d.get("url") or ("dry-run" if d.get("dry_run") else "?"))' 2>/dev/null)" \
+  && echo "PARTII notes $version $nurl" || { echo "PARTII notes FAILED ($(printf '%s' "$nout" | tail -c 300))"; fail=1; }
+rm -f "$notes"
+
 # Prune: per uploaded platform, keep the newest two builds on this channel.
 partii builds list "$game" | redact > "${TMPDIR:-/tmp}/partii-builds.$$.json"
 platforms="$(for it in "${items[@]}"; do printf '%s\n' "${it%%=*}"; done)"
