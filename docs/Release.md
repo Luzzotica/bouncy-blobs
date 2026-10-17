@@ -89,6 +89,16 @@ Report lines (spec format): `bouncy-blobs <full|demo> <macos|windows|linux> <ste
    partii has no release-notes field yet (CLI 0.2.1).
 8. **Report**: `report.txt` + the Steam patch-notes block for the morning report.
 
+## Windows C runtime
+
+The Windows exe links the MSVC runtime dynamically (`VCRUNTIME140.dll`, plus the
+`api-ms-win-crt-*` UCRT that Windows 10+ always has), exactly like tankii's builds, and
+like tankii we ship only `steam_api64.dll` beside it. A PC without the VC++ 2015-2022
+x64 redistributable can't start the game. Open decision: tick that redistributable in
+Steamworks (Installation > Redistributables) and either ship an app-local
+`vcruntime140.dll` in the partii zip or build Windows with a static CRT
+(`+crt-static` for `x86_64-pc-windows-msvc` in the repo's `.cargo/config.toml`).
+
 ## Steamworks setup (Sterling)
 
 What Steam shows for 4485010 today (builder `acitozzul`, `app_info_print`): one depot,
