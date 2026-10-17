@@ -3,9 +3,15 @@
 #   scripts/build-macos.sh          # build
 #   scripts/build-macos.sh --run    # build, then launch the bundle
 #   scripts/build-macos.sh --zip    # also produce build/macos/BouncyBlobs-<ver>-macos.zip
+#   scripts/build-macos.sh --steam  # release build: `steam` feature + libsteam_api.dylib
+#                                   # beside the binary (Steam depot AND partii zip)
 #   ARCHS=aarch64-apple-darwin scripts/build-macos.sh   # one arch (quick test builds)
 # Signing: ad-hoc by default. Set MACOS_SIGN_IDENTITY="Developer ID Application: …"
 # to sign for distribution (notarize with `xcrun notarytool submit`).
+# --steam builds are ad-hoc signed WITHOUT the hardened runtime and are not
+# notarized (same as tankii, docs/Release.md): the Steam overlay re-execs the
+# game with DYLD_INSERT_LIBRARIES, which a hardened runtime refuses, and Steam
+# launches are not quarantined.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -14,10 +20,12 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 source "$ROOT/scripts/lib/mp-api-key.sh"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 
-RUN=0; ZIP=0
+RUN=0; ZIP=0; STEAM=0
 for a in "$@"; do
-  case "$a" in --run) RUN=1 ;; --zip) ZIP=1 ;; *) echo "unknown arg $a" >&2; exit 2 ;; esac
+  case "$a" in --run) RUN=1 ;; --zip) ZIP=1 ;; --steam) STEAM=1 ;; *) echo "unknown arg $a" >&2; exit 2 ;; esac
 done
+FEATURES=()
+[[ $STEAM == 1 ]] && FEATURES=(--features steam)
 
 VERSION="$(awk -F'"' '/^\[workspace.package\]/{f=1} f&&/^version/{print $2; exit}' Cargo.toml)"
 BUILD="${MACOS_BUILD_NUMBER:-$VERSION}"
@@ -26,7 +34,7 @@ ARCHS="${ARCHS:-aarch64-apple-darwin x86_64-apple-darwin}"
 BINS=()
 for t in $ARCHS; do
   rustup target add "$t" >/dev/null 2>&1 || true
-  cargo build --release --target "$t" -p bb-game --bin bouncy-blobs
+  cargo build --release --target "$t" -p bb-game --bin bouncy-blobs ${FEATURES[@]+"${FEATURES[@]}"}
   BINS+=("$TARGET_DIR/$t/release/bouncy-blobs")
 done
 
@@ -39,8 +47,21 @@ cp macos/BouncyBlobs.icns "$APP/Contents/Resources/"
 # bb_game::platform looks in Contents/Resources/assets when bundled.
 cp -R crates/bb-game/assets "$APP/Contents/Resources/assets"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+if [[ $STEAM == 1 ]]; then
+  # Next to the binary: the dylib's install name is @loader_path/libsteam_api.dylib.
+  # steamworks-sys copies the SDK's (universal) dylib into its OUT_DIR.
+  DYLIB="$(ls -t "$TARGET_DIR"/*-apple-darwin/release/build/steamworks-sys-*/out/libsteam_api.dylib 2>/dev/null | head -1)"
+  [[ -f "$DYLIB" ]] || { echo "libsteam_api.dylib not found under $TARGET_DIR" >&2; exit 1; }
+  cp "$DYLIB" "$APP/Contents/MacOS/libsteam_api.dylib"
+fi
+# Never ship the dev app-id file (Steam sets the app id when it launches us).
+find "$APP" -name steam_appid.txt -delete
 
-codesign --force --deep --options runtime --sign "${MACOS_SIGN_IDENTITY:--}" "$APP"
+if [[ $STEAM == 1 && -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
+  codesign --force --deep --sign - "$APP"
+else
+  codesign --force --deep --options runtime --sign "${MACOS_SIGN_IDENTITY:--}" "$APP"
+fi
 lipo -info "$APP/Contents/MacOS/bouncy-blobs"
 echo "built $APP ($VERSION / $BUILD)"
 

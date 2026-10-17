@@ -2,6 +2,23 @@
 //! scene renders can name the exact build in their NOTES.
 use std::process::Command;
 
+/// `--features steam`: the binaries link libsteam_api dynamically, and the
+/// release layout ships it NEXT TO the executable (Steam depots, partii zips;
+/// scripts/steam/assemble.sh). Linux needs RUNPATH `$ORIGIN` for that (the
+/// Steam Linux Runtime does not add the game dir to the search path). macOS
+/// already finds it (install name `@loader_path/libsteam_api.dylib`); the
+/// `@executable_path` rpath is belt and braces.
+fn steam_rpath() {
+    if std::env::var_os("CARGO_FEATURE_STEAM").is_none() {
+        return;
+    }
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("linux") => println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"),
+        Ok("macos") => println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path"),
+        _ => {}
+    }
+}
+
 fn git(args: &[&str]) -> Option<String> {
     let o = Command::new("git").args(args).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -9,6 +26,7 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    steam_rpath();
     println!("cargo:rerun-if-env-changed=BB_GIT_COMMIT");
     // bb-scene builds exact commits from a `git archive` (no .git there).
     if let Ok(c) = std::env::var("BB_GIT_COMMIT") {
