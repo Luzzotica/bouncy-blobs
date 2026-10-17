@@ -76,6 +76,20 @@ print(d.get("url") or ("dry-run" if d.get("dry_run") else "?"))' 2>/dev/null)" \
   && echo "PARTII notes $version $nurl" || { echo "PARTII notes FAILED ($(printf '%s' "$nout" | tail -c 300))"; fail=1; }
 rm -f "$notes"
 
+# Install instructions (per game, not per version): install/<platform>.md, shown on
+# the store right after a download starts. Re-set every release so edits ship.
+# {{title}} and {{file}} are filled in by partii. Needs CLI 0.2.4+.
+for it in "${items[@]}"; do
+  platform="${it%%=*}"; md="$(dirname "${BASH_SOURCE[0]}")/../install/$platform.md"
+  [ -f "$md" ] || { echo "PARTII instructions $platform FAILED (missing install/$platform.md)"; fail=1; continue; }
+  iargs=(instructions set "$game" --platform "$platform" --markdown "@$md")
+  [ "$dry" = true ] && iargs+=(--dry-run)
+  iout="$(partii "${iargs[@]}" 2>&1 | redact)" || true
+  printf '%s' "$iout" | python3 -c 'import json,sys
+d=json.load(sys.stdin); sys.exit(1 if d.get("ok") is False or d.get("error") else 0)' 2>/dev/null \
+    && echo "PARTII instructions $platform set" || { echo "PARTII instructions $platform FAILED ($(printf '%s' "$iout" | tail -c 300))"; fail=1; }
+done
+
 # Prune: per uploaded platform, keep the newest two builds on this channel.
 partii builds list "$game" | redact > "${TMPDIR:-/tmp}/partii-builds.$$.json"
 platforms="$(for it in "${items[@]}"; do printf '%s\n' "${it%%=*}"; done)"

@@ -1,6 +1,6 @@
-# Play Bouncy Blobs on Linux
+# Play {{title}} on Linux
 
-1. Unzip the download: `unzip bouncy-blobs-*-linux.zip`
+1. Unzip it: `unzip "{{file}}"`
 2. Run it: `cd "Bouncy Blobs" && ./"Bouncy Blobs"` (or double-click **Bouncy Blobs** in your file manager).
 3. If it won't start, make it executable: `chmod +x "Bouncy Blobs"`
 

@@ -1,6 +1,6 @@
-# Play Bouncy Blobs on Windows
+# Play {{title}} on Windows
 
-1. Unzip the download (right-click it, then **Extract All…**).
+1. Unzip **{{file}}** (right-click it, then **Extract All…**).
 2. Open the **Bouncy Blobs** folder and double-click **Bouncy Blobs.exe**.
 3. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. The game isn't signed with a Microsoft certificate yet.
 

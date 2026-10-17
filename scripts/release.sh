@@ -165,7 +165,7 @@ for os in macos windows linux; do
     windows) ditto "$CONTENT/windows" "$stage"; mv "$stage/bouncy-blobs.exe" "$stage/Bouncy Blobs.exe" ;;
     linux) ditto "$CONTENT/linux" "$stage"; mv "$stage/bouncy-blobs" "$stage/Bouncy Blobs"; chmod 755 "$stage/Bouncy Blobs" ;;
   esac
-  sed -e 's/\*\*//g' -e 's/`//g' "install/$os.md" > "$stage/How to play.txt"
+  sed -e 's/\*\*//g' -e 's/`//g' -e 's/{{title}}/Bouncy Blobs/g' -e "s/{{file}}/$(basename "$z")/g" "install/$os.md" > "$stage/How to play.txt"
   if [ "$os" = windows ]; then perl -pi -e 's/\n/\r\n/' "$stage/How to play.txt"; fi
   cp "$OUT/VERSION.txt" "$stage/"
   if [ "$os" = macos ]; then

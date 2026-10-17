@@ -103,7 +103,11 @@ itself (`Bouncy Blobs.exe`, `Bouncy Blobs.app`, or `Bouncy Blobs` on Linux), its
 runtime files, `VERSION.txt` and a `How to play.txt`. That last file is
 `install/<platform>.md` as plain text (CRLF on Windows). Steam content keeps the
 plain `bouncy-blobs` names that the launch options point at. When partii's per-platform
-install instructions land, each release publishes `install/<platform>.md` too.
+install instructions are set per game (not per version) with
+`partii instructions set bouncy-blobs --platform <p> --markdown @install/<p>.md` (CLI
+0.2.4+). `partii-upload.sh` re-sets them on every release so edits ship. partii fills
+in `{{title}}` and `{{file}}`; the in-zip `How to play.txt` gets the same values
+filled in by `release.sh`. Builds are always uploaded with the `.zip` filename.
 
 ## Windows C runtime
 

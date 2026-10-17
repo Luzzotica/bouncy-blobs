@@ -1,6 +1,6 @@
-# Play Bouncy Blobs on a Mac
+# Play {{title}} on a Mac
 
-1. Unzip the download (double-click it).
+1. Unzip **{{file}}** (double-click it).
 2. Drag **Bouncy Blobs.app** from the **Bouncy Blobs** folder into your **Applications** folder.
 3. The first time only: **right-click** (or Control-click) **Bouncy Blobs**, choose **Open**, then click **Open** again. After that, open it like any app. If macOS still blocks it, go to **System Settings → Privacy & Security** and click **Open Anyway**.
 
