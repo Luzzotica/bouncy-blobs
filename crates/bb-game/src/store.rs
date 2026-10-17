@@ -16,6 +16,9 @@
 //!    next launch, so a purchase is never lost to a network failure.
 //! 4. `restore()` runs `AppStore.sync()` and reports every current
 //!    entitlement as [`StoreEvent::Restored`]; each is submitted the same way.
+//!
+//! `price()` is the product's localized price ("$4.99") once the App Store
+//! answered (fetched at `start()`), for the buy button's label.
 
 /// The App Store product for the full game (non-consumable). It has to be
 /// created in App Store Connect with exactly this id.
@@ -59,6 +62,8 @@ mod imp {
         /// Copies the next event (JSON) into `buf`; returns its length, 0
         /// when there's none, or minus the size needed when `buf` is short.
         fn bb_sk_poll(buf: *mut u8, cap: usize) -> isize;
+        /// Copies the localized price (UTF-8) into `buf`, same contract.
+        fn bb_sk_price(buf: *mut u8, cap: usize) -> isize;
     }
 
     pub fn start() {
@@ -88,6 +93,15 @@ mod imp {
         }
         super::parse_event(std::str::from_utf8(&buf[..n as usize]).ok()?)
     }
+    pub fn price() -> Option<String> {
+        let mut buf = [0u8; 64];
+        let n = unsafe { bb_sk_price(buf.as_mut_ptr(), buf.len()) };
+        // A price that doesn't fit in 64 bytes isn't one to show.
+        if n <= 0 {
+            return None;
+        }
+        std::str::from_utf8(&buf[..n as usize]).ok().map(str::to_string)
+    }
 }
 
 #[cfg(not(all(target_os = "ios", feature = "storekit")))]
@@ -101,6 +115,9 @@ mod imp {
     }
     pub fn finish(_id: &str) {}
     pub fn poll() -> Option<super::StoreEvent> {
+        None
+    }
+    pub fn price() -> Option<String> {
         None
     }
 }
@@ -125,6 +142,10 @@ pub fn finish(id: &str) {
 pub fn poll() -> Option<StoreEvent> {
     imp::poll()
 }
+/// The full game's localized price ("$4.99"), once the App Store answered.
+pub fn price() -> Option<String> {
+    imp::price().map(|p| p.trim().to_string()).filter(|p| !p.is_empty())
+}
 
 #[cfg(test)]
 mod tests {
@@ -140,6 +161,6 @@ mod tests {
         assert_eq!(parse_event(r#"{"kind":"purchased"}"#), None);
         assert_eq!(parse_event("junk"), None);
         // Stubs off iOS: no store, nothing arrives.
-        assert!(!purchase() && !restore() && poll().is_none());
+        assert!(!purchase() && !restore() && poll().is_none() && price().is_none());
     }
 }
