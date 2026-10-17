@@ -87,7 +87,15 @@ fi
 # ---------------------------------------------------------------- preflight
 REPORT="$OUT/report.txt"; : > "$REPORT"
 line() { echo "$*" | tee -a "$REPORT"; }
-[ "$(git rev-parse HEAD)" = "$commit" ] || { echo "release: HEAD is $(git rev-parse --short HEAD), not $sha7 (git checkout $sha7)" >&2; exit 1; }
+if [ "$(git rev-parse HEAD)" != "$commit" ]; then
+  # HEAD may be ahead of <commit> by release tooling only (scripts/, docs/, *.md):
+  # the game builds from <commit> either way.
+  git merge-base --is-ancestor "$commit" HEAD || { echo "release: HEAD isn't at or after $sha7 (git checkout $sha7)" >&2; exit 1; }
+  other="$(git diff --name-only "$commit" HEAD | grep -vE '^(scripts/|docs/|[^/]*\.md$)' || true)"
+  [ -z "$other" ] || { echo "release: HEAD differs from $sha7 in build inputs ($other); git checkout $sha7" >&2; exit 1; }
+  [ "$skip_mac" = true ] || { echo "release: HEAD is ahead of $sha7 (tooling only); a mac build here would bake HEAD. Check out $sha7 or use --skip-mac-build" >&2; exit 1; }
+  echo "note: HEAD $(git rev-parse --short HEAD) = $sha7 + tooling only"
+fi
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "release: tracked files are modified; release builds come from a clean commit" >&2; exit 1; }
 [ -z "${CARGO_TARGET_DIR:-}" ] || { echo "release: unset CARGO_TARGET_DIR (each worktree builds into its own ./target)" >&2; exit 1; }
 # Staging must never reach a release build (bb-net bakes these with option_env!).
@@ -168,6 +176,18 @@ steam_app() {  # <variant> <app id> <win> <mac> <linux>
   local variant="$1" app="$2" w="$3" m="$4" l="$5" res id
   if [ -z "$app" ]; then
     for os in macos windows linux; do line "$GAME $variant $os steam: skipped (no Steam app id yet)"; done; return
+  fi
+  local any=false os dep
+  for os in macos windows linux; do
+    case $os in macos) dep="$m" ;; windows) dep="$w" ;; linux) dep="$l" ;; esac
+    [ -d "$CONTENT/$os" ] && [ -n "$dep" ] && any=true
+  done
+  if [ "$any" = false ]; then
+    for os in macos windows linux; do
+      case $os in macos) dep="$m" ;; windows) dep="$w" ;; linux) dep="$l" ;; esac
+      if [ ! -d "$CONTENT/$os" ]; then line "$GAME $variant $os steam: skipped (no $os build)"
+      else line "$GAME $variant $os steam: skipped (no depot id in apps.env)"; fi
+    done; return
   fi
   if res="$(bash scripts/steam/upload.sh --app "$app" --content "$CONTENT" --depot-windows "$w" --depot-macos "$m" --depot-linux "$l" \
         --desc "$GAME $version $sha7" ${dryflag[@]+"${dryflag[@]}"} 2>&1)"; then :; else
