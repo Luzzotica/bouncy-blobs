@@ -28,6 +28,13 @@ rm -rf "$ARCHIVE" "$OUT/export"
 mkdir -p "$OUT"
 
 # Regenerate the project if xcodegen is present (keeps project.yml the source of truth).
+# xcodegen reshuffles the IDs in the committed project.pbxproj, so put a clean
+# checkout back afterwards; BB_KEEP_XCODEPROJ=1 keeps the regenerated one (to
+# commit it after editing project.yml).
+PROJ=ios/BouncyBlobs.xcodeproj
+if [[ -z "${BB_KEEP_XCODEPROJ:-}" ]] && git diff --quiet -- "$PROJ" 2>/dev/null; then
+  trap 'git checkout -q -- "$PROJ"' EXIT
+fi
 if command -v xcodegen >/dev/null; then (cd ios && xcodegen --quiet); fi
 
 xcodebuild -project ios/BouncyBlobs.xcodeproj -scheme BouncyBlobs \
