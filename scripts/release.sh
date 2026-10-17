@@ -157,14 +157,24 @@ zips=()
 for os in macos windows linux; do
   [ -d "$CONTENT/$os" ] || continue
   z="$PKG/$GAME-$version-$os.zip"
+  # One top folder named after the game, the game named after itself, and a
+  # "How to play.txt" (install/<os>.md as plain text), so a download explains itself.
+  stage="$OUT/stage-$os/Bouncy Blobs"; rm -rf "$OUT/stage-$os"; mkdir -p "$stage"
+  case "$os" in
+    macos) ditto "$CONTENT/macos/Bouncy Blobs.app" "$stage/Bouncy Blobs.app" ;;
+    windows) ditto "$CONTENT/windows" "$stage"; mv "$stage/bouncy-blobs.exe" "$stage/Bouncy Blobs.exe" ;;
+    linux) ditto "$CONTENT/linux" "$stage"; mv "$stage/bouncy-blobs" "$stage/Bouncy Blobs"; chmod 755 "$stage/Bouncy Blobs" ;;
+  esac
+  sed -e 's/\*\*//g' -e 's/`//g' "install/$os.md" > "$stage/How to play.txt"
+  if [ "$os" = windows ]; then perl -pi -e 's/\n/\r\n/' "$stage/How to play.txt"; fi
+  cp "$OUT/VERSION.txt" "$stage/"
   if [ "$os" = macos ]; then
-    ditto -c -k --keepParent "$CONTENT/macos/Bouncy Blobs.app" "$z"
+    (cd "$OUT/stage-$os" && ditto -c -k --norsrc --noextattr --keepParent "Bouncy Blobs" "$z")
   else
-    # One top folder; zip keeps the exec bit (Info-ZIP unix attributes).
-    stage="$OUT/stage-$os/BouncyBlobs"; rm -rf "$OUT/stage-$os"; mkdir -p "$stage"
-    ditto "$CONTENT/$os" "$stage"; cp "$OUT/VERSION.txt" "$stage/"
-    (cd "$OUT/stage-$os" && zip -qry "$z" BouncyBlobs); rm -rf "$OUT/stage-$os"
+    # zip keeps the exec bit (Info-ZIP unix attributes).
+    (cd "$OUT/stage-$os" && zip -qry "$z" "Bouncy Blobs")
   fi
+  rm -rf "$OUT/stage-$os"
   zips+=("$os=$z")
 done
 ls -lh "$PKG"

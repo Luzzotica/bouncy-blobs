@@ -96,6 +96,15 @@ Report lines (spec format): `bouncy-blobs <full|demo> <macos|windows|linux> <ste
    the biggest gameplay features.
 8. **Report**: `report.txt` + the Steam patch-notes block for the morning report.
 
+## partii downloads explain themselves
+
+Each partii zip has one top folder, `Bouncy Blobs/`, holding the game named after
+itself (`Bouncy Blobs.exe`, `Bouncy Blobs.app`, or `Bouncy Blobs` on Linux), its
+runtime files, `VERSION.txt` and a `How to play.txt`. That last file is
+`install/<platform>.md` as plain text (CRLF on Windows). Steam content keeps the
+plain `bouncy-blobs` names that the launch options point at. When partii's per-platform
+install instructions land, each release publishes `install/<platform>.md` too.
+
 ## Windows C runtime
 
 The Windows exe links the MSVC C runtime statically (`+crt-static` for
