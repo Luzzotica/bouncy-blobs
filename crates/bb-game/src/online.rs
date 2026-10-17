@@ -24,7 +24,101 @@ impl Plugin for OnlinePlugin {
             }
             app.add_systems(EguiPrimaryContextPass, dialog.run_if(resource_exists::<JoinDialog>));
         }
-        app.add_systems(OnExit(AppState::Playing), leave_on_exit);
+        app.add_systems(OnExit(AppState::Playing), (leave_on_exit, clear_wait))
+            .add_systems(Update, waiting.run_if(in_state(AppState::Playing)));
+    }
+}
+
+/// The screen while a join is connecting (free play with no level yet):
+/// says what's happening and always has a way back to the title. Without
+/// it a join that never connects was a blank screen with no way out (the
+/// pause menu needs a level).
+#[derive(Component)]
+struct WaitUi;
+
+#[derive(Component)]
+struct WaitText;
+
+#[allow(clippy::too_many_arguments)]
+fn waiting(
+    mut commands: Commands,
+    game: Option<Res<crate::sim::Game>>,
+    session: Option<Res<crate::net::NetSession>>,
+    time: Res<Time>,
+    mut since: Local<f32>,
+    ui: Query<Entity, With<WaitUi>>,
+    mut text: Query<&mut Text, With<WaitText>>,
+    (keys, pads, mouse, touches, device, assets): (Res<ButtonInput<KeyCode>>, Query<&Gamepad>, Res<ButtonInput<MouseButton>>, Res<Touches>, Res<crate::input::LastDevice>, Res<crate::assets::GameAssets>),
+    (mut next, mut unload): (ResMut<NextState<AppState>>, MessageWriter<crate::sim::UnloadLevel>),
+) {
+    if game.is_some() {
+        *since = 0.0;
+        for e in ui.iter() {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
+    // A level load takes a frame or two: only a real wait gets the screen.
+    *since += time.delta_secs();
+    if *since < 0.5 {
+        return;
+    }
+    use crate::input::LastDevice::*;
+    let how = match *device {
+        Keyboard => "Press Esc to go back",
+        Touch => "Tap to go back",
+        Gamepad => "Press B to go back",
+        Phone => "Press B to go back",
+    };
+    let what = match session.as_deref().map(|s| &s.status) {
+        Some(crate::net::NetStatus::Error(e)) => format!("Couldn't join:\n{e}"),
+        Some(crate::net::NetStatus::Ended) => "The game ended".to_string(),
+        Some(_) => "Joining your friend's game...".to_string(),
+        None => "Nothing to play here".to_string(),
+    };
+    let line = format!("{what}\n\n{how}");
+    match text.iter_mut().next() {
+        Some(mut t) => {
+            if t.0 != line {
+                t.0 = line;
+            }
+        }
+        None => {
+            commands
+                .spawn((
+                    WaitUi,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: percent(100.0),
+                        height: percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::all(px(32.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new(line),
+                        TextFont { font: assets.font_medium.clone().into(), font_size: 34.0.into(), ..default() },
+                        TextColor(Color::WHITE),
+                        TextLayout::justify(Justify::Center),
+                        TextShadow { offset: Vec2::new(3.0, 4.0), color: Color::srgba(0.0, 0.0, 0.0, 0.6) },
+                        WaitText,
+                    ));
+                });
+        }
+    }
+    let tapped = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
+    if crate::input::back_pressed(&keys, pads.iter()) || tapped {
+        unload.write(crate::sim::UnloadLevel);
+        next.set(AppState::Title);
+    }
+}
+
+fn clear_wait(mut commands: Commands, ui: Query<Entity, With<WaitUi>>) {
+    for e in ui.iter() {
+        commands.entity(e).despawn();
     }
 }
 

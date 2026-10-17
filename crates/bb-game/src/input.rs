@@ -180,6 +180,14 @@ pub fn control_text(text: &str, device: LastDevice) -> String {
     out
 }
 
+/// "Back" on a menu, from any local device: Escape, Backspace, the Android
+/// back button, or a pad's B or Select. (Menus only: in a level B is one of
+/// the jump buttons.)
+pub fn back_pressed<'a>(keys: &ButtonInput<KeyCode>, pads: impl IntoIterator<Item = &'a Gamepad>) -> bool {
+    keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace, KeyCode::BrowserBack])
+        || pads.into_iter().any(|p| p.any_just_pressed([GamepadButton::East, GamepadButton::Select]))
+}
+
 /// Slots claimed by phone/network players this frame (don't overwrite).
 #[derive(Resource, Default)]
 pub struct RemoteSlots(pub [bool; 16]);
@@ -206,6 +214,7 @@ impl InputPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn gather(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<(Entity, &Gamepad)>,
@@ -216,6 +225,7 @@ fn gather(
     remote: Res<RemoteSlots>,
     mut inputs: ResMut<Inputs>,
     mut last: ResMut<LastDevice>,
+    pause: Option<Res<crate::pause::TouchPause>>,
 ) {
     let mut used: Option<LastDevice> = None;
     if remote.0.iter().enumerate().any(|(s, r)| *r && (inputs.slots[s].button || inputs.slots[s].stick.length() > 0.3)) {
@@ -266,7 +276,13 @@ fn gather(
         let layout = pad_layout(size);
         let mut button = false;
         let mut pad_touch = None;
+        // A tap on the on-screen pause button is the button's, not a jump.
+        let rect = pause.as_ref().filter(|p| p.shown).map(|_| crate::pause::touch_button_rect(size));
+        let finger = pause.as_ref().and_then(|p| p.finger);
         for t in touches.iter() {
+            if finger == Some(t.id()) || rect.is_some_and(|r| r.contains(t.start_position())) {
+                continue;
+            }
             if t.start_position().x < size.x * 0.5 {
                 if pad.pad_id.is_none() {
                     pad.pad_id = Some(t.id());

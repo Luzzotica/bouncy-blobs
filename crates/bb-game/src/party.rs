@@ -344,7 +344,7 @@ fn lobby_input(
     mut cam_dir: ResMut<CameraDirector>,
     inputs: Res<Inputs>,
     mut joinable: MessageWriter<crate::net::NetCommand>,
-    (time, mut labels, mut pointer): (Res<Time>, Query<&mut SoftText>, ResMut<crate::menu_feel::MenuPointer>),
+    (time, mut labels, mut pointer, pads): (Res<Time>, Query<&mut SoftText>, ResMut<crate::menu_feel::MenuPointer>, Query<&Gamepad>),
 ) {
     if party.phase == PartyPhase::Lobby {
         let dt = time.delta_secs().min(1.0 / 20.0);
@@ -364,7 +364,10 @@ fn lobby_input(
         joinable.write(crate::net::NetCommand::SetJoinable(true));
     }
     if party.phase != PartyPhase::Lobby {
-        if keys.just_pressed(KeyCode::Escape) {
+        // Leave the round: Escape / Backspace / Android back, or a pad's
+        // Select (B is a jump button in a round).
+        let leave = keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace, KeyCode::BrowserBack]) || pads.iter().any(|p| p.just_pressed(GamepadButton::Select));
+        if leave {
             if let Some(mut m) = party.current.take() {
                 m.cleanup(&mut game.sim);
             }
@@ -372,7 +375,7 @@ fn lobby_input(
         }
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if crate::input::back_pressed(&keys, pads.iter()) {
         next.set(AppState::Title);
         return;
     }
@@ -381,8 +384,14 @@ fn lobby_input(
     let press: Option<Vec2> = pointer.take_click();
     let hit = press.and_then(|p| game.sim.world.pick(PVec2::new(p.x, p.y), crate::load_layer::UI));
     let mut chosen = hit.and_then(|h| party.buttons.iter().find(|b| b.0 == h).map(|b| (b.0, b.1)));
-    if keys.just_pressed(KeyCode::Enter) {
-        chosen = party.buttons.iter().find(|b| b.1 == PartyButton::Start).map(|b| (b.0, b.1));
+    // Keys and pads: Enter / Start plays, Tab / the left bumper picks
+    // the next map (the arrows and stick roll your blob around the lobby).
+    let pick = |want: PartyButton| party.buttons.iter().find(|b| b.1 == want).map(|b| (b.0, b.1));
+    if keys.just_pressed(KeyCode::Enter) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start)) {
+        chosen = pick(PartyButton::Start);
+    }
+    if keys.just_pressed(KeyCode::Tab) || pads.iter().any(|p| p.just_pressed(GamepadButton::LeftTrigger)) {
+        chosen = chosen.or(pick(PartyButton::Map));
     }
     let Some((body, which)) = chosen else { return };
     if let Some(b) = game.sim.world.body_mut(body) {

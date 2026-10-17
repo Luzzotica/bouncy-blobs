@@ -17,8 +17,12 @@ use crate::camera::{CameraDirector, MainCamera};
 use crate::flow::AppState;
 use crate::sim::Game;
 
-/// How far the camera leans at the window edges (world px).
-const LEAN: Vec2 = Vec2::new(70.0, 28.0);
+/// How far the camera leans at the window edges (world px). Less than the
+/// menus' margins (tiles 48 px in from the design view's left edge, the
+/// logo ~17 px under its top): at 4:3 and 21:9 the view is exactly that
+/// wide / tall, and a bigger lean pushed the tile column or the logo off
+/// screen whenever the mouse sat near an edge.
+const LEAN: Vec2 = Vec2::new(30.0, 12.0);
 /// Screen px a press may move and still count as a click.
 const CLICK_SLOP: f32 = 12.0;
 /// Particles within this distance of the grab point follow the pointer.
@@ -141,7 +145,11 @@ fn drag(
     // No window in a headless run: touches (`BB_TAP`) still press and click.
     let cursor = windows.iter().next().and_then(|w| w.cursor_position());
     let touch = touches.iter().next().map(|t| t.position());
-    let screen = touch.or(cursor);
+    // A finger lifting this frame is still where it was (not the mouse
+    // cursor, which a touchscreen laptop or an iPad trackpad also has: its
+    // distance from the press read as a drag and ate the tap).
+    let lifted = touches.iter_just_released().next().map(|t| t.position());
+    let screen = touch.or(lifted).or(cursor);
     let world = |s: Vec2| camera.viewport_to_world_2d(tf, s).ok();
     let pressed = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
     let released = mouse.just_released(MouseButton::Left) || touches.iter_just_released().next().is_some();

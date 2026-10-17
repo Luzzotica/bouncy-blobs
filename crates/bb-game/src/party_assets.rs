@@ -80,7 +80,7 @@ pub fn imported_maps() -> Vec<Level> {
 /// "Grab a phone" hint shown in the lobby until the net join panel lands.
 pub fn spawn_join_hint<M: Component>(commands: &mut Commands, assets: &GameAssets, marker: M) {
     commands.spawn((
-        Text::new("Pads: press A to join  ·  Phones: scan the code!"),
+        Text::new("Pads: press A to join, Start to play  ·  Phones: scan the code!"),
         TextFont { font: assets.font_medium.clone().into(), font_size: 22.0.into(), ..default() },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
         Node {

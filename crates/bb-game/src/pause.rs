@@ -34,13 +34,22 @@ struct Pause {
     nav: f32,
     dim: Entity,
     drop: DropIn,
+    /// Seconds open. Pointer presses count only after a moment: the tap
+    /// that opened it (the touch pause button) isn't a choice.
+    age: f32,
 }
 
 pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (toggle, run.run_if(resource_exists::<Pause>)).chain().run_if(in_state(AppState::Story).or_else(in_state(AppState::Playing))))
+        app.init_resource::<TouchPause>()
+            .add_systems(Startup, spawn_touch_button)
+            .add_systems(Update, touch_button)
+            .add_systems(
+                Update,
+                (toggle, run.run_if(resource_exists::<Pause>)).chain().after(touch_button).run_if(in_state(AppState::Story).or_else(in_state(AppState::Playing))),
+            )
             .add_systems(OnExit(AppState::Story), close_on_exit)
             .add_systems(OnExit(AppState::Playing), close_on_exit);
     }
@@ -63,10 +72,13 @@ fn toggle(
     mut meshes: ResMut<Assets<Mesh>>,
     shared: Res<Shared>,
     assets: Res<GameAssets>,
-    (state, hints): (Res<State<AppState>>, Res<crate::story::glimmer::CompanionHints>),
+    (state, hints, mut tapped): (Res<State<AppState>>, Res<crate::story::glimmer::CompanionHints>, ResMut<TouchPause>),
 ) {
-    let pressed = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyP) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
-    if !pressed || runner.is_some() {
+    let tap = std::mem::take(&mut tapped.tapped);
+    let pressed = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyP) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start)) || tap;
+    // B (and Backspace / Android back) only closes it: in a level B jumps.
+    let back = pause.is_some() && crate::input::back_pressed(&keys, pads.iter());
+    if !(pressed || back) || runner.is_some() {
         return;
     }
     let Some(mut game) = game else { return };
@@ -116,7 +128,7 @@ fn toggle(
         items.push((id, *action, *color, vis, mesh, label));
     }
     let _ = &assets;
-    commands.insert_resource(Pause { world, items, origin, focus: 0, prev_button: true, nav: 0.0, dim, drop });
+    commands.insert_resource(Pause { world, items, origin, focus: 0, prev_button: true, nav: 0.0, dim, drop, age: 0.0 });
 }
 
 fn close(commands: &mut Commands, p: &Pause) {
@@ -150,8 +162,10 @@ fn run(
     mut next: ResMut<NextState<AppState>>,
     mut unload: MessageWriter<UnloadLevel>,
     mut hints: ResMut<crate::story::glimmer::CompanionHints>,
+    mut hovered: Local<Option<BodyId>>,
 ) {
     let dt = time.delta_secs().min(1.0 / 30.0);
+    pause.age += dt;
     {
         let p = &mut *pause;
         p.drop.update(&mut p.world, dt);
@@ -175,12 +189,29 @@ fn run(
     // Choose by pointer, keys, pads or phones.
     let mut chosen = None;
     if let (Ok((camera, ctf)), Some(w)) = (cam.single(), windows.iter().next()) {
+        // The mouse highlights the pill it's over, like the keys do.
+        let over = w.cursor_position().and_then(|s| camera.viewport_to_world_2d(ctf, s).ok()).and_then(|wp| pause.world.pick(PVec2::new(wp.x, wp.y), u32::MAX));
+        if over != *hovered {
+            *hovered = over;
+            if let Some(i) = over.and_then(|id| pause.items.iter().position(|it| it.0 == id)) {
+                if i != pause.focus {
+                    pause.focus = i;
+                    if let Ok(mut st) = labels.get_mut(pause.items[i].5) {
+                        st.kick(0.4);
+                    }
+                }
+            }
+        }
         let mut s = None;
         if mouse.just_pressed(MouseButton::Left) {
             s = w.cursor_position();
         }
         for t in touches.iter_just_pressed() {
             s = Some(t.position());
+        }
+        // The tap that opened the menu (the touch pause button) isn't a pick.
+        if pause.age < 0.1 {
+            s = None;
         }
         if let Some(wp) = s.and_then(|s| camera.viewport_to_world_2d(ctf, s).ok()) {
             if let Some(hit) = pause.world.pick(PVec2::new(wp.x, wp.y), u32::MAX) {
@@ -241,8 +272,118 @@ fn run(
     let _ = pause.origin;
 }
 
+/// The on-screen pause button for touch players (who have no Escape key):
+/// shown in levels whenever the touch pad is, top right.
+#[derive(Resource, Default)]
+pub struct TouchPause {
+    pub shown: bool,
+    /// Tapped this frame (for [`toggle`]).
+    tapped: bool,
+    /// The finger that tapped it, until it lifts: never a jump, and never a
+    /// press on the pause menu it opened.
+    pub finger: Option<u64>,
+}
+
+#[derive(Component)]
+struct TouchPauseButton;
+
+/// Side of the round button and its gap from the screen's top-right corner
+/// (logical px, clear of the notch).
+const TOUCH_BUTTON: f32 = 64.0;
+const TOUCH_MARGIN: f32 = 18.0;
+
+/// Where a touch hits the pause button (a little bigger than it looks), in
+/// window coordinates (y down) for a window of `size`.
+pub fn touch_button_rect(size: Vec2) -> Rect {
+    let c = Vec2::new(size.x - crate::platform::SAFE_SIDE - TOUCH_MARGIN - TOUCH_BUTTON * 0.5, TOUCH_MARGIN + TOUCH_BUTTON * 0.5);
+    Rect::from_center_size(c, Vec2::splat(TOUCH_BUTTON + 24.0))
+}
+
+fn spawn_touch_button(mut commands: Commands) {
+    let lav = |a: f32| Color::srgba(0.655, 0.545, 0.98, a);
+    commands
+        .spawn((
+            TouchPauseButton,
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(crate::platform::SAFE_SIDE + TOUCH_MARGIN),
+                top: px(TOUCH_MARGIN),
+                width: px(TOUCH_BUTTON),
+                height: px(TOUCH_BUTTON),
+                border: UiRect::all(px(2.0)),
+                border_radius: BorderRadius::MAX,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: px(9.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.2, 0.35)),
+            BorderColor::all(lav(0.6)),
+            BoxShadow::new(lav(0.3), Val::ZERO, Val::ZERO, px(2.0), px(14.0)),
+            GlobalZIndex(6),
+            Visibility::Hidden,
+        ))
+        .with_children(|b| {
+            for _ in 0..2 {
+                b.spawn((Node { width: px(8.0), height: px(24.0), border_radius: BorderRadius::all(px(3.0)), ..default() }, BackgroundColor(lav(0.9))));
+            }
+        });
+}
+
+/// Show the touch pause button when the touch pad is up, and catch taps on it.
+#[allow(clippy::too_many_arguments)]
+fn touch_button(
+    mut shown: ResMut<TouchPause>,
+    mut q: Query<&mut Visibility, With<TouchPauseButton>>,
+    state: Res<State<AppState>>,
+    story: Option<Res<crate::story::StoryFlow>>,
+    (runner, pause, game): (Option<Res<Runner>>, Option<Res<Pause>>, Option<Res<Game>>),
+    last: Res<crate::input::LastDevice>,
+    touches: Res<Touches>,
+    (mouse, windows): (Res<ButtonInput<MouseButton>>, Query<&Window>),
+) {
+    let in_level = match state.get() {
+        AppState::Playing => true,
+        AppState::Story => story.is_some_and(|s| s.phase == crate::story::Phase::Level),
+        _ => false,
+    };
+    let touch = crate::platform::IS_MOBILE || *last == crate::input::LastDevice::Touch || std::env::var_os("BB_TOUCH_PAD").is_some();
+    let want = in_level && game.is_some() && runner.is_none() && pause.is_none() && touch && !crate::capture::on();
+    if shown.shown != want {
+        shown.shown = want;
+    }
+    if shown.finger.is_some_and(|f| touches.get_pressed(f).is_none()) {
+        shown.finger = None;
+    }
+    for mut v in q.iter_mut() {
+        v.set_if_neq(if want { Visibility::Visible } else { Visibility::Hidden });
+    }
+    shown.tapped = false;
+    let Some(w) = windows.iter().next().filter(|_| want) else { return };
+    let rect = touch_button_rect(w.size());
+    let mouse_hit = mouse.just_pressed(MouseButton::Left) && w.cursor_position().is_some_and(|c| rect.contains(c));
+    if let Some(t) = touches.iter_just_pressed().find(|t| rect.contains(t.position())) {
+        shown.tapped = true;
+        shown.finger = Some(t.id());
+    }
+    if mouse_hit {
+        shown.tapped = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn touch_pause_button_is_on_screen_and_off_the_touch_pad() {
+        use bevy::math::Vec2;
+        for size in [Vec2::new(874.0, 402.0), Vec2::new(1376.0, 1032.0), Vec2::new(1600.0, 900.0)] {
+            let r = super::touch_button_rect(size);
+            assert!(r.min.x >= 0.0 && r.max.x <= size.x && r.min.y >= 0.0, "{size}: pause button off screen");
+            let pad = crate::input::pad_layout(size);
+            assert!(r.max.y < pad.button_center.y - pad.button_radius, "{size}: pause button on the expand button");
+        }
+    }
+
     #[test]
     fn pause_labels_have_glyphs() {
         let hints = [crate::story::glimmer::CompanionHints(true).label(), crate::story::glimmer::CompanionHints(false).label()];
