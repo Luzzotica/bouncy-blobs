@@ -82,8 +82,8 @@ pub enum Action {
     Quit,
     /// A tile that needs the full game: opens its unlock page.
     Locked(Lock),
-    /// Buy the full game: StoreKit's sheet on iOS (the demo title's buy
-    /// tile there), partii checkout elsewhere.
+    /// Buy the full game: StoreKit's sheet on iOS, the buy screen (QR +
+    /// browser checkout) on desktop.
     Buy,
     /// iOS: Restore Purchases.
     Restore,
@@ -723,12 +723,14 @@ fn page_tiles(page: Page, progress: &StoryProgress, own: &Ownership, store: Stor
             let mut v = vec![("Play".into(), Action::Goto(Page::Play), 0xff8fab)];
             // The demo invites a wishlist (the Steam page) right on the
             // title; on iOS (no links out to Steam) it offers the in-app
-            // purchase itself.
+            // purchase itself. Desktop offers both: the buy screen (a QR
+            // for the phone, or the browser) and the wishlist.
             if !own.full() {
+                if !store.wishlist() || crate::buy_screen::DESKTOP {
+                    v.push((buy_label(own.price.as_deref()), Action::Buy, BUY_COLOR));
+                }
                 if store.wishlist() {
                     v.push(("Wishlist Now".into(), Action::Wishlist, WISHLIST_COLOR));
-                } else {
-                    v.push((buy_label(own.price.as_deref()), Action::Buy, BUY_COLOR));
                 }
             }
             v.push(("Settings".into(), Action::Goto(Page::Settings), 0xb8a1ff));
@@ -1020,7 +1022,7 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores, mut wishes, pads, mut back_to): (
+    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores, mut wishes, pads, mut back_to, buy_screen): (
         Query<&mut SoftText>,
         Query<(Entity, &BodyLabel)>,
         Res<MusicBeat>,
@@ -1031,6 +1033,7 @@ fn interact(
         MessageWriter<WishlistRequest>,
         Query<&Gamepad>,
         ResMut<ReturnTo>,
+        Option<Res<crate::buy_screen::BuyScreen>>,
     ),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
@@ -1089,6 +1092,13 @@ fn interact(
             menu.page = l.back();
             return;
         }
+    }
+    // The buy screen is over the menu: it has the input (the page under it
+    // still updates, so a purchase unlocks it live).
+    if crate::buy_screen::blocking(buy_screen.as_deref()) {
+        let _ = pointer.take_click();
+        menu.prev_button = true;
+        return;
     }
     // Fire a pending action once the squish has played.
     if let Some((action, t)) = menu.pending.as_mut() {
@@ -1391,8 +1401,6 @@ mod tests {
             }
         }
         for b in [
-            crate::ownership::BuyStatus::Starting,
-            crate::ownership::BuyStatus::InBrowser,
             crate::ownership::BuyStatus::InStore,
             crate::ownership::BuyStatus::Verifying,
             crate::ownership::BuyStatus::Restoring,
@@ -1479,7 +1487,7 @@ mod tests {
         assert!(!relabel_only(&before, &page_key(Page::Main, &p, &own(Owned::Full), s)));
     }
 
-    /// The title's buttons (4 in the demo, 3 owned) stack without touching,
+    /// The title's buttons (5 in the desktop demo, 3 owned) stack without touching,
     /// inside the narrowest view the camera ever shows.
     #[test]
     fn title_buttons_stack_clear_of_each_other_and_on_screen() {
@@ -1505,9 +1513,19 @@ mod tests {
         let p = StoryProgress { unlocked: 1, current: 1, pip_color: 0 };
         for o in [Owned::Demo, Owned::Unknown] {
             let main = page_buttons(Page::Main, &p, &own(o), Storefront::Open);
-            assert_eq!(main[1], ("Wishlist Now".to_string(), Action::Wishlist, WISHLIST_COLOR));
-            assert!(!main.iter().any(|t| t.1 == Action::Buy || t.1 == Action::Restore));
+            // Desktop: the buy screen first, then the wishlist; Android and
+            // the web: the wishlist only.
+            let wish = ("Wishlist Now".to_string(), Action::Wishlist, WISHLIST_COLOR);
+            if crate::buy_screen::DESKTOP {
+                assert_eq!(main[1], ("Get the Full Game".to_string(), Action::Buy, BUY_COLOR));
+                assert_eq!(main[2], wish);
+            } else {
+                assert_eq!(main[1], wish);
+                assert!(!main.iter().any(|t| t.1 == Action::Buy));
+            }
+            assert!(!main.iter().any(|t| t.1 == Action::Restore));
         }
+        assert!(!actions(Page::Main, &p, Owned::Full).contains(&Action::Buy));
         assert!(!actions(Page::Main, &p, Owned::Full).contains(&Action::Wishlist));
         // Desktop / Android Settings: no Restore.
         assert!(!actions(Page::Settings, &p, Owned::Demo).contains(&Action::Restore));

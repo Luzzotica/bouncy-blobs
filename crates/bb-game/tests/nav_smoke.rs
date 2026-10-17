@@ -737,3 +737,336 @@ impl Nav {
         }
     }
 }
+
+// ------------------------------------------------------------ buy screen
+
+use bb_game::buy_flow::{BuyStore, Checkout, CheckoutReply, FakeStore, Phase};
+use bb_game::buy_screen::{BuyAction, BuyButton, BuyQr, BuyScreen};
+
+impl Nav {
+    /// Swap partii for a fake store (before the first frame).
+    fn fake_store(&mut self, reply: CheckoutReply) -> FakeStore {
+        let f = FakeStore::answering(reply);
+        self.app.world_mut().insert_resource(BuyStore(std::sync::Arc::new(f.clone())));
+        f
+    }
+
+    fn buy(&self) -> &BuyScreen {
+        self.world().resource::<BuyScreen>()
+    }
+
+    fn buy_showing(&self) -> bool {
+        matches!(self.buy().flow.phase, Phase::Showing { .. })
+    }
+
+    fn qr_shown(&mut self) -> bool {
+        let mut q = self.app.world_mut().query_filtered::<(), With<BuyQr>>();
+        q.iter(self.app.world()).count() > 0
+    }
+
+    /// The buy screen's buttons on show, top to bottom.
+    fn buy_buttons(&mut self) -> Vec<BuyAction> {
+        let mut q = self.app.world_mut().query::<(&BuyButton, &bevy::ui::UiGlobalTransform)>();
+        let mut v: Vec<(f32, BuyAction)> = q.iter(self.app.world()).map(|(b, t)| (t.translation.y, b.0)).collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v.into_iter().map(|x| x.1).collect()
+    }
+
+    /// Press a buy-screen button by mouse or finger.
+    #[track_caller]
+    fn press_buy(&mut self, a: BuyAction, via: Via) {
+        let at = {
+            let mut q = self.app.world_mut().query::<(&BuyButton, &bevy::ui::UiGlobalTransform, &bevy::ui::ComputedNode)>();
+            q.iter(self.app.world()).find(|(b, _, _)| b.0 == a).map(|(_, t, n)| t.translation * n.inverse_scale_factor())
+        };
+        let at = at.unwrap_or_else(|| panic!("[{}] no {a:?} on the buy screen", self.tag));
+        self.press_screen(at, via);
+    }
+
+    /// Wait for the QR to be up (and the screen to take presses).
+    #[track_caller]
+    fn until_buy_showing(&mut self) {
+        self.until("the buy screen's QR", 200, |n| n.buy_showing());
+        self.run(40);
+    }
+
+    #[track_caller]
+    fn until_buy_closed(&mut self) {
+        self.until("the buy screen closed", 300, |n| !n.buy().flow.open());
+    }
+}
+
+fn test_checkout() -> CheckoutReply {
+    CheckoutReply::Ready(Checkout { url: "https://checkout.stripe.com/c/pay/cs_test_navsmoke#fid=abc".into(), session: "cs_test_navsmoke".into() })
+}
+
+/// The desktop demo title's "Get the Full Game" opens the buy screen (QR,
+/// polling) and every device closes it: Escape, the Back button by mouse
+/// and by finger, the keyboard, the pad's B.
+#[test]
+fn buy_screen_opens_and_closes_by_every_means() {
+    env(true, &[]);
+    let mut n = Nav::new("buy", LANDSCAPE);
+    let fake = n.fake_store(test_checkout());
+    n.settle_title(Page::Main);
+    assert!(n.button(&Action::Buy).is_some(), "the desktop demo title offers the purchase");
+    assert!(n.button(&Action::Wishlist).is_some(), "and still the wishlist");
+    n.shot("title");
+    // Mouse in.
+    n.choose(Action::Buy, Via::Mouse);
+    n.until_buy_showing();
+    assert!(n.qr_shown(), "the checkout QR is up");
+    assert_eq!(n.buy_buttons(), vec![BuyAction::PayInBrowser, BuyAction::Back]);
+    assert_eq!(n.buy().flow.status(), "Waiting for payment...");
+    let (ok, cancel) = fake.created()[0].clone();
+    assert!(ok.ends_with("/paid") && cancel.ends_with("/cancelled"), "{ok} {cancel}");
+    n.shot("buy-screen");
+    // It polls while it's up (every 2.5 s: ~1 check in 3.3 s)...
+    let c0 = fake.checks();
+    n.run(200);
+    assert!((c0 + 1..=c0 + 2).contains(&fake.checks()), "polling: {c0} -> {}", fake.checks());
+    // ...the menu underneath takes no input...
+    n.key(KeyCode::ArrowDown);
+    assert_eq!(n.menu().unwrap().page, Page::Main);
+    // "Pay in browser" keeps the screen up (headless: logged, not opened).
+    n.press_buy(BuyAction::PayInBrowser, Via::Mouse);
+    n.run(10);
+    assert!(n.buy_showing());
+    // Escape closes it, and only it.
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+    n.run(30);
+    assert_eq!((n.state(), n.menu().unwrap().page), (AppState::Title, Page::Main), "Escape closed the buy screen, not the page");
+    let c1 = fake.checks();
+    n.run(400);
+    assert_eq!(fake.checks(), c1, "no polling once closed");
+    n.settle_title(Page::Main);
+    // Keyboard in; down to Back, Enter.
+    n.choose_by_keys(Action::Buy);
+    n.until_buy_showing();
+    n.hold_key(KeyCode::ArrowDown, 2);
+    n.run(4);
+    n.key(KeyCode::Enter);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    // Pad in, B out.
+    n.choose_by_pad(Action::Buy);
+    n.until_buy_showing();
+    n.pad(GamepadButton::East);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    // Finger in, Back tapped.
+    n.choose(Action::Buy, Via::Touch);
+    n.until_buy_showing();
+    n.press_buy(BuyAction::Back, Via::Touch);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    // Mouse in, Back clicked.
+    n.choose(Action::Buy, Via::Mouse);
+    n.until_buy_showing();
+    n.press_buy(BuyAction::Back, Via::Mouse);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    assert!(n.button(&Action::Buy).is_some(), "still the demo");
+}
+
+/// Host locked → unlock page → Get the Full Game → paid on the phone →
+/// "Thanks!" → back on Multiplayer with Host unlocked, no restart.
+#[test]
+fn paying_on_the_phone_unlocks_host_live() {
+    env(true, &[]);
+    let mut n = Nav::new("buypaid", LANDSCAPE);
+    let fake = n.fake_store(test_checkout());
+    n.settle_title(Page::Main);
+    n.choose(Action::Goto(Page::Play), Via::Mouse);
+    n.settle_title(Page::Play);
+    n.choose(Action::Goto(Page::Party), Via::Mouse);
+    n.settle_title(Page::Party);
+    n.choose(Action::Locked(Lock::Host), Via::Mouse);
+    n.settle_title(Page::Unlock(Lock::Host));
+    n.choose_by_pad(Action::Buy);
+    n.until_buy_showing();
+    n.shot("buy-from-unlock");
+    // The phone pays; the next check hears it.
+    fake.pay();
+    n.until("paid", 200, |n| matches!(n.buy().flow.phase, Phase::Paid { .. }));
+    n.run(30);
+    n.shot("paid");
+    assert!(n.world().resource::<bb_game::ownership::Ownership>().full(), "unlocked at once");
+    n.until_buy_closed();
+    n.settle_title(Page::Party);
+    assert!(n.button(&Action::PartyHost).is_some(), "Host with Phones is unlocked");
+    assert!(n.button(&Action::Sandbox).is_some(), "Sandbox too");
+    n.shot("unlocked");
+    // The title stops selling it.
+    n.key(KeyCode::Escape);
+    n.settle_title(Page::Play);
+    n.key(KeyCode::Escape);
+    n.settle_title(Page::Main);
+    assert!(n.button(&Action::Buy).is_none() && n.button(&Action::Wishlist).is_none());
+    // And Host really starts.
+    n.choose(Action::Goto(Page::Play), Via::Mouse);
+    n.settle_title(Page::Play);
+    n.choose(Action::Goto(Page::Party), Via::Mouse);
+    n.settle_title(Page::Party);
+    n.choose(Action::PartyHost, Via::Mouse);
+    n.until("party lobby", 300, |n| n.state() == AppState::Party);
+}
+
+/// Streamer mode hides the checkout QR (Pay in browser stays); "Show QR
+/// code" reveals it for this visit only.
+#[test]
+fn streamer_mode_hides_the_checkout_qr() {
+    env(true, &[("BB_STREAMER", "1")]);
+    let mut n = Nav::new("buystreamer", LANDSCAPE);
+    n.fake_store(test_checkout());
+    n.settle_title(Page::Main);
+    n.choose(Action::Buy, Via::Mouse);
+    n.until_buy_showing();
+    assert!(!n.qr_shown(), "no QR on stream");
+    assert_eq!(n.buy_buttons(), vec![BuyAction::PayInBrowser, BuyAction::Reveal, BuyAction::Back]);
+    n.shot("streamer");
+    n.press_buy(BuyAction::Reveal, Via::Mouse);
+    n.run(20);
+    assert!(n.qr_shown(), "revealed");
+    n.run(30);
+    n.shot("streamer-revealed");
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    n.choose(Action::Buy, Via::Mouse);
+    n.until_buy_showing();
+    assert!(!n.qr_shown(), "hidden again next time");
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+}
+
+/// No network: a clear message and Retry; a 409 "owned" unlocks.
+#[test]
+fn buy_screen_offline_retry_and_already_owned() {
+    env(true, &[]);
+    let mut n = Nav::new("buyoffline", LANDSCAPE);
+    let fake = n.fake_store(CheckoutReply::Offline);
+    n.settle_title(Page::Main);
+    n.choose(Action::Buy, Via::Mouse);
+    n.until("offline", 200, |n| n.buy().flow.phase == Phase::Offline);
+    n.run(40);
+    assert_eq!(n.buy_buttons(), vec![BuyAction::Retry, BuyAction::Back]);
+    assert!(n.buy().flow.status().contains("Retry"));
+    n.shot("offline");
+    // Back online: Retry (focused first) with Enter.
+    fake.set_reply(test_checkout());
+    n.key(KeyCode::Enter);
+    n.until_buy_showing();
+    assert!(n.qr_shown());
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    // Bought on another device: 409 owned → refresh → unlocked.
+    fake.set_reply(CheckoutReply::AlreadyOwned);
+    n.choose(Action::Buy, Via::Mouse);
+    n.until("owned", 300, |n| matches!(n.buy().flow.phase, Phase::Paid { .. }));
+    n.until_buy_closed();
+    n.settle_title(Page::Main);
+    assert!(n.world().resource::<bb_game::ownership::Ownership>().full());
+    assert!(n.button(&Action::Buy).is_none());
+}
+
+/// The demo's end card: Get the Full Game opens the buy screen over it;
+/// Escape closes only the screen; the card still goes home.
+#[test]
+fn demo_end_card_opens_the_buy_screen() {
+    env(true, &[("BB_SCENE", "ch02_outro")]);
+    let mut n = Nav::new("buyend", LANDSCAPE);
+    n.fake_store(test_checkout());
+    n.settle_title(Page::Main);
+    n.choose(Action::Goto(Page::Play), Via::Mouse);
+    n.settle_title(Page::Play);
+    n.choose(Action::Continue, Via::Mouse);
+    n.until("outro", 300, |n| n.world().contains_resource::<bb_game::story::cutscene::Runner>());
+    n.hold_key(KeyCode::Space, 70);
+    n.until("demo end card", 600, |n| n.world().contains_resource::<bb_game::story::demo_end::DemoEnd>());
+    n.run(150);
+    // The card's first button (focused) is Get the Full Game.
+    n.key(KeyCode::Enter);
+    n.until_buy_showing();
+    n.shot("demo-end-buy");
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+    n.run(30);
+    assert_eq!(n.state(), AppState::Story, "Escape closed the buy screen, not the card");
+    assert!(n.world().contains_resource::<bb_game::story::demo_end::DemoEnd>());
+    n.key(KeyCode::Escape);
+    n.settle_title(Page::Main);
+}
+
+/// Counts the entitlement checks of the store it wraps.
+struct Counting(Box<dyn bb_game::buy_flow::StoreBackend>, std::sync::Arc<std::sync::atomic::AtomicU32>);
+
+impl bb_game::buy_flow::StoreBackend for Counting {
+    fn create_checkout(&self, ok: &str, cancel: &str) {
+        self.0.create_checkout(ok, cancel)
+    }
+    fn take_checkout(&self) -> Option<CheckoutReply> {
+        self.0.take_checkout()
+    }
+    fn check_owned(&self) {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.0.check_owned()
+    }
+    fn owned(&self) -> bool {
+        self.0.owned()
+    }
+}
+
+/// Manual: the real partii store against STAGING with a fresh guest player
+/// (a scratch HOME). Makes a real Stripe test checkout, shows its QR and
+/// polls; never pays. Run with the staging edge and key in the env:
+///
+/// ```text
+/// set -a; . ~/.config/partii/bouncy-blobs-game.env; set +a
+/// BB_PARTII_API=$PARTII_API BB_PARTII_KEY=$PARTII_KEY BB_NAV_SHOTS=/tmp/shots \
+///   cargo nextest run -p bb-game --test nav_smoke --run-ignored only -E 'test(staging)'
+/// ```
+#[test]
+#[ignore = "talks to partii staging"]
+fn staging_checkout_shows_a_real_qr_and_polls() {
+    let api = std::env::var("BB_PARTII_API").expect("BB_PARTII_API (staging)");
+    assert!(api.contains("staging"), "staging only");
+    assert!(std::env::var("BB_PARTII_KEY").is_ok_and(|k| k.starts_with("pk_")), "BB_PARTII_KEY (staging publishable key)");
+    let home = std::env::temp_dir().join(format!("bb-buy-staging-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&home);
+    // SAFETY: before the app starts.
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_DATA_HOME", home.join("data"));
+        std::env::set_var("BB_SHOT", home.join("unused.png"));
+        std::env::set_var("BB_SHOT_FRAME", "4000000000");
+        std::env::set_var("BB_MUTE", "1");
+        std::env::set_var("BB_DEMO", "1");
+    }
+    let mut n = Nav::new("staging", LANDSCAPE);
+    let checks = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    n.app.world_mut().insert_resource(BuyStore(std::sync::Arc::new(Counting(Box::new(bb_game::buy_flow::PartiiStore::default()), checks.clone()))));
+    n.settle_title(Page::Main);
+    // Wait for the new guest to sign in.
+    n.until("signed in to staging", 1800, |_| bb_game::account::get().is_some_and(|a| a.ready()));
+    let player = bb_game::account::get().and_then(|a| a.player_id()).unwrap_or_default();
+    n.choose(Action::Buy, Via::Mouse);
+    n.until("a real checkout", 1800, |n| n.buy().flow.open() && !matches!(n.buy().flow.phase, Phase::Creating));
+    let phase = n.buy().flow.phase.clone();
+    let Phase::Showing { checkout, .. } = phase else { panic!("no checkout: {phase:?} ({})", n.buy().flow.status()) };
+    assert!(checkout.url.starts_with("https://checkout.stripe.com/"), "a Stripe-hosted checkout");
+    assert!(checkout.session.starts_with("cs_test_"), "Stripe test mode");
+    n.run(40);
+    assert!(n.qr_shown(), "QR up");
+    n.shot("staging-qr");
+    let c0 = checks.load(std::sync::atomic::Ordering::Relaxed);
+    n.run(60 * 8);
+    let c1 = checks.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(c1 >= c0 + 3, "polling every 2.5 s: {c0} -> {c1}");
+    assert!(n.buy_showing(), "still waiting for payment");
+    println!("STAGING OK: guest {player}, session {}, {} checks in 8 s, QR shown", checkout.session, c1 - c0);
+    n.key(KeyCode::Escape);
+    n.until_buy_closed();
+}

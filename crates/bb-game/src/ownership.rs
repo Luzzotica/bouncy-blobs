@@ -21,10 +21,12 @@
 //! as owned unless `BB_DEMO=1` (or a test player's `BB_PARTII_PLAYER_TOKEN`
 //! is set), so dev tooling can reach every chapter.
 //!
-//! Buying: [`BuyRequest`]. On desktop that's partii checkout in the browser,
-//! with `refresh()` when the window gets focus back; on iOS, StoreKit 2
-//! through [`crate::store`], with the receipt sent to partii and the
-//! transaction finished only once partii accepted it.
+//! Buying: [`BuyRequest`]. On desktop that's the buy screen
+//! ([`crate::buy_screen`]: partii's Stripe Checkout as a QR code for the
+//! phone, or in the browser, polled until the copy is recorded; Steam
+//! builds under Steam open Steam's store page instead; docs/BuyFlow.md); on
+//! iOS, StoreKit 2 through [`crate::store`], with the receipt sent to
+//! partii and the transaction finished only once partii accepted it.
 //!
 //! Wishlisting: [`WishlistRequest`] ("Wishlist Now" on the demo's title and
 //! end card) opens the game's Steam store page: in the Steam overlay when
@@ -136,10 +138,6 @@ fn env_on(k: &str) -> bool {
 pub enum BuyStatus {
     #[default]
     Idle,
-    /// Asking partii for a checkout page.
-    Starting,
-    /// The checkout page is open in the browser; refreshed on focus.
-    InBrowser,
     /// The App Store sheet is up (iOS).
     InStore,
     /// Sending a store receipt to partii.
@@ -157,8 +155,6 @@ impl BuyStatus {
         }
         match self {
             BuyStatus::Idle => String::new(),
-            BuyStatus::Starting => "Opening the store...".into(),
-            BuyStatus::InBrowser => "Finish in your browser, then come back here.".into(),
             BuyStatus::InStore => "Talking to the App Store...".into(),
             BuyStatus::Verifying => "Unlocking...".into(),
             BuyStatus::Restoring => "Looking for your purchase...".into(),
@@ -167,7 +163,7 @@ impl BuyStatus {
     }
 
     pub fn busy(&self) -> bool {
-        matches!(self, BuyStatus::Starting | BuyStatus::InStore | BuyStatus::Verifying | BuyStatus::Restoring)
+        matches!(self, BuyStatus::InStore | BuyStatus::Verifying | BuyStatus::Restoring)
     }
 }
 
@@ -308,6 +304,20 @@ fn dev() -> Option<bool> {
 
 /// The demo scope from the listing, once fetched (native, signed in).
 static LISTING: std::sync::Mutex<Option<DemoScope>> = std::sync::Mutex::new(None);
+/// The listing's price ("$4.99"), for desktop's buy buttons and screen.
+static LISTING_PRICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Bought during this run (the buy screen saw the payment land). Wins over
+/// everything, `BB_DEMO` included, so a purchase unlocks at once.
+static BOUGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The purchase landed: unlock now, with no restart.
+pub fn mark_bought() {
+    BOUGHT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn bought() -> bool {
+    BOUGHT.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Follow the account: owned / demo / unknown, and the listing's demo scope.
 fn track(mut own: ResMut<Ownership>, mut asked: Local<bool>) {
@@ -318,9 +328,11 @@ fn track(mut own: ResMut<Ownership>, mut asked: Local<bool>) {
             *asked = true;
             if let Some(c) = a.client() {
                 std::thread::spawn(move || {
-                    if let Some(s) = c.json("storeGame", &[("game", crate::account::GAME)], None).ok().and_then(|v| DemoScope::from_listing(&v)) {
+                    let Ok(v) = c.json("storeGame", &[("game", crate::account::GAME)], None) else { return };
+                    if let Some(s) = DemoScope::from_listing(&v) {
                         *LISTING.lock().unwrap_or_else(|p| p.into_inner()) = Some(s);
                     }
+                    *LISTING_PRICE.lock().unwrap_or_else(|p| p.into_inner()) = crate::buy_flow::listing_price(&v);
                 });
             }
         }
@@ -331,9 +343,16 @@ fn track(mut own: ResMut<Ownership>, mut asked: Local<bool>) {
         let _ = &mut asked;
         None
     };
-    let owned = resolve(dev(), owns);
+    let owned = if bought() { Owned::Full } else { resolve(dev(), owns) };
     if own.price.is_none() && NATIVE_STORE {
         if let Some(p) = crate::store::price() {
+            info!("store: full game is {p}");
+            own.price = Some(p);
+        }
+    }
+    // Desktop: the store listing's price.
+    if own.price.is_none() && !NATIVE_STORE {
+        if let Some(p) = LISTING_PRICE.lock().unwrap_or_else(|p| p.into_inner()).clone() {
             info!("store: full game is {p}");
             own.price = Some(p);
         }
@@ -373,10 +392,8 @@ fn buy(mut own: ResMut<Ownership>, mut buys: MessageReader<BuyRequest>, mut rest
         own.buy = if crate::store::purchase() { BuyStatus::InStore } else { BuyStatus::Failed("The App Store isn't available in this build yet.".into()) };
         return;
     }
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-    if let Some(a) = crate::account::get() {
-        a.start_checkout();
-        own.buy = BuyStatus::Starting;
+    // Desktop: the buy screen takes it from here.
+    if crate::buy_screen::DESKTOP {
         return;
     }
     own.buy = BuyStatus::Failed(if cfg!(target_os = "android") { "Get the full game at partii.games".into() } else { "Can't reach the store right now. Try again in a bit.".into() });
@@ -403,53 +420,12 @@ fn wishlist(mut wishes: MessageReader<WishlistRequest>, ach: Option<Res<crate::a
     open_url(STEAM_STORE_URL);
 }
 
-/// Seconds between `refresh()` calls while the checkout is in the browser
-/// (focus coming back refreshes at once).
-const REFRESH_EVERY: f32 = 10.0;
-/// Stop polling after this long; focus still refreshes.
-const REFRESH_FOR: f32 = 15.0 * 60.0;
-
-/// Drive a purchase: open the checkout, refresh on return; StoreKit events
-/// and their receipts on iOS.
+/// StoreKit events and their receipts (iOS). Desktop purchases are the buy
+/// screen's ([`crate::buy_screen`]).
 #[cfg(not(target_arch = "wasm32"))]
-fn checkout(
-    mut own: ResMut<Ownership>,
-    time: Res<Time>,
-    mut focus: MessageReader<bevy::window::WindowFocused>,
-    mut since: Local<f32>,
-    mut last_refresh: Local<f32>,
-    mut receipts: Local<std::collections::VecDeque<String>>,
-    mut submitted: Local<Option<String>>,
-) {
-    let refocused = focus.read().any(|f| f.focused);
+fn checkout(mut own: ResMut<Ownership>, mut receipts: Local<std::collections::VecDeque<String>>, mut submitted: Local<Option<String>>) {
     let Some(a) = crate::account::get() else { return };
     {
-        // Desktop checkout.
-        if let Some(out) = a.take_checkout() {
-            match out {
-                Ok(url) => {
-                    open_url(&url);
-                    own.buy = BuyStatus::InBrowser;
-                    *since = 0.0;
-                    *last_refresh = 0.0;
-                }
-                // The local fake store completes at once (and refreshed).
-                Err(e) if e == "completed" => own.buy = BuyStatus::Idle,
-                Err(e) => {
-                    warn!("checkout: {e}");
-                    own.buy = BuyStatus::Failed("Couldn't open the store. Try again in a bit.".into());
-                }
-            }
-        }
-        if own.buy == BuyStatus::InBrowser {
-            *since += time.delta_secs();
-            *last_refresh += time.delta_secs();
-            if refocused || (*last_refresh >= REFRESH_EVERY && *since < REFRESH_FOR) {
-                *last_refresh = 0.0;
-                a.refresh();
-            }
-        }
-
         // StoreKit: purchases and restores, each verified by partii before
         // the transaction is finished.
         while let Some(ev) = crate::store::poll() {

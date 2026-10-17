@@ -1,6 +1,7 @@
 //! The end of the demo: after the last free chapter (by default chapter 2,
 //! The Drip; see [`crate::ownership::DemoScope`]), the story stops on a
-//! friendly card instead of the next chapter: "Get the Full Game" (Buy),
+//! friendly card instead of the next chapter: "Get the Full Game" (Buy; on
+//! desktop the buy screen opens over the card, [`crate::buy_screen`]),
 //! "Wishlist Now" (the Steam page) or "Back to Title". If the purchase lands
 //! while the card is up, the first button turns into "Play Chapter 3" and the
 //! story carries on.
@@ -366,13 +367,14 @@ fn demo_end(
     mut buttons: Query<(&Interaction, &DemoButton, &mut BackgroundColor, &mut BorderColor, &mut Node)>,
     mut bg: Query<&mut BackgroundColor, (With<EndCardUi>, Without<DemoButton>)>,
     cards: Query<Entity, With<EndCardUi>>,
-    (mut prev, mut buys, mut wishes, mut flow, mut next, mut cues): (
+    (mut prev, mut buys, mut wishes, mut flow, mut next, mut cues, buy_screen): (
         Local<(bool, f32)>,
         MessageWriter<BuyRequest>,
         MessageWriter<WishlistRequest>,
         ResMut<StoryFlow>,
         ResMut<NextState<AppState>>,
         ResMut<Cues>,
+        Option<Res<crate::buy_screen::BuyScreen>>,
     ),
 ) {
     let Some(mut card) = card else { return };
@@ -489,6 +491,12 @@ fn demo_end(
         if t.0 != status {
             t.0 = status.clone();
         }
+    }
+    // Desktop's buy screen is over the card: it has the input until it
+    // closes (paid: the card is already offering the next chapter).
+    if crate::buy_screen::blocking(buy_screen.as_deref()) {
+        prev.0 = true;
+        return;
     }
 
     // Focus: arrows / stick / phone; activate: Enter, Space, pad A, phone

@@ -89,7 +89,13 @@ pub struct MenuJoinPanel;
 /// QR modules → a crisp RGBA image (1 px per module, 2-module quiet zone;
 /// the nearest sampler keeps it sharp when the UI scales it up).
 pub fn qr_image(data: &str) -> Option<Image> {
-    let code = qrcode::QrCode::new(data.as_bytes()).ok()?;
+    qr_image_ec(data, qrcode::EcLevel::M)
+}
+
+/// The same with a chosen error correction: `L` keeps a long URL (a Stripe
+/// checkout) at fewer, bigger modules, easier to scan from the couch.
+pub fn qr_image_ec(data: &str, ec: qrcode::EcLevel) -> Option<Image> {
+    let code = qrcode::QrCode::with_error_correction_level(data.as_bytes(), ec).ok()?;
     let w = code.width();
     let quiet = 2;
     let size = w + quiet * 2;

@@ -7,6 +7,8 @@ pub mod alive;
 pub mod assets;
 pub mod audio;
 pub mod backdrop;
+pub mod buy_flow;
+pub mod buy_screen;
 pub mod camera;
 pub mod capture;
 pub mod capture_scene;
@@ -155,6 +157,7 @@ impl Plugin for GamePlugin {
                 online::OnlinePlugin,
                 tuning::TuningPlugin,
                 dance::DancePlugin,
+                buy_screen::BuyScreenPlugin,
             ));
     }
 }
