@@ -91,13 +91,11 @@ Report lines (spec format): `bouncy-blobs <full|demo> <macos|windows|linux> <ste
 
 ## Windows C runtime
 
-The Windows exe links the MSVC runtime dynamically (`VCRUNTIME140.dll`, plus the
-`api-ms-win-crt-*` UCRT that Windows 10+ always has), exactly like tankii's builds, and
-like tankii we ship only `steam_api64.dll` beside it. A PC without the VC++ 2015-2022
-x64 redistributable can't start the game. Open decision: tick that redistributable in
-Steamworks (Installation > Redistributables) and either ship an app-local
-`vcruntime140.dll` in the partii zip or build Windows with a static CRT
-(`+crt-static` for `x86_64-pc-windows-msvc` in the repo's `.cargo/config.toml`).
+The Windows exe links the MSVC C runtime statically (`+crt-static` for
+`x86_64-pc-windows-msvc` in `.cargo/config.toml`), so it has no `VCRUNTIME140.dll`
+import and runs without the VC++ 2015-2022 redistributable. Only `steam_api64.dll`
+ships beside it. Check a new box build with `objdump -p bouncy-blobs.exe | grep -i dll`:
+no `VCRUNTIME140.dll` may appear.
 
 ## Steamworks setup (Sterling)
 
