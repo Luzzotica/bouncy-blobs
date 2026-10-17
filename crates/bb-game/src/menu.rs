@@ -167,7 +167,15 @@ pub struct Menu {
     pub drop: DropIn,
     /// Tiles from the previous page, falling out of view: (body, seconds left).
     pub falling: Vec<(BodyId, f32)>,
+    /// The tile the mouse was last over (hover moves the focus).
+    hovered: Option<BodyId>,
 }
+
+/// The title page to come back to after a mode (where it was started
+/// from): Kids Mode returns to Play, Sandbox / Party / Join to Multiplayer,
+/// Story (and anything else) to the main page.
+#[derive(Resource, Default)]
+pub struct ReturnTo(pub Option<Page>);
 
 /// Text that rides on a softbody (one [`SoftText`] glyph per letter).
 #[derive(Component)]
@@ -184,6 +192,7 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HeldBlobs>()
+            .init_resource::<ReturnTo>()
             .add_systems(OnEnter(AppState::Title), enter)
             .add_systems(OnExit(AppState::Title), exit)
             .add_systems(
@@ -525,13 +534,13 @@ fn menu_blobs(
     }
 }
 
-fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mut commands: Commands) {
+fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mut commands: Commands, mut back: ResMut<ReturnTo>) {
     load.write(LoadLevel { level: title_level(), players: vec![] });
     cam.target = Some(Vec2::new(0.0, 380.0));
     cam.zoom = Some(1.0);
     cam.ease = 0.0;
     commands.insert_resource(Menu {
-        page: Page::Main,
+        page: back.0.take().unwrap_or(Page::Main),
         buttons: Vec::new(),
         letters: Vec::new(),
         focus: 0,
@@ -540,6 +549,7 @@ fn enter(mut load: MessageWriter<LoadLevel>, mut cam: ResMut<CameraDirector>, mu
         prev_button: true,
         drop: DropIn::new(DropStyle::MENU),
         falling: Vec::new(),
+        hovered: None,
     });
 }
 
@@ -1010,7 +1020,7 @@ fn interact(
     mut load: MessageWriter<LoadLevel>,
     join: Option<Res<crate::online::JoinDialog>>,
     mut commands: Commands,
-    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores, mut wishes): (
+    (mut labels, label_bodies, beat, mut pointer, own, mut buys, mut restores, mut wishes, pads, mut back_to): (
         Query<&mut SoftText>,
         Query<(Entity, &BodyLabel)>,
         Res<MusicBeat>,
@@ -1019,6 +1029,8 @@ fn interact(
         MessageWriter<BuyRequest>,
         MessageWriter<RestoreRequest>,
         MessageWriter<WishlistRequest>,
+        Query<&Gamepad>,
+        ResMut<ReturnTo>,
     ),
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
@@ -1061,6 +1073,14 @@ fn interact(
         }
     }
     if join.is_some() {
+        // Back closes the Join dialog (a pad can't reach its Cancel), and
+        // only the dialog: the page stays.
+        if crate::input::back_pressed(&keys, pads.iter()) {
+            commands.remove_resource::<crate::online::JoinDialog>();
+        }
+        // Whatever is held now (the B that closed it) mustn't press a tile
+        // the moment the dialog is gone.
+        menu.prev_button = true;
         return;
     }
     // Bought: the unlock page steps back to where the lock was, unlocked.
@@ -1077,6 +1097,13 @@ fn interact(
             // Gate again at the moment it fires (ownership can change).
             let action = gate(action.clone(), &own, &progress);
             menu.pending = None;
+            // Where the title comes back to when this mode is left.
+            match action {
+                Action::Continue | Action::Chapter(_) => back_to.0 = None,
+                Action::Kids => back_to.0 = Some(Page::Play),
+                Action::Sandbox | Action::PartyHost | Action::JoinFriend => back_to.0 = Some(Page::Party),
+                _ => {}
+            }
             match action {
                 Action::Continue => next.set(AppState::Story),
                 Action::Chapter(c) => {
@@ -1174,6 +1201,25 @@ fn interact(
         }
     }
 
+    // The mouse moves the focus too: the tile under it lights up like the
+    // keyboard's (one look for "this is the one you'd press").
+    let over = pointer.hovered().filter(|h| menu.buttons.iter().any(|b| b.body == *h));
+    if over != menu.hovered {
+        menu.hovered = over;
+        if let Some(i) = over.and_then(|h| menu.buttons.iter().position(|b| b.body == h)) {
+            if i != menu.focus {
+                let old = menu.focus;
+                menu.focus = i;
+                for (k, b) in menu.buttons.iter().enumerate() {
+                    if k == old || k == i {
+                        overrides.0.insert(b.body, button_style(b.color, k == i));
+                    }
+                }
+                kick_label(&mut labels, menu.buttons[i].body, 0.35);
+            }
+        }
+    }
+
     // Keyboard / gamepad / phone focus navigation (any slot).
     menu.nav_cooldown = (menu.nav_cooldown - dt).max(0.0);
     let stick = inputs.slots.iter().fold(Vec2::ZERO, |a, i| a + Vec2::new(i.stick.x, i.stick.y));
@@ -1198,13 +1244,16 @@ fn interact(
             kick_label(&mut labels, b.body, 0.5);
         }
     }
+    // Back: Escape, Backspace, Android back, a pad's B or Select. (B is
+    // also one of a pad's action buttons: here it only ever goes back.)
+    let back = crate::input::back_pressed(&keys, pads.iter());
     // The keyboard player also rolls around the menu; only Enter activates,
     // so jumping doesn't press buttons. Gamepads/phones use their button.
-    let pad_press = inputs.slots.iter().skip(1).any(|i| i.button) && just;
+    let pad_press = inputs.slots.iter().skip(1).any(|i| i.button) && just && !back;
     if chosen.is_none() && (keys.just_pressed(KeyCode::Enter) || pad_press) {
         chosen = Some(menu.focus);
     }
-    if keys.just_pressed(KeyCode::Escape) && menu.page != Page::Main {
+    if back && menu.page != Page::Main {
         menu.page = match menu.page {
             Page::Chapters | Page::Party => Page::Play,
             Page::Unlock(l) => l.back(),
